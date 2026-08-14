@@ -14,8 +14,17 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
+from nanobot.agent.plugins import (
+    AgentPlugin,
+    discover_agent_plugins,
+    set_agent_plugin_enabled,
+)
+from nanobot.agent.tools.mcp_oauth import (
+    delete_mcp_oauth_credentials,
+    mcp_oauth_has_credentials,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
@@ -24,6 +33,9 @@ from nanobot.config.schema import MCPServerConfig
 from nanobot.utils.helpers import ensure_dir
 
 QueryParams = dict[str, list[str]]
+
+if TYPE_CHECKING:
+    from nanobot.webui.settings_services import WebUISettingsConfig
 
 _MCP_PRESET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _SECRET_QUERY_RE = re.compile(
@@ -44,12 +56,13 @@ _MCP_ATTACHMENT_KEYS = (
     "status",
     "configured",
 )
-_MAX_TEST_TOOLS = 16
 _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
+_MCP_RUNTIME_STATUSES = {"connecting", "connected", "failed"}
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
+McpRuntimeStatus = Callable[[], Mapping[str, str]]
 
 
 class McpPresetError(Exception):
@@ -189,6 +202,25 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         ),
     ),
     McpPreset(
+        name="parallel-search",
+        display_name="Parallel Search",
+        category="web",
+        description="Search the web and fetch relevant page content through Parallel's hosted MCP server.",
+        docs_url="https://docs.parallel.ai/integrations/mcp/search-mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="parallel.ai",
+        brand_color="#111827",
+        requires="Network access",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            url="https://search.parallel.ai/mcp",
+            tool_timeout=60,
+            enabled_tools=["web_search", "web_fetch"],
+        ),
+        note="Free anonymous access for light use; no API key is required.",
+    ),
+    McpPreset(
         name="exa",
         display_name="Exa",
         category="web",
@@ -316,6 +348,63 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         note="Requires Figma Desktop Dev Mode MCP to be running locally.",
     ),
     McpPreset(
+        name="xmind",
+        display_name="Xmind",
+        category="productivity",
+        description="Create, read, and edit cloud mind maps through Xmind.",
+        docs_url="https://xmind.com/user-guide/xmind-mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="xmind.com",
+        brand_color="#F4B41A",
+        requires="Xmind account",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://app.xmind.com/api/mcp",
+            tool_timeout=60,
+        ),
+        note="Connects securely in your browser with Xmind OAuth.",
+    ),
+    McpPreset(
+        name="notion",
+        display_name="Notion",
+        category="productivity",
+        description="Read and update your Notion workspace through Notion MCP.",
+        docs_url="https://developers.notion.com/guides/mcp/get-started-with-mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="notion.so",
+        brand_color="#111111",
+        requires="Notion account",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://mcp.notion.com/mcp",
+            tool_timeout=60,
+        ),
+        note="Connects securely in your browser with Notion OAuth.",
+    ),
+    McpPreset(
+        name="linear",
+        display_name="Linear",
+        category="productivity",
+        description="Find and manage Linear issues, projects, and comments.",
+        docs_url="https://linear.app/docs/mcp",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="linear.app",
+        brand_color="#5E6AD2",
+        requires="Linear account",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://mcp.linear.app/mcp",
+            tool_timeout=60,
+        ),
+        note="Connects securely in your browser with Linear OAuth.",
+    ),
+    McpPreset(
         name="github",
         display_name="GitHub",
         category="code",
@@ -436,9 +525,10 @@ def normalize_mcp_preset_mentions(raw: Any) -> list[dict[str, Any]]:
     known = _known_mcp_names()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in raw[:8]:
-        if not isinstance(item, dict):
+    for item_value in cast(list[object], raw)[:8]:
+        if not isinstance(item_value, dict):
             continue
+        item = cast(dict[str, Any], item_value)
         name = _clip_ws_string(item.get("name"), 64)
         if not name or _MCP_PRESET_NAME_RE.match(name) is None:
             continue
@@ -634,6 +724,8 @@ def _status_for(preset: McpPreset, cfg: MCPServerConfig | None) -> str:
         return "not_installed" if preset.install_supported else "coming_soon"
     if any(field.required and not _field_configured(field, cfg) for field in preset.fields):
         return "missing_credentials"
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(preset.name, cfg.url):
+        return "authorization_required"
     if cfg.command and not _command_available(cfg.command):
         return "missing_dependency"
     return "configured"
@@ -679,6 +771,7 @@ def _preset_manifest(preset: McpPreset, *, logo_url: str) -> dict[str, Any]:
         compact_dict({
             "type": "mcp",
             "transport": preset.transport,
+            "auth": server.auth if server and server.auth else None,
             "command": server.command if server and server.command else None,
             "args": list(server.args) if server and server.command else None,
             "url": _connection_summary(server) if server and server.url else None,
@@ -729,6 +822,7 @@ def _custom_manifest(name: str, cfg: MCPServerConfig) -> dict[str, Any]:
             compact_dict({
                 "type": "mcp",
                 "transport": transport,
+                "auth": cfg.auth,
                 "command": cfg.command or None,
                 "url": _connection_summary(cfg) if cfg.url else None,
             })
@@ -756,7 +850,7 @@ def _custom_manifest(name: str, cfg: MCPServerConfig) -> dict[str, Any]:
 def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerConfig]) -> dict[str, Any]:
     cfg = configured_servers.get(preset.name)
     status = _status_for(preset, cfg)
-    configured = cfg is not None and status not in {"missing_credentials"}
+    configured = cfg is not None and status not in {"missing_credentials", "authorization_required"}
     logo_url = _favicon_url(preset.brand_domain)
     return {
         "name": preset.name,
@@ -765,6 +859,7 @@ def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerCo
         "description": preset.description,
         "docs_url": preset.docs_url,
         "transport": preset.transport,
+        "auth": (cfg.auth if cfg is not None else (preset.server.auth if preset.server else None)),
         "requires": preset.requires,
         "note": preset.note,
         "install_supported": preset.install_supported,
@@ -791,7 +886,11 @@ def _custom_payload(
     transport = cfg.type
     if not transport:
         transport = "stdio" if cfg.command else ("sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp")
-    status = "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url):
+        status = "authorization_required"
+    else:
+        status = "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
+    configured = status != "authorization_required"
     return {
         "name": name,
         "display_name": name,
@@ -799,12 +898,13 @@ def _custom_payload(
         "description": "Custom MCP server from nanobot config.",
         "docs_url": "",
         "transport": transport,
+        "auth": cfg.auth,
         "requires": "",
         "note": "",
         "install_supported": True,
         "installed": True,
-        "configured": True,
-        "available": _config_available(cfg),
+        "configured": configured,
+        "available": configured and _config_available(cfg),
         "status": status,
         "logo_url": None,
         "brand_color": "#64748B",
@@ -817,12 +917,38 @@ def _custom_payload(
     }
 
 
+def _agent_plugin_payload(plugin: AgentPlugin) -> dict[str, Any]:
+    return {
+        "name": f"plugin-{plugin.name}",
+        "display_name": plugin.display_name,
+        "category": plugin.category,
+        "description": plugin.description or "Agent Plugin",
+        "docs_url": plugin.repository,
+        "transport": "stdio",
+        "requires": ", ".join(plugin.permissions),
+        "note": "",
+        "install_supported": False,
+        "installed": True,
+        "configured": True,
+        "enabled": plugin.enabled,
+        "available": plugin.enabled,
+        "status": "enabled" if plugin.enabled else "disabled",
+        "logo_url": plugin.logo,
+        "brand_color": plugin.accent_color,
+        "required_fields": [],
+        "connection_summary": ", ".join(plugin.mcp_servers),
+        "source": "agent-plugin",
+    }
+
+
 def mcp_presets_payload(
     *,
     last_action: dict[str, Any] | None = None,
     tool_preview: Mapping[str, list[str]] | None = None,
+    runtime_status: Mapping[str, str] | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
-    config = load_config()
+    config = load_config(config_path) if config_path is not None else load_config()
     known = _known_preset_names()
     preset_rows = [
         _preset_payload(preset, config.tools.mcp_servers)
@@ -834,13 +960,51 @@ def mcp_presets_payload(
         for name, cfg in sorted(config.tools.mcp_servers.items())
         if name not in known
     ]
+    existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
+    plugin_rows = [
+        _agent_plugin_payload(plugin)
+        for plugin in discover_agent_plugins(config.workspace_path)
+        if f"plugin-{plugin.name}" not in existing_names
+    ]
     payload: dict[str, Any] = {
-        "presets": [*preset_rows, *custom_rows],
-        "installed_count": len(config.tools.mcp_servers),
+        "presets": [*preset_rows, *custom_rows, *plugin_rows],
+        "installed_count": len(config.tools.mcp_servers)
+        + sum(int(row["enabled"]) for row in plugin_rows),
     }
     if last_action is not None:
         payload["last_action"] = last_action
-    return payload
+    return attach_mcp_runtime_status(payload, runtime_status)
+
+
+def attach_mcp_runtime_status(
+    payload: dict[str, Any],
+    runtime_status: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    """Project safe, connection-attempt state onto configured MCP rows."""
+    if runtime_status is None:
+        return payload
+    projected = dict(payload)
+    raw_rows: object = payload.get("presets", [])
+    preset_rows = cast(list[object], raw_rows) if isinstance(raw_rows, list) else []
+    rows: list[Any] = []
+    for raw_row in preset_rows:
+        if not isinstance(raw_row, dict):
+            rows.append(raw_row)
+            continue
+        row = dict(cast(dict[str, Any], raw_row))
+        name = row.get("name")
+        status = runtime_status.get(name) if isinstance(name, str) else None
+        if (
+            status in _MCP_RUNTIME_STATUSES
+            and row.get("installed") is True
+            and row.get("configured") is True
+        ):
+            row["runtime_status"] = status
+        else:
+            row.pop("runtime_status", None)
+        rows.append(row)
+    projected["presets"] = rows
+    return projected
 
 
 def _display_name_for(name: str, preset: McpPreset | None = None) -> str:
@@ -873,6 +1037,7 @@ def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[s
         "import-cursor": "Imported",
         "tools": "Updated tools for",
         "remove": "Removed",
+        "reconnect": "Retried connection for",
     }.get(action, "Updated")
     payload: dict[str, Any] = {
         "ok": ok,
@@ -884,6 +1049,24 @@ def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[s
     elif action == "remove":
         payload["removed"] = True
         payload["verification"] = ["config_absent"]
+    return payload
+
+
+def mcp_reconnect_action(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Validate a configured server before asking the live runtime to retry it."""
+    name = _validated_server_name((_query_first(query, "name") or "").strip())
+    config = load_config(config_path) if config_path is not None else load_config()
+    if name not in config.tools.mcp_servers:
+        raise McpPresetError("unknown MCP server", status=404)
+    payload = mcp_presets_payload(
+        last_action=_server_action_message("reconnect", name),
+        config_path=config_path,
+    )
+    payload["requires_restart"] = True
     return payload
 
 
@@ -908,8 +1091,12 @@ async def _close_mcp_stacks(stacks: Mapping[str, Any]) -> None:
             await stack.aclose()
 
 
-async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
-    """Connect to an enabled MCP preset and report its tool surface."""
+async def mcp_presets_test_action(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Connect to an enabled MCP preset and report its complete tool surface."""
     from nanobot.agent.tools.mcp import connect_mcp_servers
 
     name = (_query_first(query, "name") or "").strip()
@@ -921,16 +1108,22 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
     display_name = _display_name_for(name, preset)
 
     try:
-        config = resolve_config_env_vars(load_config())
+        config = resolve_config_env_vars(
+            load_config(config_path) if config_path is not None else load_config(),
+            config_path=config_path,
+        )
     except ValueError as exc:
-        return mcp_presets_payload(last_action={
-            "ok": False,
-            "message": _scrub_test_error(str(exc)),
-            "error": _scrub_test_error(str(exc)),
-            "tool_count": 0,
-            "tool_names": [],
-            "checked_at": _checked_at(),
-        })
+        return mcp_presets_payload(
+            last_action={
+                "ok": False,
+                "message": _scrub_test_error(str(exc)),
+                "error": _scrub_test_error(str(exc)),
+                "tool_count": 0,
+                "tool_names": [],
+                "checked_at": _checked_at(),
+            },
+            config_path=config_path,
+        )
 
     cfg = config.tools.mcp_servers.get(name)
     if cfg is None:
@@ -940,7 +1133,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
         "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
     )
     if status == "missing_credentials":
-        last_action = {
+        last_action: dict[str, Any] = {
             "ok": False,
             "message": f"{display_name} is missing required credentials.",
             "error": "missing credentials",
@@ -948,7 +1141,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action)
+        return mcp_presets_payload(last_action=last_action, config_path=config_path)
 
     if cfg.command and not _command_available(cfg.command):
         last_action = {
@@ -959,17 +1152,22 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action)
+        return mcp_presets_payload(last_action=last_action, config_path=config_path)
 
     registry = ToolRegistry()
     stacks: dict[str, Any] = {}
+    inspection_cfg = cfg.model_copy(update={"enabled_tools": ["*"]})
     try:
         stacks = await asyncio.wait_for(
-            connect_mcp_servers({name: cfg}, registry),
+            connect_mcp_servers({name: inspection_cfg}, registry),
             timeout=_test_timeout(cfg),
         )
         tool_prefix = f"mcp_{name}_"
-        tool_names = sorted(name for name in registry.tool_names if name.startswith(tool_prefix))
+        tool_names = sorted(
+            tool_name
+            for tool_name in registry.tool_names
+            if tool_name.startswith(tool_prefix)
+        )
         ok = name in stacks
         if ok:
             last_action = {
@@ -980,7 +1178,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
                     else f"{display_name} connected, but reported no tools."
                 ),
                 "tool_count": len(tool_names),
-                "tool_names": tool_names[:_MAX_TEST_TOOLS],
+                "tool_names": tool_names,
                 "checked_at": _checked_at(),
             }
         else:
@@ -1014,8 +1212,13 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
     finally:
         await _close_mcp_stacks(stacks)
 
-    preview = {name: last_action.get("tool_names", [])} if last_action.get("tool_names") else None
-    return mcp_presets_payload(last_action=last_action, tool_preview=preview)
+    tool_names = last_action.get("tool_names", [])
+    preview = {name: tool_names} if tool_names else None
+    return mcp_presets_payload(
+        last_action=last_action,
+        tool_preview=preview,
+        config_path=config_path,
+    )
 
 
 def _parse_json_value(raw: str | None, *, fallback: Any) -> Any:
@@ -1031,8 +1234,10 @@ def _parse_string_list(raw: str | None) -> list[str]:
     if raw is None or not raw.strip():
         return []
     parsed = _parse_json_value(raw, fallback=None)
-    if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
-        return [item for item in parsed if item.strip()]
+    if isinstance(parsed, list):
+        items = cast(list[object], parsed)
+        if all(isinstance(item, str) for item in items):
+            return [item for item in cast(list[str], items) if item.strip()]
     if isinstance(parsed, str):
         return shlex.split(parsed)
     raise McpPresetError("expected a JSON string array")
@@ -1043,7 +1248,7 @@ def _parse_string_map(raw: str | None) -> dict[str, str]:
     if not isinstance(parsed, dict):
         raise McpPresetError("expected a JSON object")
     out: dict[str, str] = {}
-    for key, value in parsed.items():
+    for key, value in cast(dict[object, object], parsed).items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise McpPresetError("JSON object values must be strings")
         if key.strip():
@@ -1082,6 +1287,32 @@ def _normalize_transport(value: str | None, *, command: str = "", url: str = "")
     return normalized  # type: ignore[return-value]
 
 
+def _normalize_auth(
+    value: object,
+    *,
+    transport: Literal["stdio", "sse", "streamableHttp"],
+    url: str,
+    headers: Mapping[str, str],
+) -> Literal["oauth"] | None:
+    raw = str(value or "").strip().lower()
+    if not raw and url and not headers:
+        normalized_url = url.rstrip("/")
+        if any(
+            preset.server is not None
+            and preset.server.auth == "oauth"
+            and preset.server.url.rstrip("/") == normalized_url
+            for preset in MCP_PRESETS
+        ):
+            raw = "oauth"
+    if not raw:
+        return None
+    if raw != "oauth":
+        raise McpPresetError("unsupported MCP auth type")
+    if transport == "stdio":
+        raise McpPresetError("MCP OAuth requires a remote HTTP transport")
+    return "oauth"
+
+
 def _validated_server_name(name: str) -> str:
     if not name or _MCP_PRESET_NAME_RE.match(name) is None:
         raise McpPresetError("invalid MCP server name")
@@ -1097,6 +1328,13 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
         raise McpPresetError("stdio MCP servers require a command")
     if transport in {"sse", "streamableHttp"} and not url:
         raise McpPresetError("remote MCP servers require a URL")
+    headers = _parse_string_map(_query_first(query, "headers"))
+    auth = _normalize_auth(
+        _query_first(query, "auth"),
+        transport=transport,
+        url=url,
+        headers=headers,
+    )
     raw_timeout = (_query_first(query, "tool_timeout") or "").strip()
     tool_timeout = _DEFAULT_CUSTOM_TIMEOUT
     if raw_timeout:
@@ -1106,12 +1344,13 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
             raise McpPresetError("tool_timeout must be an integer") from exc
     cfg = MCPServerConfig(
         type=transport,
+        auth=auth,
         command=command if transport == "stdio" else "",
         args=_parse_string_list(_query_first(query, "args")),
         env=_parse_string_map(_query_first(query, "env")),
         cwd=(_query_first(query, "cwd") or "").strip() if transport == "stdio" else "",
         url=url if transport in {"sse", "streamableHttp"} else "",
-        headers=_parse_string_map(_query_first(query, "headers")),
+        headers=headers,
         tool_timeout=tool_timeout,
         enabled_tools=_parse_enabled_tools(_query_first(query, "enabled_tools")),
     )
@@ -1122,42 +1361,64 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
     server_name = _validated_server_name(name)
     if not isinstance(raw, Mapping):
         raise McpPresetError(f"MCP server '{server_name}' must be an object")
-    command = str(raw.get("command") or "").strip()
-    url = str(raw.get("url") or "").strip()
-    transport_value = str(raw.get("type", raw.get("transport", "")) or "")
+    server = cast(Mapping[str, Any], raw)
+    command = str(server.get("command") or "").strip()
+    url = str(server.get("url") or "").strip()
+    transport_value = str(server.get("type", server.get("transport", "")) or "")
     transport = _normalize_transport(transport_value, command=command, url=url)
     if transport == "stdio" and not command:
         raise McpPresetError(f"MCP server '{server_name}' stdio transport requires a command")
     if transport in {"sse", "streamableHttp"} and not url:
         raise McpPresetError(f"MCP server '{server_name}' remote transport requires a URL")
-    args = raw.get("args") or []
-    env = raw.get("env") or {}
-    headers = raw.get("headers") or {}
-    cwd = str(raw.get("cwd") or "").strip()
-    enabled_tools = raw.get("enabledTools", raw.get("enabled_tools", ["*"]))
-    tool_timeout = raw.get("toolTimeout", raw.get("tool_timeout", _DEFAULT_CUSTOM_TIMEOUT))
+    args_value: object = server.get("args") or []
+    env_value: object = server.get("env") or {}
+    headers_value: object = server.get("headers") or {}
+    cwd = str(server.get("cwd") or "").strip()
+    enabled_tools_value: object = server.get("enabledTools", server.get("enabled_tools", ["*"]))
+    tool_timeout: object = server.get("toolTimeout", server.get("tool_timeout", _DEFAULT_CUSTOM_TIMEOUT))
     try:
-        timeout_int = max(5, min(int(tool_timeout), 600))
+        timeout_int = max(5, min(int(cast(Any, tool_timeout)), 600))
     except (TypeError, ValueError):
         timeout_int = _DEFAULT_CUSTOM_TIMEOUT
-    if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+    if not isinstance(args_value, list):
         raise McpPresetError(f"MCP server '{server_name}' args must be a string array")
-    if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+    args = cast(list[object], args_value)
+    if not all(isinstance(item, str) for item in args):
+        raise McpPresetError(f"MCP server '{server_name}' args must be a string array")
+    if not isinstance(env_value, dict):
         raise McpPresetError(f"MCP server '{server_name}' env must be a string object")
-    if not isinstance(headers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+    env = cast(dict[object, object], env_value)
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        raise McpPresetError(f"MCP server '{server_name}' env must be a string object")
+    if not isinstance(headers_value, dict):
         raise McpPresetError(f"MCP server '{server_name}' headers must be a string object")
-    if not isinstance(enabled_tools, list) or not all(isinstance(item, str) for item in enabled_tools):
-        enabled_tools = ["*"]
+    headers = cast(dict[object, object], headers_value)
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+        raise McpPresetError(f"MCP server '{server_name}' headers must be a string object")
+    typed_headers = cast(dict[str, str], headers)
+    auth = _normalize_auth(
+        server.get("auth"),
+        transport=transport,
+        url=url,
+        headers=typed_headers,
+    )
+    if not isinstance(enabled_tools_value, list):
+        enabled_tools_value = ["*"]
+    else:
+        enabled_tools = cast(list[object], enabled_tools_value)
+        if not all(isinstance(item, str) for item in enabled_tools):
+            enabled_tools_value = ["*"]
     return server_name, MCPServerConfig(
         type=transport,
+        auth=auth,
         command=command if transport == "stdio" else "",
-        args=args,
-        env=dict(env),
+        args=cast(list[str], args),
+        env=cast(dict[str, str], env),
         cwd=cwd if transport == "stdio" else "",
         url=url if transport in {"sse", "streamableHttp"} else "",
-        headers=dict(headers),
+        headers=typed_headers,
         tool_timeout=timeout_int,
-        enabled_tools=list(enabled_tools),
+        enabled_tools=cast(list[str], enabled_tools_value),
     )
 
 
@@ -1165,11 +1426,12 @@ def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
     parsed = _parse_json_value(raw_json, fallback=None)
     if not isinstance(parsed, Mapping):
         raise McpPresetError("MCP config must be a JSON object")
-    servers = parsed.get("mcpServers", parsed)
+    parsed_mapping = cast(Mapping[str, Any], parsed)
+    servers: object = parsed_mapping.get("mcpServers", parsed_mapping)
     if not isinstance(servers, Mapping):
         raise McpPresetError("MCP config must contain mcpServers")
     out: dict[str, MCPServerConfig] = {}
-    for name, raw_server in servers.items():
+    for name, raw_server in cast(Mapping[object, object], servers).items():
         if not isinstance(name, str):
             raise McpPresetError("MCP server names must be strings")
         server_name, cfg = _mcp_server_config(name, raw_server)
@@ -1179,24 +1441,54 @@ def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
     return out
 
 
-def custom_mcp_action(action: str, query: QueryParams) -> dict[str, Any]:
-    config = load_config()
+def _oauth_credentials_replaced(
+    previous: MCPServerConfig | None,
+    replacement: MCPServerConfig,
+) -> bool:
+    if previous is None or previous.auth != "oauth":
+        return False
+    return replacement.auth != "oauth" or replacement.url != previous.url
+
+
+def custom_mcp_action(
+    action: str,
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = load_config(config_path) if config_path is not None else load_config()
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
+        delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         config.tools.mcp_servers[name] = cfg
-        save_config(config)
-        payload = mcp_presets_payload(last_action=_server_action_message(action, name))
+        save_config(config, config_path)
+        if delete_credentials:
+            delete_mcp_oauth_credentials(name)
+        payload = mcp_presets_payload(
+            last_action=_server_action_message(action, name),
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
     if action in {"import", "import-cursor"}:
         servers = _import_mcp_servers(_query_first(query, "config"))
+        delete_credentials = [
+            name
+            for name, cfg in servers.items()
+            if _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
+        ]
         config.tools.mcp_servers.update(servers)
-        save_config(config)
-        payload = mcp_presets_payload(last_action={
-            "ok": True,
-            "message": f"Imported {len(servers)} MCP server(s).",
-        })
+        save_config(config, config_path)
+        for name in delete_credentials:
+            delete_mcp_oauth_credentials(name)
+        payload = mcp_presets_payload(
+            last_action={
+                "ok": True,
+                "message": f"Imported {len(servers)} MCP server(s).",
+            },
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
@@ -1207,29 +1499,61 @@ def custom_mcp_action(action: str, query: QueryParams) -> dict[str, Any]:
             raise McpPresetError("unknown MCP server", status=404)
         cfg.enabled_tools = _parse_enabled_tools(_query_first(query, "enabled_tools"))
         config.tools.mcp_servers[name] = cfg
-        save_config(config)
-        payload = mcp_presets_payload(last_action=_server_action_message(action, name))
+        save_config(config, config_path)
+        payload = mcp_presets_payload(
+            last_action=_server_action_message(action, name),
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
     raise McpPresetError(f"unknown MCP action '{action}'", status=404)
 
 
-def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
+def ensure_mcp_oauth_server(
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> tuple[str, MCPServerConfig]:
+    """Materialize an OAuth preset on first click and return its saved config."""
+    name = _validated_server_name((_query_first(query, "name") or "").strip())
+    config = load_config(config_path) if config_path is not None else load_config()
+    cfg = config.tools.mcp_servers.get(name)
+    if cfg is None:
+        preset = _preset_by_name(name)
+        if preset.server is None or preset.server.auth != "oauth":
+            raise McpPresetError("MCP server does not support browser authorization", status=409)
+        cfg = _materialize_server(preset, query, None)
+        config.tools.mcp_servers[name] = cfg
+        save_config(config, config_path)
+    if cfg.auth != "oauth" or cfg.type not in {"sse", "streamableHttp"} or not cfg.url:
+        raise McpPresetError("MCP server is not configured for OAuth", status=409)
+    return name, cfg
+
+
+def mcp_presets_action(
+    action: str,
+    query: QueryParams,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name:
         raise McpPresetError("missing MCP preset name")
     preset = _preset_by_name_optional(name)
 
-    config = load_config()
+    config = load_config(config_path) if config_path is not None else load_config()
     existing = config.tools.mcp_servers.get(name)
 
     if action == "enable":
         if preset is None:
             raise McpPresetError("unknown MCP preset", status=404)
         config.tools.mcp_servers[preset.name] = _materialize_server(preset, query, existing)
-        save_config(config)
-        payload = mcp_presets_payload(last_action=_action_message(action, preset))
+        save_config(config, config_path)
+        payload = mcp_presets_payload(
+            last_action=_action_message(action, preset),
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
@@ -1245,7 +1569,8 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
             except OSError as exc:
                 cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
-            save_config(config)
+            save_config(config, config_path)
+            delete_mcp_oauth_credentials(name)
         last_action = (
             _action_message(action, preset)
             if preset is not None
@@ -1261,7 +1586,10 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
                 f"{last_action['message']} Could not remove managed runtime files: {cleanup_error}"
             )
             last_action["verification_failed"] = ["managed_paths_absent"]
-        payload = mcp_presets_payload(last_action=last_action)
+        payload = mcp_presets_payload(
+            last_action=last_action,
+            config_path=config_path,
+        )
         payload["requires_restart"] = True
         return payload
 
@@ -1297,16 +1625,64 @@ async def mcp_presets_settings_action(
     query: QueryParams,
     *,
     reload_mcp: McpReload | None = None,
+    mcp_runtime_status: McpRuntimeStatus | None = None,
+    config: WebUISettingsConfig | None = None,
 ) -> dict[str, Any]:
     """Run a WebUI MCP preset action and hot-reload the agent when config changes."""
+    config_path = config.path if config is not None else None
     if action is None:
-        return mcp_presets_payload()
+        return mcp_presets_payload(
+            runtime_status=mcp_runtime_status() if mcp_runtime_status is not None else None,
+            config_path=config_path,
+        )
+    name = (_query_first(query, "name") or "").strip()
+    if name.startswith("plugin-"):
+        plugin_config = load_config(config_path) if config_path is not None else load_config()
+        plugin_name = name.removeprefix("plugin-")
+        plugins = discover_agent_plugins(plugin_config.workspace_path)
+        plugin = next((item for item in plugins if item.name == plugin_name), None)
+        if name not in plugin_config.tools.mcp_servers and plugin is not None:
+            if action not in {"enable", "disable"}:
+                raise McpPresetError("Agent Plugins support enable and disable actions only")
+            await asyncio.to_thread(
+                set_agent_plugin_enabled,
+                plugin_config.workspace_path,
+                plugin_name,
+                action == "enable",
+            )
+            verb = "enabled" if action == "enable" else "disabled"
+            payload = mcp_presets_payload(
+                last_action={"ok": True, "message": f"{plugin.display_name} {verb}."},
+                config_path=config_path,
+            )
+            if reload_mcp is not None:
+                payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
+            return payload
     if action == "test":
-        return await mcp_presets_test_action(query)
-    if action in _CUSTOM_ACTIONS:
+        payload = await mcp_presets_test_action(query, config_path=config_path)
+        return attach_mcp_runtime_status(
+            payload,
+            mcp_runtime_status() if mcp_runtime_status is not None else None,
+        )
+    if action == "reconnect":
+        payload = await asyncio.to_thread(
+            mcp_reconnect_action,
+            query,
+            config_path=config_path,
+        )
+    elif config is not None:
+        operation = custom_mcp_action if action in _CUSTOM_ACTIONS else mcp_presets_action
+        payload = await asyncio.to_thread(
+            config.run_serialized,
+            lambda path: operation(action, query, config_path=path),
+        )
+    elif action in _CUSTOM_ACTIONS:
         payload = await asyncio.to_thread(custom_mcp_action, action, query)
     else:
         payload = await asyncio.to_thread(mcp_presets_action, action, query)
     if reload_mcp is not None:
         payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
-    return payload
+    return attach_mcp_runtime_status(
+        payload,
+        mcp_runtime_status() if mcp_runtime_status is not None else None,
+    )

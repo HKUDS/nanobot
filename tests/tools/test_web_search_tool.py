@@ -272,7 +272,7 @@ async def test_serper_search_http_error(monkeypatch):
     tool = _tool(provider="serper", api_key="bad-serper-key")
     result = await tool.execute(query="serper")
     assert "Error: Serper search failed (403)" in result
-    assert is_tool_error_result(tool.name, result)
+    assert is_tool_error_result(result)
 
 
 @pytest.mark.asyncio
@@ -284,7 +284,7 @@ async def test_serper_search_rate_limited(monkeypatch):
     tool = _tool(provider="serper", api_key="serper-key")
     result = await tool.execute(query="serper")
     assert "Serper search rate limited" in result
-    assert is_tool_error_result(tool.name, result)
+    assert is_tool_error_result(result)
 
 
 @pytest.mark.asyncio
@@ -820,4 +820,6 @@ async def test_olostep_package_missing_returns_install_hint(monkeypatch):
     tool = _tool(provider="olostep", api_key="olostep-key")
     result = await tool.execute(query="test query")
 
-    assert result == "Error: olostep package not installed. Run: pip install olostep"
+    assert result == (
+        "Error: Olostep support is not installed. Run `nanobot plugins enable olostep`."
+    )

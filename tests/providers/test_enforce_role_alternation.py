@@ -1,6 +1,6 @@
 """Tests for LLMProvider._enforce_role_alternation."""
 
-from nanobot.providers.base import LLMProvider, _SYNTHETIC_USER_CONTENT
+from nanobot.providers.base import _SYNTHETIC_USER_CONTENT, LLMProvider
 
 
 class TestEnforceRoleAlternation:
@@ -132,12 +132,11 @@ class TestEnforceRoleAlternation:
         assert len(msgs) == 2
 
     def test_trailing_assistant_recovered_as_user_when_only_system_remains(self):
-        """Subagent result injected as assistant message must not be silently dropped.
+        """A trailing assistant message must not be silently dropped.
 
-        When build_messages(current_role="assistant") produces [system, assistant],
-        _enforce_role_alternation would drop the assistant, leaving only [system].
-        Most providers (e.g. Zhipu/GLM error 1214) reject such requests.
-        The trailing assistant should be recovered as a user message instead.
+        An externally supplied [system, assistant] sequence would otherwise leave
+        only [system]. Most providers reject such requests, so the trailing
+        assistant should be recovered as a user message instead.
         """
         msgs = [
             {"role": "system", "content": "You are helpful."},

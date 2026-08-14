@@ -44,7 +44,7 @@ export function RenameChatDialog({
     <Dialog open={open} onOpenChange={(next) => {
       if (!next) onCancel();
     }}>
-      <DialogContent className="max-w-sm rounded-[22px] border-border/70 bg-popover p-5 shadow-2xl">
+      <DialogContent className="max-w-sm p-5">
         <form
           className="grid gap-4"
           onSubmit={(event) => {

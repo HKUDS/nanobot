@@ -16,6 +16,7 @@ from nanobot.command.builtin import (
     cmd_dream_restore,
 )
 from nanobot.command.router import CommandContext
+from nanobot.session.manager import SessionManager
 from nanobot.utils.gitstore import CommitInfo
 
 
@@ -65,17 +66,34 @@ class _FakeGit:
         self._commits = commits or []
         self._diff_map = diff_map or {}
         self._revert_result = revert_result
+        self.revert_calls: list[tuple[str, str | None]] = []
 
     def is_initialized(self) -> bool:
         return self._initialized
 
-    def log(self, max_entries: int = 20) -> list[CommitInfo]:
-        return self._commits[:max_entries]
+    def log(
+        self,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> list[CommitInfo]:
+        commits = self._commits
+        if message_prefix is not None:
+            commits = [c for c in commits if c.message.startswith(message_prefix)]
+        return commits[:max_entries]
 
-    def show_commit_diff(self, sha: str, max_entries: int = 20):
-        return self._diff_map.get(sha)
+    def show_commit_diff(
+        self,
+        sha: str,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ):
+        result = self._diff_map.get(sha)
+        if result and message_prefix is not None and not result[0].message.startswith(message_prefix):
+            return None
+        return result
 
-    def revert(self, sha: str) -> str | None:
+    def revert(self, sha: str, *, message_prefix: str | None = None) -> str | None:
+        self.revert_calls.append((sha, message_prefix))
         return self._revert_result
 
     def auto_commit(self, message: str) -> str | None:
@@ -90,6 +108,13 @@ class _FakeBus:
         self.outbound.append(message)
 
 
+def _make_sessions(tmp_path) -> SessionManager:
+    return SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "runtime",
+    )
+
+
 def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int = 1) -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
     store = _FakeStore(git, last_dream_cursor=last_dream_cursor)
@@ -101,12 +126,10 @@ def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
     store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=None)
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, bus
@@ -152,13 +175,13 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
             metadata={"_stop_reason": "completed"},
         )
 
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
+    dream_runtime = object()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
+        dream_runtime=lambda: dream_runtime,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
@@ -167,6 +190,7 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
 
     assert len(calls) == 1
     assert callable(calls[0][1]["on_progress"])
+    assert calls[0][1]["runtime"] is dream_runtime
 
 
 def _build_runnable_dream(
@@ -175,6 +199,7 @@ def _build_runnable_dream(
     initialized: bool,
     content_diff: str,
     stop_reason: str = "completed",
+    tool_error: bool = False,
 ) -> tuple[CommandContext, _FakeStore]:
     """Build a /dream ctx whose run is driven by a canned stop reason + diff."""
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
@@ -186,6 +211,15 @@ def _build_runnable_dream(
     )
 
     async def process_direct(*args, **kwargs):
+        if tool_error:
+            await kwargs["on_progress"](
+                "",
+                tool_events=[{
+                    "phase": "error",
+                    "name": "edit_file",
+                    "error": "edit failed",
+                }],
+            )
         return OutboundMessage(
             channel="cli",
             chat_id="direct",
@@ -194,13 +228,12 @@ def _build_runnable_dream(
         )
 
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
+        dream_runtime=lambda: None,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, store
@@ -208,7 +241,7 @@ def _build_runnable_dream(
 
 @pytest.mark.asyncio
 async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
-    """A real file delta => productive run => cursor advances (Tier 3)."""
+    """A completed run with a real file delta advances the cursor."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="SOUL.md: +1 -0")
     await cmd_dream(ctx)
     await asyncio.sleep(0)
@@ -216,19 +249,97 @@ async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dream_keeps_cursor_on_completed_noop(tmp_path) -> None:
-    """Completed run with no file changes must NOT advance the cursor, so the
-    history batch is reconsidered next run instead of silently swallowed."""
+async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
+    """A completed no-op has processed the batch and must not repeat it."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
     await cmd_dream(ctx)
     await asyncio.sleep(0)
-    assert store._last_dream_cursor == 5  # unchanged
+    assert store._last_dream_cursor == 42
+    assert "no memory changes" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
+    """An incomplete run remains retryable even if it left a partial edit."""
+    ctx, store = _build_runnable_dream(
+        tmp_path,
+        initialized=True,
+        content_diff="SOUL.md: +1 -0",
+        stop_reason="length",
+    )
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 5
+    assert "did not complete" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_keeps_cursor_when_completed_after_tool_error(tmp_path) -> None:
+    """A soft tool failure must not masquerade as a verified no-op."""
+    ctx, store = _build_runnable_dream(
+        tmp_path,
+        initialized=True,
+        content_diff="",
+        tool_error=True,
+    )
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 5
+    assert "did not complete" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
+    """A no-op first batch must not starve later history entries."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = MemoryStore(workspace)
+    store.write_soul("# Soul")
+    store.write_memory("# Memory")
+    for index in range(1, 22):
+        store.append_history(f"entry-{index:02d}")
+    store.git.init()
+
+    processed_prompts: list[str] = []
+
+    async def process_direct(prompt, *args, **kwargs):
+        processed_prompts.append(prompt)
+        return OutboundMessage(
+            channel="cli",
+            chat_id="direct",
+            content="done",
+            metadata={"_stop_reason": "completed"},
+        )
+
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
+    bus = _FakeBus()
+    loop = SimpleNamespace(
+        bus=bus,
+        context=SimpleNamespace(memory=store, timezone="UTC"),
+        sessions=_make_sessions(tmp_path),
+        process_direct=process_direct,
+        dream_runtime=lambda: None,
+    )
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
+
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+
+    assert len(processed_prompts) == 1
+    assert "entry-20" in processed_prompts[0]
+    assert "entry-21" not in processed_prompts[0]
+    assert store.get_last_dream_cursor() == 20
+    next_result = store.build_dream_prompt()
+    assert next_result is not None
+    next_prompt, next_cursor = next_result
+    assert next_cursor == 21
+    assert "entry-21" in next_prompt
+    assert "entry-01" not in next_prompt
 
 
 @pytest.mark.asyncio
 async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
-    """Without git there is no diff signal; productivity falls back to the
-    completion check so non-git workspaces keep working."""
+    """Non-git workspaces use the same clean-completion gate."""
     ctx, store = _build_runnable_dream(
         tmp_path, initialized=False, content_diff="", stop_reason="completed",
     )
@@ -258,6 +369,26 @@ async def test_dream_log_latest_is_more_user_friendly() -> None:
     assert "- Changed files: `SOUL.md`" in out.content
     assert "Use `/dream-restore abcd1234` to undo this change." in out.content
     assert "```diff" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_log_latest_skips_non_dream_commit() -> None:
+    backup = CommitInfo(
+        sha="bbbb2222", message="backup: workspace snapshot", timestamp="2026-04-04 13:00",
+    )
+    dream = CommitInfo(
+        sha="abcd1234", message="dream: latest", timestamp="2026-04-04 12:00",
+    )
+    diff = "diff --git a/SOUL.md b/SOUL.md\n"
+    git = _FakeGit(
+        commits=[backup, dream],
+        diff_map={dream.sha: (dream, diff), backup.sha: (backup, "unrelated diff")},
+    )
+
+    out = await cmd_dream_log(_make_ctx("/dream-log", git))
+
+    assert "`abcd1234`" in out.content
+    assert "`bbbb2222`" not in out.content
 
 
 @pytest.mark.asyncio
@@ -357,6 +488,7 @@ def test_dream_prompt_command_in_help_and_palette() -> None:
 async def test_dream_restore_lists_versions_with_next_steps() -> None:
     commits = [
         CommitInfo(sha="abcd1234", message="dream: latest", timestamp="2026-04-04 12:00"),
+        CommitInfo(sha="cccc3333", message="backup: workspace", timestamp="2026-04-04 10:00"),
         CommitInfo(sha="bbbb2222", message="dream: older", timestamp="2026-04-04 08:00"),
     ]
     git = _FakeGit(commits=commits)
@@ -366,6 +498,8 @@ async def test_dream_restore_lists_versions_with_next_steps() -> None:
     assert "## Dream Restore" in out.content
     assert "Choose a Dream memory version to restore." in out.content
     assert "`abcd1234` 2026-04-04 12:00 - dream: latest" in out.content
+    assert "`bbbb2222` 2026-04-04 08:00 - dream: older" in out.content
+    assert "backup: workspace" not in out.content
     assert "Preview a version with `/dream-log <sha>`" in out.content
     assert "Restore a version with `/dream-restore <sha>`." in out.content
 
@@ -398,3 +532,21 @@ async def test_dream_restore_success_mentions_files_and_followup() -> None:
     assert "- New safety commit: `eeee9999`" in out.content
     assert "- Restored files: `SOUL.md`, `memory/MEMORY.md`" in out.content
     assert "Use `/dream-log eeee9999` to inspect the restore diff." in out.content
+    assert git.revert_calls == [("abcd1234", "dream:")]
+
+
+@pytest.mark.asyncio
+async def test_dream_restore_rejects_non_dream_commit_clearly() -> None:
+    commit = CommitInfo(
+        sha="cccc3333", message="backup: workspace", timestamp="2026-04-04 10:00",
+    )
+    git = _FakeGit(
+        diff_map={commit.sha: (commit, "unrelated diff")},
+        revert_result="eeee9999",
+    )
+
+    out = await cmd_dream_restore(_make_ctx("/dream-restore cccc3333", git, args="cccc3333"))
+
+    assert "Only Dream memory versions can be restored." in out.content
+    assert "Use `/dream-restore` to list recent versions." in out.content
+    assert git.revert_calls == []

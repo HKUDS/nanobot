@@ -431,7 +431,13 @@ curl -sS http://localhost:11434/v1/models
 nanobot agent -m "Hello!"
 ```
 
-If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If the response is very slow, try a smaller local model or lower `contextWindowTokens`.
+If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If every response is slow, try a smaller local model or lower `contextWindowTokens`.
+
+If direct Ollama responses are fast but tool-using nanobot turns repeatedly evaluate
+thousands of prompt tokens, the model's chat template may be moving its tool
+definitions between requests. See
+[Improve Ollama Tool-Calling Prompt Cache Reuse](./guides/configure-ollama-prompt-cache.md)
+for a diagnostic procedure and an optional model-specific workaround.
 
 ## Recipe: vLLM or LM Studio
 
@@ -543,7 +549,7 @@ This recipe applies after the agent works and you want observability for OpenAI-
 Install the optional package in the same Python environment that runs nanobot:
 
 ```bash
-python -m pip install langfuse
+nanobot plugins enable langfuse
 ```
 
 Set the environment variables before starting nanobot:
@@ -604,7 +610,9 @@ In chat:
 /model fast
 ```
 
-`/model` switching is runtime-only. It does not rewrite `config.json`, and an in-progress turn keeps using the model it started with.
+`/model` stores the selection in the current session without rewriting `config.json`.
+The selection survives restarts, does not affect other sessions, and an in-progress
+turn keeps using the model it started with.
 
 ## Quick Failure Map
 

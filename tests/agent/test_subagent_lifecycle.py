@@ -65,6 +65,24 @@ async def _drain_subagent_tasks(sm: SubagentManager) -> None:
     await asyncio.sleep(0)
 
 
+@pytest.mark.asyncio
+async def test_close_cancels_tasks_before_closing_exec_sessions(tmp_path):
+    sm = _manager(tmp_path)
+    task = asyncio.create_task(asyncio.Event().wait())
+    sm._running_tasks["t1"] = task
+
+    async def close_exec_sessions() -> int:
+        assert task.done()
+        return 0
+
+    sm._exec_session_manager.close_all = AsyncMock(side_effect=close_exec_sessions)
+
+    await sm.close()
+
+    assert task.cancelled()
+    sm._exec_session_manager.close_all.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # SubagentStatus defaults
 # ---------------------------------------------------------------------------

@@ -3,7 +3,14 @@ import copy
 
 import pytest
 
-from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
+from nanobot.providers.base import (
+    RETRY_AFTER_BUFFER,
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    ProviderCallContext,
+    ProviderConversationState,
+)
 
 
 class ScriptedProvider(LLMProvider):
@@ -331,6 +338,79 @@ async def test_successful_image_retry_mutates_original_messages_in_place() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("messages", "payload", "pending_messages"),
+    [
+        (_IMAGE_MSG, {}, _IMAGE_MSG),
+        (
+            [{"role": "user", "content": "continue"}],
+            {
+                "items": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,abc",
+                            }
+                        ],
+                    }
+                ]
+            },
+            [],
+        ),
+    ],
+    ids=["pending-image", "opaque-payload-image"],
+)
+async def test_image_retry_discards_provider_state_with_images(
+    messages,
+    payload,
+    pending_messages,
+) -> None:
+    class ContextScriptedProvider(ScriptedProvider):
+        def __init__(self, responses):
+            super().__init__(responses)
+            self.contexts: list[ProviderCallContext] = []
+
+        async def chat_with_context(
+            self,
+            *,
+            provider_context: ProviderCallContext,
+            **kwargs,
+        ) -> LLMResponse:
+            self.contexts.append(provider_context)
+            return await self.chat(**kwargs)
+
+    provider = ContextScriptedProvider([
+        LLMResponse(content="model does not support images", finish_reason="error"),
+        LLMResponse(content="ok, no image"),
+    ])
+    messages = copy.deepcopy(messages)
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload=copy.deepcopy(payload),
+        pending_messages=copy.deepcopy(pending_messages),
+    )
+
+    response = await provider.chat_with_retry(
+        messages=messages,
+        provider_context=ProviderCallContext(conversation_state=state),
+    )
+
+    assert response.content == "ok, no image"
+    retry_context = provider.contexts[-1]
+    assert isinstance(retry_context, ProviderCallContext)
+    assert retry_context.conversation_state is None
+    public_content = messages[0]["content"]
+    if isinstance(public_content, list):
+        assert all(block.get("type") != "image_url" for block in public_content)
+
+
+@pytest.mark.asyncio
 async def test_non_transient_error_without_images_no_retry() -> None:
     """Non-transient errors without image content are returned immediately."""
     provider = ScriptedProvider([
@@ -402,8 +482,8 @@ async def test_chat_with_retry_uses_retry_after_and_emits_wait_progress(monkeypa
     )
 
     assert response.content == "ok"
-    assert delays == [7.0]
-    assert progress and "7s" in progress[0]
+    assert delays == [7.0 + RETRY_AFTER_BUFFER]
+    assert progress and f"{int(7 + RETRY_AFTER_BUFFER)}s" in progress[0]
 
 
 def test_extract_retry_after_supports_common_provider_formats() -> None:
@@ -444,7 +524,7 @@ async def test_chat_with_retry_prefers_structured_retry_after_when_present(monke
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
     assert response.content == "ok"
-    assert delays == [9.0]
+    assert delays == [9.0 + RETRY_AFTER_BUFFER]
 
 
 @pytest.mark.asyncio
@@ -521,7 +601,7 @@ async def test_chat_with_retry_retries_429_transient_rate_limit(monkeypatch) -> 
 
     assert response.content == "ok"
     assert provider.calls == 2
-    assert delays == [0.2]
+    assert delays == [0.2 + RETRY_AFTER_BUFFER]
 
 
 @pytest.mark.asyncio
@@ -591,7 +671,7 @@ async def test_chat_with_retry_prefers_structured_retry_after(monkeypatch) -> No
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
     assert response.content == "ok"
-    assert delays == [0.2]
+    assert delays == [0.2 + RETRY_AFTER_BUFFER]
 
 
 @pytest.mark.asyncio

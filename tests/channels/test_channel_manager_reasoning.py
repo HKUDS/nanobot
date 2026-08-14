@@ -124,6 +124,7 @@ async def test_reasoning_end_routes_to_send_reasoning_end(manager):
     )
     await manager._send_once(channel, msg)
     channel._end_mock.assert_awaited_once()
+    assert channel._end_mock.await_args.kwargs["stream_id"] == "r1"
     channel._delta_mock.assert_not_awaited()
 
 
@@ -224,24 +225,6 @@ async def test_base_channel_reasoning_primitives_are_noop_safe():
 
 @pytest.mark.asyncio
 async def test_file_edit_events_route_to_channel_capability(manager):
-    channel = manager.channels["mock"]
-    edits = [{"version": 1, "phase": "start", "path": "src/app.py"}]
-    msg = outbound_message_for_event(
-        channel="mock",
-        chat_id="c1",
-        event=ProgressEvent(file_edit_events=edits),
-    )
-
-    await manager._send_once(channel, msg)
-
-    channel._file_edit_mock.assert_awaited_once_with(
-        "c1", edits, msg.metadata
-    )
-    channel._send_mock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_typed_file_edit_event_routes_to_channel_capability(manager):
     channel = manager.channels["mock"]
     edits = [{"version": 1, "phase": "start", "path": "src/app.py"}]
     msg = outbound_message_for_event(

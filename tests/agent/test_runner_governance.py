@@ -10,13 +10,16 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
-    MICROCOMPACT_KEEP_RECENT,
     ContextGovernanceConfig,
     ContextGovernor,
 )
 from nanobot.agent.runner import AgentRunSpec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMResponse,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -58,17 +61,11 @@ def _make_loop(tmp_path):
     return loop
 
 
-async def test_runner_uses_raw_messages_when_context_governance_fails():
+async def test_runner_propagates_context_governance_failure():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
-    captured_messages: list[dict] = []
-
-    async def chat_with_retry(*, messages, **kwargs):
-        captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
-
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_with_retry = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
     initial_messages = [
@@ -80,16 +77,16 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
     runner.context_governor.prepare_for_model = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("boom")
     )
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=initial_messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    with pytest.raises(RuntimeError, match="boom"):
+        await runner.run(make_run_spec(provider,
+            initial_messages=initial_messages,
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
 
-    assert result.final_content == "done"
-    assert captured_messages == initial_messages
+    provider.chat_with_retry.assert_not_awaited()
 
 
 def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
@@ -501,7 +498,7 @@ def test_microcompact_skips_when_prompt_under_hard_budget(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -535,7 +532,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 8
+    total = 18
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -574,7 +571,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
 
 
 def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
-    """The newest result is preserved only while the request can still fit."""
+    """An unfit newest result tells the model to retry narrowly or report the limit."""
     provider = MagicMock()
     provider.generation = SimpleNamespace(max_tokens=0)
     tools = MagicMock()
@@ -611,6 +608,9 @@ def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
 
     tool_msg = next(m for m in result if m.get("role") == "tool")
     assert "compacted to fit context" in tool_msg["content"]
+    assert "Do not repeat the same call unchanged" in tool_msg["content"]
+    assert "Retry with a narrower path, query, range, or result limit" in tool_msg["content"]
+    assert "tell the user the task cannot fit" in tool_msg["content"]
     assert compacted_tool_call_ids == {"c0"}
 
 
@@ -620,7 +620,7 @@ def test_context_governor_keeps_compaction_boundary_stable(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 8
+    total = 18
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
     spec = make_run_spec(provider,
@@ -661,7 +661,7 @@ def test_microcompact_preserves_short_results(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     messages = _microcompact_messages(total=total, tool_name="exec", content="short")
     spec = make_run_spec(provider,
         initial_messages=messages,
@@ -693,7 +693,7 @@ def test_microcompact_skips_non_compactable_tools(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    total = MICROCOMPACT_KEEP_RECENT + 5
+    total = 15
     long_content = "y" * 1000
     messages = _microcompact_messages(total=total, tool_name="message", content=long_content)
     spec = make_run_spec(provider,
@@ -890,20 +890,30 @@ def test_drop_malformed_tool_calls_trims_response():
     """LLM response tool_calls with a missing/empty name are dropped in place."""
     from nanobot.agent.runner import AgentRunner
 
+    candidate_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "function_call", "name": None}]},
+    )
     response = LLMResponse(
         content=None,
         tool_calls=[
             ToolCallRequest(id="1", name=None, arguments={}),
             ToolCallRequest(id="2", name="", arguments={}),
-            ToolCallRequest(id="3", name="read_file", arguments={}),
+            ToolCallRequest(id="3", name={"unexpected": "object"}, arguments={}),
+            ToolCallRequest(id="4", name="read_file", arguments={}),
         ],
         finish_reason="tool_calls",
+        provider_state=candidate_state,
     )
     dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
     assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.provider_state is None
     assert response.finish_reason == "tool_calls"
     assert response.should_execute_tools is True
-    assert dropped == 2
+    assert dropped == 3
     assert all_dropped is False
     assert orig == "tool_calls"
 

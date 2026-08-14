@@ -1,0 +1,38 @@
+{
+  "description": "QQ チャットから nanobot を利用します。",
+  "requirements": "QQ ボットの認証情報とゲートウェイ",
+  "setup": {
+    "docsLabel": "QQ 設定ガイドを開く",
+    "officialLabel": "QQ ボットコンソールを開く",
+    "tryIt": "QQ から個人またはグループのテストメッセージを送信します。",
+    "summary": "QQ は公式ボット認証情報と常時接続の WebSocket を使用します。",
+    "steps": [
+      "QQ Open Platform でボットを作成し、App ID と Secret をコピーします。",
+      "メッセージ形式と任意の送信者許可リストを選びます。",
+      "保存して QQ を有効にし、個人またはグループのテストメッセージを送信します。"
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ ボット App ID",
+        "help": "QQ Open Platform からコピーします。"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••",
+        "help": "QQ の認証情報ページを離れる前に保存してください。"
+      },
+      "allowFrom": {
+        "label": "許可するユーザー",
+        "placeholder": "Open ID（カンマ区切り）"
+      },
+      "msgFormat": {
+        "label": "メッセージ形式",
+        "choices": {
+          "plain": "プレーンテキスト",
+          "markdown": "Markdown"
+        }
+      }
+    }
+  }
+}

@@ -6,7 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -20,11 +20,22 @@ from nanobot.security.workspace_access import (
     validate_workspace_scope_payload,
 )
 
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
+
 WEBUI_WORKSPACE_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 128 * 1024
 _DEFAULT_ACCESS_MODES = {"default", "full"}
 _LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE = "restricted"
 _WEBUI_SCOPE_CHANNEL = "websocket"
+
+
+def _scope_change_is_non_escalating(current: WorkspaceScope, requested: WorkspaceScope) -> bool:
+    """Allow a remote request only when it keeps the project and does not add access."""
+    return (
+        requested.project_path == current.project_path
+        and (not current.restrict_to_workspace or requested.restrict_to_workspace)
+    )
 
 
 def webui_workspace_state_path() -> Path:
@@ -42,6 +53,7 @@ def default_webui_workspace_state() -> dict[str, Any]:
 def normalize_webui_workspace_state(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
+    raw = cast(dict[str, Any], raw)
     state = default_webui_workspace_state()
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None
@@ -137,6 +149,7 @@ def workspaces_payload(
     default_workspace: Path,
     default_restrict_to_workspace: bool,
     controls_available: bool,
+    folder_picker_available: bool = False,
 ) -> dict[str, Any]:
     default_access_mode = read_webui_default_access_mode()
     default_scope = (
@@ -155,6 +168,7 @@ def workspaces_payload(
         "controls": {
             "can_change_project": controls_available,
             "can_use_full_access": controls_available,
+            "can_pick_folder": folder_picker_available,
         },
     }
 
@@ -165,7 +179,7 @@ class WebUIWorkspaceController:
     def __init__(
         self,
         *,
-        session_manager: Any | None,
+        session_manager: SessionManager | None,
         default_workspace: Path,
         default_restrict_to_workspace: bool,
     ) -> None:
@@ -179,32 +193,67 @@ class WebUIWorkspaceController:
             self._default_restrict_to_workspace,
         )
 
-    def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
-        if self._sessions is None:
-            return self.default_scope()
-        metadata_reader = getattr(self._sessions, "read_session_metadata", None)
-        if callable(metadata_reader):
-            data = metadata_reader(session_key)
-        else:
-            data = self._sessions.read_session_file(session_key)
-        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
-        if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
-            return self.default_scope()
+    def restricted_default_scope(self) -> WorkspaceScope:
+        """Return the default workspace with access restricted for this request."""
+        return build_workspace_scope(
+            self._default_workspace,
+            "restricted",
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+
+    def _scope_from_metadata_value(
+        self,
+        raw_scope: object,
+        *,
+        default_scope: WorkspaceScope | None = None,
+    ) -> WorkspaceScope:
         try:
             return validate_workspace_scope_payload(
-                metadata.get(WORKSPACE_SCOPE_METADATA_KEY),
+                raw_scope,
                 default_workspace=self._default_workspace,
                 default_restrict_to_workspace=self._default_restrict_to_workspace,
                 source_channel=_WEBUI_SCOPE_CHANNEL,
             )
         except WorkspaceScopeError:
-            return self.default_scope()
+            return default_scope if default_scope is not None else self.default_scope()
 
-    def payload(self, *, controls_available: bool) -> dict[str, Any]:
+    def scope_for_indexed_metadata(
+        self,
+        raw_scope: object,
+        *,
+        scope_present: bool,
+        default_scope: WorkspaceScope,
+    ) -> WorkspaceScope:
+        """Resolve a sidebar-only metadata snapshot without an authority-store read."""
+        if not scope_present:
+            return default_scope
+        return self._scope_from_metadata_value(raw_scope, default_scope=default_scope)
+
+    def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
+        if self._sessions is None:
+            return self.default_scope()
+        data = self._sessions.read_session_metadata(session_key)
+        if not isinstance(data, dict):
+            return self.default_scope()
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
+            return self.default_scope()
+        metadata_data = cast(dict[str, Any], metadata)
+        return self._scope_from_metadata_value(
+            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY))
+        )
+
+    def payload(
+        self,
+        *,
+        controls_available: bool,
+        folder_picker_available: bool = False,
+    ) -> dict[str, Any]:
         return workspaces_payload(
             default_workspace=self._default_workspace,
             default_restrict_to_workspace=self._default_restrict_to_workspace,
             controls_available=controls_available,
+            folder_picker_available=folder_picker_available,
         )
 
     def scope_from_envelope(
@@ -214,11 +263,10 @@ class WebUIWorkspaceController:
         session_key: str | None,
         controls_available: bool,
     ) -> WorkspaceScope:
+        current = self.scope_for_session_key(session_key) if session_key else self.default_scope()
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
-        if raw is None and session_key:
-            scope = self.scope_for_session_key(session_key)
-        elif raw is None:
-            scope = self.default_scope()
+        if raw is None:
+            scope = current
         else:
             scope = validate_workspace_scope_payload(
                 raw,
@@ -226,7 +274,7 @@ class WebUIWorkspaceController:
                 default_restrict_to_workspace=self._default_restrict_to_workspace,
                 source_channel=_WEBUI_SCOPE_CHANNEL,
             )
-        if not controls_available and scope.metadata() != self.default_scope().metadata():
+        if not controls_available and not _scope_change_is_non_escalating(current, scope):
             raise WorkspaceScopeError("workspace controls are localhost-only", status=403)
         return scope
 

@@ -14,6 +14,23 @@ class RecordingHook(AgentHook):
         self._events.append(f"{self._label}:{context.iteration}")
 
 
+def test_turn_hook_context_preserves_legacy_positional_arguments(tmp_path) -> None:
+    context = AgentTurnHookContext(
+        None,
+        tmp_path,
+        "sdk",
+        "chat-a",
+        "message-1",
+        "sdk:chat-a",
+        {"trusted": True},
+        True,
+    )
+
+    assert context.metadata == {"trusted": True}
+    assert context.ephemeral is True
+    assert context.attributes == {}
+
+
 @pytest.mark.asyncio
 async def test_turn_hook_builder_runs_progress_hook_before_extra_hooks() -> None:
     events: list[str] = []
@@ -65,6 +82,7 @@ async def test_turn_hook_builder_runs_factories_with_matching_registration_order
         session_key="websocket:chat-1",
         workspace=tmp_path,
         metadata={"source": "test"},
+        attributes={"tenant": "acme"},
         registered_hook_factories=[factory("registered_factory")],
         registered_hooks=[RecordingHook(events, "registered")],
         turn_hook_factories=[factory("turn_factory")],
@@ -91,6 +109,10 @@ async def test_turn_hook_builder_runs_factories_with_matching_registration_order
     assert [context.metadata for context in captured] == [
         {"source": "test"},
         {"source": "test"},
+    ]
+    assert [context.attributes for context in captured] == [
+        {"tenant": "acme"},
+        {"tenant": "acme"},
     ]
 
 

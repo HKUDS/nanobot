@@ -52,9 +52,10 @@ def test_provider_snapshot_has_one_canonical_runtime_conversion() -> None:
         model="snapshot-model",
         context_window_tokens=32_768,
         signature=("snapshot-model", "openai"),
+        model_preset="fast",
     )
 
-    runtime = runtime_from_provider_snapshot(snapshot, model_preset="fast")
+    runtime = runtime_from_provider_snapshot(snapshot)
 
     assert runtime.provider is provider
     assert runtime.model == "snapshot-model"
@@ -92,6 +93,101 @@ def test_resolver_resolves_preset_without_mutating_selected_runtime() -> None:
     assert resolver.model_preset is None
     assert initial.provider.generation == GenerationSettings(0.1, 1024, None)
     assert resolved.generation == GenerationSettings(0.5, 512, None)
+
+
+def test_resolver_reuses_preset_until_runtime_config_is_invalidated() -> None:
+    initial = _runtime()
+    preset = ModelPresetConfig(model="fast-model")
+    load_count = 0
+    preset_signature = ("fast-model", "auto", "initial")
+
+    def load_preset(_name: str) -> ProviderSnapshot:
+        nonlocal load_count
+        load_count += 1
+        return ProviderSnapshot(
+            provider=_provider(),
+            model="fast-model",
+            context_window_tokens=20_000,
+            signature=preset_signature,
+        )
+
+    resolver = ModelRuntimeResolver(
+        initial,
+        model_presets={"fast": preset},
+        preset_snapshot_loader=load_preset,
+    )
+
+    first = resolver.resolve_preset("fast")
+    second = resolver.resolve_preset("fast")
+
+    assert first is second
+    assert load_count == 1
+
+    preset_signature = ("fast-model", "auto", "new-credential")
+    resolver.invalidate()
+    refreshed = resolver.resolve_preset("fast")
+
+    assert refreshed is not first
+    assert load_count == 2
+
+
+def test_resolver_refreshes_preset_catalog_after_invalidation() -> None:
+    provider = _provider()
+    catalog = {
+        "old": ModelPresetConfig(model="old-model", provider="openai"),
+    }
+    default_name = "old"
+
+    def load_preset(name: str) -> ProviderSnapshot:
+        preset = catalog[name]
+        return ProviderSnapshot(
+            provider=provider,
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=(preset.model, preset.provider),
+            model_preset=name,
+        )
+
+    resolver = ModelRuntimeResolver(
+        runtime_from_provider_snapshot(load_preset("old")),
+        model_presets=catalog,
+        preset_catalog_loader=lambda: catalog,
+        configured_default_preset="old",
+        provider_snapshot_loader=lambda: load_preset(default_name),
+        preset_snapshot_loader=load_preset,
+    )
+
+    catalog["new"] = ModelPresetConfig(model="new-model", provider="openai")
+    default_name = "new"
+    resolver.invalidate()
+
+    assert resolver.admit().model_preset == "new"
+    assert set(resolver.model_presets) == {"old", "new"}
+
+    del catalog["old"]
+    resolver.invalidate()
+
+    assert resolver.admit().model_preset == "new"
+    assert set(resolver.model_presets) == {"new"}
+
+
+def test_resolver_model_presets_are_read_only() -> None:
+    resolver = ModelRuntimeResolver(
+        _runtime(),
+        model_presets={"fast": ModelPresetConfig(model="fast-model")},
+    )
+
+    exposed = resolver.model_presets
+    with pytest.raises(TypeError):
+        exposed["other"] = ModelPresetConfig(  # type: ignore[index]
+            model="other-model"
+        )
+
+    exposed["fast"].model = "mutated-model"
+
+    assert set(resolver.model_presets) == {"fast"}
+    assert resolver.model_presets["fast"].model == "fast-model"
+    assert resolver.resolve_preset("fast").model == "fast-model"
 
 
 def test_resolver_model_override_is_derived_without_default_mutation() -> None:
@@ -177,10 +273,57 @@ def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:
     admitted = resolver.current()
 
     provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
-    refreshed = resolver.current(refresh=True)
+    refreshed = resolver.admit()
 
     assert admitted.generation == GenerationSettings(0.2, 2048, None)
     assert refreshed.generation == GenerationSettings(0.8, 512, None)
+
+
+def test_resolver_admission_reloads_config_only_after_invalidation() -> None:
+    initial = _runtime()
+    refreshed_provider = _provider()
+    load_count = 0
+
+    def load_snapshot() -> ProviderSnapshot:
+        nonlocal load_count
+        load_count += 1
+        return ProviderSnapshot(
+            provider=refreshed_provider,
+            model="refreshed-model",
+            context_window_tokens=20_000,
+            signature=("refreshed-model", "auto"),
+        )
+
+    resolver = ModelRuntimeResolver(initial, provider_snapshot_loader=load_snapshot)
+
+    assert resolver.admit() is initial
+    assert load_count == 0
+
+    resolver.invalidate()
+    refreshed = resolver.admit()
+
+    assert refreshed.provider is refreshed_provider
+    assert refreshed.model == "refreshed-model"
+    assert resolver.admit() is refreshed
+    assert load_count == 1
+
+
+def test_current_refresh_forces_config_reload() -> None:
+    initial = _runtime()
+    load_snapshot = MagicMock(
+        return_value=ProviderSnapshot(
+            provider=_provider(),
+            model="refreshed-model",
+            context_window_tokens=20_000,
+            signature=("refreshed-model", "auto"),
+        )
+    )
+    resolver = ModelRuntimeResolver(initial, provider_snapshot_loader=load_snapshot)
+
+    refreshed = resolver.current(refresh=True)
+
+    assert refreshed.model == "refreshed-model"
+    load_snapshot.assert_called_once_with()
 
 
 def test_selected_preset_generation_does_not_fall_back_to_provider_defaults() -> None:
@@ -198,7 +341,7 @@ def test_selected_preset_generation_does_not_fall_back_to_provider_defaults() ->
     selected = resolver.select_preset("creative")
 
     provider.generation = GenerationSettings(temperature=0.9, max_tokens=64)
-    refreshed = resolver.current(refresh=True)
+    refreshed = resolver.admit()
 
     assert refreshed is selected
     assert refreshed.generation == GenerationSettings(0.7, 4096, None)

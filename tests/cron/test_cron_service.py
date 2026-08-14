@@ -25,6 +25,95 @@ def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
     }
 
 
+def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "every_ms": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "session_key": "websocket:chat-1",
+                        },
+                        "state": {
+                            "run_history": [
+                                {"run_at_ms": 1000, "status": "ok", "duration_ms": 12},
+                            ],
+                        },
+                        "created_at_ms": 0,
+                        "updated_at_ms": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].payload.session_key == "websocket:chat-1"
+    assert jobs[0].state.run_history[0].run_at_ms == 1000
+    assert jobs[0].state.run_history[0].duration_ms == 12
+
+
+def test_cron_job_from_dict_rejects_malformed_run_history() -> None:
+    with pytest.raises(TypeError):
+        CronJob.from_dict(
+            {
+                "id": "j1",
+                "name": "t",
+                "state": {"run_history": [None]},
+            }
+        )
+
+
+def test_load_jobs_coerces_string_schedule_and_state_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": "60000"},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "nextRunAtMs": "100",
+                            "lastRunAtMs": "50",
+                        },
+                        "createdAtMs": 0,
+                        "updatedAtMs": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].state.next_run_at_ms == 100
+    assert jobs[0].state.last_run_at_ms == 50
+
+
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 
@@ -50,6 +139,33 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
 
     assert job.schedule.tz == "America/Vancouver"
     assert job.state.next_run_at_ms is not None
+
+
+@pytest.mark.parametrize("expr", [None, "", "   "])
+def test_add_job_rejects_missing_cron_expression(tmp_path, expr: str | None) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires a non-empty 'expr'"):
+        service.add_job(
+            name="missing expression",
+            schedule=CronSchedule(kind="cron", expr=expr),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+def test_add_job_rejects_invalid_cron_expression_before_persisting(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="invalid cron expression"):
+        service.add_job(
+            name="bad expression",
+            schedule=CronSchedule(kind="cron", expr="not a cron expression"),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
 
 
 def test_write_run_record_uses_cron_runs_dir(tmp_path) -> None:
@@ -512,6 +628,117 @@ async def test_run_job_preserves_running_service_state(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_manual_run_persists_completion_when_callback_lists_jobs(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def on_job(_job) -> None:
+        service.list_jobs(include_disabled=True)
+        await asyncio.sleep(0)
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+
+    assert await service.run_job(job.id) is True
+
+    state = json.loads(store_path.read_text())["jobs"][0]["state"]
+    assert state["lastStatus"] == "ok"
+    assert state["lastError"] is None
+    assert len(state["runHistory"]) == 1
+    assert state["runHistory"][0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_overlapping_manual_runs_preserve_stopped_service_state(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    call_count = 0
+
+    async def on_job(_job) -> None:
+        nonlocal call_count
+        call_index = call_count
+        call_count += 1
+        entered[call_index].set()
+        await release[call_index].wait()
+
+    service = CronService(store_path, on_job=on_job)
+    jobs = [
+        service.add_job(
+            name=f"manual-{index}",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            message="hello",
+            **_bound_chat(str(index)),
+        )
+        for index in range(2)
+    ]
+
+    first = asyncio.create_task(service.run_job(jobs[0].id))
+    await entered[0].wait()
+    second = asyncio.create_task(service.run_job(jobs[1].id))
+    try:
+        await entered[1].wait()
+        release[0].set()
+        assert await first is True
+        assert service._running is False
+
+        release[1].set()
+        assert await second is True
+        assert service._running is False
+        assert service._timer_task is None
+
+        states = {
+            item["name"]: item["state"]
+            for item in json.loads(store_path.read_text())["jobs"]
+        }
+        assert states["manual-0"]["lastStatus"] == "ok"
+        assert states["manual-1"]["lastStatus"] == "ok"
+    finally:
+        release[0].set()
+        release[1].set()
+        await asyncio.gather(first, second, return_exceptions=True)
+        service.stop()
+
+
+@pytest.mark.asyncio
+async def test_manual_run_does_not_restart_service_stopped_during_execution(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def on_job(_job) -> None:
+        entered.set()
+        await release.wait()
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual-stop",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    await service.start()
+
+    run = asyncio.create_task(service.run_job(job.id))
+    try:
+        await entered.wait()
+        service.stop()
+        release.set()
+
+        assert await run is True
+        assert service._running is False
+        assert service._timer_task is None
+    finally:
+        release.set()
+        await asyncio.gather(run, return_exceptions=True)
+        service.stop()
+
+
+@pytest.mark.asyncio
 async def test_running_service_honors_external_disable(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     called: list[str] = []
@@ -967,3 +1194,83 @@ async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> 
         next_run = j["state"]["nextRunAtMs"]
         assert next_run is not None
         assert next_run > now_ms, f"Job '{j['name']}' next_run should be in the future"
+
+
+def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                {"runAtMs": None, "status": "ok", "durationMs": None},
+                            ],
+                        },
+                        "createdAtMs": None,
+                        "updatedAtMs": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].state.run_history[0].run_at_ms == 0
+    assert jobs[0].state.run_history[0].duration_ms == 0
+    assert jobs[0].state.run_history[0].status == "ok"
+    assert jobs[0].created_at_ms == 0
+    assert jobs[0].updated_at_ms == 0
+
+
+def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
+    """Null runHistory elements must be skipped like LocalTrigger.from_dict."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                None,
+                                {"runAtMs": 1, "status": "ok", "durationMs": 2},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert len(jobs[0].state.run_history) == 1
+    assert jobs[0].state.run_history[0].run_at_ms == 1
+    assert jobs[0].state.run_history[0].status == "ok"

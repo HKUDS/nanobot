@@ -9,7 +9,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent import plugins as agent_plugins
+from nanobot.agent.skills import SkillsLoader
 from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+
+
+@pytest.fixture(autouse=True)
+def _isolate_plugin_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_plugins, "get_config_path", lambda: tmp_path / "config/config.json")
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -197,6 +204,63 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
 
 
+def test_payload_resolves_obsidian_agent_cli_brand(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-07-14"},
+            "clis": [
+                {
+                    "name": "obsidian-agent-cli",
+                    "display_name": "Obsidian CLI",
+                    "description": "Obsidian automation",
+                    "category": "productivity",
+                    "entry_point": "obsidian-agent",
+                }
+            ],
+        },
+    )
+    _write_cache(manager._cache_path("public"), {"meta": {}, "clis": []})
+    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
+
+    app = manager.payload()["apps"][0]
+
+    assert app["brand_color"] == "#7C3AED"
+    assert app["logo_url"] == "https://cdn.simpleicons.org/obsidian/7C3AED"
+
+
+def test_installed_payload_enriches_apps_from_cached_catalog(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({
+        "gimp": {
+            "entry_point": "installed-gimp",
+            "source": "harness",
+            "strategy": "pip",
+        }
+    })
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry_point: "/bin/installed-gimp" if entry_point == "installed-gimp" else None,
+    )
+
+    app = manager.installed_payload()["apps"][0]
+
+    assert app["name"] == "gimp"
+    assert app["entry_point"] == "installed-gimp"
+    assert app["source"] == "harness"
+    assert app["status"] == "installed"
+    assert app["display_name"] == "GIMP"
+    assert app["category"] == "image"
+    assert app["description"] == "Public duplicate entry"
+    assert app["brand_color"] == "#5C5543"
+    assert app["logo_url"] == "https://cdn.simpleicons.org/gimp/5C5543"
+
+
 def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
@@ -334,6 +398,9 @@ def test_install_dispatches_safe_pip_and_installs_skill(
         "_fetch_skill_content",
         lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
     )
+    legacy = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("legacy", encoding="utf-8")
 
     payload = manager.install("gimp")
 
@@ -343,9 +410,15 @@ def test_install_dispatches_safe_pip_and_installs_skill(
     assert "state_recorded" in payload["last_action"]["verification"]
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["gimp"]["entry_point"] == "cli-anything-gimp"
-    skill = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
+    plugin = manager.workspace / "plugins" / "cli-app-gimp"
+    skill = plugin / "skills" / "cli-app-gimp" / "SKILL.md"
     assert skill.is_file()
+    manifest = json.loads((plugin / "plugin.json").read_text(encoding="utf-8"))
+    assert (manifest["name"], manifest["version"]) == ("cli-app-gimp", "1.0.0")
+    assert "name: cli-app-gimp" in skill.read_text(encoding="utf-8")
     assert 'run_cli_app` tool with `name="gimp"' in skill.read_text(encoding="utf-8")
+    assert SkillsLoader(manager.workspace).load_skill("cli-app-gimp") is not None
+    assert not legacy.exists()
 
 
 def test_run_argv_logs_command_exit_and_output(
@@ -366,11 +439,18 @@ def test_run_argv_logs_command_exit_and_output(
         *,
         capture_output: bool,
         text: bool,
+        encoding: str,
+        errors: str,
         timeout: int,
+        env: dict[str, str],
     ) -> subprocess.CompletedProcess[str]:
         assert capture_output is True
         assert text is True
+        assert encoding == "utf-8"
+        assert errors == "replace"
         assert timeout == 5
+        assert "OPENAI_API_KEY" not in env
+        assert env["PYTHONUNBUFFERED"] == "1"
         return subprocess.CompletedProcess(argv, 0, stdout="installed ok", stderr="")
 
     monkeypatch.setattr(cli_service, "logger", _Logger())
@@ -382,6 +462,22 @@ def test_run_argv_logs_command_exit_and_output(
     assert any(record.startswith("CLI Apps: running ") for record in records)
     assert any("command exited with code 0" in record for record in records)
     assert any("installed ok" in record for record in records)
+
+
+def test_run_argv_decodes_utf8_output(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+
+    result = manager._run_argv(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(chr(0x2713).encode('utf-8'))",
+        ],
+        timeout=5,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "\u2713"
 
 
 def test_install_records_available_cli_without_reinstalling(
@@ -410,7 +506,7 @@ def test_install_records_available_cli_without_reinstalling(
     assert "entry_point_available" in payload["last_action"]["verification"]
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["feishu"]["entry_point_path"] == str(resolved)
-    skill = manager.workspace / "skills" / "cli-app-feishu" / "SKILL.md"
+    skill = manager.workspace / "plugins/cli-app-feishu/skills/cli-app-feishu/SKILL.md"
     assert skill.is_file()
     assert 'run_cli_app` tool with `name="feishu"' in skill.read_text(encoding="utf-8")
 
@@ -520,6 +616,9 @@ def test_install_records_entry_point_path_and_pip_distribution(
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["gimp"]["entry_point_path"] == str(resolved)
     assert installed["gimp"]["pip_distribution"] == "cli-anything-gimp"
+    assert installed["gimp"]["display_name"] == "GIMP"
+    assert installed["gimp"]["category"] == "image"
+    assert installed["gimp"]["description"] == "Public duplicate entry"
 
 
 def test_installed_state_writes_atomically_without_temp_leftovers(tmp_path: Path) -> None:
@@ -624,7 +723,8 @@ def test_uninstall_removes_installed_state_and_generated_skill(
     manager = _manager(tmp_path)
     _seed_catalog(manager)
     manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
-    skill_dir = manager.workspace / "skills" / "cli-app-gimp"
+    plugin_dir = manager.workspace / "plugins" / "cli-app-gimp"
+    skill_dir = plugin_dir / "skills" / "cli-app-gimp"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# GIMP\n", encoding="utf-8")
     monkeypatch.setattr(
@@ -637,7 +737,7 @@ def test_uninstall_removes_installed_state_and_generated_skill(
 
     assert payload["last_action"]["ok"] is True
     assert "gimp" not in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
-    assert not skill_dir.exists()
+    assert not plugin_dir.exists()
 
 
 def test_uninstall_uses_safe_python_m_pip_uninstall_command(
@@ -765,17 +865,60 @@ def test_mentioned_installed_apps_only_returns_installed_mentions(tmp_path: Path
             "name": "zoom",
             "entry_point": "cli-anything-zoom",
             "source": "public",
-            "skill": "skills/cli-app-zoom/SKILL.md",
+            "skill": "plugins/cli-app-zoom/skills/cli-app-zoom/SKILL.md",
             "tool": "run_cli_app",
         },
         {
             "name": "gimp",
             "entry_point": "cli-anything-gimp",
             "source": "harness",
-            "skill": "skills/cli-app-gimp/SKILL.md",
+            "skill": "plugins/cli-app-gimp/skills/cli-app-gimp/SKILL.md",
             "tool": "run_cli_app",
         },
     ]
+
+
+def test_remove_skill_cleans_legacy_underscored_name(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    legacy = manager.workspace / "skills" / "cli-app-unimol_tools" / "SKILL.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("# Legacy Uni-Mol\n", encoding="utf-8")
+
+    manager.remove_skill("unimol_tools")
+
+    assert not legacy.exists()
+
+
+def test_migrated_cli_app_skill_keeps_legacy_identity_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.get_runtime_subdir",
+        lambda _name: data_dir,
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manager = CliAppManager(workspace=workspace)
+    manager._save_installed({"unimol_tools": {"entry_point": "unimol-tools"}})
+    manager.install_skill({
+        "name": "unimol_tools",
+        "display_name": "Uni-Mol Tools",
+        "entry_point": "unimol-tools",
+    })
+    agent_plugins.set_agent_plugin_enabled(workspace, "cli-app-unimol-tools", True)
+
+    loader = SkillsLoader(workspace)
+    assert loader.get_explicitly_invoked_skills("Use $cli-app-unimol_tools") == [
+        "cli-app-unimol-tools"
+    ]
+    assert loader.load_skill("cli-app-unimol_tools") is not None
+
+    disabled = SkillsLoader(workspace, disabled_skills={"cli-app-unimol_tools"})
+    assert "cli-app-unimol-tools" not in {
+        skill["name"] for skill in disabled.list_skills(filter_unavailable=False)
+    }
 
 
 def test_install_rejects_unknown_and_script_strategy(tmp_path: Path) -> None:
@@ -803,6 +946,9 @@ def test_run_installed_cli_uses_argv_without_shell(
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "shell" not in kwargs or kwargs["shell"] is False
+        assert kwargs["text"] is True
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         return subprocess.CompletedProcess(
             argv,
             0,

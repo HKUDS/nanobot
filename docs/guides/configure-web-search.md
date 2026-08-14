@@ -7,7 +7,7 @@ providers.
 ## What you will build
 
 - web tools enabled in nanobot
-- one search provider selected in `config.json`
+- one search provider selected in the WebUI or `config.json`
 - optional web fetch settings for page reading
 
 ## When to use this
@@ -28,7 +28,15 @@ provider, API key, proxy, fetch behavior, or SSRF allowlist.
 
 ## Minimal working example
 
-Use the default search provider:
+For local interactive setup:
+
+1. Run `nanobot webui`.
+2. Open **Settings → Web**.
+3. Enable web search, choose a provider, and enter its API key if required.
+4. Save and restart when prompted.
+5. Ask a question that requires current information and inspect the cited sources.
+
+For manual or deployment-managed config, use the default search provider:
 
 ```json
 {
@@ -73,6 +81,10 @@ in the WebUI or logs.
 - Web fetch and HTTP MCP share an SSRF guard.
 - Private, loopback, link-local, and cloud metadata addresses are blocked by
   default.
+- With `useJinaReader` enabled (the default), fetched URLs are disclosed to the
+  remote reader service. Credential-bearing URLs (userinfo or token/signature
+  query parameters) are fetched locally instead; path-embedded secrets cannot
+  be detected, so disable the remote reader when URLs must stay local.
 - Add `tools.ssrfWhitelist` only for narrow trusted CIDRs.
 - Do not give public chat users unrestricted web and shell access without
   review.

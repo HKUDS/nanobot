@@ -27,7 +27,8 @@ To allow the agent to set its configuration (e.g. switch models, adjust paramete
 
 Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and rewritten in-place the next time `nanobot onboard` refreshes the config.
 
-All modifications are held in memory only — restart restores defaults.
+Most modifications are held in memory only. `model_preset` is the exception: it is
+stored in the current session so the selection survives a restart.
 
 ---
 
@@ -77,20 +78,18 @@ my(action="check", key="web_config.enable")
 
 ## set — Runtime tuning
 
-Changes take effect immediately, no restart required.
+Changes do not require a restart. `model_preset` is saved for the current session and
+applies to its next turn; other writable runtime tuning takes effect immediately.
+Direct `model` and `context_window_tokens` writes are rejected during an active session
+because those setters change the shared instance default. Configure a named preset for
+model or context-window changes instead.
 
 ```text
 my(action="set", key="max_iterations", value=80)
 # → Bump iteration limit from 40 to 80
 
 my(action="set", key="model_preset", value="fast")
-# → Switch to a configured model preset
-
-my(action="set", key="model", value="fast-model")
-# → Switch to a raw model and clear the active preset
-
-my(action="set", key="context_window_tokens", value=262144)
-# → Expand context window for long documents
+# → Use a configured model preset for this session's next turn
 ```
 
 You can also store custom state in your scratchpad:
@@ -109,9 +108,9 @@ These parameters have type and range validation — invalid values are rejected:
 | Parameter | Type | Range | Purpose |
 |-----------|------|-------|---------|
 | `max_iterations` | int | 1–100 | Max tool calls per conversation turn |
-| `context_window_tokens` | int | 4,096–1,000,000 | Context window size |
-| `model` | str | non-empty | LLM model to use |
-| `model_preset` | str | configured preset name | Named preset to use |
+| `context_window_tokens` | int | 4,096–1,000,000 | Instance default; during a session, select through a preset |
+| `model` | str | non-empty | Instance default; during a session, select through a preset |
+| `model_preset` | str | configured preset name | Current session's preset for its next turn |
 
 Other parameters (e.g. `workspace`, `provider_retry_mode`, `max_tool_result_chars`) can be set freely, as long as the value is JSON-safe.
 
@@ -122,8 +121,8 @@ Other parameters (e.g. `workspace`, `provider_retry_mode`, `max_tool_result_char
 ### "This task is complex, I need more room"
 
 ```text
-Agent: This codebase is large, let me expand my context window to handle it.
-→ my(action="set", key="context_window_tokens", value=262144)
+Agent: This codebase is large, let me switch this session to the configured deep preset.
+→ my(action="set", key="model_preset", value="deep")
 ```
 
 ### "Simple question, don't waste compute"
@@ -180,7 +179,9 @@ Agent: The code review is progressing well. The test task hasn't started yet.
 
 ## Safety Mechanisms
 
-Core design principle: **All modifications live in memory only. Restart restores defaults.** The agent cannot cause persistent damage.
+Core design principle: **The tool does not rewrite `config.json`.** Instance-wide
+changes live in memory only, while `model_preset` persists only as the current
+session's selector.
 
 ### Off-limits (BLOCKED)
 

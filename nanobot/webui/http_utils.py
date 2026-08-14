@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import email.utils
+import gzip
 import hmac
 import http
 import ipaddress
 import json
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
 QueryParams = dict[str, list[str]]
+
+_JSON_GZIP_MIN_BYTES = 4 * 1024
+_JSON_GZIP_LEVEL = 5
 
 
 def strip_trailing_slash(path: str) -> str:
@@ -41,6 +45,15 @@ def case_insensitive_header(headers: Any, key: str) -> str:
     return str(value or "").strip()
 
 
+def combined_list_header(headers: Any, key: str) -> str:
+    """Combine repeated values for a comma-separated HTTP list header."""
+    try:
+        values = headers.get_all(key)
+    except (AttributeError, KeyError):
+        return case_insensitive_header(headers, key)
+    return ", ".join(str(value).strip() for value in values if str(value).strip())
+
+
 def safe_host_header(value: str) -> str:
     """Return a safe Host header value, or empty when it should not be echoed."""
     value = value.strip()
@@ -62,18 +75,49 @@ def host_for_url(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
-def http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
+def accepts_gzip(value: str) -> bool:
+    wildcard_quality: float | None = None
+    for item in value.split(","):
+        name, *params = (part.strip() for part in item.split(";"))
+        quality = 1.0
+        for param in params:
+            key, separator, raw_value = param.partition("=")
+            if separator and key.strip().lower() == "q":
+                try:
+                    quality = float(raw_value.strip())
+                except ValueError:
+                    quality = 0.0
+                break
+        if name.lower() == "gzip":
+            return quality > 0
+        if name == "*":
+            wildcard_quality = quality
+    return wildcard_quality is not None and wildcard_quality > 0
+
+
+def http_json_response(
+    data: dict[str, Any],
+    *,
+    status: int = 200,
+    accept_encoding: str | None = None,
+    extra_headers: list[tuple[str, str]] | None = None,
+) -> Response:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    headers = Headers(
-        [
-            ("Date", email.utils.formatdate(usegmt=True)),
-            ("Connection", "close"),
-            ("Content-Length", str(len(body))),
-            ("Content-Type", "application/json; charset=utf-8"),
-        ]
-    )
+    headers = [
+        ("Date", email.utils.formatdate(usegmt=True)),
+        ("Connection", "close"),
+        ("Content-Type", "application/json; charset=utf-8"),
+    ]
+    if accept_encoding is not None:
+        headers.append(("Vary", "Accept-Encoding"))
+        if len(body) >= _JSON_GZIP_MIN_BYTES and accepts_gzip(accept_encoding):
+            body = gzip.compress(body, compresslevel=_JSON_GZIP_LEVEL, mtime=0)
+            headers.append(("Content-Encoding", "gzip"))
+    if extra_headers:
+        headers.extend(extra_headers)
+    headers.append(("Content-Length", str(len(body))))
     reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, headers, body)
+    return Response(status, reason, Headers(headers), body)
 
 
 def http_response(
@@ -120,12 +164,56 @@ def is_localhost(connection: Any) -> bool:
     addr = getattr(connection, "remote_address", None)
     if not addr:
         return False
-    host = addr[0] if isinstance(addr, tuple) else addr
+    host = cast(Any, addr[0] if isinstance(addr, tuple) else addr)
     if not isinstance(host, str):
         return False
     if host.startswith("::ffff:"):
         host = host[7:]
     return host in {"127.0.0.1", "::1", "localhost"}
+
+
+def _connection_ip(connection: Any) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    addr = getattr(connection, "remote_address", None)
+    host = cast(Any, addr[0] if isinstance(addr, tuple) else addr)
+    if not isinstance(host, str):
+        return None
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def _address_matches_network(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    if isinstance(address, ipaddress.IPv4Address):
+        if isinstance(network, ipaddress.IPv4Network):
+            return address in network
+        return ipaddress.IPv6Address(f"::ffff:{address}") in network
+    if isinstance(network, ipaddress.IPv6Network):
+        return address in network
+    mapped = address.ipv4_mapped
+    return mapped is not None and mapped in network
+
+
+def is_trusted_proxy_authenticated_request(
+    connection: Any,
+    headers: Any,
+    config: Any,
+) -> bool:
+    """Return True when a configured proxy peer presents a non-empty assertion."""
+    trusted_proxy_auth = getattr(config, "trusted_proxy_auth", None)
+    if trusted_proxy_auth is None:
+        return False
+    address = _connection_ip(connection)
+    if address is None:
+        return False
+    networks = getattr(trusted_proxy_auth, "_trusted_peer_networks", ())
+    if not any(_address_matches_network(address, network) for network in networks):
+        return False
+    assertion_header = getattr(trusted_proxy_auth, "assertion_header", "")
+    return bool(case_insensitive_header(headers, assertion_header))
 
 
 def _host_without_port(value: str) -> str:

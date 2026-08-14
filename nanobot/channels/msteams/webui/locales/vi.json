@@ -1,0 +1,39 @@
+{
+  "description": "Sử dụng nanobot từ các cuộc trò chuyện Microsoft Teams.",
+  "requirements": "Thông tin xác thực bot Azure và endpoint callback công khai",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Teams",
+    "officialLabel": "Mở cổng nhà phát triển Teams",
+    "tryIt": "Cài ứng dụng Teams và gửi tin nhắn thử.",
+    "summary": "Teams nhận tin nhắn qua URL callback của Bot Framework. Môi trường production cần endpoint HTTPS có thể truy cập.",
+    "steps": [
+      "Tạo Azure Bot hoặc ứng dụng Teams và sao chép App ID cùng client secret.",
+      "Công khai đường dẫn callback qua HTTPS và đặt làm endpoint nhắn tin của bot.",
+      "Lưu và bật Teams, sau đó cài ứng dụng và gửi tin nhắn thử."
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID",
+        "help": "Sao chép từ đăng ký Azure Bot hoặc ứng dụng Teams."
+      },
+      "appPassword": {
+        "label": "Client secret",
+        "placeholder": "••••••",
+        "help": "Tạo client secret cho ứng dụng Microsoft."
+      },
+      "tenantId": {
+        "label": "Tenant ID",
+        "placeholder": "Tenant ID tùy chọn"
+      },
+      "path": {
+        "label": "Đường dẫn callback",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng Teams, phân tách bằng dấu phẩy"
+      }
+    }
+  }
+}

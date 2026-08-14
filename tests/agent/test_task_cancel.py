@@ -56,6 +56,60 @@ class TestHandleStop:
         assert "No active task" in out.content
 
     @pytest.mark.asyncio
+    async def test_aclose_cancels_active_turn_before_resources(self):
+        loop, _bus = _make_loop()
+        events: list[str] = []
+
+        async def active_turn():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                events.append("turn_cancelled")
+                raise
+
+        task = asyncio.create_task(active_turn())
+        await asyncio.sleep(0)
+        loop._active_tasks["test:c1"] = {task}
+
+        async def close_subagents():
+            events.append("resources_closed")
+
+        loop.subagents.close = close_subagents
+        loop._exec_session_manager.close_all = AsyncMock()
+        await loop.aclose()
+
+        assert events == ["turn_cancelled", "resources_closed"]
+        assert task.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_aclose_serializes_duplicate_cleanup(self):
+        loop, _bus = _make_loop()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        concurrent = 0
+        max_concurrent = 0
+
+        async def close_subagents():
+            nonlocal concurrent, max_concurrent
+            concurrent += 1
+            max_concurrent = max(max_concurrent, concurrent)
+            entered.set()
+            await release.wait()
+            concurrent -= 1
+
+        loop.subagents.close = close_subagents
+        loop._exec_session_manager.close_all = AsyncMock()
+        first = asyncio.create_task(loop.aclose())
+        await entered.wait()
+        second = asyncio.create_task(loop.aclose())
+        await asyncio.sleep(0)
+        assert not second.done()
+        release.set()
+        await asyncio.gather(first, second)
+
+        assert max_concurrent == 1
+
+    @pytest.mark.asyncio
     async def test_stop_cancels_active_task(self):
         from nanobot.bus.events import InboundMessage
         from nanobot.command.builtin import cmd_stop
@@ -73,7 +127,9 @@ class TestHandleStop:
 
         task = asyncio.create_task(slow_task())
         await asyncio.sleep(0)
-        loop._active_tasks["test:c1"] = [task]
+        active_tasks = {task}
+        loop._active_tasks["test:c1"] = active_tasks
+        task.add_done_callback(active_tasks.discard)
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
@@ -100,7 +156,7 @@ class TestHandleStop:
 
         tasks = [asyncio.create_task(slow(i)) for i in range(2)]
         await asyncio.sleep(0)
-        loop._active_tasks["test:c1"] = tasks
+        loop._active_tasks["test:c1"] = set(tasks)
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
@@ -111,6 +167,33 @@ class TestHandleStop:
 
 
 class TestDispatch:
+    @pytest.mark.asyncio
+    async def test_run_logs_and_continues_after_leaked_cancelled_error(self, monkeypatch):
+        loop, bus = _make_loop()
+        loop.aclose = AsyncMock()
+        loop.auto_compact.check_expired = MagicMock()
+        warnings: list[str] = []
+        calls = 0
+
+        async def consume_once_then_stop():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise asyncio.CancelledError()
+            loop.stop()
+            raise asyncio.TimeoutError()
+
+        monkeypatch.setattr(bus, "consume_inbound", consume_once_then_stop)
+        monkeypatch.setattr(
+            "nanobot.agent.loop.logger.warning",
+            lambda message, *args, **kwargs: warnings.append(message),
+        )
+
+        await loop.run()
+
+        assert calls == 2
+        assert any("Ignoring leaked CancelledError" in warning for warning in warnings)
+
     def test_exec_tool_not_registered_when_disabled(self):
         from nanobot.agent.tools.shell import ExecToolConfig
         from nanobot.config.schema import ToolsConfig
@@ -245,6 +328,27 @@ class TestSubagentCancellation:
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         )
         assert await mgr.cancel_by_session("nonexistent") == 0
+
+    @pytest.mark.asyncio
+    async def test_cancel_by_session_terminates_exec_sessions(self):
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.agent.tools.exec_session import ExecSessionManager
+        from nanobot.bus.queue import MessageBus
+
+        bus = MessageBus()
+        mgr = SubagentManager(
+            workspace=MagicMock(),
+            bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+        # Replace the real exec session manager with a mock
+        mock_exec_mgr = AsyncMock(spec=ExecSessionManager)
+        mock_exec_mgr.terminate_by_owner = AsyncMock(return_value=0)
+        mgr._exec_session_manager = mock_exec_mgr
+
+        await mgr.cancel_by_session("test:c1")
+
+        mock_exec_mgr.terminate_by_owner.assert_awaited_once_with("test:c1")
 
     @pytest.mark.asyncio
     async def test_subagent_preserves_reasoning_fields_in_tool_turn(self, monkeypatch, tmp_path):

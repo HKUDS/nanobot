@@ -1,0 +1,38 @@
+{
+  "description": "Sử dụng nanobot từ tin nhắn Signal.",
+  "requirements": "Dịch vụ HTTP signal-cli, số điện thoại và danh sách cho phép",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Signal",
+    "officialLabel": "Mở hướng dẫn signal-cli",
+    "tryIt": "Gửi tin nhắn riêng Signal đến số đã liên kết.",
+    "summary": "Signal kết nối qua dịch vụ HTTP signal-cli đã liên kết với một số Signal.",
+    "steps": [
+      "Cài signal-cli-rest-api và liên kết hoặc đăng ký một số Signal.",
+      "Nhập host, cổng và số điện thoại đã liên kết.",
+      "Lưu và bật Signal, sau đó gửi tin nhắn riêng thử."
+    ],
+    "fields": {
+      "phoneNumber": {
+        "label": "Số điện thoại",
+        "placeholder": "+1234567890",
+        "help": "Dùng số Signal đã đăng ký với signal-cli."
+      },
+      "daemonHost": {
+        "label": "Host dịch vụ",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "Cổng dịch vụ",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "Tin nhắn riêng được phép",
+        "placeholder": "Số điện thoại hoặc UUID"
+      },
+      "group_allowFrom": {
+        "label": "Nhóm được phép",
+        "placeholder": "ID nhóm"
+      }
+    }
+  }
+}

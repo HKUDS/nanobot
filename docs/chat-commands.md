@@ -9,7 +9,7 @@ These commands work inside chat channels and interactive agent sessions:
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
 | `/model` | Show the current model and available model presets |
-| `/model <preset>` | Switch the runtime model preset for future turns |
+| `/model <preset>` | Switch and persist the model preset for the current session |
 | `/dream` | Run Dream memory consolidation now |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream memory change |
@@ -47,7 +47,7 @@ Use `/model` to inspect the current runtime model:
 /model
 ```
 
-The response shows the current model, the current preset, and the available preset names. Named presets come from the top-level `modelPresets` config and are the recommended way to configure model choices. `default` is always available and represents the model settings from direct `agents.defaults.*` fields.
+The response shows the current session's model and preset, plus the available preset names. Named presets come from the top-level `modelPresets` config and are the recommended way to configure model choices. `default` is always available and represents the model settings from direct `agents.defaults.*` fields.
 
 To switch presets for future turns:
 
@@ -57,7 +57,7 @@ To switch presets for future turns:
 /model default
 ```
 
-Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
+Preset names come from the top-level `modelPresets` config. Switching affects only the current session and persists the selection in that session, so later turns keep using it across process restarts. It does not rewrite `config.json`, does not change other sessions, and does not alter an in-progress turn's captured model. Sessions without a saved selection follow `agents.defaults.modelPreset` (or the implicit `default` preset when it is omitted). See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
 
 ## Local triggers
 

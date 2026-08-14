@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,6 +12,12 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+
+
+@pytest.fixture
+def cmd_python() -> str:
+    """Return the Python command name available to ExecTool tests."""
+    return "python" if os.name == "nt" else "python3"
 
 
 def make_provider(
@@ -39,7 +46,6 @@ def make_loop(
     context_window_tokens: int = 128_000,
     session_ttl_minutes: int = 0,
     unified_session: bool = False,
-    mcp_servers: dict | None = None,
     tools_config=None,
     model_presets: dict | None = None,
     hooks: list | None = None,
@@ -65,8 +71,6 @@ def make_loop(
         session_ttl_minutes=session_ttl_minutes,
         unified_session=unified_session,
     )
-    if mcp_servers is not None:
-        kwargs["mcp_servers"] = mcp_servers
     if tools_config is not None:
         kwargs["tools_config"] = tools_config
     if model_presets is not None:

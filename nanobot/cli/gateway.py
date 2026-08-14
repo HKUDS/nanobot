@@ -25,11 +25,14 @@ from nanobot.gateway.service import (
     GatewayServiceResult,
     ServiceManagerKind,
 )
+from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
 GatewayRunner = Callable[..., None]
+GatewayConfigValidator = Callable[[Config], str | None]
 GatewayRuntimeFactory = Callable[..., Any]
 GatewayServiceFactory = Callable[[], Any]
+WebUIBundlePreparer = Callable[[Config, BuildMode], None]
 
 
 def create_gateway_app(
@@ -38,8 +41,10 @@ def create_gateway_app(
     log_handler_id: int,
     load_runtime_config: RuntimeConfigLoader,
     run_gateway: GatewayRunner,
+    validate_startup_config: GatewayConfigValidator | None = None,
     runtime_factory: GatewayRuntimeFactory | None = None,
     service_factory: GatewayServiceFactory | None = None,
+    prepare_webui_bundle: WebUIBundlePreparer | None = None,
 ) -> typer.Typer:
     gateway_app = typer.Typer(
         help="Start and manage the nanobot gateway.",
@@ -81,14 +86,20 @@ def create_gateway_app(
     def service_installer():
         return service_factory() if service_factory is not None else GatewayServiceInstaller()
 
+    def interactive_build_mode() -> BuildMode:
+        # `nanobot gateway` is often launched by tests, supervisors, or service managers.
+        # The higher-level `nanobot webui` command owns interactive first-run guidance.
+        return "warn"
+
     def start_options(
         *,
         port: int | None,
         verbose: bool,
         workspace: str | None,
         config: str | None,
+        loaded_config: Config | None = None,
     ) -> GatewayStartOptions:
-        cfg = load_runtime_config(config, workspace)
+        cfg = loaded_config or load_runtime_config(config, workspace)
         resolved_config = str(Path(config).expanduser().resolve()) if config else None
         resolved_workspace = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
         return GatewayStartOptions(
@@ -122,8 +133,9 @@ def create_gateway_app(
             console.print()
             console.print(result.content)
 
+    # Typer consumes these callbacks through decorator registration.
     @gateway_app.callback(invoke_without_command=True)
-    def gateway(
+    def gateway(  # pyright: ignore[reportUnusedFunction]
         ctx: typer.Context,
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -139,6 +151,11 @@ def create_gateway_app(
             console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
             raise typer.Exit(1)
         if background:
+            cfg = load_runtime_config(config, workspace)
+            if validate_startup_config is not None:
+                validate_startup_config(cfg)
+            if prepare_webui_bundle is not None:
+                prepare_webui_bundle(cfg, interactive_build_mode())
             runtime = runtime_for_instance(workspace=workspace, config=config)
             result = runtime.start_background(
                 start_options(
@@ -146,6 +163,7 @@ def create_gateway_app(
                     verbose=verbose,
                     workspace=workspace,
                     config=config,
+                    loaded_config=cfg,
                 )
             )
             if result.ok:
@@ -158,10 +176,21 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
-        run_gateway(cfg, port=port)
+        unconfigured_provider_error = None
+        if validate_startup_config is not None:
+            unconfigured_provider_error = validate_startup_config(cfg)
+        if unconfigured_provider_error is None:
+            run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
+        else:
+            run_gateway(
+                cfg,
+                port=port,
+                webui_bundle_mode=interactive_build_mode(),
+                unconfigured_provider_error=unconfigured_provider_error,
+            )
 
     @gateway_app.command("status")
-    def gateway_status(
+    def gateway_status(  # pyright: ignore[reportUnusedFunction]
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
@@ -169,7 +198,7 @@ def create_gateway_app(
         print_status(runtime_for_instance(workspace=workspace, config=config).status())
 
     @gateway_app.command("logs")
-    def gateway_logs(
+    def gateway_logs(  # pyright: ignore[reportUnusedFunction]
         tail: int = typer.Option(200, "--tail", help="Number of recent lines to show"),
         follow: bool = typer.Option(True, "--follow/--no-follow", help="Follow new log output"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -187,7 +216,7 @@ def create_gateway_app(
             console.print(line)
 
     @gateway_app.command("stop")
-    def gateway_stop(
+    def gateway_stop(  # pyright: ignore[reportUnusedFunction]
         timeout: int = typer.Option(20, "--timeout", help="Stop timeout in seconds"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -203,7 +232,7 @@ def create_gateway_app(
             raise typer.Exit(1)
 
     @gateway_app.command("restart")
-    def gateway_restart(
+    def gateway_restart(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -211,6 +240,11 @@ def create_gateway_app(
         timeout: int = typer.Option(20, "--timeout", help="Restart timeout in seconds"),
     ) -> None:
         """Restart the background gateway."""
+        cfg = load_runtime_config(config, workspace)
+        if validate_startup_config is not None:
+            validate_startup_config(cfg)
+        if prepare_webui_bundle is not None:
+            prepare_webui_bundle(cfg, interactive_build_mode())
         runtime = runtime_for_instance(workspace=workspace, config=config)
         result = runtime.restart(
             start_options(
@@ -218,6 +252,7 @@ def create_gateway_app(
                 verbose=verbose,
                 workspace=workspace,
                 config=config,
+                loaded_config=cfg,
             ),
             timeout_s=timeout,
         )
@@ -230,7 +265,7 @@ def create_gateway_app(
         raise typer.Exit(1)
 
     @gateway_app.command("install-service")
-    def gateway_install_service(
+    def gateway_install_service(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -266,7 +301,7 @@ def create_gateway_app(
         raise typer.Exit(1)
 
     @gateway_app.command("uninstall-service")
-    def gateway_uninstall_service(
+    def gateway_uninstall_service(  # pyright: ignore[reportUnusedFunction]
         name: str = typer.Option("nanobot-gateway", "--name", help="Service name"),
         manager: ServiceManagerKind = typer.Option("auto", "--manager", help="auto, systemd, or launchd"),
         dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without uninstalling"),

@@ -8,7 +8,7 @@ continuation is allowed and, when it is, queue the next turn directly.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Mapping, MutableMapping
+from typing import TYPE_CHECKING, Any, Mapping, MutableMapping
 
 from loguru import logger
 
@@ -17,6 +17,9 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
     sustained_goal_turn,
 )
+
+if TYPE_CHECKING:
+    from nanobot.agent.loop import TurnContext
 
 INTERNAL_CONTINUATION_META = "_internal_continuation"
 INTERNAL_CONTINUATION_KIND_META = "_internal_continuation_kind"
@@ -101,7 +104,7 @@ def should_finalize_on_max_iterations(
     )
 
 
-async def maybe_continue_turn(ctx: Any) -> bool:
+async def maybe_continue_turn(ctx: TurnContext) -> bool:
     """Queue an internal continuation for *ctx* when policy allows it."""
     if ctx.session is None or ctx.pending_queue is None:
         return False
@@ -115,7 +118,7 @@ async def maybe_continue_turn(ctx: Any) -> bool:
 
     metadata = _internal_continuation_metadata(
         ctx.msg.metadata,
-        run_started_at=getattr(ctx, "visible_run_started_at", None),
+        run_started_at=ctx.visible_run_started_at,
     )
     content = _goal_continuation_prompt(ctx.session.metadata)
     messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
@@ -139,7 +142,7 @@ async def maybe_continue_turn(ctx: Any) -> bool:
     return True
 
 
-def prepare_save_boundary(ctx: Any) -> None:
+def prepare_save_boundary(ctx: TurnContext) -> None:
     """Prepare continuation bookkeeping and the history append boundary."""
     if ctx.session is not None:
         clear_internal_continuation_state(ctx.session.metadata)
@@ -148,7 +151,7 @@ def prepare_save_boundary(ctx: Any) -> None:
         message_metadata=ctx.msg.metadata,
         initial_message_count=len(ctx.initial_messages),
         history_count=len(ctx.history),
-        user_persisted_early=ctx.user_persisted_early,
+        input_persisted_early=ctx.input_persisted_early,
     )
 
 
@@ -183,7 +186,7 @@ def _save_skip_for_turn(
     message_metadata: Mapping[str, Any] | None,
     initial_message_count: int,
     history_count: int,
-    user_persisted_early: bool,
+    input_persisted_early: bool,
 ) -> int:
     """Return the persisted-message append boundary for this turn."""
     if message_metadata and message_metadata.get(SKIP_USER_PERSIST_META) is True:
@@ -193,7 +196,7 @@ def _save_skip_for_turn(
     # build_messages may merge the current message into a same-role history tail.
     # Runner-appended messages start at initial_message_count in either shape.
     has_standalone_current = initial_message_count > 1 + history_count
-    if has_standalone_current and not user_persisted_early:
+    if has_standalone_current and not input_persisted_early:
         return initial_message_count - 1
     return initial_message_count
 

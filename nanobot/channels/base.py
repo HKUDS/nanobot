@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -29,7 +29,7 @@ class BaseChannel(ABC):
     name: str = "base"
     display_name: str = "Base"
     send_progress: bool = True
-    send_tool_hints: bool = False
+    send_tool_hints: bool = True
     show_reasoning: bool = True
 
     def __init__(self, config: Any, bus: MessageBus):
@@ -101,6 +101,31 @@ class BaseChannel(ABC):
         """
         pass
 
+    def progress_transport_defaults(self) -> tuple[bool, bool] | None:
+        """Return channel-owned defaults for progress and tool-hint messages.
+
+        ``None`` keeps the global channel policy. Channels should override this
+        only when their transport requires different defaults.
+        """
+        return None
+
+    def should_retry_send_error(self, error: Exception) -> bool:
+        """Return whether the channel manager may retry a failed delivery.
+
+        Channels with protocol-level business errors can override this hook to
+        prevent retries that cannot succeed until external state changes.
+        Transport and unexpected errors remain retryable by default.
+        """
+        return True
+
+    def start_error_message(self, error: Exception) -> str | None:
+        """Return an actionable public message for a channel startup failure.
+
+        Channel-specific exception handling stays in the owning channel. Returning
+        ``None`` keeps the manager's generic fallback.
+        """
+        return None
+
     async def send_delta(
         self,
         chat_id: str,
@@ -110,6 +135,7 @@ class BaseChannel(ABC):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Deliver a streaming text chunk.
 
@@ -118,6 +144,9 @@ class BaseChannel(ABC):
 
         Stateful implementations should key buffers by ``stream_id`` rather
         than only by ``chat_id`` when it is provided.
+
+        ``merge_next`` marks a resumable provider boundary whose next text
+        segment belongs to the same user-visible message.
         """
         pass
 
@@ -197,13 +226,21 @@ class BaseChannel(ABC):
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
         cfg = self.config
-        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
+        config_mapping = cast(dict[str, Any], cfg) if isinstance(cfg, dict) else None
+        streaming: Any = (
+            config_mapping.get("streaming", False)
+            if config_mapping is not None
+            else getattr(cast(Any, cfg), "streaming", False)
+        )
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check sender permission: star > allowlist > pairing store > deny."""
         if isinstance(self.config, dict):
-            allow_list = self.config.get("allow_from") or self.config.get("allowFrom") or []
+            config_mapping = cast(dict[str, Any], self.config)
+            allow_list: Any = (
+                config_mapping.get("allow_from") or config_mapping.get("allowFrom") or []
+            )
         else:
             allow_list = getattr(self.config, "allow_from", None) or []
         if "*" in allow_list:
@@ -224,11 +261,28 @@ class BaseChannel(ABC):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         is_dm: bool = False,
+        authorization_id: str | None = None,
+        require_existing_session: bool = False,
     ) -> None:
-        """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
-        if not self.is_allowed(sender_id):
+        """Handle a message after checking its authorization subject.
+
+        ``sender_id`` is the identity recorded on the inbound message.  Channels
+        where access is scoped to another entity (for example, a group or room)
+        can pass that entity as ``authorization_id`` without changing the
+        sender's identity.  When omitted, authorization remains sender-based.
+        """
+        permission_id = authorization_id if authorization_id is not None else sender_id
+        if not self.is_allowed(permission_id):
             if is_dm:
-                code = generate_code(self.name, str(sender_id))
+                try:
+                    code = generate_code(self.name, str(sender_id))
+                except OSError:
+                    # Transient pairing-store I/O failure: skip the pairing
+                    # reply for this message rather than crash the handler.
+                    self.logger.warning(
+                        "Pairing store unavailable; dropping DM from {}", sender_id
+                    )
+                    return
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
@@ -261,6 +315,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            require_existing_session=require_existing_session,
         )
 
         await self.bus.publish_inbound(msg)
@@ -269,6 +324,16 @@ class BaseChannel(ABC):
     def default_config(cls) -> dict[str, Any]:
         """Return default config for onboard. Override in plugins to auto-populate config.json."""
         return {"enabled": False}
+
+    @classmethod
+    def refresh_feature_metadata(
+        cls,
+        config_path: Path,
+        *,
+        instance_id: str = "default",
+    ) -> bool:
+        """Refresh persisted display metadata after an explicit settings action."""
+        return False
 
     @property
     def is_running(self) -> bool:

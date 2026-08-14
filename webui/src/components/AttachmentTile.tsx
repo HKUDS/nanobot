@@ -31,7 +31,9 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
           target="_blank"
           rel="noreferrer noopener"
           className="block bg-muted/20"
-          aria-label={attachment.name ? `Open ${attachment.name}` : t("lightbox.open", { defaultValue: "Open image" })}
+          aria-label={attachment.name
+            ? t("message.openAttachment", { name: attachment.name })
+            : t("lightbox.open", { defaultValue: "Open image" })}
         >
           <img
             src={attachment.url}
@@ -61,7 +63,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         <video
           src={attachment.url}
           controls
-          preload="auto"
+          preload="metadata"
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",
