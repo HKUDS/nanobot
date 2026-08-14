@@ -23,14 +23,26 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
+from loguru import logger
 from openai import AsyncOpenAI
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ProviderCallContext,
+    ProviderConversationState,
+)
 from nanobot.providers.openai_responses import (
+    ResponsesStreamCapture,
+    build_responses_state,
     consume_sdk_stream,
-    convert_messages,
     convert_tools,
+    is_compaction_compatibility_error,
+    is_replayable_finish_reason,
     parse_response_output,
+    prepare_responses_input,
+    resolve_compact_threshold,
+    responses_state_matches,
 )
 
 _AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -97,6 +109,7 @@ class AzureOpenAIProvider(LLMProvider):
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self._native_compaction_available = True
 
         if not api_base:
             raise ValueError("Azure OpenAI api_base is required")
@@ -142,6 +155,25 @@ class AzureOpenAIProvider(LLMProvider):
         name = deployment_name.lower()
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
+    def _responses_state_provider(self) -> str:
+        return f"azure_openai:{str(self.api_base).rstrip('/')}"
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        return responses_state_matches(
+            state,
+            provider=self._responses_state_provider(),
+            model=model or self.default_model,
+        )
+
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Azure's native Responses endpoint accepts context management."""
+        _ = model
+        return self._native_compaction_available
+
     def _build_body(
         self,
         messages: list[dict[str, Any]],
@@ -151,10 +183,26 @@ class AzureOpenAIProvider(LLMProvider):
         temperature: float,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
+        provider_context: ProviderCallContext | None = None,
     ) -> dict[str, Any]:
         """Build the Responses API request body from Chat-Completions-style args."""
         deployment = model or self.default_model
-        instructions, input_items = convert_messages(self._sanitize_empty_content(messages))
+        sanitized_messages = self._sanitize_empty_content(messages)
+        sanitized_state = (
+            provider_context.conversation_state
+            if provider_context is not None
+            else None
+        )
+        if sanitized_state is not None:
+            sanitized_state = sanitized_state.with_pending_messages(
+                self._sanitize_empty_content(sanitized_state.pending_messages)
+            )
+        instructions, input_items, replayed = prepare_responses_input(
+            sanitized_messages,
+            state=sanitized_state,
+            provider=self._responses_state_provider(),
+            model=deployment,
+        )
 
         body: dict[str, Any] = {
             "model": deployment,
@@ -164,13 +212,29 @@ class AzureOpenAIProvider(LLMProvider):
             "store": False,
             "stream": False,
         }
+        compact_threshold = resolve_compact_threshold(
+            (
+                provider_context.context_window_tokens
+                if provider_context is not None
+                else None
+            ),
+            max_tokens,
+        )
+        if self.supports_native_compaction(deployment) and compact_threshold is not None:
+            body["context_management"] = [{
+                "type": "compaction",
+                "compact_threshold": compact_threshold,
+            }]
 
         if self._supports_temperature(deployment, reasoning_effort):
             body["temperature"] = temperature
 
+        if not self._supports_temperature(deployment, reasoning_effort):
+            body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
-            body["include"] = ["reasoning.encrypted_content"]
+        if replayed and "gpt-5.6" in deployment.lower():
+            body.setdefault("reasoning", {})["context"] = "all_turns"
 
         if tools:
             body["tools"] = convert_tools(tools)
@@ -178,20 +242,96 @@ class AzureOpenAIProvider(LLMProvider):
 
         return body
 
+    async def _create_response_with_compaction_fallback(
+        self,
+        body: dict[str, Any],
+    ) -> Any:
+        """Retry once without server compaction when Azure rejects the option."""
+        try:
+            return cast(Any, await self._client.responses.create(**body))
+        except Exception as exc:
+            if (
+                "context_management" not in body
+                or not is_compaction_compatibility_error(exc)
+            ):
+                raise
+            self._native_compaction_available = False
+            body.pop("context_management", None)
+            logger.warning(
+                "Azure Responses server compaction unsupported; disabled for this provider "
+                "instance (status={})",
+                getattr(exc, "status_code", None),
+            )
+            return cast(Any, await self._client.responses.create(**body))
+
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
         response = getattr(e, "response", None)
         body = getattr(e, "body", None) or getattr(response, "text", None)
         body_text = str(body).strip() if body is not None else ""
         msg = f"Error: {body_text[:500]}" if body_text else f"Error calling Azure OpenAI: {e}"
-        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        headers = getattr(response, "headers", None)
+        retry_after = LLMProvider._extract_retry_after_from_headers(headers)
         if retry_after is None:
             retry_after = LLMProvider._extract_retry_after(msg)
-        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+        error_type, error_code = LLMProvider._extract_error_type_code(body)
+        should_retry: bool | None = None
+        if headers is not None:
+            raw_should_retry = headers.get("x-should-retry")
+            if isinstance(raw_should_retry, str):
+                lowered = raw_should_retry.strip().lower()
+                if lowered == "true":
+                    should_retry = True
+                elif lowered == "false":
+                    should_retry = False
+        error_name = type(e).__name__.lower()
+        error_kind = (
+            "timeout"
+            if "timeout" in error_name
+            else "connection"
+            if "connection" in error_name
+            else None
+        )
+        return LLMResponse(
+            content=msg,
+            finish_reason="error",
+            retry_after=retry_after,
+            error_status_code=int(status_code) if status_code is not None else None,
+            error_kind=error_kind,
+            error_type=error_type,
+            error_code=error_code,
+            error_retry_after_s=retry_after,
+            error_should_retry=should_retry,
+        )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
+        )
+
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
+        )
 
     async def chat(
         self,
@@ -202,14 +342,21 @@ class AzureOpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
+            provider_context,
         )
         try:
-            response = cast(Any, await self._client.responses.create(**body))
-            return parse_response_output(response)
+            response = await self._create_response_with_compaction_fallback(body)
+            return parse_response_output(
+                response,
+                state_provider=self._responses_state_provider(),
+                state_model=str(body["model"]),
+                state_input_items=cast(list[dict[str, Any]], body["input"]),
+            )
         except Exception as e:
             return self._handle_error(e)
 
@@ -225,26 +372,43 @@ class AzureOpenAIProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         _ = on_thinking_delta
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
+            provider_context,
         )
         body["stream"] = True
 
         try:
-            stream = cast(Any, await self._client.responses.create(**body))
+            stream = await self._create_response_with_compaction_fallback(body)
+            capture = ResponsesStreamCapture()
             content, tool_calls, finish_reason, usage, reasoning_content = (
-                await consume_sdk_stream(stream, on_content_delta, on_tool_call_delta)
+                await consume_sdk_stream(
+                    stream,
+                    on_content_delta,
+                    on_tool_call_delta,
+                    capture=capture,
+                )
             )
-            return LLMResponse(
+            result = LLMResponse(
                 content=content or None,
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
                 usage=usage,
                 reasoning_content=reasoning_content,
             )
+            if capture.completed and is_replayable_finish_reason(finish_reason):
+                result.provider_state = build_responses_state(
+                    provider=self._responses_state_provider(),
+                    model=str(body["model"]),
+                    input_items=cast(list[dict[str, Any]], body["input"]),
+                    output_items=capture.output_items,
+                    usage=usage,
+                )
+            return result
         except Exception as e:
             return self._handle_error(e)
 

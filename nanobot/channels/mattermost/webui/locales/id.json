@@ -27,10 +27,18 @@
         "placeholder": "ID tim opsional"
       },
       "groupPolicy": {
-        "label": "Perilaku grup",
+        "label": "Perilaku kanal",
         "choices": {
           "mention": "Hanya sebutan",
           "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Perilaku thread",
+        "choices": {
+          "mention": "Hanya sebutan",
+          "open": "Semua pesan (tanpa sebutan)",
           "allowlist": "Daftar izin"
         }
       },

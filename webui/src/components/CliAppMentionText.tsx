@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
@@ -6,7 +7,7 @@ import {
 } from "@/components/InlineTokenHighlight";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { logoFallbackUrls } from "@/lib/provider-brand";
-import type { CliAppInfo, McpPresetInfo } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type CliAppMentionSegment =
@@ -15,7 +16,8 @@ type CliAppMentionSegment =
 
 export type CapabilityMentionSegment =
   | CliAppMentionSegment
-  | { kind: "mcp"; text: string; preset: McpPresetInfo };
+  | { kind: "mcp"; text: string; preset: McpPresetInfo }
+  | { kind: "session"; text: string; mention: SessionMention };
 
 export function cliAppInitials(app: CliAppInfo): string {
   const value = app.display_name || app.name;
@@ -43,8 +45,9 @@ export function splitCapabilityMentionSegments(
   value: string,
   cliApps: CliAppInfo[],
   mcpPresets: McpPresetInfo[] = [],
+  sessionMentions: SessionMention[] = [],
 ): CapabilityMentionSegment[] {
-  if (!value || (cliApps.length === 0 && mcpPresets.length === 0)) {
+  if (!value || (cliApps.length === 0 && mcpPresets.length === 0 && sessionMentions.length === 0)) {
     return value ? [{ kind: "text", text: value }] : [];
   }
   const cliAppsByName = new Map(
@@ -57,12 +60,15 @@ export function splitCapabilityMentionSegments(
       .filter((preset) => preset.installed && preset.configured)
       .map((preset) => [preset.name.toLowerCase(), preset]),
   );
-  if (cliAppsByName.size === 0 && mcpPresetsByName.size === 0) {
+  const sessionsByName = new Map(
+    sessionMentions.map((mention) => [mention.name.toLowerCase(), mention]),
+  );
+  if (cliAppsByName.size === 0 && mcpPresetsByName.size === 0 && sessionsByName.size === 0) {
     return [{ kind: "text", text: value }];
   }
 
   const segments: CapabilityMentionSegment[] = [];
-  const mentionRe = /(^|[\s([{])@([a-z0-9_-]+)\b/gi;
+  const mentionRe = /(^|[\s([{])@([\p{L}\p{N}_-]+)(?=$|[^\p{L}\p{N}_-])/giu;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = mentionRe.exec(value)) !== null) {
@@ -71,7 +77,8 @@ export function splitCapabilityMentionSegments(
     const key = name.toLowerCase();
     const app = cliAppsByName.get(key);
     const preset = app ? null : mcpPresetsByName.get(key);
-    if (!app && !preset) continue;
+    const session = app || preset ? null : sessionsByName.get(key);
+    if (!app && !preset && !session) continue;
 
     const mentionStart = match.index + prefix.length;
     const mentionEnd = mentionStart + name.length + 1;
@@ -82,6 +89,12 @@ export function splitCapabilityMentionSegments(
       segments.push({ kind: "cli", text: value.slice(mentionStart, mentionEnd), app });
     } else if (preset) {
       segments.push({ kind: "mcp", text: value.slice(mentionStart, mentionEnd), preset });
+    } else if (session) {
+      segments.push({
+        kind: "session",
+        text: value.slice(mentionStart, mentionEnd),
+        mention: session,
+      });
     }
     cursor = mentionEnd;
   }
@@ -91,41 +104,67 @@ export function splitCapabilityMentionSegments(
   return segments.length ? segments : [{ kind: "text", text: value }];
 }
 
-export function CliAppMentionText({
-  text,
-  cliApps,
-  mcpPresets = [],
+export function CapabilityMentionToken({
+  segment,
+  variant,
+  isHero = false,
 }: {
-  text: string;
-  cliApps: CliAppInfo[];
-  mcpPresets?: McpPresetInfo[];
+  segment: Exclude<CapabilityMentionSegment, { kind: "text" }>;
+  variant: "composer" | "message";
+  isHero?: boolean;
 }) {
-  const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets);
-  if (!segments.some((segment) => segment.kind === "cli" || segment.kind === "mcp")) return <>{text}</>;
+  if (segment.kind === "cli") {
+    return (
+      <CliAppMentionToken
+        app={segment.app}
+        label={segment.text}
+        variant={variant}
+        isHero={isHero}
+      />
+    );
+  }
+  if (segment.kind === "mcp") {
+    return (
+      <McpPresetMentionToken
+        preset={segment.preset}
+        label={segment.text}
+        variant={variant}
+        isHero={isHero}
+      />
+    );
+  }
+  return <SessionMentionToken mention={segment.mention} label={segment.text} variant={variant} />;
+}
+
+export function SessionMentionToken({
+  mention,
+  label,
+  variant,
+}: {
+  mention: SessionMention;
+  label: string;
+  variant: "composer" | "message";
+}) {
+  const testIdPrefix = variant === "composer" ? "composer" : "message";
+  const token = (
+    <InlineTokenHighlight
+      testId={`${testIdPrefix}-session-mention-${mention.name}`}
+      title={`Session: ${mention.title || mention.name}`}
+      color={INLINE_TOKEN_HIGHLIGHT_COLOR}
+      className={variant === "composer" ? "font-normal" : undefined}
+    >
+      {label}
+    </InlineTokenHighlight>
+  );
+  if (variant === "composer") return token;
   return (
-    <>
-      {segments.map((segment, index) => {
-        if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.text}</span>;
-        }
-        if (segment.kind === "cli") return (
-          <CliAppMentionToken
-            key={`cli-${segment.app.name}-${index}`}
-            app={segment.app}
-            label={segment.text}
-            variant="message"
-          />
-        );
-        return (
-          <McpPresetMentionToken
-            key={`mcp-${segment.preset.name}-${index}`}
-            preset={segment.preset}
-            label={segment.text}
-            variant="message"
-          />
-        );
-      })}
-    </>
+    <a
+      href={`#/chat/${encodeURIComponent(mention.session_key)}`}
+      className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
+    >
+      {token}
+    </a>
   );
 }
 
@@ -140,6 +179,7 @@ export function CliAppMentionToken({
   variant: "composer" | "message";
   isHero?: boolean;
 }) {
+  const { t } = useTranslation();
   const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const mentionName = label.startsWith("@") ? label.slice(1) : label;
   const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
@@ -150,8 +190,9 @@ export function CliAppMentionToken({
   return (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-cli-mention-${app.name}`}
-      title={`CLI app: ${app.display_name || app.name}`}
+      title={t("thread.composer.mentions.cliTitle", { name: app.display_name || app.name })}
       color={color}
+      className={variant === "composer" ? "font-normal" : undefined}
     >
       <span
         className={cn("relative inline-block", showLogo && "text-transparent")}
@@ -195,6 +236,7 @@ export function McpPresetMentionToken({
   variant: "composer" | "message";
   isHero?: boolean;
 }) {
+  const { t } = useTranslation();
   const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const mentionName = label.startsWith("@") ? label.slice(1) : label;
   const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
@@ -205,8 +247,9 @@ export function McpPresetMentionToken({
   return (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-mcp-mention-${preset.name}`}
-      title={`MCP server: ${preset.display_name || preset.name}`}
+      title={t("thread.composer.mentions.mcpTitle", { name: preset.display_name || preset.name })}
       color={color}
+      className={variant === "composer" ? "font-normal" : undefined}
     >
       <span
         className={cn("relative inline-block", showLogo && "text-transparent")}

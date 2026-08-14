@@ -49,6 +49,8 @@ from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.agent.tools.mcp import MCPProvider  # noqa: E402
+from nanobot.agent.tools.registry import ToolRegistry  # noqa: E402
 from nanobot.cli import terminal as cli_terminal  # noqa: E402
 from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
@@ -351,12 +353,15 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
+    tools = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(runtime_config, tools)
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
+            tool_registry=tools,
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -378,13 +383,17 @@ def serve(
     api_app = create_app(
         agent_loop, model_name=model_name, request_timeout=timeout,
         api_key=api_key,
+        prepare_agent=mcp_provider.connect,
     )
 
     async def on_startup(_app: Any) -> None:
-        await agent_loop._connect_mcp()
+        await mcp_provider.connect()
 
     async def on_cleanup(_app: Any) -> None:
-        await agent_loop.close_mcp()
+        try:
+            await agent_loop.aclose()
+        finally:
+            await mcp_provider.aclose()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)
@@ -429,6 +438,44 @@ app.add_typer(
 
 
 app.command(name="agent")(agent)
+
+
+# ============================================================================
+# Session Commands
+# ============================================================================
+
+
+sessions_app = typer.Typer(help="Manage persisted session history")
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("restore-workspace")
+def sessions_restore_workspace(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+) -> None:
+    """Copy sessions back into the workspace before downgrading nanobot."""
+    from nanobot.session.manager import SessionManager
+
+    runtime_config = _load_runtime_config(config, workspace)
+    data_dir = runtime_config.runtime_data_dir
+    manager = SessionManager(
+        runtime_config.workspace_path,
+        sessions_root=data_dir / "sessions" if data_dir is not None else None,
+    )
+    result = manager.restore_sessions_to_workspace()
+    console.print(
+        f"Restored {result.restored} session file(s) to "
+        f"{escape(str(runtime_config.workspace_path / 'sessions'))}; "
+        f"{result.unchanged} already matched."
+    )
+    if result.conflicts:
+        console.print(
+            "[red]Rollback is incomplete: existing or invalid files require manual review.[/red]"
+        )
+        for path in result.conflicts:
+            console.print(Text(f"- {path}", style="red"))
+        raise typer.Exit(1)
 
 
 # ============================================================================

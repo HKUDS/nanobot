@@ -11,7 +11,7 @@ Check these once before Render, Docker, systemd, or LaunchAgent:
 | `nanobot status` shows the expected config and workspace | Confirms the process will read the instance you meant to run |
 | `nanobot agent -m "Hello!"` works | Proves install, config, provider, model, and workspace writes before adding a service layer |
 | Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
-| `~/.nanobot/` or your custom config/workspace path is persistent | Sessions, memory, channel login state, generated artifacts, and cron jobs live there |
+| The active config directory (including `sessions/`) and workspace are persistent | Sessions follow `--config`; memory, generated artifacts, and the workspace identity marker follow the workspace |
 | Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
 | Ports are planned | Gateway health defaults to local-only `127.0.0.1:18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
 | Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |
@@ -67,7 +67,7 @@ If deployment fails, open the service **Logs** page first. A missing model key f
 > Official Docker usage currently means building from this repository with the included `Dockerfile`. Docker Hub images under third-party namespaces are not maintained or verified by HKUDS/nanobot; do not mount API keys or bot tokens into them unless you trust the publisher.
 
 > [!IMPORTANT]
-> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `nanobot/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.nanobot/config.json` before starting the container. To serve the bundled WebUI from Docker, bind the WebSocket channel externally and protect bootstrap with a secret:
+> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `nanobot/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.nanobot/config.json` before starting the container. To serve the bundled WebUI from Docker, bind the WebSocket channel externally and protect bootstrap with `tokenIssueSecret`:
 >
 > ```json
 > {
@@ -82,12 +82,53 @@ If deployment fails, open the service **Logs** page first. A missing model key f
 > }
 > ```
 >
-> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
+> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token`, `tokenIssueSecret`, or a fully configured `trustedProxyAuth` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
 > The gateway health route itself is intentionally minimal and unauthenticated. When the
 > container binds it to `0.0.0.0`, publish port `18790` to host loopback only; place any
 > remotely monitored health endpoint behind a firewall or reverse proxy. If another host
 > must probe it directly, replace `127.0.0.1` in the port mapping with a trusted host
 > interface and restrict inbound traffic to the monitoring system.
+
+### Cloudflare Tunnel + Cloudflare Access
+
+For a local `cloudflared` process in front of nanobot, Cloudflare Access can
+authenticate the user before forwarding the request and add
+`Cf-Access-Jwt-Assertion`. Opt in to trusted-proxy no-token mode only when the
+direct TCP peer is the tunnel process and the assertion is non-empty:
+
+```json
+{
+  "gateway": { "host": "127.0.0.1" },
+  "channels": {
+    "websocket": {
+      "host": "127.0.0.1",
+      "port": 8765,
+      "publicWsUrl": "wss://nanobot.example.com/",
+      "trustedProxyAuth": {
+        "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
+        "assertionHeader": "Cf-Access-Jwt-Assertion"
+      }
+    }
+  }
+}
+```
+
+This is two-part authorization: a trusted direct loopback peer **and** a
+non-empty Cloudflare Access assertion. A trusted CIDR alone is not a bypass.
+For this flow `/webui/bootstrap` returns connection metadata without a
+bootstrap token or REST API token; the proxy assertion authorizes the WebSocket
+handshake and REST requests directly.
+
+Set `publicWsUrl` to the browser-facing `wss://` endpoint when the tunnel sends
+the origin host header (such as `127.0.0.1:8765`); otherwise the WebUI could
+attempt to open its WebSocket directly against the loopback address.
+The assertion header must be generated
+by Cloudflare Access after authentication; routing/client metadata headers such
+as `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP`
+are rejected as `assertionHeader` values. Nanobot trusts the assertion but does
+not cryptographically validate the JWT, so configure the tunnel and Access
+policy carefully and do not expose the nanobot listener directly to untrusted
+clients. Forwarded client headers do not establish proxy trust.
 
 ### Docker Compose
 
@@ -119,8 +160,11 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
-The default Compose file drops all Linux capabilities and keeps Docker's default
-AppArmor/seccomp profiles enabled. If you explicitly set
+The default Compose file drops all Linux capabilities except `CHOWN`, `SETUID`, and
+`SETGID`, which the root entrypoint needs to fix bind-mount ownership and become UID
+1000. It also enables `no-new-privileges`, so the non-root process cannot regain those
+bootstrap capabilities through setuid binaries or file capabilities. Docker's default
+AppArmor/seccomp profiles remain enabled. If you explicitly set
 `"tools.exec.sandbox": "bwrap"` in `~/.nanobot/config.json`, add the bwrap
 override file when starting containers:
 
@@ -129,8 +173,10 @@ docker compose -f docker-compose.yml -f docker-compose.bwrap.yml up -d nanobot-g
 docker compose -f docker-compose.yml -f docker-compose.bwrap.yml run --rm nanobot-cli agent -m "Hello!"
 ```
 
-The override grants `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for
-the container so bubblewrap can create its nested namespaces. Use it only when the
+The override adds `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for the
+container so bubblewrap can create its nested namespaces. It preserves
+`no-new-privileges`. The host must also allow unprivileged user namespaces; the
+override cannot bypass a host-level namespace restriction. Use it only when the
 bwrap sandbox is enabled.
 
 ### Docker
@@ -156,6 +202,8 @@ vim ~/.nanobot/config.json
 # health endpoint on 18790.
 docker run \
   --cap-drop ALL \
+  --cap-add CHOWN --cap-add SETGID --cap-add SETUID \
+  --security-opt no-new-privileges:true \
   -v ~/.nanobot:/home/nanobot/.nanobot \
   -p 18790:18790 -p 8765:8765 \
   nanobot gateway
@@ -164,7 +212,9 @@ docker run \
 # bubblewrap needs for nested namespaces. Without them, `bwrap` may exit with
 # `clone3: Operation not permitted`.
 docker run \
-  --cap-drop ALL --cap-add SYS_ADMIN \
+  --cap-drop ALL \
+  --cap-add CHOWN --cap-add SETGID --cap-add SETUID --cap-add SYS_ADMIN \
+  --security-opt no-new-privileges:true \
   --security-opt apparmor=unconfined \
   --security-opt seccomp=unconfined \
   -v ~/.nanobot:/home/nanobot/.nanobot \

@@ -15,7 +15,11 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.runner import AgentRunSpec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMResponse,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -886,6 +890,13 @@ def test_drop_malformed_tool_calls_trims_response():
     """LLM response tool_calls with a missing/empty name are dropped in place."""
     from nanobot.agent.runner import AgentRunner
 
+    candidate_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "function_call", "name": None}]},
+    )
     response = LLMResponse(
         content=None,
         tool_calls=[
@@ -895,9 +906,11 @@ def test_drop_malformed_tool_calls_trims_response():
             ToolCallRequest(id="4", name="read_file", arguments={}),
         ],
         finish_reason="tool_calls",
+        provider_state=candidate_state,
     )
     dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
     assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.provider_state is None
     assert response.finish_reason == "tool_calls"
     assert response.should_execute_tools is True
     assert dropped == 3

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -713,11 +713,10 @@ class MemoryStore:
                 if tools_used
                 else ""
             )
-            timestamp = cast(str, message.get("timestamp", "?"))
-            role = cast(str, message["role"])
-            lines.append(
-                f"[{timestamp[:16]}] {role.upper()}{tools}: {content}"
-            )
+            raw_timestamp = message.get("timestamp")
+            timestamp = str(raw_timestamp) if raw_timestamp is not None else "?"
+            role = str(message.get("role") or "unknown")
+            lines.append(f"[{timestamp[:16]}] {role.upper()}{tools}: {content}")
         return "\n".join(lines)
 
     def raw_archive(
@@ -770,28 +769,25 @@ class MemoryStore:
         return f"{prefix}\n\n{diff_body}"
 
     @staticmethod
-    def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:
+    def prune_dream_sessions(sessions: SessionManager, *, keep: int = 10) -> None:
         """Remove the oldest Dream session files, keeping only the N most recent.
 
         Only current base64url-encoded Dream session keys are considered.
         Non-dream session files are never touched.
         """
-        dream_files: list[Path] = []
-        for path in sessions_dir.glob("*.jsonl"):
-            decoded_key = SessionManager.decode_storage_key(path.stem)
-            if decoded_key is not None and decoded_key.startswith("dream:"):
-                dream_files.append(path)
-        dream_files.sort(key=lambda p: p.stat().st_mtime)
-        if len(dream_files) <= keep:
-            return
+        with sessions.locked_session_files() as sessions_dir:
+            dream_files: list[tuple[Path, str]] = []
+            for path in sessions_dir.glob("*.jsonl"):
+                decoded_key = SessionManager.decode_storage_key(path.stem)
+                if decoded_key is not None and decoded_key.startswith("dream:"):
+                    dream_files.append((path, decoded_key))
+            dream_files.sort(key=lambda item: item[0].stat().st_mtime)
 
-        to_remove = dream_files[: len(dream_files) - keep]
-        for path in to_remove:
-            try:
-                path.unlink()
-                logger.debug("Pruned old dream session: {}", path.stem)
-            except OSError:
-                logger.warning("Failed to prune dream session {}", path)
+            for path, key in dream_files[: max(0, len(dream_files) - keep)]:
+                if sessions.delete_session(key):
+                    logger.debug("Pruned old dream session: {}", path.stem)
+                else:
+                    logger.warning("Failed to prune dream session {}", path)
 
 
 # ---------------------------------------------------------------------------
@@ -859,14 +855,13 @@ class Consolidator:
         return last_boundary
 
     @staticmethod
-    def _full_unconsolidated_history(
+    def _full_replay_history(
         session: Session,
     ) -> list[dict[str, Any]]:
-        """Return the whole unconsolidated tail for consolidation decisions."""
-        unconsolidated_count = len(session.messages) - session.last_consolidated
-        if unconsolidated_count <= 0:
+        """Return all messages that can reach the next model prompt."""
+        if not session.messages:
             return []
-        return session.get_history(max_messages=unconsolidated_count)
+        return session.get_history(max_messages=len(session.messages))
 
     @staticmethod
     def _replay_overflow_boundary(
@@ -931,6 +926,7 @@ class Consolidator:
             session_key=session.key,
         )
         session.last_consolidated = end_idx
+        session.provider_state = None
         self.sessions.save(session)
         return summary
 
@@ -948,8 +944,8 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
     ) -> tuple[int, str]:
-        """Estimate prompt size from the full unconsolidated session tail."""
-        history = self._full_unconsolidated_history(session)
+        """Estimate prompt size from the full replayable session history."""
+        history = self._full_replay_history(session)
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
@@ -1136,6 +1132,7 @@ class Consolidator:
                 if summary:
                     last_summary = summary
                 session.last_consolidated = end_idx
+                session.provider_state = None
                 self.sessions.save(session)
                 if not summary:
                     # LLM is degraded — stop hammering it this call;
@@ -1159,42 +1156,37 @@ class Consolidator:
         session_key: str,
         *,
         runtime: LLMRuntime,
-        max_suffix: int = 8,
+        max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
     ) -> str | None:
-        """Archive an idle prefix and hide it from replay without deleting it."""
+        """Archive the full idle tail while keeping recent messages replayable.
+
+        ``max_suffix`` remains accepted for SDK compatibility. Replay retention
+        is now derived independently from archive progress using the project-wide
+        compacted-session window.
+        """
+        if max_suffix != MIN_COMPACTED_REPLAY_MESSAGES:
+            logger.debug(
+                "Idle-session compact for {} uses the fixed replay window ({}, requested {})",
+                session_key,
+                MIN_COMPACTED_REPLAY_MESSAGES,
+                max_suffix,
+            )
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
             session = self.sessions.get_or_create(session_key)
 
-            messages_to_summarize = list(session.messages[session.last_consolidated:])
-            if not messages_to_summarize:
-                self.sessions.save(session)
-                return ""
-
-            probe = Session(
-                key=session.key,
-                messages=messages_to_summarize.copy(),
-                created_at=session.created_at,
-                updated_at=session.updated_at,
-                metadata={},
-                last_consolidated=0,
-            )
-            result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
-            visible_suffix = probe.messages
-            messages_to_remove = result.dropped
-
-            if not messages_to_remove:
-                self.sessions.save(session)
+            archive_start = session.last_consolidated
+            messages_to_archive = list(session.messages[archive_start:])
+            if not messages_to_archive:
                 return ""
 
             last_active = session.updated_at
-            # The visible suffix informs the summary but stays out of raw fallback.
+            archive_end = archive_start + len(messages_to_archive)
             summary = await self.archive(
-                messages_to_remove,
+                messages_to_archive,
                 runtime=runtime,
                 session_key=session_key,
-                summary_messages=messages_to_summarize,
             )
 
             if summary and summary != "(nothing)":
@@ -1203,15 +1195,22 @@ class Consolidator:
                     "last_active": last_active.isoformat(),
                 }
 
-            # Preserve history and advance only the replay boundary.
-            session.last_consolidated = len(session.messages) - len(visible_suffix)
+            # A turn can append while the provider call is in flight. Advance only
+            # through the captured batch so new messages remain eligible next time.
+            session.last_consolidated = archive_end
+            session.provider_state = None
             self.sessions.save(session)
+
+            visible = session.get_history(
+                max_messages=MIN_COMPACTED_REPLAY_MESSAGES,
+                extend_to_user=True,
+            )
 
             logger.info(
                 "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
                 session_key,
-                len(messages_to_remove),
-                len(visible_suffix),
+                len(messages_to_archive),
+                len(visible),
                 len(session.messages),
                 bool(summary),
             )

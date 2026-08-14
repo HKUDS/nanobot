@@ -76,7 +76,7 @@ ws://{host}:{port}{path}?client_id={id}&token={token}
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `client_id` | No | Identifier for `allowFrom` authorization. Auto-generated as `anon-xxxxxxxxxxxx` if omitted. Truncated to 128 chars. |
-| `token` | Conditional | Authentication token. Required when `websocketRequiresToken` is `true` or `token` (static secret) is configured. |
+| `token` | Conditional | Authentication token. Required when `websocketRequiresToken` is `true` or `token` (static secret) is configured, unless the request comes through an authenticated `trustedProxyAuth` peer. |
 
 ## Wire Protocol
 
@@ -216,16 +216,20 @@ All fields go under `channels.websocket` in `config.json`.
 | `host` | string | `"127.0.0.1"` | Bind address. Use `"0.0.0.0"` to accept external connections. |
 | `port` | int | `8765` | Listen port. |
 | `path` | string | `"/"` | WebSocket upgrade path. Trailing slashes are normalized (root `/` is preserved). |
+| `publicWsUrl` | string | `""` | Exact public `ws://` or `wss://` endpoint returned by `/webui/bootstrap`. Set this when a reverse proxy forwards requests with an origin `Host` header (for example, `wss://claw.example.com/`); its path must match `path`. |
 | `maxMessageBytes` | int | `37748736` | Maximum inbound message size in bytes (1 KB – 40 MB). Default (36 MB) is sized to accept up to 4 base64-encoded image attachments at 8 MB each; lower it if the channel only carries text. |
 
 ### Authentication
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `token` | string | `""` | Static shared secret. When set, clients must provide `?token=<value>` matching this secret (timing-safe comparison). Issued tokens are also accepted as a fallback. |
-| `websocketRequiresToken` | bool | `true` | When `true` and no static `token` is configured, clients must still present a valid issued token. Set to `false` to allow unauthenticated connections (only safe for local/trusted networks). |
+| `token` | string | `""` | Static shared secret. When set, clients must provide `?token=<value>` matching this secret (timing-safe comparison). Issued tokens are also accepted as a fallback. A trusted proxy assertion bypasses this requirement. |
+| `websocketRequiresToken` | bool | `true` | When `true` and no static `token` is configured, clients must still present a valid issued token, unless `trustedProxyAuth` authenticates the direct proxy peer. Set to `false` to allow unauthenticated connections (only safe for local/trusted networks). |
 | `tokenIssuePath` | string | `""` | HTTP path for issuing short-lived tokens. Must differ from `path`. See [Token Issuance](#token-issuance). |
-| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` still issues WebUI REST API tokens for same-machine localhost browser requests; remote or forwarded bootstrap requires `tokenIssueSecret` or `token`. |
+| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` issues tokens for local/secret-authenticated requests; trusted-proxy requests intentionally receive no bootstrap or API token. |
+| `trustedProxyAuth` | object or `null` | `null` | Optional two-part no-token authorization for a directly connected upstream proxy. Both `trustedPeerCidrs` and a non-empty `assertionHeader` value must match; a CIDR alone never authorizes bootstrap or WebSocket/API access. |
+| `trustedProxyAuth.trustedPeerCidrs` | list of CIDR strings | — | Direct TCP peer networks that may present the assertion. IPv4, IPv6, and IPv4-mapped IPv6 peers are supported; universal CIDRs (`0.0.0.0/0`, `::/0`) are rejected. |
+| `trustedProxyAuth.assertionHeader` | string | — | Header injected by the identity-aware proxy after successful authentication. Routing/client metadata headers (`Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `CF-Connecting-IP`) are rejected; nanobot trusts the remaining header's non-empty value but does not cryptographically validate it. |
 | `tokenTtlS` | int | `300` | Time-to-live for issued tokens in seconds (30 – 86,400). |
 
 ### Access Control
@@ -270,10 +274,57 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 3. Client opens WebSocket with `?token=nbwt_aBcDeFg...&client_id=...`.
 4. The token is consumed (single use) and cannot be reused.
 
-The embedded WebUI's `/webui/bootstrap` route also returns a WebSocket token.
-It returns a separate `api_token` for REST routes to same-machine localhost
-browser requests, or after the request proves knowledge of `tokenIssueSecret`
-or the static `token`.
+The embedded WebUI's `/webui/bootstrap` route returns a WebSocket token and
+REST `api_token` for local or secret-authenticated requests. When
+`trustedProxyAuth` authenticates the direct proxy peer, it returns connection
+metadata only: no bootstrap token, no REST API token, and no token query
+parameter is required for the WebSocket handshake or subsequent REST requests.
+
+### Trusted proxy no-token bootstrap
+
+`trustedProxyAuth` is an opt-in alternative for deployments where an
+identity-aware reverse proxy authenticates the user before connecting to nanobot.
+The proxy assertion becomes the authentication boundary for the entire WebUI
+surface: `/webui/bootstrap`, the WebSocket handshake, and REST API routes.
+Bootstrap is accepted only when **both** the direct TCP peer matches one of
+`trustedPeerCidrs` and the configured assertion header is present and non-empty.
+A trusted address by itself is never sufficient.
+
+Nanobot deliberately uses only `connection.remote_address` for the peer check.
+It never uses `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `CF-Connecting-IP`,
+or `X-Forwarded-Host` to decide whether the proxy is trusted. Nanobot trusts the
+assertion supplied by the explicitly trusted peer, but does not cryptographically
+validate or interpret the JWT/assertion contents. Do not enable this option if
+untrusted clients can connect directly to the nanobot listener.
+
+The configured assertion header must be a proxy-generated authentication
+assertion, not a routing or client metadata header. Headers such as `Host`,
+`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `CF-Connecting-IP` are rejected
+by configuration; use the identity provider's post-authentication assertion
+header instead (for example, `Cf-Access-Jwt-Assertion`).
+
+For example, a local Cloudflare Tunnel with Cloudflare Access can validate the
+user at the edge and forward the resulting `Cf-Access-Jwt-Assertion`:
+
+```json
+{
+  "channels": {
+    "websocket": {
+      "host": "127.0.0.1",
+      "publicWsUrl": "wss://nanobot.example.com/",
+      "trustedProxyAuth": {
+        "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
+        "assertionHeader": "Cf-Access-Jwt-Assertion"
+      }
+    }
+  }
+}
+```
+
+This works only when the directly connected `cloudflared` process reaches
+nanobot over the configured loopback address and supplies a non-empty assertion.
+Keep nanobot firewalled from untrusted clients; this configuration is not a
+CIDR-based bootstrap bypass.
 
 ### Example setup
 

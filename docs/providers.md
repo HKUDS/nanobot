@@ -100,6 +100,62 @@ Gateway-style setup for model IDs served through OpenRouter.
 
 Use the model ID exactly as OpenRouter lists it.
 
+To opt into OpenRouter server-managed search and fetch, add:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "extraBody": {
+        "tools": [
+          { "type": "openrouter:web_search" },
+          { "type": "openrouter:web_fetch" }
+        ]
+      }
+    }
+  }
+}
+```
+
+Chat Completions-compatible OpenRouter
+[server tools](https://openrouter.ai/docs/guides/features/server-tools), such as those above, are
+appended to nanobot's generated functions. This keeps unrelated local tools such as `write_file`
+available in the same request. Responses-only server tools require an API surface that the
+OpenRouter provider does not currently enable.
+
+### Eden AI Gateway
+
+Eden AI exposes an OpenAI-compatible chat-completions endpoint at
+`https://api.edenai.run/v3`. Configure the built-in `edenai` provider and use
+the full `provider/model` identifier listed by Eden AI:
+
+```json
+{
+  "providers": {
+    "edenai": {
+      "apiKey": "${EDENAI_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "edenai",
+      "model": "anthropic/claude-sonnet-4-5",
+      "maxTokens": 8192
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Nanobot sends the model ID unchanged, including its provider prefix. Use
+Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
+to choose a currently available model. The WebUI can also load that catalog
+after the Eden AI API key is saved under **Settings → Models**.
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
@@ -229,7 +285,9 @@ Arbitrary custom provider names are OpenAI-compatible only; they do not use the 
 }
 ```
 
-`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account.
+`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account. Direct OpenAI Responses, OpenAI Codex, Azure OpenAI Responses, and eligible GitHub Copilot models share [opaque Responses state retention](./configuration.md#responses-state-and-compaction); native compaction is enabled only where the backend supports it. The WebUI exposes provider-native switches for OpenAI web search, Codex Fast mode, DeepSeek web search, and Grok X Search. These switches write the corresponding raw provider request fields under `extraBody`.
+
+DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash` and `deepseek-v4-pro` automatically use DeepSeek's native Responses API. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it.
 
 ### Custom OpenAI-Compatible Endpoint
 
@@ -301,6 +359,53 @@ Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase
 If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
 
 This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
+
+### ModelScope
+
+ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separate async image generation API. Both are covered by the built-in `modelscope` provider.
+
+Create a ModelScope [access token](https://modelscope.cn/my/myaccesstoken), then choose a model whose page exposes API-Inference. The example below uses [`Qwen/Qwen3-32B`](https://modelscope.cn/models/Qwen/Qwen3-32B); hosted availability and quotas are controlled by ModelScope. See the official [API-Inference guide](https://modelscope.cn/docs/model-service/API-Inference/intro) for current service details.
+
+```json
+{
+  "providers": {
+    "modelscope": {
+      "apiKey": "${MODELSCOPE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "modelscope",
+      "model": "Qwen/Qwen3-32B",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Use an inference-enabled model ID exactly as ModelScope publishes it (usually `Namespace/model-name`). The default base URL is `https://api-inference.modelscope.cn/v1`; override `providers.modelscope.apiBase` only if your account routes through a different host. Chat model IDs may optionally be prefixed with `modelscope/`; nanobot strips that routing prefix before sending the request.
+
+ModelScope image generation reuses the same provider key but is configured under `tools.imageGeneration`, not in a model preset:
+
+```json
+{
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "modelscope",
+      "model": "Qwen/Qwen-Image-2512"
+    }
+  }
+}
+```
+
+Use the image model's exact ModelScope ID without a leading `modelscope/`; the image client sends this value unchanged and handles ModelScope's async submit/poll flow. The example uses [`Qwen/Qwen-Image-2512`](https://modelscope.cn/models/Qwen/Qwen-Image-2512). See [Image Generation](./image-generation.md#modelscope) for supported sizes, aspect ratios, and the complete provider configuration.
 
 ### Ollama
 
@@ -446,6 +551,8 @@ When enabled, Grok can search current X posts and return inline source links
 without invoking a local nanobot tool. Credentials are stored under the
 active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
 `config.json` and not in Grok Build's credential file.
+Hosted X Search remains enabled by default and can be disabled with the WebUI
+switch or `providers.xaiGrok.extraBody.tools: []`.
 
 The login is xAI subscription OAuth, not X Developer OAuth. It follows the
 public client contract documented and implemented by
@@ -458,7 +565,7 @@ For GitHub Copilot:
 nanobot provider login github-copilot --set-main
 ```
 
-Each command authenticates the selected provider and makes its current default model active. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
+Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
 ## Provider Resolution
 

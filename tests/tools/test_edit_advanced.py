@@ -13,7 +13,7 @@ import os
 import pytest
 
 from nanobot.agent.tools import file_state
-from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, _find_match
+from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
 
 
 @pytest.fixture(autouse=True)
@@ -66,41 +66,6 @@ class TestDeleteLineCleanup:
 # ---------------------------------------------------------------------------
 # Smart quote normalization
 # ---------------------------------------------------------------------------
-
-
-class TestSmartQuoteNormalization:
-    """_find_match should handle curly ↔ straight quote fallback."""
-
-    def test_curly_double_quotes_match_straight(self):
-        content = 'She said \u201chello\u201d to him'
-        old_text = 'She said "hello" to him'
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-        # Returned match should be the ORIGINAL content with curly quotes
-        assert "\u201c" in match
-
-    def test_curly_single_quotes_match_straight(self):
-        content = "it\u2019s a test"
-        old_text = "it's a test"
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-        assert "\u2019" in match
-
-    def test_straight_matches_curly_in_old_text(self):
-        content = 'x = "hello"'
-        old_text = 'x = \u201chello\u201d'
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-
-    def test_exact_match_still_preferred_over_quote_normalization(self):
-        content = 'x = "hello"'
-        old_text = 'x = "hello"'
-        match, count = _find_match(content, old_text)
-        assert match == old_text
-        assert count == 1
 
 
 class TestQuoteStylePreservation:

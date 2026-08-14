@@ -261,6 +261,7 @@ def make_provider(
             primary=provider,
             fallback_presets=fallback_presets,
             provider_factory=lambda fb: _make_provider_core(config, preset=fb),
+            primary_context_window_tokens=resolved.context_window_tokens,
         )
 
     return provider

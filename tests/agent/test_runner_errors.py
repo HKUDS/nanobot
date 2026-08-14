@@ -310,3 +310,50 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
         i for i, m in enumerate(result.messages) if m.get("role") == "tool"
     ]
     assert all(ti > asst_tc_idx for ti in tool_indices)
+
+
+@pytest.mark.asyncio
+async def test_length_finish_with_blank_content_routes_to_length_recovery():
+    """Regression test for #5133.
+
+    A response with finish_reason='length' and blank content (e.g. the model
+    spent its whole output budget on a tool call whose closing tag was
+    truncated) must take the length-recovery path, not the empty-response
+    retry path. Retrying the same prompt cannot recover from output-budget
+    exhaustion.
+    """
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.utils.runtime import LENGTH_RECOVERY_PROMPT
+
+    provider = MagicMock(spec=LLMProvider)
+    # First call: truncated (length) with blank content and a dropped tool call.
+    # Second call: normal completion so the loop can terminate.
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            finish_reason="length",
+            tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={})],
+            usage={},
+        ),
+        LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage={}),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "do a long task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    # The runner must have injected a length-recovery prompt and continued,
+    # rather than exhausting empty-response retries into a generic apology.
+    user_msgs = [m.get("content") or "" for m in result.messages if m.get("role") == "user"]
+    assert any(LENGTH_RECOVERY_PROMPT in c for c in user_msgs), (
+        "expected a length-recovery message to be appended for a "
+        "finish_reason='length' response with blank content"
+    )
+    assert result.final_content == "done"

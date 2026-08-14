@@ -11,7 +11,7 @@ import os
 import re
 from collections.abc import Callable
 from typing import Any, cast
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
@@ -148,6 +148,59 @@ def _unsafe_url_request_error(exc: BaseException) -> str | None:
     return str(exc) if isinstance(exc, UnsafeURLRequestError) else None
 
 
+# Forwarding a URL to the remote Jina reader discloses it to a third party, so
+# URLs that embed credential material (userinfo, signed-URL parameters, token
+# or key query values) must never leave the machine. Matching is by parameter
+# name: over-matching only costs the local readability fallback, while
+# under-matching leaks a secret.
+_CREDENTIAL_QUERY_PARAMS = frozenset({
+    "access_token", "api-key", "api-token", "apikey", "api_key", "api_token",
+    "auth", "authorization", "client_assertion", "client_secret", "code",
+    "credential", "credentials", "id_token", "jwt", "key", "password",
+    "passwd", "private_key", "pwd", "refresh_token", "samlresponse", "secret",
+    "session_id", "session_token", "sessionid", "sig", "signature", "sso_token",
+    "ticket", "token",
+})
+_CREDENTIAL_QUERY_PREFIXES = ("x-amz-", "x-goog-")
+
+
+def _url_carries_credentials(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return True
+    if parsed.username is not None or parsed.password is not None:
+        return True
+    # Some frameworks still accept semicolons as query separators. Treating
+    # them as separators here may over-match a value, but the safe consequence
+    # is only using the local extractor instead of disclosing a credential.
+    query = parsed.query.replace(";", "&")
+    for name, _value in parse_qsl(query, keep_blank_values=True):
+        lowered = name.strip().lower()
+        if lowered in _CREDENTIAL_QUERY_PARAMS or lowered.startswith(_CREDENTIAL_QUERY_PREFIXES):
+            return True
+    return False
+
+
+def _redact_url_for_log(url: str) -> str:
+    """Return only a URL's origin, excluding userinfo, path, query, and fragment."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not parsed.scheme or hostname is None:
+            return "<redacted URL>"
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        authority = f"{hostname}:{port}" if port is not None else hostname
+        return f"{parsed.scheme}://{authority}"
+    except ValueError:
+        return "<redacted URL>"
+
+
 async def _get_with_safe_redirects(
     client: httpx.AsyncClient,
     url: str,
@@ -191,13 +244,14 @@ async def _stream_with_safe_redirects(
     client: httpx.AsyncClient,
     url: str,
     headers: dict[str, str] | None = None,
-) -> tuple[httpx.Response | None, Any | None, str | None]:
+) -> tuple[httpx.Response | None, Any | None, str | None, bool]:
     """Open a streamed response while validating every redirect target first."""
     current_url = url
+    chain_carries_credentials = _url_carries_credentials(url)
     for _ in range(MAX_REDIRECTS + 1):
         is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
-            return None, None, f"Redirect blocked: {error_msg}"
+            return None, None, f"Redirect blocked: {error_msg}", chain_carries_credentials
 
         stream = client.stream(
             "GET",
@@ -210,26 +264,39 @@ async def _stream_with_safe_redirects(
         except httpx.RequestError as exc:
             unsafe_error = _unsafe_url_request_error(exc)
             if unsafe_error is not None:
-                return None, None, f"Redirect blocked: {unsafe_error}"
+                return (
+                    None,
+                    None,
+                    f"Redirect blocked: {unsafe_error}",
+                    chain_carries_credentials,
+                )
             raise
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
-            return response, stream, None
+            return response, stream, None, chain_carries_credentials
 
         location = response.headers.get("location")
         if not location:
-            return response, stream, None
+            return response, stream, None, chain_carries_credentials
 
         next_url = urljoin(str(response.url), location)
+        chain_carries_credentials = (
+            chain_carries_credentials or _url_carries_credentials(next_url)
+        )
         is_valid, error_msg = _validate_url_safe(next_url)
         if not is_valid:
             await stream.__aexit__(None, None, None)
-            return None, None, f"Redirect blocked: {error_msg}"
+            return None, None, f"Redirect blocked: {error_msg}", chain_carries_credentials
 
         await stream.__aexit__(None, None, None)
         current_url = next_url
 
-    return None, None, f"Too many redirects: exceeded limit of {MAX_REDIRECTS}"
+    return (
+        None,
+        None,
+        f"Too many redirects: exceeded limit of {MAX_REDIRECTS}",
+        chain_carries_credentials,
+    )
 
 
 def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
@@ -453,12 +520,15 @@ class WebSearchTool(Tool):
 
     async def _search_olostep(self, query: str, n: int) -> str:
         try:
-            from olostep import (  # pyright: ignore[reportMissingImports]
+            from olostep import (  # pyright: ignore[reportMissingImports, reportMissingTypeStubs]
                 AsyncOlostep,  # pyright: ignore[reportUnknownVariableType]
-                Olostep_BaseError,  # pyright: ignore[reportUnknownVariableType]
+                Olostep_BaseError,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
             )
         except ImportError:
-            return ToolResult.error("Error: olostep package not installed. Run: pip install olostep")
+            return ToolResult.error(
+                "Error: Olostep support is not installed. "
+                "Run `nanobot plugins enable olostep`."
+            )
         async_olostep = cast(Any, AsyncOlostep)
         olostep_base_error = cast(type[Exception], Olostep_BaseError)
         api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
@@ -1040,20 +1110,26 @@ class WebFetchTool(Tool):
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
-        # Detect and fetch images directly to avoid Jina's textual image captioning
+        # Detect and fetch images directly to avoid Jina's textual image captioning.
+        # This local preflight also proves that no credential-bearing URL occurs
+        # in the redirect chain before the original URL may be sent to Jina.
+        jina_remote_safe = False
         try:
             async with httpx.AsyncClient(
                 **_fetch_client_kwargs(self.proxy, 15.0),
             ) as client:
-                r, stream, redirect_error = await _stream_with_safe_redirects(
-                    client,
-                    url,
-                    headers={"User-Agent": self.user_agent},
+                r, stream, redirect_error, chain_carries_credentials = (
+                    await _stream_with_safe_redirects(
+                        client,
+                        url,
+                        headers={"User-Agent": self.user_agent},
+                    )
                 )
                 if redirect_error:
                     return json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False)
                 if r is None:
                     return json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False)
+                jina_remote_safe = not chain_carries_credentials
 
                 try:
                     ctype = r.headers.get("content-type", "")
@@ -1068,10 +1144,14 @@ class WebFetchTool(Tool):
             unsafe_error = _unsafe_url_request_error(e)
             if unsafe_error is not None:
                 return json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False)
-            logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
+            logger.debug(
+                "Pre-fetch image detection failed for {} ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
 
         result = None
-        if self.config.use_jina_reader:
+        if self.config.use_jina_reader and jina_remote_safe:
             result = await self._fetch_jina(url, max_chars)
         if result is None:
             result = await self._fetch_readability(url, extract_mode, max_chars)
@@ -1079,13 +1159,23 @@ class WebFetchTool(Tool):
 
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
         """Try fetching via Jina Reader API. Returns None on failure."""
+        if _url_carries_credentials(url):
+            logger.debug(
+                "Skipping Jina Reader for {}: URL carries credential material",
+                _redact_url_for_log(url),
+            )
+            return None
+        # httpx already drops the fragment when building the request; strip it
+        # explicitly so client-side-only data (OAuth implicit flows put tokens
+        # there) stays out of this path even if the transport changes.
+        forwarded_url = url.split("#", 1)[0]
         try:
             headers = {"Accept": "application/json", "User-Agent": self.user_agent}
             jina_key = os.environ.get("JINA_API_KEY", "")
             if jina_key:
                 headers["Authorization"] = f"Bearer {jina_key}"
             async with httpx.AsyncClient(proxy=self.proxy, timeout=20.0) as client:
-                r = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+                r = await client.get(f"https://r.jina.ai/{forwarded_url}", headers=headers)
                 if r.status_code == 429:
                     logger.debug("Jina Reader rate limited, falling back to readability")
                     return None
@@ -1110,7 +1200,11 @@ class WebFetchTool(Tool):
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except Exception as e:
-            logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
+            logger.debug(
+                "Jina Reader failed for {}, falling back to readability ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
             return None
 
     async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:
@@ -1141,7 +1235,11 @@ class WebFetchTool(Tool):
                     text = self._extract_readable_html(r.text, extract_mode)
                     extractor = "readability"
                 except Exception as e:
-                    logger.warning("Readability failed for {}, using raw HTML fallback: {}", url, e)
+                    logger.warning(
+                        "Readability failed for {}, using raw HTML fallback ({})",
+                        _redact_url_for_log(url),
+                        type(e).__name__,
+                    )
                     text, extractor = _normalize(_strip_tags(r.text)), "html"
             else:
                 text, extractor = r.text, "raw"
@@ -1157,10 +1255,18 @@ class WebFetchTool(Tool):
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except httpx.ProxyError as e:
-            logger.exception("WebFetch proxy error for {}", url)
+            logger.warning(
+                "WebFetch proxy error for {} ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
             return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)
         except Exception as e:
-            logger.exception("WebFetch error for {}", url)
+            logger.warning(
+                "WebFetch error for {} ({})",
+                _redact_url_for_log(url),
+                type(e).__name__,
+            )
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
 
     def _extract_readable_html(self, html_content: str, extract_mode: str) -> str:

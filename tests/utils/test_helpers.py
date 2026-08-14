@@ -1,14 +1,11 @@
 from pathlib import Path
-from zoneinfo import ZoneInfoNotFoundError
 
-import pytest
 import tiktoken
 
 from nanobot.utils import helpers
 from nanobot.utils.helpers import (
     _write_text_atomic,
     content_with_media_breadcrumbs,
-    current_time_str,
     split_message,
     truncate_text_to_tokens,
 )
@@ -49,11 +46,6 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
     text = "anything"
 
     assert truncate_text_to_tokens(text, 0) == text
-
-
-def test_current_time_str_rejects_unknown_timezone():
-    with pytest.raises(ZoneInfoNotFoundError):
-        current_time_str("Not/AZone")
 
 
 def test_content_with_media_breadcrumbs_preserves_valid_paths():

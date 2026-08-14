@@ -154,6 +154,26 @@ class TestIsExpired:
         now_over = datetime(2026, 1, 1, 10, 10, 0)
         assert ac._is_expired(ts, now=now_over) is True
 
+    def test_unparseable_string_timestamp_returns_false(self):
+        """A persisted timestamp that no longer parses must not raise.
+
+        list_sessions() forwards the raw persisted updated_at string, and
+        SessionManager._load already tolerates a malformed value through its
+        recovery path. The idle scan must mirror that tolerance instead of crashing.
+        """
+        ac = _make_autocompact(ttl=15)
+        assert ac._is_expired("not-a-timestamp") is False
+
+    def test_tz_aware_string_timestamp_is_compared_by_instant(self):
+        """A valid timestamp with an offset remains eligible for expiry."""
+        ac = _make_autocompact(ttl=15)
+        now = datetime(2026, 1, 1, 12, 0, 0)
+        recent = (now - timedelta(minutes=10)).astimezone().isoformat()
+        expired = (now - timedelta(minutes=20)).astimezone().isoformat()
+
+        assert ac._is_expired(recent, now=now) is False
+        assert ac._is_expired(expired, now=now) is True
+
 
 # ---------------------------------------------------------------------------
 # _format_summary
@@ -220,6 +240,36 @@ class TestCheckExpired:
         ac.check_expired(scheduler, _runtime)
         assert len(scheduled) == 1
         assert "cli:old" in ac._archiving
+
+    def test_unparseable_updated_at_does_not_stop_scan(self):
+        """A malformed timestamp is skipped without hiding later sessions.
+
+        The idle scan runs from the agent loop's inbound-timeout branch, so a
+        raised exception here would tear down the loop. list_sessions() forwards
+        the raw string, so check_expired must tolerate it like SessionManager
+        does when loading.
+        """
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:corrupt", "updated_at": "not-a-timestamp"},
+            {"key": "cli:old", "updated_at": old_dt.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
+        ac.check_expired(scheduler, _runtime)
+
+        assert len(scheduled) == 1
+        assert ac._archiving == {"cli:old"}
 
     @pytest.mark.asyncio
     async def test_runtime_is_captured_before_background_starts(self):
@@ -355,13 +405,37 @@ class TestCheckExpired:
         scheduler.assert_not_called()
         assert "dream:20260602-155256" not in ac._archiving
 
-    def test_already_trimmed_session_skips(self):
-        """Expired session with no removable tail should not be re-scheduled."""
+    def test_short_unarchived_session_schedules(self):
+        """A short idle session still needs an archive entry for Dream."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        last_active = datetime(2026, 1, 1, 10, 0, 0)
+        session = _make_session("cli:short", updated_at=last_active)
+        _add_turns(session, 2)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:short", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
+        ac.check_expired(scheduler, _runtime)
+
+        assert len(scheduled) == 1
+        assert ac._archiving == {"cli:short"}
+
+    def test_fully_archived_session_skips(self):
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         last_active = datetime(2026, 1, 1, 10, 0, 0)
         session = _make_session("cli:done", updated_at=last_active)
         _add_turns(session, 2)
+        session.last_consolidated = len(session.messages)
         mock_sm.list_sessions.return_value = [
             {"key": "cli:done", "updated_at": last_active.isoformat()},
         ]
@@ -541,6 +615,58 @@ class TestPrepareSession:
         assert result_session is session
         assert summary is not None
         assert "Cold summary." in summary
+
+    def test_cold_path_tolerates_malformed_last_active(self):
+        """A malformed persisted last_active must not raise on the turn path.
+
+        prepare_session runs from _compact_session on every turn. Persisted
+        _last_summary can be hand-edited or written by another version, so a bad
+        last_active should degrade gracefully (mirror estimate_session_prompt_tokens
+        and _archive) instead of crashing the turn.
+        """
+        ac = _make_autocompact(ttl=0)
+        fallback = datetime(2026, 1, 2, 3, 4, 5)
+        session = _make_session(
+            metadata={
+                "_last_summary": {"text": "Cold summary.", "last_active": "not-a-date"},
+            },
+            updated_at=fallback,
+        )
+
+        result_session, summary = ac.prepare_session(session, "cli:test")
+
+        assert result_session is session
+        assert summary is not None
+        assert "Cold summary." in summary
+        assert fallback.isoformat() in summary
+
+    def test_cold_path_tolerates_missing_last_active(self):
+        """A _last_summary dict without last_active must not raise."""
+        ac = _make_autocompact(ttl=0)
+        fallback = datetime(2026, 1, 2, 3, 4, 5)
+        session = _make_session(
+            metadata={"_last_summary": {"text": "Cold summary."}},
+            updated_at=fallback,
+        )
+
+        result_session, summary = ac.prepare_session(session, "cli:test")
+
+        assert result_session is session
+        assert summary is not None
+        assert "Cold summary." in summary
+        assert fallback.isoformat() in summary
+
+    def test_cold_path_missing_text_returns_none(self):
+        """A _last_summary without a non-empty string text yields no summary."""
+        ac = _make_autocompact()
+        session = _make_session(metadata={
+            "_last_summary": {"last_active": datetime(2026, 1, 1).isoformat()},
+        })
+
+        result_session, summary = ac.prepare_session(session, "cli:test")
+
+        assert result_session is session
+        assert summary is None
 
     def test_no_summary_available_returns_none(self):
         """When no summary is available, should return (session, None)."""

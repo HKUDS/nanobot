@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+} from "react";
 import {
   Check,
   ChevronDown,
@@ -54,6 +60,7 @@ import type {
   NanobotFeaturesPayload,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
 
 export function ChannelCatalogRow({
   feature,
@@ -80,7 +87,7 @@ export function ChannelCatalogRow({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border border-transparent px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
+        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
         selected ? "bg-background" : "hover:bg-muted",
       )}
     >
@@ -134,21 +141,22 @@ export function ChannelSetupPanel({
   const PluginPanel = uiContribution?.Panel;
   if (PluginPanel) {
     return (
-      <PluginPanel
-        token={token}
-        feature={feature}
-        actionKey={actionKey}
-        showBrandLogos={showBrandLogos}
-        chatAppsDocsUrl={chatAppsDocsUrl}
-        onAction={onAction}
-        onFeaturesUpdate={onFeaturesUpdate}
-      />
+      <Suspense fallback={<ChannelPluginLoading />}>
+        <PluginPanel
+          token={token}
+          feature={feature}
+          actionKey={actionKey}
+          showBrandLogos={showBrandLogos}
+          chatAppsDocsUrl={chatAppsDocsUrl}
+          onAction={onAction}
+          onFeaturesUpdate={onFeaturesUpdate}
+        />
+      </Suspense>
     );
   }
   if (feature.instances !== undefined) {
     return (
       <ChannelInstancesPanel
-        token={token}
         feature={feature}
         showBrandLogos={showBrandLogos}
         chatAppsDocsUrl={chatAppsDocsUrl}
@@ -194,7 +202,7 @@ export function ChannelSetupPanel({
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 disabled={enableBusy}
                 onClick={() => onAction("enable", feature.name)}
                 className="mt-2 h-8 rounded-full px-3 text-[12px] font-semibold"
@@ -269,6 +277,7 @@ function ChannelSetupSurface({
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
+  const { client } = useClient();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [notice, setNotice] = useState<string | null>(null);
@@ -345,7 +354,7 @@ function ChannelSetupSurface({
     setNotice(null);
     const values = channelValuesForSubmit(fields, fieldValues, touchedFields);
     try {
-      const validationPayload = await validateChannel(token, feature.name, values);
+      const validationPayload = await validateChannel(client, feature.name, values);
       setValidation(validationPayload);
       if (!validationPayload.can_enable) {
         setNotice(
@@ -355,7 +364,7 @@ function ChannelSetupSurface({
         return;
       }
       const payload = await configureChannel(
-        token,
+        client,
         feature.name,
         values,
         { enable: true },
@@ -377,7 +386,7 @@ function ChannelSetupSurface({
     setNotice(null);
     try {
       const payload = await validateChannel(
-        token,
+        client,
         feature.name,
         channelValuesForSubmit(fields, fieldValues, touchedFields),
       );
@@ -396,13 +405,13 @@ function ChannelSetupSurface({
 
   return (
     <form
-      className="mt-5 overflow-hidden rounded-[16px] bg-background/55"
+      className="mt-5 space-y-5"
       onSubmit={(event) => {
         event.preventDefault();
         if (mode === "credentials") void saveCredentialSettings();
       }}
     >
-      <section className="px-4 py-4">
+      <section>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[13px] font-semibold text-foreground">
             {tx("settings.channels.requiredSetup", "Required setup")}
@@ -431,21 +440,23 @@ function ChannelSetupSurface({
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
         {mode === "connect" && ConnectFlow ? (
-          <ConnectFlow
-            token={token}
-            feature={feature}
-            idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-            connectRequestId={connectRequestId}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
+          <Suspense fallback={<ChannelPluginLoading compact />}>
+            <ConnectFlow
+              token={token}
+              feature={feature}
+              idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
+              connectRequestId={connectRequestId}
+              onFeaturesUpdate={onFeaturesUpdate}
+            />
+          </Suspense>
         ) : mode === "connect" ? (
           <>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
-                className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                variant="secondary"
+                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold hover:bg-background"
                 onClick={() =>
                   setNotice(
                     tx(
@@ -461,7 +472,7 @@ function ChannelSetupSurface({
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   className="h-8 rounded-full px-3 text-[12px] font-semibold"
                   onClick={copyCommand}
                 >
@@ -498,8 +509,8 @@ function ChannelSetupSurface({
               <Button
                 type="submit"
                 size="sm"
-                variant="outline"
-                className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                variant="secondary"
+                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold hover:bg-background"
                 disabled={saving}
               >
                 {saving || validating ? (
@@ -527,7 +538,7 @@ function ChannelSetupSurface({
       {notice ? (
         <div
           role="status"
-          className="border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground"
+          className="rounded-[12px] bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground"
         >
           {notice}
         </div>
@@ -540,7 +551,7 @@ function ChannelSetupSurface({
       {validation?.checks.length ? <ChannelValidationChecks validation={validation} /> : null}
 
       {hasAdvanced ? (
-        <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+        <details className="group text-[12px] leading-5 text-muted-foreground">
           <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
             <span className="inline-flex items-center gap-1.5">
               {tx("settings.channels.advanced", "Advanced")}
@@ -563,5 +574,21 @@ function ChannelSetupSurface({
         </details>
       ) : null}
     </form>
+  );
+}
+
+function ChannelPluginLoading({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex items-center justify-center gap-2 text-sm text-muted-foreground",
+        compact ? "min-h-12" : "min-h-48",
+      )}
+    >
+      <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      {t("settings.status.loading")}
+    </div>
   );
 }

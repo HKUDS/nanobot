@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalToolTrace,
+  mergeToolProgressTraceLines,
   mergeUniqueToolTraceLines,
 } from "@/lib/tool-traces";
 
@@ -25,5 +26,19 @@ describe("tool trace identity", () => {
       traces: [first, second],
       added: true,
     });
+  });
+
+  it("replaces an empty streaming placeholder when hosted search arguments arrive", () => {
+    expect(mergeToolProgressTraceLines(
+      ["web_search()"],
+      [{ phase: "start", call_id: "ws-1", name: "web_search", arguments: {} }],
+      ['web_search({"query":"nanobot news"})'],
+      [{
+        phase: "end",
+        call_id: "ws-1",
+        name: "web_search",
+        arguments: { query: "nanobot news" },
+      }],
+    )).toEqual(['web_search({"query":"nanobot news"})']);
   });
 });

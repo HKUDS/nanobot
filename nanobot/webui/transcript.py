@@ -12,7 +12,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple, cast
+from typing import Any, Callable, Mapping, NamedTuple, Sequence, cast
 from urllib.parse import unquote, urlparse
 
 from loguru import logger
@@ -28,7 +28,8 @@ WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
 WEBUI_TRANSCRIPT_INCOMPLETE_KEY = "transcript_incomplete"
 _MAX_TRANSCRIPT_FILE_BYTES = 8 * 1024 * 1024
-_TARGET_ACTIVE_TRANSCRIPT_BYTES = _MAX_TRANSCRIPT_FILE_BYTES // 2
+_ACTIVE_TRANSCRIPT_ROTATE_BYTES = 2 * 1024 * 1024
+_TARGET_ACTIVE_TRANSCRIPT_BYTES = _ACTIVE_TRANSCRIPT_ROTATE_BYTES // 2
 _TRANSCRIPT_SEGMENT_MANIFEST_VERSION = 2
 _TRANSCRIPT_ACTIVE_CHUNK_ID = "active"
 _TRANSCRIPT_SEGMENT_RE = re.compile(r"^\d{6}\.jsonl$")
@@ -67,6 +68,8 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
     "file_edit",
     "turn_end",
 })
+MAX_SESSION_MENTIONS = 8
+_SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
 
 
 def rewrite_local_markdown_images(
@@ -284,12 +287,12 @@ def _normalize_manifest_entry(session_key: str, entry: Any) -> dict[str, Any] | 
     }
 
 
-def _write_segment_manifest(session_key: str, segment_ids: list[str]) -> None:
+def _write_segment_manifest(session_key: str, entries: list[dict[str, Any]]) -> None:
     directory = webui_transcript_segments_dir(session_key)
     directory.mkdir(parents=True, exist_ok=True)
     data = {
         "version": _TRANSCRIPT_SEGMENT_MANIFEST_VERSION,
-        "segments": [_segment_manifest_entry(session_key, segment_id) for segment_id in segment_ids],
+        "segments": entries,
     }
     path = _webui_transcript_manifest_path(session_key)
     tmp_path = path.with_suffix(".json.tmp")
@@ -301,17 +304,14 @@ def _write_segment_manifest(session_key: str, segment_ids: list[str]) -> None:
         raise
 
 
-def _rebuild_segment_manifest(session_key: str) -> list[str]:
+def _rebuild_segment_manifest(session_key: str) -> list[dict[str, Any]]:
     segment_ids = _segment_ids_on_disk(session_key)
-    if segment_ids:
-        _write_segment_manifest(session_key, segment_ids)
+    entries = [_segment_manifest_entry(session_key, segment_id) for segment_id in segment_ids]
+    if entries:
+        _write_segment_manifest(session_key, entries)
     else:
         _webui_transcript_manifest_path(session_key).unlink(missing_ok=True)
-    return segment_ids
-
-
-def _rebuilt_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
-    return [_segment_manifest_entry(session_key, segment_id) for segment_id in _rebuild_segment_manifest(session_key)]
+    return entries
 
 
 def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
@@ -320,7 +320,7 @@ def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
         return []
     path = _webui_transcript_manifest_path(session_key)
     if not path.is_file():
-        return _rebuilt_segment_manifest_entries(session_key)
+        return _rebuild_segment_manifest(session_key)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         manifest = cast(dict[str, Any], data) if isinstance(data, dict) else None
@@ -330,18 +330,18 @@ def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
             or manifest.get("version") != _TRANSCRIPT_SEGMENT_MANIFEST_VERSION
             or not isinstance(raw_segments, list)
         ):
-            return _rebuilt_segment_manifest_entries(session_key)
+            return _rebuild_segment_manifest(session_key)
         entries: list[dict[str, Any]] = []
         for entry in cast(list[Any], raw_segments):
             normalized = _normalize_manifest_entry(session_key, entry)
             if normalized is None:
-                return _rebuilt_segment_manifest_entries(session_key)
+                return _rebuild_segment_manifest(session_key)
             entries.append(normalized)
         if [entry["id"] for entry in entries] != _segment_ids_on_disk(session_key):
-            return _rebuilt_segment_manifest_entries(session_key)
+            return _rebuild_segment_manifest(session_key)
         return entries
     except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-        return _rebuilt_segment_manifest_entries(session_key)
+        return _rebuild_segment_manifest(session_key)
 
 
 def _read_segment_ids(session_key: str) -> list[str]:
@@ -351,26 +351,40 @@ def _read_segment_ids(session_key: str) -> list[str]:
 def _append_segment_turns(session_key: str, turns: list[list[dict[str, Any]]]) -> None:
     if not turns:
         return
-    segment_ids = _read_segment_ids(session_key)
-    next_id = int(segment_ids[-1]) + 1 if segment_ids else 1
+    entries = _read_segment_manifest_entries(session_key)
+    next_id = int(entries[-1]["id"]) + 1 if entries else 1
     batch: list[list[dict[str, Any]]] = []
     batch_bytes = 0
+
+    def write_batch() -> None:
+        nonlocal next_id
+        segment_id = f"{next_id:06d}"
+        path = _segment_file_path(session_key, segment_id)
+        _write_records_to_path(path, _flatten_turns(batch))
+        entries.append({
+            "id": segment_id,
+            "bytes": path.stat().st_size,
+            "turn_count": len(batch),
+            "user_count": sum(
+                1
+                for turn in batch
+                for row in turn
+                if _is_user_transcript_row(row)
+            ),
+        })
+        next_id += 1
+
     for turn in turns:
         turn_bytes = _records_bytes(turn)
         if batch and batch_bytes + turn_bytes > _MAX_TRANSCRIPT_FILE_BYTES:
-            segment_id = f"{next_id:06d}"
-            _write_records_to_path(_segment_file_path(session_key, segment_id), _flatten_turns(batch))
-            segment_ids.append(segment_id)
-            next_id += 1
+            write_batch()
             batch = []
             batch_bytes = 0
         batch.append(turn)
         batch_bytes += turn_bytes
     if batch:
-        segment_id = f"{next_id:06d}"
-        _write_records_to_path(_segment_file_path(session_key, segment_id), _flatten_turns(batch))
-        segment_ids.append(segment_id)
-    _write_segment_manifest(session_key, segment_ids)
+        write_batch()
+    _write_segment_manifest(session_key, entries)
 
 
 def _rotate_active_transcript_if_needed(session_key: str) -> None:
@@ -378,7 +392,7 @@ def _rotate_active_transcript_if_needed(session_key: str) -> None:
     if not path.is_file():
         return
     try:
-        if path.stat().st_size <= _MAX_TRANSCRIPT_FILE_BYTES:
+        if path.stat().st_size <= _ACTIVE_TRANSCRIPT_ROTATE_BYTES:
             return
     except OSError:
         return
@@ -426,6 +440,16 @@ def _read_chunk_turns(session_key: str, chunk_id: str) -> list[list[dict[str, An
     return _split_transcript_turns(_read_transcript_file(path))
 
 
+def _cached_chunk_turns(
+    session_key: str,
+    chunk_id: str,
+    turn_cache: dict[str, list[list[dict[str, Any]]]],
+) -> list[list[dict[str, Any]]]:
+    if chunk_id not in turn_cache:
+        turn_cache[chunk_id] = _read_chunk_turns(session_key, chunk_id)
+    return turn_cache[chunk_id]
+
+
 def _encode_page_cursor(before_turn_ordinal: int) -> str:
     raw = json.dumps(
         {"before_turn": before_turn_ordinal},
@@ -462,7 +486,10 @@ def _coerce_page_limit(limit: int | None) -> int:
     return max(1, min(_MAX_TRANSCRIPT_PAGE_LIMIT, int(limit)))
 
 
-def _chunk_turn_refs(session_key: str) -> list[_TranscriptChunkRef]:
+def _chunk_turn_refs(
+    session_key: str,
+    turn_cache: dict[str, list[list[dict[str, Any]]]],
+) -> list[_TranscriptChunkRef]:
     _rotate_active_transcript_if_needed(session_key)
     refs: list[_TranscriptChunkRef] = []
     ordinal = 0
@@ -474,7 +501,11 @@ def _chunk_turn_refs(session_key: str) -> list[_TranscriptChunkRef]:
         refs.append(_TranscriptChunkRef(chunk_id, ordinal, turn_count, int(entry["user_count"])))
         ordinal += turn_count
     if webui_transcript_path(session_key).is_file():
-        active_turns = _read_chunk_turns(session_key, _TRANSCRIPT_ACTIVE_CHUNK_ID)
+        active_turns = _cached_chunk_turns(
+            session_key,
+            _TRANSCRIPT_ACTIVE_CHUNK_ID,
+            turn_cache,
+        )
         active_turn_count = len(active_turns)
         if active_turn_count > 0:
             refs.append(
@@ -492,6 +523,7 @@ def _count_user_messages_before_ordinal(
     session_key: str,
     chunks: list[_TranscriptChunkRef],
     before_ordinal: int,
+    turn_cache: dict[str, list[list[dict[str, Any]]]],
 ) -> int:
     total = 0
     for chunk in chunks:
@@ -503,7 +535,7 @@ def _count_user_messages_before_ordinal(
         if local_end >= chunk.turn_count:
             total += chunk.user_count
             continue
-        turns = _read_chunk_turns(session_key, chunk.chunk_id)
+        turns = _cached_chunk_turns(session_key, chunk.chunk_id, turn_cache)
         total += sum(
             1
             for turn in turns[:local_end]
@@ -521,7 +553,8 @@ def _select_transcript_page(
     _manifest_rebuilt: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     page_limit = _coerce_page_limit(limit)
-    chunks = _chunk_turn_refs(session_key)
+    turn_cache: dict[str, list[list[dict[str, Any]]]] = {}
+    chunks = _chunk_turn_refs(session_key, turn_cache)
     total_turns = sum(chunk.turn_count for chunk in chunks)
     before_ordinal = _decode_page_cursor(before)
     upper_ordinal = total_turns if before_ordinal is None else min(before_ordinal, total_turns)
@@ -534,7 +567,7 @@ def _select_transcript_page(
         local_upper = min(chunk.turn_count, upper_ordinal - chunk.start_ordinal)
         if local_upper <= 0:
             continue
-        turns = _read_chunk_turns(session_key, chunk.chunk_id)
+        turns = _cached_chunk_turns(session_key, chunk.chunk_id, turn_cache)
         if (
             chunk.chunk_id != _TRANSCRIPT_ACTIVE_CHUNK_ID
             and len(turns) != chunk.turn_count
@@ -585,6 +618,7 @@ def _select_transcript_page(
             session_key,
             chunks,
             first_ref.ordinal,
+            turn_cache,
         ),
     }
     return lines, page
@@ -725,6 +759,7 @@ class WebUITranscriptRecorder:
         media_paths: list[str] | None = None,
         cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
+        session_mentions: Sequence[Mapping[str, Any]] | None = None,
     ) -> bool:
         if text.strip() == "/stop" and not media_paths:
             return False
@@ -734,6 +769,7 @@ class WebUITranscriptRecorder:
             media_paths=media_paths,
             cli_apps=cli_apps,
             mcp_presets=mcp_presets,
+            session_mentions=session_mentions,
         )
         if payload is None:
             return False
@@ -858,7 +894,7 @@ def write_session_messages_as_transcript(
                 row["media_paths"] = [
                     str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
                 ]
-            for key in ("cli_apps", "mcp_presets"):
+            for key in ("cli_apps", "mcp_presets", "session_mentions"):
                 value = msg.get(key)
                 if isinstance(value, list) and value:
                     row[key] = json.loads(json.dumps(value, ensure_ascii=False))
@@ -895,6 +931,32 @@ def delete_webui_transcript(session_key: str) -> bool:
     return removed
 
 
+def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
+    """Validate session-reference metadata crossing a persistence seam."""
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        return []
+    normalized: list[dict[str, str]] = []
+    for raw_item in cast(Sequence[object], raw)[:MAX_SESSION_MENTIONS]:
+        if not isinstance(raw_item, Mapping):
+            continue
+        item = cast(Mapping[str, object], raw_item)
+        name = item.get("name")
+        session_key = item.get("session_key")
+        title = item.get("title")
+        if not isinstance(name, str) or not isinstance(session_key, str):
+            continue
+        name = name.strip()[:80]
+        session_key = session_key.strip()[:512]
+        if not name or not session_key or _SESSION_MENTION_NAME_RE.fullmatch(name) is None:
+            continue
+        normalized.append({
+            "name": name,
+            "session_key": session_key,
+            "title": title.strip()[:160] if isinstance(title, str) else "",
+        })
+    return normalized
+
+
 def build_user_transcript_event(
     chat_id: str,
     text: str,
@@ -902,6 +964,7 @@ def build_user_transcript_event(
     media_paths: list[Any] | None = None,
     cli_apps: list[Any] | None = None,
     mcp_presets: list[Any] | None = None,
+    session_mentions: Sequence[Any] | None = None,
 ) -> dict[str, Any] | None:
     paths = [str(path) for path in (media_paths or []) if path]
     if not text and not paths:
@@ -927,6 +990,9 @@ def build_user_transcript_event(
     ]
     if presets:
         event["mcp_presets"] = presets
+    mentions = normalize_session_mentions_metadata(session_mentions)
+    if mentions:
+        event["session_mentions"] = mentions
     return event
 
 
@@ -959,6 +1025,7 @@ def _session_user_event(
     media = message.get("media")
     cli_apps = message.get("cli_apps")
     mcp_presets = message.get("mcp_presets")
+    session_mentions = message.get("session_mentions")
     chat_id = session_key.split(":", 1)[1] if ":" in session_key else session_key
     return build_user_transcript_event(
         chat_id,
@@ -966,6 +1033,9 @@ def _session_user_event(
         media_paths=cast(list[Any], media) if isinstance(media, list) else None,
         cli_apps=cast(list[Any], cli_apps) if isinstance(cli_apps, list) else None,
         mcp_presets=cast(list[Any], mcp_presets) if isinstance(mcp_presets, list) else None,
+        session_mentions=(
+            cast(list[Any], session_mentions) if isinstance(session_mentions, list) else None
+        ),
     )
 
 
@@ -1152,7 +1222,7 @@ def _find_unique_session_turn(
 def _user_recovery_signature(event: dict[str, Any]) -> str:
     fields = {
         key: event[key]
-        for key in ("text", "media_paths", "cli_apps", "mcp_presets")
+        for key in ("text", "media_paths", "cli_apps", "mcp_presets", "session_mentions")
         if key in event
     }
     return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1182,19 +1252,18 @@ def _is_recoverable_answer_record(record: dict[str, Any]) -> bool:
     }
 
 
-def recover_incomplete_turns_from_session(
-    lines: list[dict[str, Any]],
-    session_messages: list[dict[str, Any]] | None,
-    *,
-    session_key: str,
-) -> list[dict[str, Any]]:
-    """Recover marked transcript answers only when one durable session turn matches."""
-    if not lines or not session_messages:
-        return lines
-    session_turns = _session_backfill_turns(session_key, session_messages)
-    if not session_turns:
-        return lines
+def _needs_incomplete_turn_recovery(lines: list[dict[str, Any]]) -> bool:
+    return any(
+        record.get("event") == "turn_end"
+        and record.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True
+        for record in lines
+    )
 
+
+def _recover_incomplete_turns(
+    lines: list[dict[str, Any]],
+    session_turns: list[_SessionBackfillTurn],
+) -> list[dict[str, Any]]:
     recovered: list[dict[str, Any]] = []
     for turn in _split_transcript_turns(lines):
         turn_end = turn[-1] if turn else None
@@ -1254,18 +1323,19 @@ def _with_backfilled_user(
     return records
 
 
-def inject_missing_user_events_from_session(
-    session_key: str,
-    lines: list[dict[str, Any]],
-    session_messages: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    """Backfill user rows for legacy WebUI transcripts that only stored assistant streams."""
-    if not lines or not session_messages:
-        return lines
-    session_turns = _session_backfill_turns(session_key, session_messages)
-    if not session_turns:
-        return lines
+def _needs_user_event_backfill(lines: list[dict[str, Any]]) -> bool:
+    for turn in _split_transcript_turns(lines):
+        if any(record.get("event") == "user" for record in turn):
+            continue
+        if _transcript_turn_signature(turn):
+            return True
+    return False
 
+
+def _inject_missing_user_events(
+    lines: list[dict[str, Any]],
+    session_turns: list[_SessionBackfillTurn],
+) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     session_cursor = 0
     for turn in _split_transcript_turns(lines):
@@ -2004,6 +2074,11 @@ def replay_transcript_to_ui_messages(
                     for preset in cast(list[Any], mcp_presets)
                     if isinstance(preset, dict)
                 ]
+            session_mentions = normalize_session_mentions_metadata(
+                rec.get("session_mentions")
+            )
+            if session_mentions:
+                row["sessionMentions"] = session_mentions
             messages.append(row)
             continue
 
@@ -2026,6 +2101,7 @@ def replay_transcript_to_ui_messages(
                 continue
             close_activity_for_answer()
             turn_fields = _turn_fields(rec, "answer")
+            source_fields = _source_fields(rec)
             adopted = find_active_placeholder(messages, turn_fields) if buffer_message_id is None else None
             if buffer_message_id is None:
                 if adopted:
@@ -2038,7 +2114,8 @@ def replay_transcript_to_ui_messages(
                             "role": "assistant",
                             "content": "",
                             "isStreaming": True,
-                            **_turn_fields(rec, "answer"),
+                            **turn_fields,
+                            **source_fields,
                             "createdAt": _created_at_ms(rec, idx),
                         },
                     )
@@ -2050,7 +2127,8 @@ def replay_transcript_to_ui_messages(
                         **m,
                         "content": combined,
                         "isStreaming": True,
-                        **_turn_fields(rec, "answer"),
+                        **turn_fields,
+                        **source_fields,
                     }
                     break
             continue
@@ -2062,6 +2140,8 @@ def replay_transcript_to_ui_messages(
                 continue
             merge_next = rec.get("resuming") is True and rec.get("merge_next") is True
             final_text = rec.get("text")
+            turn_fields = _turn_fields(rec, "answer")
+            source_fields = _source_fields(rec)
             if isinstance(final_text, str):
                 if buffer_message_id is None:
                     buffer_message_id = _new_id("buf", idx)
@@ -2071,7 +2151,8 @@ def replay_transcript_to_ui_messages(
                             "role": "assistant",
                             "content": final_text,
                             "isStreaming": True,
-                            **_turn_fields(rec, "answer"),
+                            **turn_fields,
+                            **source_fields,
                             "createdAt": _created_at_ms(rec, idx),
                         },
                     )
@@ -2082,11 +2163,21 @@ def replay_transcript_to_ui_messages(
                                 **m,
                                 "content": final_text,
                                 "isStreaming": True,
-                                **_turn_fields(rec, "answer"),
+                                **turn_fields,
+                                **source_fields,
                             }
                             break
                 if merge_next:
                     buffer_parts = [final_text]
+            elif source_fields and buffer_message_id is not None:
+                for i, m in enumerate(messages):
+                    if m.get("id") == buffer_message_id:
+                        messages[i] = {
+                            **m,
+                            **turn_fields,
+                            **source_fields,
+                        }
+                        break
             if not merge_next:
                 buffer_message_id = None
                 buffer_parts = []
@@ -2342,6 +2433,7 @@ def build_webui_thread_response(
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
     session_messages: list[dict[str, Any]] | None = None,
+    session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
     active_turn_started_at: float | None = None,
     active_turn_id: str | None = None,
     active_turn_transcript_persistence_failed: bool = False,
@@ -2358,12 +2450,20 @@ def build_webui_thread_response(
         lines = _annotate_replay_identities(read_transcript_lines(session_key))
     if not lines and active_turn_started_at is None:
         return None
-    lines = inject_missing_user_events_from_session(session_key, lines, session_messages)
-    lines = recover_incomplete_turns_from_session(
-        lines,
-        session_messages,
-        session_key=session_key,
-    )
+    needs_user_backfill = _needs_user_event_backfill(lines)
+    needs_incomplete_recovery = _needs_incomplete_turn_recovery(lines)
+    if (
+        session_messages is None
+        and session_messages_loader is not None
+        and (needs_user_backfill or needs_incomplete_recovery)
+    ):
+        session_messages = session_messages_loader()
+    if session_messages and (needs_user_backfill or needs_incomplete_recovery):
+        session_turns = _session_backfill_turns(session_key, session_messages)
+        if needs_user_backfill:
+            lines = _inject_missing_user_events(lines, session_turns)
+        if needs_incomplete_recovery:
+            lines = _recover_incomplete_turns(lines, session_turns)
     lines = _ensure_replay_identities(lines)
     fork_boundary = fork_boundary_message_count(lines)
     msgs = replay_transcript_to_ui_messages(

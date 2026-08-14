@@ -241,7 +241,7 @@ Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.
 
 ## 🌐 WebUI
 
-The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, visible agent activity, workspace controls, Apps, Skills, Automations, and settings.
+The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, temporary chats, visible agent activity, workspace controls, Apps, Skills, Automations, and settings.
 
 <p align="center">
   <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
@@ -250,9 +250,10 @@ The WebUI ships **inside the published wheel** with no separate frontend build. 
 Use it to:
 
 - keep separate topics for different tasks and projects;
+- use temporary chats when a conversation should not be saved to history or memory;
 - inspect reasoning, tool calls, file edits, diffs, command output, and generated artifacts;
 - switch models and workspaces without leaving the conversation;
-- configure providers, chat channels, Apps, Skills, and Automations from one place.
+- configure providers and chat channels, connect Apps, discover Skills, and manage Automations from one place.
 
 See the [WebUI guide](./docs/webui.md) for LAN access, background operation, workspace controls, and the full feature tour. Working on the frontend itself? Use [`webui/README.md`](./webui/README.md).
 

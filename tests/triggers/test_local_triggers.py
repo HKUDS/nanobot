@@ -150,6 +150,36 @@ def test_enqueue_writes_trigger_run_record(tmp_path: Path) -> None:
     assert record["content"] == "Review PR #4591"
     assert record["origin_metadata"] == {"webui": True}
     assert record["updated_at_ms"] > 0
+    stored = store.get(trigger.id)
+    assert stored is not None
+    assert stored.last_message == "Review PR #4591"
+
+
+def test_enqueue_rolls_back_delivery_and_audit_when_trigger_save_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+
+    def fail_save(_triggers: list[LocalTrigger]) -> None:
+        raise OSError("store write failed")
+
+    monkeypatch.setattr(store, "_save_triggers_unlocked", fail_save)
+
+    with pytest.raises(OSError, match="store write failed"):
+        store.enqueue(trigger.id, "Review PR #4591")
+
+    assert list(store.inbox_dir.glob("*.json")) == []
+    assert list(store.runs_dir.glob("*.json")) == []
+    stored = LocalTriggerStore(tmp_path).get(trigger.id)
+    assert stored is not None
+    assert stored.last_message == ""
 
 
 def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path) -> None:
@@ -168,6 +198,9 @@ def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path
     assert queued_record["content"].startswith("content-")
     assert queued_record["content"].endswith("\n... (truncated)")
     assert len(queued_record["content"]) < len(large_content)
+    stored = store.get(trigger.id)
+    assert stored is not None
+    assert stored.last_message == queued_record["content"]
 
     store.write_delivery_run_record(
         delivery,

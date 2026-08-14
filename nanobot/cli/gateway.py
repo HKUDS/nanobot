@@ -1,7 +1,5 @@
 """Typer commands for foreground and background gateway control."""
 
-# pyright: reportUnusedFunction=false
-
 from __future__ import annotations
 
 import subprocess
@@ -135,8 +133,9 @@ def create_gateway_app(
             console.print()
             console.print(result.content)
 
+    # Typer consumes these callbacks through decorator registration.
     @gateway_app.callback(invoke_without_command=True)
-    def gateway(
+    def gateway(  # pyright: ignore[reportUnusedFunction]
         ctx: typer.Context,
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -191,7 +190,7 @@ def create_gateway_app(
             )
 
     @gateway_app.command("status")
-    def gateway_status(
+    def gateway_status(  # pyright: ignore[reportUnusedFunction]
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
@@ -199,7 +198,7 @@ def create_gateway_app(
         print_status(runtime_for_instance(workspace=workspace, config=config).status())
 
     @gateway_app.command("logs")
-    def gateway_logs(
+    def gateway_logs(  # pyright: ignore[reportUnusedFunction]
         tail: int = typer.Option(200, "--tail", help="Number of recent lines to show"),
         follow: bool = typer.Option(True, "--follow/--no-follow", help="Follow new log output"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -217,7 +216,7 @@ def create_gateway_app(
             console.print(line)
 
     @gateway_app.command("stop")
-    def gateway_stop(
+    def gateway_stop(  # pyright: ignore[reportUnusedFunction]
         timeout: int = typer.Option(20, "--timeout", help="Stop timeout in seconds"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -233,7 +232,7 @@ def create_gateway_app(
             raise typer.Exit(1)
 
     @gateway_app.command("restart")
-    def gateway_restart(
+    def gateway_restart(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -266,7 +265,7 @@ def create_gateway_app(
         raise typer.Exit(1)
 
     @gateway_app.command("install-service")
-    def gateway_install_service(
+    def gateway_install_service(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -302,7 +301,7 @@ def create_gateway_app(
         raise typer.Exit(1)
 
     @gateway_app.command("uninstall-service")
-    def gateway_uninstall_service(
+    def gateway_uninstall_service(  # pyright: ignore[reportUnusedFunction]
         name: str = typer.Option("nanobot-gateway", "--name", help="Service name"),
         manager: ServiceManagerKind = typer.Option("auto", "--manager", help="auto, systemd, or launchd"),
         dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without uninstalling"),

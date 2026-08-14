@@ -136,7 +136,7 @@ export function ChannelLogo({
   if (showBrandLogos && logoUrl) {
     return (
       <span
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] border border-border/45 bg-background"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-background"
       >
         <img
           src={logoUrl}
@@ -154,7 +154,7 @@ export function ChannelLogo({
   if (Icon) {
     return (
       <span
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-background"
         style={{ color }}
         aria-hidden
       >
@@ -165,7 +165,7 @@ export function ChannelLogo({
 
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background text-[11px] font-bold"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-background text-[11px] font-bold"
       style={{ color }}
       aria-hidden
     >

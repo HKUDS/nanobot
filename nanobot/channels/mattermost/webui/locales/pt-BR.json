@@ -27,10 +27,18 @@
         "placeholder": "ID de equipe opcional"
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Comportamento em canais",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
+          "allowlist": "Lista de permissão"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Comportamento em threads",
+        "choices": {
+          "mention": "Somente menções",
+          "open": "Todas as mensagens (sem menção)",
           "allowlist": "Lista de permissão"
         }
       },

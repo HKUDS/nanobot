@@ -228,7 +228,8 @@ def test_save_prunes_unsupported_conversation_refs(make_channel, tmp_path, monke
         ),
     }
 
-    ch._save_refs()
+    with ch._refs_guard:
+        ch._save_refs_locked()
 
     assert set(ch._conversation_refs.keys()) == {"conv-valid"}
 
@@ -378,7 +379,8 @@ def test_save_uses_atomic_replace_and_keeps_existing_file_on_replace_error(make_
         raise OSError("replace failed")
 
     monkeypatch.setattr(msteams_module.os, "replace", _raise_replace)
-    ch._save_refs()
+    with ch._refs_guard:
+        ch._save_refs_locked()
 
     persisted = json.loads(refs_path.read_text(encoding="utf-8"))
     assert set(persisted.keys()) == {"conv-old"}
@@ -934,7 +936,8 @@ def test_save_refs_prunes_webchat_and_stale_refs(make_channel):
         ),
     }
 
-    ch._save_refs()
+    with ch._refs_guard:
+        ch._save_refs_locked()
 
     assert set(ch._conversation_refs) == {"teams-good"}
     saved = json.loads(ch._refs_path.read_text(encoding="utf-8"))

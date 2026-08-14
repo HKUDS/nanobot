@@ -93,7 +93,14 @@ def test_sanitize_filename_keeps_chinese_chars() -> None:
 
 
 def test_sanitize_filename_empty_input() -> None:
-    assert _sanitize_filename("") == ""
+    assert _sanitize_filename("") == "unnamed"
+
+
+def test_sanitize_filename_empty_or_dots_fallback() -> None:
+    assert _sanitize_filename("...") == "unnamed"
+    assert _sanitize_filename("..", fallback="fallback.txt") == "fallback.txt"
+    assert _sanitize_filename("...", fallback="../../outside.txt") == "outside.txt"
+    assert _sanitize_filename("") == "unnamed"
 
 
 def test_guess_wecom_media_type_image() -> None:
@@ -142,6 +149,27 @@ async def test_download_and_save_success() -> None:
     assert os.path.basename(path) == "photo.png"
     # Cleanup
     os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_download_and_save_sanitizes_sdk_fallback(tmp_path: Path) -> None:
+    """An unsafe SDK filename cannot escape the channel media directory."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+    client = _FakeWeComClient()
+    client.download_file.return_value = (b"payload", "../../outside.txt")
+    channel._client = client
+
+    with patch("nanobot.channels.wecom.runtime.get_media_dir", return_value=tmp_path):
+        path = await channel._download_and_save_media(
+            "https://example.com/file",
+            "aes_key",
+            "file",
+            "...",
+        )
+
+    assert path is not None
+    assert Path(path) == tmp_path / "outside.txt"
+    assert Path(path).read_bytes() == b"payload"
 
 
 @pytest.mark.asyncio

@@ -73,3 +73,17 @@ def test_flush_all_includes_live_sessions_outside_strong_cache(tmp_path, monkeyp
 
     assert manager.flush_all() == 2
     assert set(saved) == {("test:active", True), ("test:other", True)}
+
+
+def test_transient_session_never_reaches_storage(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create_transient("websocket:temporary-test")
+    session.add_message("user", "secret")
+
+    manager.save(session, fsync=True)
+
+    assert manager.get_cached(session.key) is session
+    assert manager.read_session_file(session.key) is None
+    assert list(manager.sessions_dir.glob("*.jsonl")) == []
+    manager.invalidate(session.key)
+    assert manager.get_cached(session.key) is None

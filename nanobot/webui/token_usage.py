@@ -159,6 +159,13 @@ def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
         if not isinstance(date, str) or len(date) != 10 or not isinstance(row_value, dict):
             continue
         row = cast(dict[str, Any], row_value)
+        try:
+            datetime.fromisoformat(date)
+        except ValueError:
+            # A hand-edited or foreign day key that is not a real date would
+            # otherwise reach token_usage_payload's date parsing and fail every
+            # settings request; drop it like any other malformed row.
+            continue
         normalized = _normalize_usage_row(row)
         if normalized["total_tokens"] <= 0 and normalized["requests"] <= 0:
             continue

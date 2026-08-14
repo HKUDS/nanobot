@@ -12,7 +12,9 @@ from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, cast
+from urllib.parse import urlparse
 
+import httpx
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
@@ -20,6 +22,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.security.network import PinnedDNSAsyncTransport
 
 
 class WhatsAppConfig(Base):
@@ -39,6 +42,8 @@ class _NeonizeAPI(NamedTuple):
     MessageEv: Any
     PairStatusEv: Any
     build_jid: Any
+    detect_mime: Any
+    detect_buffer: Any
 
 
 class _MediaInfo(NamedTuple):
@@ -52,6 +57,15 @@ class _MediaInfo(NamedTuple):
 _NEONIZE_API: _NeonizeAPI | None = None
 _JID_RE = re.compile(r"^(?P<user>[^@]+)@(?P<server>[^@]+)$")
 _LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
+_REMOTE_MEDIA_MAX_BYTES = 32 * 1024 * 1024
+_REMOTE_MEDIA_MAX_REDIRECTS = 5
+_REMOTE_MEDIA_TIMEOUT_SECONDS = 120.0
+# OGG is intentionally excluded: WhatsApp accepts only mono Opus, which MIME sniffing cannot prove.
+_DIRECT_AUDIO_MIMETYPES = {"audio/aac", "audio/amr", "audio/mp4", "audio/mpeg"}
+_MIMETYPE_ALIASES = {
+    "audio/x-hx-aac-adts": "audio/aac",
+    "audio/x-m4a": "audio/mp4",
+}
 
 
 def _default_database_path() -> Path:
@@ -68,9 +82,15 @@ def _load_neonize() -> _NeonizeAPI:
         return _NEONIZE_API
 
     try:
+        import magic
         from neonize.aioze.client import NewAClient
         from neonize.aioze.events import ConnectedEv, DisconnectedEv, MessageEv, PairStatusEv
         from neonize.utils.jid import build_jid
+
+        detect_mime = getattr(magic, "from_file", None)
+        detect_buffer = getattr(magic, "from_buffer", None)
+        if not callable(detect_mime) or not callable(detect_buffer):
+            raise ImportError("python-magic does not expose from_file/from_buffer")
     except ImportError as exc:
         raise RuntimeError(
             "WhatsApp dependencies not installed. Run: nanobot plugins enable whatsapp"
@@ -83,6 +103,8 @@ def _load_neonize() -> _NeonizeAPI:
         MessageEv=MessageEv,
         PairStatusEv=PairStatusEv,
         build_jid=build_jid,
+        detect_mime=detect_mime,
+        detect_buffer=detect_buffer,
     )
     return _NEONIZE_API
 
@@ -417,22 +439,83 @@ class WhatsAppChannel(BaseChannel):
         return api.build_jid(user, server)
 
     async def _send_media(self, client: Any, to: Any, media_path: str) -> None:
-        path = str(Path(media_path).expanduser())
-        mime, _ = mimetypes.guess_type(path)
-        mimetype = mime or "application/octet-stream"
+        source: str | bytes
+        if media_path.startswith(("http://", "https://")):
+            source = await self._fetch_remote_media(media_path)
+            filename = Path(urlparse(media_path).path).name or "attachment"
+        else:
+            source = str(Path(media_path).expanduser())
+            filename = Path(source).name
+
+        mimetype = self._detect_mimetype(source)
         if mimetype.startswith("image/"):
-            await client.send_image(to, path)
+            await client.send_image(to, source)
         elif mimetype.startswith("video/"):
-            await client.send_video(to, path)
-        elif mimetype.startswith("audio/"):
-            await client.send_audio(to, path)
+            await client.send_video(to, source)
+        elif mimetype in _DIRECT_AUDIO_MIMETYPES:
+            await client.send_audio(to, source)
         else:
             await client.send_document(
                 to,
-                path,
-                filename=Path(path).name,
+                source,
+                filename=filename,
                 mimetype=mimetype,
             )
+
+    async def _fetch_remote_media(self, url: str) -> bytes:
+        timeout = httpx.Timeout(_REMOTE_MEDIA_TIMEOUT_SECONDS, connect=10.0)
+        async with httpx.AsyncClient(
+            transport=PinnedDNSAsyncTransport(),
+            follow_redirects=True,
+            max_redirects=_REMOTE_MEDIA_MAX_REDIRECTS,
+            timeout=timeout,
+            trust_env=False,
+        ) as http:
+            async with http.stream("GET", url) as response:
+                response.raise_for_status()
+                declared_size = response.headers.get("content-length")
+                if (
+                    declared_size
+                    and declared_size.isdigit()
+                    and int(declared_size) > _REMOTE_MEDIA_MAX_BYTES
+                ):
+                    raise ValueError(
+                        f"Remote WhatsApp media exceeds the {_REMOTE_MEDIA_MAX_BYTES}-byte limit"
+                    )
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > _REMOTE_MEDIA_MAX_BYTES:
+                        raise ValueError(
+                            f"Remote WhatsApp media exceeds the {_REMOTE_MEDIA_MAX_BYTES}-byte limit"
+                        )
+                    chunks.append(chunk)
+        return b"".join(chunks)
+
+    def _detect_mimetype(self, source: str | bytes) -> str:
+        try:
+            api = _load_neonize()
+            detected = (
+                api.detect_buffer(source, mime=True)
+                if isinstance(source, bytes)
+                else api.detect_mime(source, mime=True)
+            )
+        except Exception as exc:
+            label = f"{len(source)} downloaded bytes" if isinstance(source, bytes) else source
+            self.logger.debug("Failed to inspect WhatsApp media {}: {}", label, exc)
+            detected = None
+
+        if isinstance(detected, str) and "/" in detected:
+            mimetype = detected.partition(";")[0].strip().lower()
+            return _MIMETYPE_ALIASES.get(mimetype, mimetype)
+
+        if isinstance(source, bytes):
+            return "application/octet-stream"
+
+        guessed, _ = mimetypes.guess_type(source)
+        return guessed or "application/octet-stream"
 
     def _register_handlers(
         self,

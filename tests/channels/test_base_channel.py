@@ -84,6 +84,49 @@ async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dm_during_transient_store_failure_keeps_approvals(
+    tmp_path, monkeypatch
+) -> None:
+    """An unapproved DM while pairing.json is unreadable must not wipe approvals.
+
+    The pairing store treated a transient OSError like corruption and returned
+    an empty store; the DM pairing path then persisted that empty view,
+    erasing every approved sender.
+    """
+    import builtins
+    from pathlib import Path
+
+    from nanobot.pairing import store
+
+    path = tmp_path / "pairing.json"
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    code = store.generate_code("dummy", "friend")
+    store.approve_code(code)
+
+    channel = _DummyChannel({"allowFrom": []}, MessageBus())
+
+    real_open = builtins.open
+
+    def flaky_open(file, mode="r", *args, **kwargs):
+        try:
+            same = Path(file) == path
+        except TypeError:
+            same = False
+        if same and "r" in mode and "+" not in mode:
+            raise PermissionError(13, "temporarily locked", str(path))
+        return real_open(file, mode, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(builtins, "open", flaky_open)
+        await channel._handle_message(
+            sender_id="stranger", chat_id="chat1", content="hello", is_dm=True
+        )
+
+    assert channel._sent == []
+    assert store.is_approved("dummy", "friend") is True
+
+
+@pytest.mark.asyncio
 async def test_handle_message_group_ignores_unknown() -> None:
     channel = _DummyChannel({"allowFrom": []}, MessageBus())
 

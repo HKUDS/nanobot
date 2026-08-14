@@ -107,6 +107,10 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    finishRunLocally: vi.fn((chatId: string) => {
+      runStartedAtByChatId.delete(chatId);
+      latestRunTurnIdByChatId.delete(chatId);
+    }),
     hasUnsettledRun: () => false,
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
@@ -309,8 +313,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       temperature: 0.7,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "",
       tool_hint_max_length: 40,
     },
     model_presets: [{
@@ -850,6 +852,48 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
+  it("keeps temporary messages across navigation and drops them after clear", async () => {
+    const client = makeClient();
+    const view = (
+      chatId: string,
+      temporary: boolean,
+      temporaryChatIds: readonly string[],
+    ) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={temporary ? "Temporary chat" : "Regular chat"}
+        temporary={temporary}
+        temporaryChatIds={temporaryChatIds}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const retainedTemporaryChats = ["temporary-live"];
+    const { rerender } = render(view("temporary-live", true, retainedTemporaryChats));
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "keep this only in memory" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "temporary-live",
+      "keep this only in memory",
+    ));
+
+    rerender(view("regular", false, retainedTemporaryChats));
+    await waitFor(() => {
+      expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
+    });
+    rerender(view("temporary-live", true, retainedTemporaryChats));
+    expect(screen.getByText("keep this only in memory")).toBeInTheDocument();
+
+    rerender(view("temporary-cleared", true, ["temporary-cleared"]));
+    await waitFor(() => {
+      expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
+    });
+  });
+
   it("highlights sent skill references without skill metadata", async () => {
     const client = makeClient();
     render(wrap(
@@ -870,7 +914,7 @@ describe("ThreadShell", () => {
       expectSendMessageWithTurn(client, "skill-reference", "Use $github for this"),
     );
     expect(screen.getByTestId("message-skill-reference-github"))
-      .toHaveTextContent("$github");
+      .toHaveTextContent(/^github$/);
   });
 
   it("clears the old thread when the active session is removed", async () => {
@@ -946,6 +990,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real");
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
@@ -1226,7 +1271,7 @@ describe("ThreadShell", () => {
 
     const greeting = screen.getByRole("heading", { level: 1, name: HERO_GREETING_PATTERN });
     expect(greeting).toHaveAttribute("data-testid", "hero-greeting");
-    expect(greeting).toHaveClass("whitespace-nowrap");
+    expect(greeting).toHaveClass("select-none", "whitespace-nowrap");
     expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create a project plan" })).not.toBeInTheDocument();
@@ -3613,7 +3658,7 @@ describe("ThreadShell", () => {
     ));
 
     const input = await screen.findByLabelText("Message input");
-    expect(screen.queryByRole("listbox", { name: "Apps" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
 
     const payload: CliAppsPayload = {
       apps: [{
@@ -3641,7 +3686,7 @@ describe("ThreadShell", () => {
     });
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
-    expect(screen.getByRole("listbox", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Mentions" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
   });
 
@@ -3768,5 +3813,43 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("composer-cli-mention-obsidian-agent-cli")).toHaveTextContent(
       "@obsidian-agent-cli",
     );
+  });
+
+  it("offers only same-project sessions in restricted mode", async () => {
+    const client = makeClient();
+    const currentScope = {
+      project_path: "/projects/current",
+      access_mode: "restricted" as const,
+    };
+    const sameProject = {
+      ...session("same-project"),
+      title: "Same project",
+      workspaceScope: currentScope,
+    };
+    const otherProject = {
+      ...session("other-project"),
+      title: "Other project",
+      workspaceScope: {
+        project_path: "/projects/other",
+        access_mode: "restricted" as const,
+      },
+    };
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("current")}
+        sessions={[sameProject, otherProject]}
+        title="Current"
+        onToggleSidebar={() => {}}
+        workspaceScope={currentScope}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    expect(screen.getByRole("option", { name: /Same project/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Other project/i })).not.toBeInTheDocument();
   });
 });

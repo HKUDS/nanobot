@@ -40,9 +40,15 @@ def _load() -> dict[str, Any]:
             data = json.load(f)
     except FileNotFoundError:
         return {"approved": {}, "pending": {}}
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError:
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
+    except OSError:
+        # A transiently locked or busy file is not corruption. Propagate so
+        # mutating callers fail loudly instead of persisting an empty view
+        # that would erase every approved sender.
+        logger.warning("Pairing store temporarily unreadable: {}", path)
+        raise
     if not isinstance(data, dict):
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
@@ -171,7 +177,11 @@ def deny_code(code: str) -> bool:
 def is_approved(channel: str, sender_id: str) -> bool:
     """Check whether *sender_id* has been approved on *channel*."""
     with _LOCK:
-        data = _load()
+        try:
+            data = _load()
+        except OSError:
+            # Fail closed for this check; the store itself stays untouched.
+            return False
         approved: dict[str, set[str]] = data.get("approved", {})
         return str(sender_id) in approved.get(channel, set())
 
@@ -179,7 +189,10 @@ def is_approved(channel: str, sender_id: str) -> bool:
 def list_pending() -> list[dict[str, Any]]:
     """Return all non-expired pending pairing requests."""
     with _LOCK:
-        data = _load()
+        try:
+            data = _load()
+        except OSError:
+            return []
         _gc_pending(data)
         return [
             {"code": code, **info}
@@ -257,7 +270,10 @@ def clear_channel(channel: str) -> dict[str, int]:
 def get_approved(channel: str) -> list[str]:
     """Return all approved sender IDs for *channel*."""
     with _LOCK:
-        data = _load()
+        try:
+            data = _load()
+        except OSError:
+            return []
         return sorted(data.get("approved", {}).get(channel, set()))
 
 
@@ -283,6 +299,15 @@ def handle_pairing_command(channel: str, subcommand_text: str) -> str:
     This is a pure function (no side effects other than store mutations)
     so it can be used from both the CLI and the agent CommandRouter.
     """
+    try:
+        return _handle_pairing_subcommand(channel, subcommand_text)
+    except OSError:
+        # Mutations fail loudly on a transient I/O error instead of lying
+        # ("invalid code") or silently rewriting the store from an empty view.
+        return "The pairing store is temporarily unavailable. Please try again."
+
+
+def _handle_pairing_subcommand(channel: str, subcommand_text: str) -> str:
     parts = subcommand_text.split()
     sub = parts[0] if parts else "list"
     arg = parts[1] if len(parts) > 1 else None

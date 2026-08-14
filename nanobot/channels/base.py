@@ -101,6 +101,31 @@ class BaseChannel(ABC):
         """
         pass
 
+    def progress_transport_defaults(self) -> tuple[bool, bool] | None:
+        """Return channel-owned defaults for progress and tool-hint messages.
+
+        ``None`` keeps the global channel policy. Channels should override this
+        only when their transport requires different defaults.
+        """
+        return None
+
+    def should_retry_send_error(self, error: Exception) -> bool:
+        """Return whether the channel manager may retry a failed delivery.
+
+        Channels with protocol-level business errors can override this hook to
+        prevent retries that cannot succeed until external state changes.
+        Transport and unexpected errors remain retryable by default.
+        """
+        return True
+
+    def start_error_message(self, error: Exception) -> str | None:
+        """Return an actionable public message for a channel startup failure.
+
+        Channel-specific exception handling stays in the owning channel. Returning
+        ``None`` keeps the manager's generic fallback.
+        """
+        return None
+
     async def send_delta(
         self,
         chat_id: str,
@@ -237,6 +262,7 @@ class BaseChannel(ABC):
         session_key: str | None = None,
         is_dm: bool = False,
         authorization_id: str | None = None,
+        require_existing_session: bool = False,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -248,7 +274,15 @@ class BaseChannel(ABC):
         permission_id = authorization_id if authorization_id is not None else sender_id
         if not self.is_allowed(permission_id):
             if is_dm:
-                code = generate_code(self.name, str(sender_id))
+                try:
+                    code = generate_code(self.name, str(sender_id))
+                except OSError:
+                    # Transient pairing-store I/O failure: skip the pairing
+                    # reply for this message rather than crash the handler.
+                    self.logger.warning(
+                        "Pairing store unavailable; dropping DM from {}", sender_id
+                    )
+                    return
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
@@ -281,6 +315,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            require_existing_session=require_existing_session,
         )
 
         await self.bus.publish_inbound(msg)

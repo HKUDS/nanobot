@@ -111,6 +111,14 @@ class ProviderSpec:
     # Substring match against the wire model name (lowercased).
     implicit_reasoning_models: tuple[str, ...] = ()
 
+    # Models that expose the OpenAI Responses wire format.  This is model-level
+    # because providers may add Responses support incrementally.
+    responses_models: tuple[str, ...] = ()
+
+    # Provider-hosted Responses tools sent unless extraBody.tools explicitly
+    # supplies the hosted-tool selection. Values are raw Responses tool types.
+    responses_default_tools: tuple[str, ...] = ()
+
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
     # reasoning_content. Mistral's Magistral / reasoning-enabled responses use
@@ -190,6 +198,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
+    ),
+    # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
+    # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
+    ProviderSpec(
+        name="edenai",
+        keywords=("edenai",),
+        env_key="EDENAI_API_KEY",
+        display_name="Eden AI",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="edenai",
+        default_api_base="https://api.edenai.run/v3",
     ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
@@ -461,6 +481,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        responses_models=("deepseek-v4-flash", "deepseek-v4-pro"),
+        responses_default_tools=("web_search",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(

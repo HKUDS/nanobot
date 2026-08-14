@@ -174,6 +174,7 @@ export function AgentActivityCluster({
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const activityContentRef = useRef<HTMLDivElement>(null);
   const autoFollowActivityRef = useRef(true);
@@ -227,11 +228,26 @@ export function AgentActivityCluster({
     }
   }, []);
 
+  const syncActivityScrollFade = useCallback(() => {
+    const el = activityScrollRef.current;
+    if (!el) return;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop));
+    const next = {
+      top: scrollTop > 1,
+      bottom: maxScrollTop - scrollTop > 1,
+    };
+    setActivityScrollFade((current) =>
+      current.top === next.top && current.bottom === next.bottom ? current : next,
+    );
+  }, []);
+
   const scrollActivityToBottom = useCallback(() => {
     const el = activityScrollRef.current;
     if (!el) return;
     el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-  }, []);
+    syncActivityScrollFade();
+  }, [syncActivityScrollFade]);
 
   const scheduleActivityScrollToBottom = useCallback(() => {
     cancelActivityScrollFrame();
@@ -265,11 +281,13 @@ export function AgentActivityCluster({
     const observer = new ResizeObserver(() => {
       if (autoFollowActivityRef.current) {
         scheduleActivityScrollToBottom();
+      } else {
+        syncActivityScrollFade();
       }
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom]);
+  }, [outerExpanded, scheduleActivityScrollToBottom, syncActivityScrollFade]);
 
   useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
@@ -289,7 +307,7 @@ export function AgentActivityCluster({
     }
     if (!wasStreaming || userToggledOuter) return undefined;
     setCompletionHoldOpen(true);
-    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 900);
+    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 300);
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 
@@ -298,7 +316,8 @@ export function AgentActivityCluster({
     if (!el) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-  }, []);
+    syncActivityScrollFade();
+  }, [syncActivityScrollFade]);
 
   if (!hasVisibleActivity) return null;
 
@@ -322,6 +341,8 @@ export function AgentActivityCluster({
         label={thoughtLabel}
         viewportRef={activityScrollRef}
         contentRef={activityContentRef}
+        fadeTop={activityScrollFade.top}
+        fadeBottom={activityScrollFade.bottom}
         onToggle={toggleOuter}
         onScroll={onActivityScroll}
       >

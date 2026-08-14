@@ -168,6 +168,9 @@ export class ThreadMotionCoordinator {
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
   private composerInputDuringTurn = false;
+  // A user leaving the live tail must first move beyond the near-bottom
+  // boundary, or explicitly reverse toward latest, before follow can resume.
+  private resumeFollowArmed = false;
 
   constructor(options: ThreadMotionCoordinatorOptions) {
     this.camera = options.camera;
@@ -198,6 +201,7 @@ export class ThreadMotionCoordinator {
     if (isNewTurn) {
       this.camera.cancel();
       this.composerInputDuringTurn = false;
+      this.resumeFollowArmed = false;
       this.promptPositioned = turn.entry === "restored";
       this.mode = this.promptPositioned && turn.hasOutput
         ? "follow-output"
@@ -249,15 +253,31 @@ export class ThreadMotionCoordinator {
     this.handleUserScrollIntent(true);
   }
 
-  handleUserScrollIntent(canScroll: boolean): void {
+  handleUserScrollIntent(canScroll: boolean, towardLatest = false): void {
+    if (this.mode === "browsing-history" && towardLatest && !canScroll) {
+      this.transitionToAutoFollow(false);
+      return;
+    }
     const event = canScroll ? "user-scroll" : "boundary-scroll";
-    if (!this.transition(event)) return;
+    const transitioned = this.transition(event);
+    if (this.mode === "browsing-history" && canScroll) {
+      this.resumeFollowArmed = towardLatest;
+    } else if (transitioned && this.mode === "browsing-history") {
+      this.resumeFollowArmed = false;
+    }
+    if (!transitioned) return;
     this.camera.cancel();
   }
 
   resumeAutoFollow(): void {
+    this.transitionToAutoFollow(true);
+  }
+
+  private transitionToAutoFollow(cancelCamera: boolean): void {
     if (!this.transition("resume-follow")) return;
-    this.camera.cancel();
+    this.resumeFollowArmed = false;
+    if (cancelCamera) this.camera.cancel();
+    this.onAutoFollow?.();
     this.invalidateGeometry();
   }
 
@@ -317,11 +337,19 @@ export class ThreadMotionCoordinator {
       case "navigating-history":
         if (!this.camera.isFollowing()) {
           this.transition("navigation-settled");
-          if (nearBottom) this.resumeAutoFollow();
+          if (nearBottom) {
+            this.resumeAutoFollow();
+          } else {
+            this.resumeFollowArmed = true;
+          }
         }
         return "navigation";
       case "browsing-history":
-        if (!nearBottom) return "user";
+        if (!nearBottom) {
+          this.resumeFollowArmed = true;
+          return "user";
+        }
+        if (!this.resumeFollowArmed) return "user";
         this.resumeAutoFollow();
         return "automatic";
       default:
@@ -339,6 +367,7 @@ export class ThreadMotionCoordinator {
     this.camera.cancel();
     this.turn = { id: null, promptId: null, hasOutput: false };
     this.composerInputDuringTurn = false;
+    this.resumeFollowArmed = false;
     this.mode = "idle";
     this.promptPositioned = false;
   }

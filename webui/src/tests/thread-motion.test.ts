@@ -410,11 +410,65 @@ describe("ThreadMotionCoordinator", () => {
     expect(camera.jumpTo).toHaveBeenCalledWith(780);
 
     coordinator.takeUserControl();
+    expect(coordinator.observeScroll(true)).toBe("user");
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+
     expect(coordinator.observeScroll(false)).toBe("user");
     expect(coordinator.snapshot().mode).toBe("browsing-history");
 
     expect(coordinator.observeScroll(true)).toBe("automatic");
     expect(coordinator.snapshot().mode).toBe("anchor-prompt");
+  });
+
+  it("resumes shallow history browsing when user intent turns toward latest", () => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+    } = motionHarness({
+      scrollTop: 1_400,
+    });
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    camera.followTo.mockClear();
+
+    coordinator.handleUserScrollIntent(true);
+    expect(coordinator.observeScroll(true)).toBe("user");
+    advanceFrame();
+    expect(camera.followTo).not.toHaveBeenCalled();
+
+    coordinator.handleUserScrollIntent(true, true);
+    expect(coordinator.observeScroll(true)).toBe("automatic");
+    expect(coordinator.snapshot().mode).toBe("follow-output");
+    advanceFrame();
+    expect(camera.followTo).toHaveBeenCalledWith(1_400);
+  });
+
+  it("resumes shallow history browsing from forward intent at the boundary", () => {
+    const {
+      advanceFrame,
+      coordinator,
+      onAutoFollow,
+    } = motionHarness({
+      scrollTop: 1_400,
+    });
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+
+    coordinator.handleUserScrollIntent(true);
+    expect(coordinator.observeScroll(true)).toBe("user");
+
+    coordinator.handleUserScrollIntent(false, true);
+    expect(coordinator.snapshot().mode).toBe("follow-output");
+    expect(onAutoFollow).toHaveBeenCalledTimes(1);
   });
 
   it("preserves history browsing when an active turn is cleared", () => {

@@ -140,6 +140,111 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
 
 
 @pytest.mark.asyncio
+async def test_explicit_parameterized_x_search_is_preserved_without_catalog_lookup(
+    monkeypatch,
+) -> None:
+    _mock_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    async def unexpected_catalog_lookup(*_args, **_kwargs):
+        raise AssertionError("explicit raw tools must not depend on model catalog metadata")
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_grok_provider._fetch_xai_model_capabilities",
+        unexpected_catalog_lookup,
+    )
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    hosted_tool = {
+        "type": "x_search",
+        "allowed_x_handles": ["nanobot_ai"],
+        "from_date": "2026-01-01",
+    }
+    provider = XAIGrokProvider(extra_body={
+        "parallel_tool_calls": False,
+        "tools": [hosted_tool, {"type": "code_interpreter", "container": "auto"}],
+    })
+
+    response = await provider.chat(
+        [{"role": "user", "content": "search"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "x_search",
+                    "description": "A colliding local tool",
+                    "parameters": {"type": "object"},
+                },
+            },
+        ],
+    )
+
+    assert response.content == "ok"
+    assert bodies[0]["parallel_tool_calls"] is False
+    assert bodies[0]["tools"] == [
+        {
+            "type": "function",
+            "name": "read_file",
+            "description": "Read a file",
+            "parameters": {"type": "object"},
+        },
+        hosted_tool,
+        {"type": "code_interpreter", "container": "auto"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_empty_tools_disables_catalog_lookup_and_hosted_tool(monkeypatch) -> None:
+    _mock_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    async def unexpected_catalog_lookup(*_args, **_kwargs):
+        raise AssertionError("explicitly disabled X Search must not fetch model capabilities")
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_grok_provider._fetch_xai_model_capabilities",
+        unexpected_catalog_lookup,
+    )
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider(extra_body={"tools": []})
+
+    response = await provider.chat(
+        [{"role": "user", "content": "hello"}],
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {"type": "object"},
+            },
+        }],
+    )
+
+    assert response.content == "ok"
+    assert bodies[0]["tools"] == [{
+        "type": "function",
+        "name": "read_file",
+        "description": "Read a file",
+        "parameters": {"type": "object"},
+    }]
+
+
+@pytest.mark.asyncio
 async def test_provider_keeps_local_x_search_when_model_does_not_support_hosted_search(
     monkeypatch,
 ) -> None:

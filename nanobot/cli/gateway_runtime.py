@@ -14,6 +14,8 @@ from rich.console import Console
 from nanobot import __logo__, __version__
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.mcp import MCPProvider
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.runtime_config import _migrate_cron_store
 from nanobot.cli.webui_support import (
@@ -25,6 +27,7 @@ from nanobot.cli.webui_support import (
     _tcp_endpoint_reachable,
     _webui_browser_url,
     _webui_channel_enabled,
+    _webui_display_url,
     _webui_endpoint_reachable,
 )
 from nanobot.config.paths import is_default_workspace
@@ -34,11 +37,40 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.webui.build import BuildMode
+from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
 
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+
+def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
+    """Return whether an HTTP endpoint responds, including with an auth error."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+
+async def _watch_webui_dev_server(
+    server: WebUIDevServer,
+    shutdown_event: asyncio.Event,
+    *,
+    poll_interval_s: float = 0.2,
+) -> None:
+    """Fail the foreground gateway when its owned Vite sidecar exits."""
+    while not shutdown_event.is_set():
+        await asyncio.sleep(poll_interval_s)
+        if shutdown_event.is_set():
+            return
+        server.ensure_running()
 
 
 def _signal_name(signum: int) -> str:
@@ -201,17 +233,71 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
     )
 
 
+async def _close_gateway_runtime(
+    agent: AgentLoop,
+    mcp_provider: MCPProvider,
+    channels: Any,
+    tasks: list[asyncio.Task[Any]],
+    runtime_tasks: asyncio.Future[list[Any]] | None,
+    *,
+    task_wait_timeout: float = 15.0,
+    close_timeout: float = 15.0,
+) -> None:
+    """Cancel runtime tasks, then deterministically close application resources.
+
+    Order matters: runtime tasks (including the agent loop and any in-flight
+    turn) are cancelled and awaited -- bounded -- before the loop-owned resources
+    and the application-owned MCP provider are torn down. The final close is
+    bounded and idempotent, so it also covers a cancelled or incomplete loop
+    cleanup without leaving subprocess transports alive past ``loop.close()``.
+    """
+    # Some SDKs swallow task cancellation while attempting to reconnect.
+    # Close channel transports before waiting for their runners to exit.
+    await channels.stop_all()
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    pending: set[asyncio.Task[Any]] = set()
+    if tasks:
+        # Bounded: a coroutine that swallows cancellation (e.g. an SDK reconnect
+        # loop) must not hold the stop open until systemd's timeout kills the
+        # cgroup. Anything still pending is abandoned and closed underneath.
+        _done, pending = await asyncio.wait(tasks, timeout=task_wait_timeout)
+        # A task can swallow the first cancellation while unwinding. Re-cancel
+        # timed-out tasks so an agent loop stuck draining background work reaches
+        # its resource-cleanup phase before the explicit final close below.
+        for task in pending:
+            task.cancel()
+    if runtime_tasks is not None and not runtime_tasks.done():
+        runtime_tasks.cancel()
+    for label, close in (
+        ("agent", agent.aclose),
+        ("MCP provider", mcp_provider.aclose),
+    ):
+        try:
+            await asyncio.wait_for(close(), timeout=close_timeout)
+        except BaseException as exc:  # noqa: BLE001 - shutdown must proceed
+            logger.warning("Gateway shutdown: {} cleanup incomplete: {}", label, exc)
+    # Retrieving an already-finished gather prevents noisy unhandled exceptions,
+    # but never wait for it here: its children were bounded individually above.
+    if runtime_tasks is not None and runtime_tasks.done():
+        with suppress(asyncio.CancelledError, Exception):
+            await runtime_tasks
+
+
 def _run_gateway(
     config: Config,
     *,
     port: int | None = None,
     open_browser_url: str | None = None,
+    open_browser_ready_url: str | None = None,
     webui_static_dist: bool = True,
     webui_bundle_mode: BuildMode = "warn",
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
     unconfigured_provider_error: str | None = None,
+    webui_dev_server: WebUIDevServer | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
@@ -330,6 +416,9 @@ def _run_gateway(
         route_policy=WebuiTurnRoutePolicy(session_manager),
     )
 
+    tools = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(config, tools)
+
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
@@ -347,6 +436,7 @@ def _run_gateway(
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
+        tool_registry=tools,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
         agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
@@ -428,6 +518,7 @@ def _run_gateway(
                 prompt, last_cursor = result
                 key = dream_session_key()
                 dream_runtime = agent.dream_runtime()
+                await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
                     session_key=key,
@@ -475,7 +566,7 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions.sessions_dir)
+                prune_dream_sessions(agent.sessions)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
@@ -505,6 +596,7 @@ def _run_gateway(
             if isinstance(message_tool, MessageTool):
                 suppress_token = message_tool.set_suppress_delivery(True)
             try:
+                await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
                     session_key="heartbeat",
@@ -584,7 +676,10 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
+        webui_mcp_runtime_status=mcp_provider.runtime_status,
+        webui_mcp_reload=mcp_provider.reload,
         webui_skill_state_action=_webui_skill_state_action,
+        config_path=Path(config_path),
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
@@ -708,10 +803,21 @@ def _run_gateway(
         import webbrowser
         from urllib.parse import urlparse
 
+        # Channels start asynchronously. When the caller supplies a backend
+        # readiness route, wait for an actual HTTP response rather than probing
+        # the WebSocket listener with an incomplete TCP connection.
+        if open_browser_ready_url:
+            for _ in range(40):  # ~4s max per listener
+                if await asyncio.to_thread(
+                    _http_endpoint_responding,
+                    open_browser_ready_url,
+                ):
+                    break
+                await asyncio.sleep(0.1)
+
         parsed = urlparse(open_browser_url)
         target_host = parsed.hostname or config.gateway.host or "127.0.0.1"
         target_port = parsed.port or port
-        # Channels start asynchronously; a short poll lets us avoid racing the bind.
         for _ in range(40):  # ~4s max
             try:
                 _reader, writer = await asyncio.open_connection(
@@ -724,17 +830,17 @@ def _run_gateway(
                 break
             except OSError:
                 await asyncio.sleep(0.1)
+        display_url = _webui_display_url(open_browser_url)
         try:
             webbrowser.open(open_browser_url)
-            console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
+            console.print(f"[green]✓[/green] Opened browser at {display_url}")
         except Exception as e:
-            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
+            console.print(f"[yellow]Could not open browser ({e}); visit {display_url}[/yellow]")
 
     async def run() -> None:
         tasks: list[asyncio.Task[Any]] = []
         shutdown_task: asyncio.Task[Any] | None = None
         runtime_tasks: asyncio.Future[list[Any]] | None = None
-        runtime_tasks_drained = False
         shutdown_event = asyncio.Event()
         cli_terminal._ensure_interactive_tty_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
@@ -747,6 +853,13 @@ def _run_gateway(
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
+            async def _run_agent() -> None:
+                try:
+                    await mcp_provider.connect()
+                    await agent.run()
+                finally:
+                    await mcp_provider.aclose()
+
             tasks = [
                 asyncio.create_task(
                     watch_config_file(
@@ -755,7 +868,7 @@ def _run_gateway(
                     ),
                     name="nanobot-config-watcher",
                 ),
-                asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
+                asyncio.create_task(_run_agent(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
                 asyncio.create_task(
                     run_local_trigger_queue(
@@ -776,6 +889,11 @@ def _run_gateway(
                     _open_browser_when_ready(),
                     name="nanobot-open-browser",
                 ))
+            if webui_dev_server is not None:
+                tasks.append(asyncio.create_task(
+                    _watch_webui_dev_server(webui_dev_server, shutdown_event),
+                    name="nanobot-webui-dev-server",
+                ))
             runtime_tasks = asyncio.gather(*tasks)
             shutdown_task = asyncio.create_task(
                 shutdown_event.wait(),
@@ -786,12 +904,13 @@ def _run_gateway(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if runtime_tasks in done:
-                runtime_tasks_drained = True
                 await runtime_tasks
             else:
                 runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+        except WebUIDevError:
+            raise
         except Exception:
             import traceback
 
@@ -805,17 +924,15 @@ def _run_gateway(
                         await shutdown_task
                 cron.stop()
                 agent.stop()
-                # Some SDKs swallow task cancellation while attempting to reconnect.
-                # Close channel transports before waiting for their runners to exit.
-                await channels.stop_all()
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                if runtime_tasks is not None and not runtime_tasks_drained:
-                    with suppress(asyncio.CancelledError, Exception):
-                        await runtime_tasks
+                # Cancel runtime tasks first, then deterministically close
+                # exec/MCP resources while the event loop is still alive.
+                await _close_gateway_runtime(
+                    agent,
+                    mcp_provider,
+                    channels,
+                    tasks,
+                    runtime_tasks,
+                )
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).

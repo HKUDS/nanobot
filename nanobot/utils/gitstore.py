@@ -5,14 +5,13 @@ from __future__ import annotations
 import io
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, cast
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
 if TYPE_CHECKING:
-    from dulwich.objects import Blob, Commit, ObjectID, Tree, TreeEntry
+    from dulwich.objects import Blob, Commit, ObjectID, Tree
     from dulwich.refs import Ref
     from dulwich.repo import Repo
 
@@ -43,25 +42,6 @@ class CommitInfo:
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
-
-
-@dataclass
-class LineAge:
-    """Age of a single line based on git blame."""
-
-    age_days: int  # days since last modification
-
-
-def _compute_line_ages(
-    annotated: Iterable[tuple[tuple["Commit", "TreeEntry"], bytes]],
-) -> list[LineAge]:
-    """Convert annotate results to per-line ages."""
-    now = datetime.now(tz=timezone.utc).date()
-    ages: list[LineAge] = []
-    for (commit, _tree_entry), _line_bytes in annotated:
-        dt = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc).date()
-        ages.append(LineAge(age_days=(now - dt).days))
-    return ages
 
 
 class GitStore:
@@ -176,7 +156,10 @@ class GitStore:
             )
             if cast(object, sha_bytes) is None:
                 return None
-            sha = sha_bytes.hex()[:8]
+            # porcelain.commit returns the id as a 40-char hex string that is
+            # already encoded to bytes; .hex() would encode those ASCII bytes
+            # again and produce an id no git command can resolve.
+            sha = sha_bytes.decode()[:8]
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
         except Exception as exc:
@@ -200,7 +183,7 @@ class GitStore:
                     return None
 
                 while sha:
-                    if sha.hex().startswith(short_sha):
+                    if sha.decode().startswith(short_sha):
                         return sha
                     commit_obj = repo[sha]
                     if commit_obj.type_name != b"commit":
@@ -280,7 +263,7 @@ class GitStore:
                     msg = commit.message.decode("utf-8", errors="replace").strip()
                     if message_prefix is None or msg.startswith(message_prefix):
                         entries.append(CommitInfo(
-                            sha=sha.hex()[:8],
+                            sha=sha.decode()[:8],
                             message=msg,
                             timestamp=ts,
                         ))
@@ -289,33 +272,6 @@ class GitStore:
             return entries
         except Exception as exc:
             raise GitStoreError("Git log failed") from exc
-
-    def line_ages(self, file_path: str) -> list[LineAge]:
-        """Compute the age of each line in a tracked file via git blame.
-
-        Returns one LineAge per line, in order.
-        Returns an empty list if the repo is not initialized or the file is
-        empty. Annotation failures raise :class:`GitStoreError`.
-        """
-
-        if not self.is_initialized():
-            return []
-
-        target = self._workspace / file_path
-        if not target.exists() or target.stat().st_size == 0:
-            return []
-
-        try:
-            from dulwich import porcelain
-
-            annotated = porcelain.annotate(str(self._workspace), file_path)
-        except Exception as exc:
-            raise GitStoreError(f"Git line annotation failed for {file_path}") from exc
-
-        if not annotated:
-            return []
-
-        return _compute_line_ages(annotated)
 
     def diff_commits(self, sha1: str, sha2: str) -> str:
         """Show diff between two commits."""
@@ -458,13 +414,6 @@ class GitStore:
         commit = cast("Commit", commit_obj)
         return cast("Tree", repo[commit.tree])
 
-    def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
-        """Find a commit by short SHA prefix match."""
-        for c in self.log(max_entries=max_entries):
-            if c.sha.startswith(short_sha):
-                return c
-        return None
-
     def show_commit_diff(
         self,
         short_sha: str,
@@ -484,7 +433,7 @@ class GitStore:
                     with Repo(str(self._workspace)) as repo:
                         commit = cast("Commit", repo[full_sha])
                         parent = commit.parents[0] if commit.parents else None
-                    diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
+                    diff = self.diff_commits(parent.decode()[:8], c.sha) if parent else ""
                     return c, diff
             return None
         except Exception as exc:

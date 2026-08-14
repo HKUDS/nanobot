@@ -70,9 +70,12 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("  /new  ")
         assert router.is_dispatchable_command("  /pairing list  ")
 
-    def test_unknown_slash_command_not_matched(self, router: CommandRouter) -> None:
-        assert not router.is_dispatchable_command("/unknown")
-        assert not router.is_dispatchable_command("/foo bar")
+    def test_invalid_slash_commands_match_for_explicit_rejection(
+        self, router: CommandRouter,
+    ) -> None:
+        assert router.is_dispatchable_command("/unknown")
+        assert router.is_dispatchable_command("/foo bar")
+        assert router.is_dispatchable_command("/status now")
 
 
 @pytest.mark.parametrize(
@@ -182,6 +185,57 @@ class TestMidTurnCommandDispatchedDirectly:
         )
         result = await router.dispatch(ctx)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_unknown_command_suggests_close_match(
+        self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
+    ) -> None:
+        fake_msg.content = "/neaw"
+        ctx = CommandContext(
+            msg=fake_msg, session=None,
+            key="test:chat1", raw="/neaw", loop=fake_loop,
+        )
+
+        result = await router.dispatch(ctx)
+
+        assert result is not None
+        assert result.content == 'Unknown command "/neaw". Did you mean "/new"?'
+        assert result.metadata["render_as"] == "text"
+
+    @pytest.mark.asyncio
+    async def test_exact_command_with_arguments_suggests_valid_form(
+        self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
+    ) -> None:
+        fake_msg.content = "/status now"
+        ctx = CommandContext(
+            msg=fake_msg, session=None,
+            key="test:chat1", raw="/status now", loop=fake_loop,
+        )
+
+        result = await router.dispatch(ctx)
+
+        assert result is not None
+        assert result.content == (
+            'Command "/status" does not accept arguments. Did you mean "/status"?'
+        )
+
+    @pytest.mark.asyncio
+    async def test_unknown_command_without_close_match_points_to_help(
+        self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
+    ) -> None:
+        fake_msg.content = "/totally-unknown-command"
+        ctx = CommandContext(
+            msg=fake_msg, session=None,
+            key="test:chat1", raw="/totally-unknown-command", loop=fake_loop,
+        )
+
+        result = await router.dispatch(ctx)
+
+        assert result is not None
+        assert result.content == (
+            'Unknown command "/totally-unknown-command". '
+            'Use "/help" to list available commands.'
+        )
 
 
 class TestPairingCommandDispatch:

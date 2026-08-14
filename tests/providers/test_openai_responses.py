@@ -1,9 +1,12 @@
 """Tests for the shared openai_responses converters and parsers."""
 
 import json
+from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
@@ -12,11 +15,21 @@ from nanobot.providers.openai_responses.converters import (
     split_tool_call_id,
 )
 from nanobot.providers.openai_responses.parsing import (
+    ResponsesStreamCapture,
     consume_sdk_stream,
     consume_sse,
     consume_sse_with_reasoning,
+    is_replayable_finish_reason,
     map_finish_reason,
     parse_response_output,
+)
+from nanobot.providers.openai_responses.state import (
+    build_responses_state,
+    is_compaction_compatibility_error,
+    prepare_responses_input,
+    resolve_compact_threshold,
+    responses_state_context_tokens,
+    responses_state_items,
 )
 
 # ======================================================================
@@ -137,6 +150,51 @@ class TestConvertMessages:
         assert items[0]["role"] == "assistant"
         assert items[0]["content"][0]["type"] == "output_text"
         assert items[0]["content"][0]["text"] == "I'll help"
+
+    def test_preserves_deepseek_reasoning_content(self):
+        _, items = convert_messages([
+            {"role": "assistant", "reasoning_content": "think first", "content": "answer"},
+        ], preserve_reasoning=True)
+
+        assert items == [
+            {
+                "type": "reasoning",
+                "content": [{"type": "output_text", "text": "think first"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}],
+                "status": "completed",
+                "id": "msg_0",
+            },
+        ]
+
+    def test_reasoning_content_serialized_as_array_for_deepseek(self):
+        # Regression for PR #5214: DeepSeek's Responses gateway rejects
+        # reasoning items whose ``content`` is a plain string with
+        # "input: invalid type: string ..., expected a sequence" (observed
+        # after context consolidation cleared provider state and forced
+        # full-history conversion). ``content`` must be a list of parts,
+        # matching both the OpenAI Responses schema and DeepSeek's accepted
+        # wire shape.
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "reasoning_content": "Michael topped up DeepSeek with $10.",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_1|fc_1",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                }],
+            },
+        ], preserve_reasoning=True)
+
+        assert items[0]["type"] == "reasoning"
+        assert items[0]["content"] == [
+            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+        ]
+        assert items[1]["type"] == "function_call"
 
     def test_assistant_empty_content_skipped(self):
         _, items = convert_messages([{"role": "assistant", "content": ""}])
@@ -398,6 +456,17 @@ class TestMapFinishReason:
     def test_unknown_defaults_to_stop(self):
         assert map_finish_reason("some_new_status") == "stop"
 
+    @pytest.mark.parametrize("finish_reason", ["stop", "tool_calls", "function_call"])
+    def test_replayable_finish_reasons(self, finish_reason):
+        assert is_replayable_finish_reason(finish_reason) is True
+
+    @pytest.mark.parametrize(
+        "finish_reason",
+        ["length", "refusal", "content_filter", "error"],
+    )
+    def test_non_replayable_finish_reasons(self, finish_reason):
+        assert is_replayable_finish_reason(finish_reason) is False
+
 
 # ======================================================================
 # parsing - parse_response_output
@@ -418,6 +487,29 @@ class TestParseResponseOutput:
         assert result.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         assert result.tool_calls == []
 
+    def test_refusal_response_surfaces_text_without_advancing_state(self):
+        refusal = "I can’t help with that request."
+        resp = {
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+            "status": "completed",
+            "usage": {},
+        }
+
+        result = parse_response_output(
+            resp,
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "request"}],
+        )
+
+        assert result.content == refusal
+        assert result.finish_reason == "refusal"
+        assert result.provider_state is None
+
     def test_tool_call_response(self):
         resp = {
             "output": [{
@@ -429,12 +521,18 @@ class TestParseResponseOutput:
             "status": "completed",
             "usage": {},
         }
-        result = parse_response_output(resp)
+        result = parse_response_output(
+            resp,
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "weather?"}],
+        )
         assert result.content is None
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "get_weather"
         assert result.tool_calls[0].arguments == {"city": "SF"}
         assert result.tool_calls[0].id == "call_1|fc_1"
+        assert result.provider_state is not None
 
     def test_malformed_tool_arguments_logged(self):
         """Malformed JSON arguments should log a warning and remain non-object."""
@@ -487,16 +585,61 @@ class TestParseResponseOutput:
         assert result.content == "42"
         assert result.reasoning_content == "I think therefore I am."
 
+    def test_deepseek_reasoning_content_extracted(self):
+        resp = {
+            "output": [
+                {"type": "reasoning", "content": "think first"},
+                {"type": "message", "content": [
+                    {"type": "output_text", "text": "answer"},
+                ]},
+            ],
+            "status": "completed", "usage": {},
+        }
+
+        result = parse_response_output(resp)
+
+        assert result.content == "answer"
+        assert result.reasoning_content == "think first"
+
     def test_empty_output(self):
         resp = {"output": [], "status": "completed", "usage": {}}
         result = parse_response_output(resp)
         assert result.content is None
         assert result.tool_calls == []
 
-    def test_incomplete_status(self):
-        resp = {"output": [], "status": "incomplete", "usage": {}}
-        result = parse_response_output(resp)
-        assert result.finish_reason == "length"
+    @pytest.mark.parametrize(
+        ("reason", "expected_finish_reason"),
+        [
+            ("max_output_tokens", "length"),
+            ("content_filter", "content_filter"),
+        ],
+    )
+    def test_incomplete_status(self, reason, expected_finish_reason):
+        resp = {
+            "output": [],
+            "status": "incomplete",
+            "incomplete_details": {"reason": reason},
+            "usage": {},
+        }
+        result = parse_response_output(
+            resp,
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "prompt"}],
+        )
+        assert result.finish_reason == expected_finish_reason
+        assert result.provider_state is None
+
+    def test_unknown_status_does_not_advance_provider_state(self):
+        result = parse_response_output(
+            {"output": [], "status": "future_terminal_status", "usage": {}},
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "prompt"}],
+        )
+
+        assert result.finish_reason == "stop"
+        assert result.provider_state is None
 
     def test_sdk_model_object(self):
         """parse_response_output should handle SDK objects with model_dump()."""
@@ -522,6 +665,247 @@ class TestParseResponseOutput:
         assert result.usage["prompt_tokens"] == 100
         assert result.usage["completion_tokens"] == 50
         assert result.usage["total_tokens"] == 150
+
+    def test_preserves_every_output_item_as_opaque_state(self):
+        input_items = [{"role": "user", "content": "inspect the repo"}]
+        output = [
+            {
+                "id": "rs_1",
+                "type": "reasoning",
+                "encrypted_content": "opaque-secret",
+                "summary": [],
+            },
+            {
+                "id": "future_1",
+                "type": "future_item_type",
+                "provider_field": {"nested": True},
+            },
+            {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "done"}],
+            },
+        ]
+
+        result = parse_response_output(
+            {"output": output, "status": "completed", "usage": {}},
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=input_items,
+        )
+
+        assert result.provider_state is not None
+        assert responses_state_items(result.provider_state) == [*input_items, *output]
+
+
+class TestResponsesConversationState:
+    def test_server_compaction_prunes_superseded_prefix(self):
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[
+                {"type": "message", "role": "user", "content": "old"},
+                {"type": "reasoning", "encrypted_content": "old-reasoning"},
+            ],
+            output_items=[
+                {"type": "compaction", "encrypted_content": "compact"},
+                {"type": "message", "role": "assistant", "content": "new"},
+            ],
+            usage={
+                "prompt_tokens": 90,
+                "completion_tokens": 10,
+                "total_tokens": 100,
+            },
+        )
+
+        assert responses_state_items(state) == [
+            {"type": "compaction", "encrypted_content": "compact"},
+            {"type": "message", "role": "assistant", "content": "new"},
+        ]
+        assert responses_state_context_tokens(state) == 100
+
+    def test_existing_compaction_keeps_canonical_retained_prefix(self):
+        canonical_input = [
+            {"type": "message", "role": "user", "content": "retained"},
+            {"type": "compaction", "encrypted_content": "compact"},
+        ]
+        output = [{"type": "message", "role": "assistant", "content": "new"}]
+
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=canonical_input,
+            output_items=output,
+        )
+
+        assert responses_state_items(state) == [*canonical_input, *output]
+
+    @pytest.mark.parametrize(
+        ("context_window", "max_output", "expected"),
+        [
+            (200_000, 20_000, 180_000),
+            (100_000, 30_000, 70_000),
+            (0, 4_096, None),
+        ],
+    )
+    def test_compact_threshold_reserves_codex_style_headroom(
+        self,
+        context_window,
+        max_output,
+        expected,
+    ):
+        assert resolve_compact_threshold(context_window, max_output) == expected
+
+    def test_compaction_compatibility_recognizes_old_sdk_signature_error(self):
+        error = TypeError("create() got an unexpected keyword argument 'context_management'")
+        assert is_compaction_compatibility_error(error) is True
+        assert is_compaction_compatibility_error(TypeError("unrelated argument")) is False
+
+    def test_state_observability_logs_counts_without_opaque_content(self):
+        secret = "opaque-secret-that-must-not-be-logged"
+        state = build_responses_state(
+            provider=f"openai:https://example.test/?key={secret}",
+            model=f"secret-model-{secret}",
+            input_items=[{"role": "user", "content": secret}],
+            output_items=[{"type": "reasoning", "encrypted_content": secret}],
+        ).with_pending_messages([{"role": "user", "content": secret}])
+        sink = StringIO()
+        sink_id = logger.add(sink, level="DEBUG", format="{message}")
+        try:
+            prepare_responses_input(
+                [{"role": "user", "content": secret}],
+                state=state,
+                provider=state.provider,
+                model=state.model,
+            )
+            build_responses_state(
+                provider=state.provider,
+                model=state.model,
+                input_items=[
+                    {"role": "user", "content": secret},
+                    {"type": "reasoning", "encrypted_content": secret},
+                ],
+                output_items=[
+                    {"type": "compaction", "encrypted_content": secret},
+                ],
+            )
+        finally:
+            logger.remove(sink_id)
+
+        log_text = sink.getvalue()
+        assert "prior_items=2" in log_text
+        assert "pending_messages=1" in log_text
+        assert "dropped_items=2" in log_text
+        assert secret not in log_text
+
+    def test_replays_exact_items_then_only_pending_and_new_messages(self):
+        prior_items = [
+            {"role": "user", "content": "first"},
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque-secret",
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": '{"path":"a.py"}',
+            },
+        ]
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=prior_items[:1],
+            output_items=prior_items[1:],
+        ).with_pending_messages([
+            {
+                "role": "tool",
+                "tool_call_id": "call_1|fc_1",
+                "content": "file contents",
+            },
+            {"role": "user", "content": "continue"},
+        ])
+
+        instructions, items, replayed = prepare_responses_input(
+            [
+                {"role": "system", "content": "current instructions"},
+                {"role": "user", "content": "a lossy public transcript"},
+            ],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert instructions == "current instructions"
+        assert replayed is True
+        assert items[:3] == prior_items
+        assert items[3] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "file contents",
+        }
+        assert items[4] == {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}],
+        }
+        assert "lossy public transcript" not in str(items)
+
+    def test_replayed_and_delta_reasoning_items_keep_array_content(self):
+        # Regression for PR #5214: token consolidation clears
+        # ``provider_state``, so the next turn converts the full history
+        # (including assistant reasoning) instead of replaying server items.
+        # Both paths must keep reasoning ``content`` as a list - DeepSeek's
+        # Responses gateway rejects the string form with a serde error.
+        prior_items = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "content": [{"type": "output_text", "text": "prior reasoning"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "prior answer"}],
+                "status": "completed",
+                "id": "msg_0",
+            },
+        ]
+        state = build_responses_state(
+            provider="openai:test",
+            model="deepseek-v4-flash",
+            input_items=prior_items,
+            output_items=[],
+        ).with_pending_messages([
+            {
+                "role": "assistant",
+                "reasoning_content": "think before acting",
+                "content": "answer",
+            },
+            {"role": "user", "content": "audit the tools"},
+        ])
+
+        instructions, items, replayed = prepare_responses_input(
+            [
+                {"role": "system", "content": "You are KITT."},
+                {"role": "user", "content": "audit the tools"},
+            ],
+            state=state,
+            provider="openai:test",
+            model="deepseek-v4-flash",
+            preserve_reasoning=True,
+        )
+
+        assert instructions == "You are KITT."
+        assert replayed is True
+        reasoning_items = [item for item in items if item.get("type") == "reasoning"]
+        assert len(reasoning_items) == 2  # one replayed, one converted delta
+        for item in reasoning_items:
+            assert isinstance(item["content"], list)
+            assert item["content"][0]["type"] == "output_text"
 
 
 # ======================================================================
@@ -552,6 +936,122 @@ class TestConsumeSse:
         assert content == "hi"
         assert tool_calls == []
         assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_refusal_events_reconcile_parts_and_terminal_output(self):
+        refusal = "First and second sentence. Done-only. Terminal suffix."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_2",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        response = _SseResponse([
+            {
+                "type": "response.refusal.delta",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "delta": "First",
+            },
+            {
+                "type": "response.refusal.delta",
+                "item_id": "msg_1",
+                "content_index": 1,
+                "delta": " and second",
+            },
+            {
+                "type": "response.refusal.done",
+                "item_id": "msg_1",
+                "content_index": 0,
+                "refusal": "First",
+            },
+            {
+                "type": "response.refusal.done",
+                "item_id": "msg_1",
+                "content_index": 1,
+                "refusal": " and second sentence.",
+            },
+            {
+                "type": "response.refusal.done",
+                "item_id": "msg_2",
+                "content_index": 0,
+                "refusal": " Done-only.",
+            },
+            {
+                "type": "response.refusal.delta",
+                "item_id": "msg_2",
+                "content_index": 1,
+                "delta": " Terminal",
+            },
+            {"type": "response.completed", "response": terminal_response},
+        ])
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        content, _, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response,
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [
+            "First",
+            " and second",
+            " sentence.",
+            " Done-only.",
+            " Terminal",
+            " suffix.",
+        ]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("source", ["events", "terminal"])
+    async def test_refusal_without_deltas_has_non_replayable_finish(self, source: str):
+        refusal = "I can’t help with that request."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        events = (
+            [
+                {"type": "response.refusal.done", "refusal": refusal},
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+            if source == "events"
+            else [{"type": "response.completed", "response": terminal_response}]
+        )
+        response = _SseResponse(events)
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        content, _, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response,
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [refusal]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
@@ -598,6 +1098,139 @@ class TestConsumeSse:
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
         assert reasoning == "cached summary"
+
+    @pytest.mark.asyncio
+    async def test_capture_commits_exact_items_only_after_completed_event(self):
+        output = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque-secret",
+            },
+            {"type": "future_item_type", "id": "future_1", "value": 7},
+        ]
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": output[0],
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 1,
+                "item": output[1],
+            },
+            {
+                "type": "response.completed",
+                "response": {"status": "completed", "output": output},
+            },
+        ])
+
+        await consume_sse_with_reasoning(response, capture=capture)
+
+        assert capture.completed is True
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
+    async def test_capture_keeps_done_items_when_completed_output_is_empty(self):
+        output = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque-secret",
+                "summary": [],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": '{"path":"weather/SKILL.md"}',
+            },
+        ]
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "output_index": index,
+                "item": item,
+            }
+            for index, item in enumerate(output)
+        ] + [{
+            "type": "response.completed",
+            "response": {"status": "completed", "output": []},
+        }])
+
+        await consume_sse_with_reasoning(response, capture=capture)
+
+        assert capture.completed is True
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("reason", "expected_finish_reason"),
+        [
+            ("max_output_tokens", "length"),
+            ("content_filter", "content_filter"),
+        ],
+    )
+    async def test_incomplete_event_commits_capture_usage(
+        self,
+        reason,
+        expected_finish_reason,
+    ):
+        output = [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "partial"}],
+            },
+        ]
+        terminal_response = {
+            "id": "resp_1",
+            "status": "incomplete",
+            "incomplete_details": {"reason": reason},
+            "output": output,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        }
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {"type": "response.output_text.delta", "delta": "partial"},
+            {"type": "response.incomplete", "response": terminal_response},
+        ])
+
+        content, _, finish_reason, usage, _ = await consume_sse_with_reasoning(
+            response,
+            capture=capture,
+        )
+
+        assert content == "partial"
+        assert finish_reason == expected_finish_reason
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert capture.completed is True
+        assert capture.response == terminal_response
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
+    async def test_capture_does_not_commit_interrupted_stream(self):
+        capture = ResponsesStreamCapture()
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "opaque-secret",
+                },
+            },
+        ])
+
+        await consume_sse_with_reasoning(response, capture=capture)
+
+        assert capture.completed is False
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_done_item(self):
@@ -754,6 +1387,216 @@ class TestConsumeSdkStream:
         assert content == "Hello world"
         assert tool_calls == []
         assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_hosted_web_search_lifecycle_is_streamed_as_tool_progress(self):
+        search_added = SimpleNamespace(
+            type="web_search_call",
+            id="ws_1",
+            status="in_progress",
+            action=SimpleNamespace(type="search"),
+        )
+        search_done = SimpleNamespace(
+            type="web_search_call",
+            id="ws_1",
+            status="completed",
+            action=SimpleNamespace(
+                type="search",
+                queries=["nanobot DeepSeek", "nanobot latest release"],
+                sources=[
+                    SimpleNamespace(
+                        title="DeepSeek Responses API",
+                        url="https://api-docs.deepseek.com/guides/responses_api/",
+                    ),
+                ],
+            ),
+        )
+        response = SimpleNamespace(status="completed", usage=None, output=[search_done])
+        events = [
+            SimpleNamespace(
+                type="response.output_item.added",
+                output_index=0,
+                item=search_added,
+            ),
+            SimpleNamespace(
+                type="response.web_search_call.searching",
+                item_id="ws_1",
+                output_index=0,
+            ),
+            SimpleNamespace(
+                type="response.web_search_call.completed",
+                item_id="ws_1",
+                output_index=0,
+            ),
+            SimpleNamespace(
+                type="response.output_item.done",
+                output_index=0,
+                item=search_done,
+            ),
+            SimpleNamespace(type="response.completed", response=response),
+        ]
+        tool_events: list[dict] = []
+
+        async def stream():
+            for event in events:
+                yield event
+
+        async def on_tool_event(event: dict) -> None:
+            tool_events.append(event)
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=on_tool_event)
+
+        assert tool_events == [
+            {
+                "kind": "hosted_tool",
+                "phase": "start",
+                "call_id": "ws_1",
+                "name": "web_search",
+                "arguments": {},
+                "result": None,
+            },
+            {
+                "kind": "hosted_tool",
+                "phase": "end",
+                "call_id": "ws_1",
+                "name": "web_search",
+                "arguments": {
+                    "query": "nanobot DeepSeek · nanobot latest release",
+                },
+                "result": {
+                    "status": "completed",
+                    "sources": [{
+                        "title": "DeepSeek Responses API",
+                        "url": "https://api-docs.deepseek.com/guides/responses_api/",
+                    }],
+                },
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_refusal_events_reconcile_parts_and_terminal_output(self):
+        refusal = "First and second sentence. Done-only. Terminal suffix."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_2",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        resp_obj.model_dump.return_value = terminal_response
+        events = [
+            MagicMock(
+                type="response.refusal.delta",
+                item_id="msg_1",
+                content_index=0,
+                delta="First",
+            ),
+            MagicMock(
+                type="response.refusal.delta",
+                item_id="msg_1",
+                content_index=1,
+                delta=" and second",
+            ),
+            MagicMock(
+                type="response.refusal.done",
+                item_id="msg_1",
+                content_index=0,
+                refusal="First",
+            ),
+            MagicMock(
+                type="response.refusal.done",
+                item_id="msg_1",
+                content_index=1,
+                refusal=" and second sentence.",
+            ),
+            MagicMock(
+                type="response.refusal.done",
+                item_id="msg_2",
+                content_index=0,
+                refusal=" Done-only.",
+            ),
+            MagicMock(
+                type="response.refusal.delta",
+                item_id="msg_2",
+                content_index=1,
+                delta=" Terminal",
+            ),
+            MagicMock(type="response.completed", response=resp_obj),
+        ]
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for event in events:
+                yield event
+
+        content, _, finish_reason, _, _ = await consume_sdk_stream(
+            stream(),
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [
+            "First",
+            " and second",
+            " sentence.",
+            " Done-only.",
+            " Terminal",
+            " suffix.",
+        ]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("source", ["events", "terminal"])
+    async def test_refusal_without_deltas_has_non_replayable_finish(self, source: str):
+        refusal = "I can’t help with that request."
+        terminal_response = {
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{"type": "refusal", "refusal": refusal}],
+            }],
+        }
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        resp_obj.model_dump.return_value = terminal_response
+        capture = ResponsesStreamCapture()
+        deltas: list[str] = []
+
+        async def on_content(delta: str) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            if source == "events":
+                yield MagicMock(type="response.refusal.done", refusal=refusal)
+                yield MagicMock(
+                    type="response.completed",
+                    response={"status": "completed"},
+                )
+            else:
+                yield MagicMock(type="response.completed", response=resp_obj)
+
+        content, _, finish_reason, _, _ = await consume_sdk_stream(
+            stream(),
+            on_content_delta=on_content,
+            capture=capture,
+        )
+
+        assert content == refusal
+        assert deltas == [refusal]
+        assert finish_reason == "refusal"
+        assert capture.completed is True
+        assert is_replayable_finish_reason(finish_reason) is False
 
     @pytest.mark.asyncio
     async def test_on_content_delta_called(self):
@@ -920,6 +1763,64 @@ class TestConsumeSdkStream:
         assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("reason", "expected_finish_reason"),
+        [
+            ("max_output_tokens", "length"),
+            ("content_filter", "content_filter"),
+        ],
+    )
+    async def test_incomplete_event_commits_capture_usage(
+        self,
+        reason,
+        expected_finish_reason,
+    ):
+        output = [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "status": "incomplete",
+                "content": [{"type": "output_text", "text": "partial"}],
+            },
+        ]
+        usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
+        output_item = MagicMock(type="message")
+        terminal_response = {
+            "id": "resp_1",
+            "status": "incomplete",
+            "incomplete_details": {"reason": reason},
+            "output": output,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        }
+        resp_obj = MagicMock(
+            status="incomplete",
+            usage=usage_obj,
+            output=[output_item],
+        )
+        resp_obj.model_dump.return_value = terminal_response
+        events = [
+            MagicMock(type="response.output_text.delta", delta="partial"),
+            MagicMock(type="response.incomplete", response=resp_obj),
+        ]
+        capture = ResponsesStreamCapture()
+
+        async def stream():
+            for event in events:
+                yield event
+
+        content, _, finish_reason, usage, _ = await consume_sdk_stream(
+            stream(),
+            capture=capture,
+        )
+
+        assert content == "partial"
+        assert finish_reason == expected_finish_reason
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert capture.completed is True
+        assert capture.response == terminal_response
+        assert capture.output_items == output
+
+    @pytest.mark.asyncio
     async def test_reasoning_extracted(self):
         summary_item = MagicMock(type="summary_text", text="thinking...")
         reasoning_item = MagicMock(type="reasoning", summary=[summary_item])
@@ -931,6 +1832,30 @@ class TestConsumeSdkStream:
 
         _, _, _, _, reasoning = await consume_sdk_stream(stream())
         assert reasoning == "thinking..."
+
+    @pytest.mark.asyncio
+    async def test_deepseek_reasoning_text_streamed(self):
+        events = [
+            MagicMock(type="response.reasoning_text.delta", delta="step 1 "),
+            MagicMock(type="response.reasoning_text.delta", delta="step 2"),
+            MagicMock(type="response.reasoning_text.done", text="step 1 step 2"),
+        ]
+        emitted: list[str] = []
+
+        async def stream():
+            for event in events:
+                yield event
+
+        async def on_reasoning_delta(delta: str) -> None:
+            emitted.append(delta)
+
+        _, _, _, _, reasoning = await consume_sdk_stream(
+            stream(),
+            on_reasoning_delta=on_reasoning_delta,
+        )
+
+        assert reasoning == "step 1 step 2"
+        assert emitted == ["step 1 ", "step 2"]
 
     @pytest.mark.asyncio
     async def test_error_event_raises(self):

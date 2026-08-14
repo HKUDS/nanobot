@@ -35,8 +35,9 @@ export interface ThreadViewportHandle {
 
 interface ThreadViewportProps {
   messages: UIMessage[];
+  temporary?: boolean;
   isStreaming: boolean;
-  composer: ReactNode;
+  composer?: ReactNode;
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
   activeTurnId?: string | null;
@@ -60,6 +61,7 @@ interface ThreadViewportProps {
 const NEAR_BOTTOM_PX = 48;
 const NEAR_TOP_PX = 96;
 const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
+const EXTERNAL_COMPOSER_SCROLL_BUTTON_BOTTOM_PX = 16;
 const SCROLL_BUTTON_COMPOSER_GAP_PX = 16;
 const SOFT_KEYBOARD_MIN_INSET_PX = 80;
 export const INITIAL_HISTORY_WINDOW = 160;
@@ -95,6 +97,11 @@ function isKeyboardEditableElement(element: Element | null): element is HTMLElem
     "reset",
     "submit",
   ].includes(element.type);
+}
+
+function isThreadDisclosureTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest("[data-thread-disclosure]") !== null;
 }
 
 type ThreadScrollDirection = "backward" | "forward";
@@ -152,6 +159,7 @@ function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
 
 export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
   messages,
+  temporary = false,
   isStreaming,
   composer,
   emptyState,
@@ -186,6 +194,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const pendingPromptJumpRef = useRef<string | null>(null);
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
+  const composerInputScrollTopRef = useRef<number | null>(null);
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const [composerDockHeight, setComposerDockHeight] = useState(0);
@@ -258,11 +267,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     forkBoundaryMessageCount !== null && forkBoundaryMessageCount > hiddenMessageCount
       ? forkBoundaryMessageCount - hiddenMessageCount
       : null;
+  const hasComposer = composer !== null && composer !== undefined;
   const scrollButtonBottom =
     keyboardInsetBottom
     + (composerDockHeight > 0
       ? composerDockHeight + SCROLL_BUTTON_COMPOSER_GAP_PX
-      : DEFAULT_SCROLL_BUTTON_BOTTOM_PX);
+      : hasComposer
+        ? DEFAULT_SCROLL_BUTTON_BOTTOM_PX
+        : EXTERNAL_COMPOSER_SCROLL_BUTTON_BOTTOM_PX);
   const scrollViewportStyle =
     keyboardInsetBottom > 0 ? { bottom: keyboardInsetBottom } : undefined;
 
@@ -542,7 +554,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
       const owner = threadMotionRef.current?.observeScroll(near) ?? "automatic";
-      const logicallyAtBottom = owner === "automatic" || near;
+      const logicallyAtBottom = owner === "automatic" || (owner === "navigation" && near);
       setAtBottom((current) =>
         current === logicallyAtBottom ? current : logicallyAtBottom,
       );
@@ -557,6 +569,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       if (!direction) return;
       threadMotionRef.current?.handleUserScrollIntent(
         canScrollInDirection(el, direction),
+        direction === "forward",
       );
     };
     const handleWheel = (event: WheelEvent) => {
@@ -570,22 +583,28 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       handleDirectionalInput(directionFromDelta(event.deltaY));
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button === 0 && event.target === el) yieldCameraToUser();
+      if (
+        event.button === 0
+        && (event.target === el || isThreadDisclosureTarget(event.target))
+      ) {
+        yieldCameraToUser();
+      }
     };
-    let touchStartY: number | null = null;
+    let lastTouchY: number | null = null;
     const handleTouchStart = (event: TouchEvent) => {
-      touchStartY = event.touches[0]?.clientY ?? null;
+      lastTouchY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
       const currentY = event.touches[0]?.clientY;
       const scrollDeltaY =
-        touchStartY !== null && currentY !== undefined
-          ? touchStartY - currentY
+        lastTouchY !== null && currentY !== undefined
+          ? lastTouchY - currentY
           : 0;
+      lastTouchY = currentY ?? null;
       handleDirectionalInput(directionFromDelta(scrollDeltaY));
     };
     const handleTouchEnd = () => {
-      touchStartY = null;
+      lastTouchY = null;
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -595,6 +614,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         || event.metaKey
         || isKeyboardEditableElement(event.target as Element | null)
       ) {
+        return;
+      }
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && isThreadDisclosureTarget(event.target)
+      ) {
+        yieldCameraToUser();
         return;
       }
       handleDirectionalInput(keyboardScrollDirection(event));
@@ -639,7 +665,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         <div
           ref={contentRef}
           data-testid={!hasMessages ? "thread-welcome-layout" : undefined}
-          data-layout={hasMessages ? "thread" : "hero"}
+          data-layout={hasComposer ? (hasMessages ? "thread" : "hero") : "external"}
           className={cn(
             "thread-layout mx-auto grid min-h-full w-full",
             hasMessages
@@ -662,6 +688,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
                   messages={visibleMessages}
+                  temporary={temporary}
                   isStreaming={isStreaming}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
@@ -676,44 +703,67 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />
             </div>
           ) : (
-            <div className="row-start-1 flex min-h-0 min-w-0 w-full items-center justify-center sm:items-end sm:pb-8">
+            <div
+              className={cn(
+                "row-start-1 flex min-h-0 min-w-0 w-full items-center justify-center",
+                hasComposer && "sm:items-end sm:pb-8",
+              )}
+            >
               {emptyState}
             </div>
           )}
 
-          <div
-            ref={composerDockRef}
-            data-testid="thread-composer-dock"
-            onInputCapture={(event) => {
-              if (event.target instanceof HTMLTextAreaElement) {
-                threadMotionRef.current?.handleComposerInput();
-              }
-            }}
-            className={cn(
-              "row-start-2 z-10 w-full",
-              hasMessages ? "relative bg-background" : "relative self-center",
-            )}
-          >
+          {hasComposer ? (
             <div
+              ref={composerDockRef}
+              data-testid="thread-composer-dock"
+              onInputCapture={(event) => {
+                if (event.target instanceof HTMLTextAreaElement) {
+                  composerInputScrollTopRef.current = scrollRef.current?.scrollTop ?? null;
+                  threadMotionRef.current?.handleComposerInput();
+                }
+              }}
+              onInput={(event) => {
+                if (!(event.target instanceof HTMLTextAreaElement)) return;
+                const previousScrollTop = composerInputScrollTopRef.current;
+                composerInputScrollTopRef.current = null;
+                const scrollEl = scrollRef.current;
+                if (scrollEl && previousScrollTop !== null) {
+                  // Textarea autosizing briefly collapses to `height: auto` while
+                  // measuring. Chrome can clamp the sibling thread scrollport in
+                  // that intermediate layout; restore it before paint, then let
+                  // ResizeObserver handle any real final composer height change.
+                  scrollEl.scrollTop = previousScrollTop;
+                }
+              }}
               className={cn(
-                hasMessages
-                  ? "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4"
-                  : "",
+                "row-start-2 z-10 w-full",
+                hasMessages ? "relative bg-background" : "relative self-center",
               )}
             >
               <div
-                data-testid="thread-composer-motion"
-                className="mx-auto w-full max-w-[58rem]"
+                className={cn(
+                  hasMessages
+                    ? "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4"
+                    : "",
+                )}
               >
-                {composer}
+                <div
+                  data-testid="thread-composer-motion"
+                  className="mx-auto w-full max-w-[58rem]"
+                >
+                  {composer}
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
 
-          <div
-            aria-hidden
-            className="thread-layout-spacer row-start-3 min-h-0 overflow-hidden"
-          />
+          {hasComposer ? (
+            <div
+              aria-hidden
+              className="thread-layout-spacer row-start-3 min-h-0 overflow-hidden"
+            />
+          ) : null}
         </div>
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}
       </div>

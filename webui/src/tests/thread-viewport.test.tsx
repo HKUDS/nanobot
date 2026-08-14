@@ -157,10 +157,11 @@ function getScroller(container: HTMLElement): HTMLElement {
 
 async function renderPromptRailViewport({
   scrollTo,
+  messages: promptMessages = makePromptExchangeMessages(5),
 }: {
   scrollTo?: (options?: ScrollToOptions) => void;
+  messages?: UIMessage[];
 } = {}) {
-  const promptMessages = makePromptExchangeMessages(5);
   const { container } = render(
     <ThreadViewport
       messages={promptMessages}
@@ -214,6 +215,34 @@ function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
 }
 
 describe("ThreadViewport", () => {
+  it("keeps reasoning disclosure anchored for pointer and keyboard toggles", () => {
+    const takeUserControl = vi.spyOn(
+      ThreadMotionCoordinator.prototype,
+      "takeUserControl",
+    );
+    render(
+      <ThreadViewport
+        messages={[{
+          id: "reasoning-1",
+          role: "assistant",
+          content: "",
+          reasoning: "A completed thought",
+          createdAt: 1,
+        }]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+
+    const disclosure = screen.getByRole("button", { name: "Thought" });
+    fireEvent.pointerDown(disclosure, { button: 0 });
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+
+    takeUserControl.mockClear();
+    fireEvent.keyDown(disclosure, { key: "Enter" });
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+  });
+
   it("top-aligns short threads in the message rendering area", () => {
     render(
       <ThreadViewport
@@ -763,6 +792,101 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("keeps shallow wheel and touch scrolling user-owned until intent reverses", async () => {
+    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+    const threaded: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: "turn-2", createdAt: 3 },
+    ];
+    const answer: UIMessage = {
+      id: "a2",
+      role: "assistant",
+      content: "streaming answer",
+      turnId: "turn-2",
+      isStreaming: true,
+      createdAt: 4,
+    };
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={threaded}
+        isStreaming
+        composer={<div>composer</div>}
+      />,
+    );
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1_904 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 1_404 },
+    });
+    const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
+    expect(prompt).not.toBeNull();
+    Object.defineProperty(prompt, "offsetTop", {
+      configurable: true,
+      value: 1_420,
+    });
+
+    rerender(
+      <ThreadViewport
+        messages={[...threaded, answer]}
+        isStreaming
+        composer={<div>composer</div>}
+        activeTurnId="turn-2"
+        activeTurnStartedHere
+      />,
+    );
+    await flushAnimationFrame();
+    followTo.mockClear();
+
+    act(() => {
+      fireEvent.wheel(scroller, { deltaY: -24 });
+      scroller.scrollTop = 1_380;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(1_380);
+    expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+
+    act(() => {
+      scroller.scrollTop = 1_404;
+      scroller.dispatchEvent(new Event("scroll"));
+      fireEvent.wheel(scroller, { deltaY: 24 });
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).toHaveBeenCalledWith(1_404);
+    expect(scroller.scrollTop).toBe(1_404);
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+
+    followTo.mockClear();
+    act(() => {
+      fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 324 }] });
+      scroller.scrollTop = 1_380;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+      scroller.scrollTop = 1_404;
+      scroller.dispatchEvent(new Event("scroll"));
+      fireEvent.touchEnd(scroller);
+    });
+    await flushAnimationFrame();
+
+    expect(followTo).toHaveBeenCalledWith(1_404);
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
+      .not.toBeInTheDocument();
+  });
+
   it("keeps the scroll-to-bottom button above a growing composer", async () => {
     const resizeObserver = stubResizeObserver();
 
@@ -1019,6 +1143,36 @@ describe("ThreadViewport", () => {
     } finally {
       resizeObserver.restore();
     }
+  });
+
+  it("restores thread scroll after the textarea autosize measurement collapses it", () => {
+    let scroller: HTMLElement | null = null;
+    const { container } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={(
+          <textarea
+            aria-label="Message input"
+            onInput={() => {
+              if (scroller) scroller.scrollTop = 692;
+            }}
+          />
+        )}
+      />,
+    );
+    scroller = getScroller(container);
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 700,
+    });
+
+    fireEvent.input(screen.getByLabelText("Message input"), {
+      target: { value: "中文" },
+    });
+
+    expect(scroller.scrollTop).toBe(700);
   });
 
   it("keeps the thread scrollport above a mobile soft keyboard", async () => {
@@ -1381,12 +1535,34 @@ describe("ThreadViewport", () => {
     expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
 
     const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
-    expect(within(targetPrompt).getByText("message 3")).toBeInTheDocument();
-    expect(within(targetPrompt).getByText("answer 3")).toBeInTheDocument();
+    fireEvent.pointerEnter(targetPrompt);
+    const preview = screen.getByTestId("prompt-rail-preview");
+    expect(within(preview).getByText("message 3")).toBeInTheDocument();
+    expect(within(preview).getByText("answer 3")).toBeInTheDocument();
 
     fireEvent.click(targetPrompt);
 
     expect(navigateTo).toHaveBeenCalledWith(1064);
+  });
+
+  it("renders markdown in prompt rail previews", async () => {
+    const promptMessages = makePromptExchangeMessages(5);
+    const answer = promptMessages.find((message) => message.id === "a3");
+    if (!answer) throw new TypeError("prompt answer fixture missing");
+    answer.content = "### Confirmed limit\n\nUse the **policy cap**.";
+
+    await renderPromptRailViewport({ messages: promptMessages });
+
+    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    fireEvent.pointerEnter(targetPrompt);
+    const preview = screen.getByTestId("prompt-rail-preview");
+
+    await waitFor(() => {
+      expect(preview.querySelector("h3")).toHaveTextContent("Confirmed limit");
+    });
+    expect(preview.querySelector("strong")).toHaveTextContent("policy cap");
+    expect(preview).not.toHaveTextContent("###");
+    expect(preview).not.toHaveTextContent("**");
   });
 
   it("lets direct paging input interrupt prompt rail navigation", async () => {

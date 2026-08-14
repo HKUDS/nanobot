@@ -159,6 +159,7 @@ async def test_exec_blocks_chained_internal_url():
         "cp /tmp/x memory/.dream_cursor",
     ],
 )
+
 def test_exec_blocks_writes_to_history_jsonl(command):
     """Direct writes to history.jsonl / .dream_cursor must be blocked (#2989)."""
     tool = ExecTool()
@@ -179,6 +180,7 @@ def test_exec_blocks_writes_to_history_jsonl(command):
         "echo history.jsonl",
     ],
 )
+
 def test_exec_allows_reads_of_history_jsonl(command):
     """Read-only access to history.jsonl must still be allowed."""
     tool = ExecTool()
@@ -274,6 +276,7 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
         "cat /dev/fd/3",
     ],
 )
+
 def test_exec_allows_benign_device_targets_inside_workspace(tmp_path, command):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -426,6 +429,7 @@ def test_exec_bwrap_bind_parent_does_not_widen_workspace_guard(tmp_path, monkeyp
         "|format",
     ],
 )
+
 def test_exec_blocks_format_command(command):
     """The Windows ``format`` disk command must be denied."""
     tool = ExecTool()
@@ -445,6 +449,7 @@ def test_exec_blocks_format_command(command):
         "echo reformat",
     ],
 )
+
 def test_exec_allows_format_in_url_and_args(command):
     """``format`` inside URL parameters or as a non-command arg must be allowed."""
     tool = ExecTool()
@@ -494,5 +499,196 @@ def test_exec_blocks_outside_paths_from_subdirectory(tmp_path):
         str(subdir),
         workspace_root=str(workspace),
     )
+    assert result is not None
+    assert "path outside working dir" in result
+
+def test_exec_blocks_outside_paths_with_redirection_and_delimiters(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secrets"
+    outside.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    for cmd in (
+        f"cat<{outside / 'key.pem'}",
+        f"cat <{outside / 'key.pem'}",
+        f"({outside / 'key.pem'})",
+        f"cat {{{outside / 'key.pem'}}}",
+    ):
+        result = tool._guard_command(cmd, str(workspace), workspace_root=str(workspace))
+        assert result is not None, f"Expected {cmd} to be blocked"
+        assert "path outside working dir" in result
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink and quoting semantics")
+@pytest.mark.parametrize("quoted", [True, False])
+def test_exec_does_not_truncate_parentheses_in_symlink_paths(tmp_path, quoted):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    link = workspace / "linked)dir"
+    link.symlink_to(outside, target_is_directory=True)
+    escaped_link = str(link).replace(")", r"\)")
+    rendered = f'"{link}/secret.txt"' if quoted else f"{escaped_link}/secret.txt"
+    command = f"cat {rendered}"
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert f"{link}/secret.txt" in tool._extract_absolute_paths(command)
+    result = tool._guard_command(command, str(workspace), workspace_root=str(workspace))
+
+    assert result is not None
+    assert "path outside working dir" in result
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX command substitution semantics")
+def test_exec_checks_leaf_symlink_inside_command_substitution(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    link = workspace / "secret-link"
+    link.symlink_to(outside, target_is_directory=True)
+    command = f'cat "$(printf %s {link})"'
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert str(link) in tool._extract_absolute_paths(command)
+    result = tool._guard_command(command, str(workspace), workspace_root=str(workspace))
+
+    assert result is not None
+    assert "path outside working dir" in result
+
+
+@pytest.mark.parametrize(
+    ("command", "not_a_posix_path"),
+    [
+        ("curl https://example.com/outside/file", "/outside/file"),
+        ("curl 'https://example.com/?next=/etc/passwd'", "/etc/passwd"),
+        ("curl --url=https://example.com/?next=/etc/passwd", "/etc/passwd"),
+        ("scp host:/etc/passwd .", "/etc/passwd"),
+        ("echo C:/Windows/System32", "/Windows/System32"),
+    ],
+)
+def test_exec_does_not_misclassify_nonlocal_slash_strings(command, not_a_posix_path):
+    assert not_a_posix_path not in ExecTool._extract_absolute_paths(command)
+
+
+def test_exec_extracts_quoted_path_with_shell_punctuation():
+    path = "/tmp/a file)/with, punctuation"
+
+    assert ExecTool._extract_absolute_paths(f'cat "{path}"') == [path]
+
+
+@pytest.mark.parametrize("uri", ["file:///etc/passwd", "file://localhost/%65tc/passwd"])
+def test_exec_extracts_local_file_uri(uri):
+    assert "/etc/passwd" in ExecTool._extract_absolute_paths(f"curl {uri}")
+
+
+def test_exec_blocks_file_uri_outside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside file.txt"
+    workspace.mkdir()
+    outside.write_text("secret")
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    result = tool._guard_command(
+        f"curl {outside.as_uri()}",
+        str(workspace),
+        workspace_root=str(workspace),
+    )
+
+    assert result is not None
+    assert "path outside working dir" in result
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX command substitution semantics")
+def test_exec_checks_file_uri_leaf_symlink_inside_command_substitution(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    link = workspace / "secret-link"
+    link.symlink_to(outside, target_is_directory=True)
+    command = f'curl "$(printf file://{link})"'
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert str(link) in tool._extract_absolute_paths(command)
+    result = tool._guard_command(command, str(workspace), workspace_root=str(workspace))
+
+    assert result is not None
+    assert "path outside working dir" in result
+
+
+def test_exec_keeps_quoted_parenthesis_path_inside_workspace_allowed(tmp_path):
+    workspace = tmp_path / "workspace"
+    inside = workspace / "linked)dir" / "file.txt"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("safe")
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert tool._guard_command(
+        f'cat "{inside}"',
+        str(workspace),
+        workspace_root=str(workspace),
+    ) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink and assignment semantics")
+def test_exec_keeps_quoted_assignment_punctuation_inside_workspace_allowed(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (workspace / "linked").symlink_to(outside, target_is_directory=True)
+    inside = workspace / "linked;dir" / "file.txt"
+    inside.parent.mkdir()
+    inside.write_text("safe")
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert tool._guard_command(
+        f'x="{inside}"; cat "$x"',
+        str(workspace),
+        workspace_root=str(workspace),
+    ) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell command-string semantics")
+def test_exec_recursively_checks_compact_shell_command_string(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    link = workspace / "secret-link"
+    link.symlink_to(outside, target_is_directory=True)
+    command = f'sh -c "x={link};cat \\"$x\\""'
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert str(link) in tool._extract_absolute_paths(command)
+    result = tool._guard_command(command, str(workspace), workspace_root=str(workspace))
+
+    assert result is not None
+    assert "path outside working dir" in result
+
+
+def test_exec_malformed_quote_still_extracts_path():
+    assert "/etc/passwd" in ExecTool._extract_absolute_paths('cat "/etc/passwd')
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX double-slash path semantics")
+@pytest.mark.parametrize("path", ["//etc/passwd", "///etc/passwd"])
+def test_exec_blocks_double_slash_absolute_paths(tmp_path, path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    assert path in tool._extract_absolute_paths(f"cat {path}")
+    result = tool._guard_command(
+        f"cat {path}",
+        str(workspace),
+        workspace_root=str(workspace),
+    )
+
     assert result is not None
     assert "path outside working dir" in result
