@@ -834,6 +834,52 @@ describe("ChatList", () => {
     expect(onRequestRenameProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
   });
 
+  it("animates project disclosure with the same rotation used by tab groups", () => {
+    const sessions = [
+      session({
+        chatId: "alpha",
+        title: "Alpha task",
+        workspaceScope: {
+          project_path: "/Users/me/nanobot",
+          project_name: "nanobot",
+          access_mode: "restricted",
+        },
+      }),
+    ];
+    const props = {
+      sessions,
+      activeKey: "websocket:alpha",
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+      onToggleGroup: vi.fn(),
+    };
+
+    const { rerender } = render(
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/nanobot": false }} />,
+    );
+
+    const expandedIcon = screen.getByRole("button", { name: "nanobot" })
+      .querySelector("[data-sidebar-project-disclosure-icon]");
+    expect(expandedIcon).toHaveClass(
+      "transition-transform",
+      "duration-200",
+      "ease-out",
+      "motion-reduce:transition-none",
+    );
+    expect(expandedIcon).not.toHaveClass("rotate-90");
+
+    rerender(
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/nanobot": true }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "nanobot" })
+      .querySelector("[data-sidebar-project-disclosure-icon]"))
+      .toHaveClass("rotate-90");
+  });
+
   it("hides the updated dot for the active chat", () => {
     const sessions = [
       session({

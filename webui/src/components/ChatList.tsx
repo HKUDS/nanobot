@@ -1482,6 +1482,14 @@ function ProjectGroupHeader({
     >
       <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      <ChevronDown
+        data-sidebar-project-disclosure-icon
+        aria-hidden
+        className={cn(
+          "h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none",
+          collapsed && "rotate-90",
+        )}
+      />
     </button>
   );
 
