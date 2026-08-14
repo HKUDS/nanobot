@@ -13,6 +13,10 @@ bun run --cwd tui build
 
 The renderer uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
 
+When you scroll away from the latest output, the scrollbar and `Ctrl+End` hint appear only until
+you return to the bottom. Large pastes are represented by a short editable placeholder in the
+composer; nanobot sends the original text unchanged.
+
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 

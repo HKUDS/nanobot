@@ -168,6 +168,29 @@ describe("NanobotTui layout", () => {
     expect(setup.captureCharFrame()).toContain("Ask nanobot anything")
   })
 
+  test("compacts large pastes in the composer without changing the sent text", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      status: { plainText: string }
+    }
+    const pasted = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n")
+
+    await setup.mockInput.pasteBracketedText(pasted)
+    await setup.flush()
+    expect(ui.composer.plainText).toBe("[Pasted 12 lines] ")
+    expect(ui.status.plainText).toContain("Pasted 12 lines")
+
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+    expect(sent).toEqual([pasted])
+    expect(ui.composer.plainText).toBe("")
+  })
+
   test("recalls submitted prompts without stealing multiline cursor movement", async () => {
     const sent: string[] = []
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
@@ -266,6 +289,7 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean }
+      titleText: { plainText: string }
     }
 
     try {
@@ -278,6 +302,7 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => attached.length === 1)
       expect(attached).toEqual(["other"])
+      expect(ui.titleText.plainText).toContain("Release checklist")
 
       app.accept({ event: "attached", chat_id: "other" })
       await Bun.sleep(1)
@@ -285,6 +310,7 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => newChats.length === 1)
       expect(newChats).toEqual(["new"])
+      expect(ui.titleText.plainText).toContain("New chat")
     } finally {
       globalThis.fetch = original
     }
@@ -429,7 +455,7 @@ describe("NanobotTui layout", () => {
       await setup.flush()
       const frame = setup.captureCharFrame()
       expect(frame).toContain("Release checklist")
-      expect(frame).not.toContain("Current chat")
+      expect(occurrences(frame, "Current chat")).toBe(1)
     } finally {
       globalThis.fetch = original
     }
@@ -461,6 +487,7 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       contextPanel: { visible: boolean }
+      modelText: { plainText: string }
     }
 
     try {
@@ -468,6 +495,7 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => ui.contextPanel.visible)
       await setup.flush()
+      expect(ui.modelText.plainText).toContain("~2.2k ctx")
       const frame = setup.captureCharFrame()
 
       expect(frame).toContain("Agent context")
@@ -1056,14 +1084,25 @@ describe("NanobotTui layout", () => {
   test("supports keyboard transcript navigation without rebuilding the layout", async () => {
     setup = await createRenderer({ width: 64, height: 16, screenMode: "alternate-screen" })
     const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
     for (let index = 0; index < 24; index += 1) {
       app.accept({ event: "delta", chat_id: "chat", text: `answer ${index}` })
       app.accept({ event: "stream_end", chat_id: "chat" })
     }
     await setup.flush()
-    const scroll = (app as unknown as {
-      transcript: { root: { scrollTop: number; scrollHeight: number; height: number } }
-    }).transcript.root
+    const internals = app as unknown as {
+      status: { plainText: string }
+      transcript: {
+        root: {
+          scrollTop: number
+          scrollHeight: number
+          height: number
+          verticalScrollBar: { visible: boolean }
+        }
+      }
+    }
+    const scroll = internals.transcript.root
 
     setup.mockInput.pressKey("HOME", { ctrl: true })
     await setup.renderOnce()
@@ -1073,6 +1112,8 @@ describe("NanobotTui layout", () => {
     app.accept({ event: "stream_end", chat_id: "chat" })
     await setup.renderOnce()
     expect(scroll.scrollTop).toBe(0)
+    expect(scroll.verticalScrollBar.visible).toBe(true)
+    expect(internals.status.plainText).toContain("Ctrl+End latest")
 
     setup.mockInput.pressKey("\u001B[6~")
     await setup.renderOnce()
@@ -1081,6 +1122,17 @@ describe("NanobotTui layout", () => {
     setup.mockInput.pressKey("END", { ctrl: true })
     await setup.renderOnce()
     expect(scroll.scrollTop).toBeGreaterThanOrEqual(scroll.scrollHeight - scroll.height)
+    expect(scroll.verticalScrollBar.visible).toBe(false)
+    expect(internals.status.plainText).not.toContain("Ctrl+End latest")
+
+    setup.mockInput.pressKey("HOME", { ctrl: true })
+    await waitUntil(() => scroll.verticalScrollBar.visible)
+    expect(scroll.verticalScrollBar.visible).toBe(true)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    await setup.renderOnce()
+    expect(scroll.verticalScrollBar.visible).toBe(false)
+    expect(internals.status.plainText).not.toContain("Ctrl+End latest")
   })
 
   test("reconciles active state from attach hydration after reconnect", async () => {

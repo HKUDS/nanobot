@@ -124,10 +124,21 @@ describe("gateway protocol", () => {
       socket.emit("message", {
         data: JSON.stringify({ event: "stream_end", chat_id: "one", resuming: "yes" }),
       })
+      socket.emit("message", {
+        data: JSON.stringify({ event: "session_updated", chat_id: "one", scope: 42 }),
+      })
+      socket.emit("message", {
+        data: JSON.stringify({ event: "session_updated", chat_id: "one", scope: "metadata" }),
+      })
       socket.emit("message", { data: JSON.stringify({ event: "future_gateway_event" }) })
       socket.emit("message", { data: JSON.stringify({ event: "error", detail: "global failure" }) })
       expect(statuses).toContain("error:gateway sent an invalid event")
-      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(4)
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(5)
+      expect(events).toContainEqual({
+        event: "session_updated",
+        chat_id: "one",
+        scope: "metadata",
+      })
       expect(events).toContainEqual({ event: "error", detail: "global failure" })
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })

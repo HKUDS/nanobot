@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
-import { SessionMenu } from "./session-menu"
+import { SessionMenu, sessionLabel } from "./session-menu"
 import type { SessionSummary } from "./protocol"
 
 const sessions: SessionSummary[] = [
@@ -53,5 +53,11 @@ describe("SessionMenu", () => {
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("Release checklist")
     expect(menu.choose()?.chatId).toBe("two")
+  })
+
+  test("keeps generated multi-line titles on one terminal row", () => {
+    expect(sessionLabel({ ...sessions[0]!, title: "Release\n  checklist" })).toBe(
+      "Release checklist",
+    )
   })
 })

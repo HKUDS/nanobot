@@ -14,7 +14,7 @@ export interface ContextPanelTheme {
   accent: string
 }
 
-function tokens(value: number): string {
+export function formatTokenCount(value: number): string {
   if (value < 1_000) return String(value)
   const compact = value >= 10_000 ? Math.round(value / 1_000) : Math.round(value / 100) / 10
   return `${compact}k`
@@ -86,7 +86,7 @@ export class ContextPanel {
     const archived = context.archivedMessages > 0
       ? `${context.archivedMessages} archived · summary ${context.archivedSummary ? "active" : "unavailable"}`
       : "No archived messages"
-    this.stats.content = `~${tokens(context.estimatedSessionTokens)} session tokens · ${context.replayMessages} replay messages · ${archived}`
+    this.stats.content = `~${formatTokenCount(context.estimatedSessionTokens)} session tokens · ${context.replayMessages} replay messages · ${archived}`
     this.summary.content = context.archivedSummary
       ? `Summary\n${context.archivedSummary}`
       : "The agent is currently replaying raw session messages; no compacted summary exists yet."

@@ -29,6 +29,11 @@ export interface TranscriptHeader {
   access: string
 }
 
+export interface TranscriptNavigation {
+  awayFromBottom: boolean
+  unseenOutput: boolean
+}
+
 interface Activity {
   text: TextRenderable
   lines: string[]
@@ -53,11 +58,14 @@ export class Transcript {
   private readonly userRows = new Set<BoxRenderable>()
   private wrote = false
   private nextId = 0
+  private navigation: TranscriptNavigation = { awayFromBottom: false, unseenOutput: false }
+  private navigationTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly renderer: CliRenderer,
     private theme: TranscriptTheme,
     private readonly treeSitterClient: TreeSitterClient,
+    private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
   ) {
     this.root = new ScrollBoxRenderable(renderer, {
       id: "nanobot-tui-transcript",
@@ -78,6 +86,7 @@ export class Transcript {
       },
       verticalScrollbarOptions: { visible: false },
       horizontalScrollbarOptions: { visible: false },
+      onMouseScroll: () => this.scheduleNavigationUpdate(),
     })
     this.root.verticalScrollBar.visible = false
     this.root.horizontalScrollBar.visible = false
@@ -126,6 +135,8 @@ export class Transcript {
   }
 
   reset(header: TranscriptHeader): void {
+    if (this.navigationTimer) clearTimeout(this.navigationTimer)
+    this.navigationTimer = null
     for (const child of [...this.root.getChildren()]) {
       this.root.remove(child)
       child.destroyRecursively()
@@ -139,7 +150,10 @@ export class Transcript {
     this.userRows.clear()
     this.wrote = false
     this.nextId = 0
+    this.navigation = { awayFromBottom: false, unseenOutput: false }
+    this.root.verticalScrollBar.visible = false
     this.header(header)
+    this.emitNavigation()
   }
 
   history(messages: HistoryMessage[]): void {
@@ -185,23 +199,27 @@ export class Transcript {
   }
 
   user(content: string): void {
+    this.noteOutput()
     this.finishActivity()
     this.writeRole("›", content, "user")
   }
 
   assistant(content: string): void {
     if (!content.trim()) return
+    this.noteOutput()
     this.finishActivity()
     this.writeMarkdown(content, false)
   }
 
   notice(content: string, error = false): void {
+    this.noteOutput()
     this.finishActivity()
     this.writeRole(error ? "×" : "·", content, error ? "error" : "muted")
   }
 
   stream(delta: string): void {
     if (!delta) return
+    this.noteOutput()
     if (!this.live) {
       this.finishActivity()
       const markdown = this.createMarkdown("", true, "assistant-stream")
@@ -233,6 +251,7 @@ export class Transcript {
 
   progress(content: string, events: ToolProgressEvent[] = []): string {
     if (events.length === 0 && !content.split("\n").some((line) => cleanProgress(line))) return ""
+    this.noteOutput()
     if (!this.activity) this.activity = this.createActivity()
     return this.updateActivity(this.activity, content, events)
   }
@@ -262,18 +281,57 @@ export class Transcript {
 
   scrollByPage(direction: -1 | 1): void {
     this.root.scrollBy(direction * Math.max(3, Math.floor(this.root.height * 0.7)))
+    this.scheduleNavigationUpdate()
   }
 
   scrollToEdge(edge: "top" | "bottom"): void {
     this.root.scrollTo(edge === "top" ? 0 : this.root.scrollHeight)
+    if (edge === "bottom") this.updateNavigation(false, true)
+    else this.scheduleNavigationUpdate()
   }
 
   destroy(): void {
+    if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.live = null
     this.activity = null
     this.frames.clear()
     this.userRows.clear()
     this.theme.syntax.destroy()
+  }
+
+  private noteOutput(): void {
+    this.updateNavigation(true)
+  }
+
+  private scheduleNavigationUpdate(): void {
+    if (this.navigationTimer) clearTimeout(this.navigationTimer)
+    this.navigationTimer = setTimeout(() => {
+      this.navigationTimer = null
+      this.updateNavigation(false)
+    }, 0)
+  }
+
+  private updateNavigation(output: boolean, forceBottom = false): void {
+    const awayFromBottom = forceBottom ? false : !this.isAtBottom()
+    const unseenOutput = awayFromBottom
+      ? this.navigation.unseenOutput || output
+      : false
+    if (
+      awayFromBottom === this.navigation.awayFromBottom
+      && unseenOutput === this.navigation.unseenOutput
+    ) return
+    this.navigation = { awayFromBottom, unseenOutput }
+    this.root.verticalScrollBar.visible = awayFromBottom
+    this.emitNavigation()
+  }
+
+  private isAtBottom(): boolean {
+    const bottom = Math.max(0, this.root.scrollHeight - this.root.height)
+    return this.root.scrollTop >= bottom - 1
+  }
+
+  private emitNavigation(): void {
+    this.onNavigationChange?.({ ...this.navigation })
   }
 
   private id(prefix: string): string {

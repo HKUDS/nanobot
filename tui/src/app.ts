@@ -6,9 +6,12 @@ import {
   TextareaRenderable,
   TextRenderable,
   createCliRenderer,
+  decodePasteBytes,
   getTreeSitterClient,
+  stripAnsiSequences,
   type CliRenderer,
   type KeyEvent,
+  type PasteEvent,
   type ThemeMode,
   type TreeSitterClient,
 } from "@opentui/core"
@@ -24,6 +27,7 @@ import {
   type HistoryMessage,
   type InboundEvent,
   type SlashCommand,
+  type SessionSummary,
 } from "./protocol"
 import {
   CommandMenu,
@@ -32,16 +36,21 @@ import {
   type ResolvedSlashCommandLifecycle,
   type TuiCommand,
 } from "./command-menu"
-import { SessionMenu } from "./session-menu"
-import { ContextPanel, type ContextPanelTheme } from "./context-panel"
+import { SessionMenu, sessionLabel } from "./session-menu"
+import { ContextPanel, formatTokenCount, type ContextPanelTheme } from "./context-panel"
 import {
   DiffViewer,
   latestTurnFileEdits,
   mergeFileEdits,
   type DiffViewerTheme,
 } from "./diff-viewer"
-import { Transcript, type TranscriptTheme } from "./transcript"
+import {
+  Transcript,
+  type TranscriptNavigation,
+  type TranscriptTheme,
+} from "./transcript"
 import { rememberChat } from "./session-state"
+import { ComposerDraft } from "./composer-draft"
 
 interface AppOptions {
   wsUrl: string
@@ -251,6 +260,7 @@ export class NanobotTui {
   private readonly composer: TextareaRenderable
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
+  private readonly draft = new ComposerDraft()
   private palette: Palette
   private activeThemeMode: ThemeMode
   private backgroundKnown: boolean
@@ -276,6 +286,13 @@ export class NanobotTui {
   private historyCursor = 0
   private historyDraft = ""
   private modelName: string
+  private sessionTitle = ""
+  private sessionMetadataId = 0
+  private contextTokens: number | null = null
+  private transcriptNavigation: TranscriptNavigation = {
+    awayFromBottom: false,
+    unseenOutput: false,
+  }
   private quitting = false
   private sessionLoadId = 0
   private sessionLoading = false
@@ -298,6 +315,7 @@ export class NanobotTui {
       renderer,
       transcriptTheme(this.palette, this.backgroundKnown),
       treeSitterClient,
+      (state) => this.handleTranscriptNavigation(state),
     )
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.commandMenu.setCommands([], LOCAL_COMMANDS)
@@ -339,14 +357,15 @@ export class NanobotTui {
     })
     this.titleText = new TextRenderable(renderer, {
       id: "nanobot-tui-title-text",
-      content: "nanobot  ·  ",
+      content: "nanobot",
       height: 1,
       flexShrink: 0,
+      truncate: true,
       fg: this.palette.muted,
     })
     this.modelText = new TextRenderable(renderer, {
       id: "nanobot-tui-model-text",
-      content: this.modelName,
+      content: `  ·  ${this.modelName}`,
       height: 1,
       flexShrink: 1,
       fg: this.palette.muted,
@@ -384,6 +403,7 @@ export class NanobotTui {
         { name: "return", meta: true, action: "newline" },
       ],
       onContentChange: () => {
+        this.draft.prune(this.composer.plainText)
         if (this.contextPanel.visible && this.composer.plainText) this.contextPanel.hide()
         this.syncComposerPlaceholder()
         if (this.sessionMenu.visible) this.syncSessionMenu()
@@ -393,6 +413,7 @@ export class NanobotTui {
       // IMEs may commit their final composed glyph after Enter. Matching the
       // OpenCode/OpenTUI integration, defer twice before reading plainText.
       onSubmit: () => this.deferSubmit(),
+      onPaste: (event) => this.handlePaste(event),
     })
     this.status = new TextRenderable(renderer, {
       id: "nanobot-tui-status",
@@ -499,25 +520,26 @@ export class NanobotTui {
 
   private submit(): void {
     if (this.quitting || this.composer.isDestroyed) return
-    const content = this.composer.plainText.trim()
+    const visibleContent = this.composer.plainText.trim()
+    const content = this.draft.expand(visibleContent).trim()
     if (this.sessionLoading) {
       this.status.content = "Loading sessions…"
       return
     }
     if (this.sessionMenu.visible) {
       const session = this.sessionMenu.choose()
-      if (session) this.switchSession(session.chatId)
+      if (session) this.switchSession(session)
       return
     }
-    if (!content) return
-    const completion = this.commandMenu.completion(content)
+    if (!visibleContent) return
+    const completion = this.commandMenu.completion(visibleContent)
     if (completion) {
       this.setComposer(completion)
       this.commandMenu.hide()
       this.updateMeta()
       return
     }
-    const command = this.commandMenu.resolve(content)
+    const command = this.commandMenu.resolve(visibleContent)
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
       else if (command.command.action === "context") void this.openContext()
@@ -526,15 +548,15 @@ export class NanobotTui {
       return
     }
     if (command?.source === "gateway") {
-      const lifecycle = resolveSlashCommandLifecycle(content, command.command)
-      if (lifecycle) this.sendGatewayCommand(content, lifecycle)
+      const lifecycle = resolveSlashCommandLifecycle(visibleContent, command.command)
+      if (lifecycle) this.sendGatewayCommand(visibleContent, lifecycle)
       return
     }
     if (!this.ready) {
       this.status.content = "Preparing chat…"
       return
     }
-    if (["exit", "quit", "/exit", "/quit", ":q"].includes(content.toLowerCase())) {
+    if (["exit", "quit", "/exit", "/quit", ":q"].includes(visibleContent.toLowerCase())) {
       this.quit()
       return
     }
@@ -548,7 +570,7 @@ export class NanobotTui {
       this.status.content = error instanceof Error ? error.message : String(error)
       return
     }
-    this.composer.setText("")
+    this.clearComposer()
     this.commandMenu.hide()
     this.recordPrompt(content)
     this.transcript.user(content)
@@ -648,8 +670,9 @@ export class NanobotTui {
         this.turnHadAnswer = false
         this.setActive(false)
         if (typeof event.latency_ms === "number") {
-          this.status.content = `Ready · ${(event.latency_ms / 1000).toFixed(1)}s`
+          this.status.content = this.readyStatus(`${(event.latency_ms / 1000).toFixed(1)}s`)
         }
+        if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
         return
       case "goal_status":
         if (event.status === "running") {
@@ -666,6 +689,16 @@ export class NanobotTui {
         return
       case "runtime_model_updated":
         this.setModel(event.model_name)
+        return
+      case "session_updated":
+        if (
+          !this.sessionTitle
+          || this.sessionTitle === "New chat"
+          || this.sessionTitle === "Untitled chat"
+          || event.scope === "metadata"
+        ) {
+          void this.refreshSessionMetadata(event.chat_id)
+        }
         return
       case "error":
         const commandLifecycle = event.turn_id ? this.commandTurns.get(event.turn_id) : undefined
@@ -719,7 +752,7 @@ export class NanobotTui {
       if (hydrationId !== this.hydrationId) return
       this.ready = true
       if (!this.activeTurn) {
-        this.status.content = this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
+        this.status.content = this.readyStatus()
       }
     }
   }
@@ -763,19 +796,45 @@ export class NanobotTui {
     if (active) {
       this.activeStartedAt = startedAt ?? Date.now()
       this.shimmerFrame = 0
+      this.renderActiveStatus()
       this.shimmerTimer = setInterval(() => {
-        const frames = ["◐", "◓", "◑", "◒"]
-        const frame = frames[this.shimmerFrame++ % frames.length]
-        const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
-        const detail = this.lastProgress ? ` · ${this.lastProgress.replace(/^\s*[·›✓×]\s*/u, "")}` : ""
-        this.status.content = `${frame} ${this.activeLabel}  ${elapsed}${detail}`
+        this.shimmerFrame += 1
+        this.renderActiveStatus()
       }, 120)
       return
     }
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.shimmerTimer = null
     this.lastProgress = ""
-    this.status.content = "Ready"
+    this.status.content = this.readyStatus()
+  }
+
+  private renderActiveStatus(): void {
+    const frames = ["◐", "◓", "◑", "◒"]
+    const frame = frames[this.shimmerFrame % frames.length]
+    const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
+    const progress = this.lastProgress
+      ? ` · ${this.lastProgress.replace(/^\s*[·›✓×]\s*/u, "")}`
+      : ""
+    const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
+    this.status.content = `${frame} ${this.activeLabel}  ${elapsed}${progress}${navigation}`
+  }
+
+  private readyStatus(detail = ""): string {
+    if (this.transcriptNavigation.awayFromBottom) {
+      return this.transcriptNavigation.unseenOutput
+        ? "New output · Ctrl+End latest"
+        : "History · Ctrl+End latest"
+    }
+    if (detail) return `Ready · ${detail}`
+    return this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
+  }
+
+  private handleTranscriptNavigation(state: TranscriptNavigation): void {
+    this.transcriptNavigation = state
+    if (this.activeTurn) this.renderActiveStatus()
+    else if (this.ready) this.status.content = this.readyStatus()
+    this.updateMeta()
   }
 
   private handleKey = (key: KeyEvent): void => {
@@ -785,7 +844,7 @@ export class NanobotTui {
         if (selected) void this.copySelection(selected)
       } else if (this.diffViewer.handleKey(key) && !this.diffViewer.visible) {
         this.composer.focus()
-        this.status.content = "Ready"
+        this.status.content = this.readyStatus()
         this.updateMeta()
       }
       key.preventDefault()
@@ -793,13 +852,14 @@ export class NanobotTui {
     }
     if (this.contextPanel.visible && key.name === "escape") {
       this.contextPanel.hide()
+      this.status.content = this.readyStatus()
       this.updateMeta()
       key.preventDefault()
       return
     }
     if (this.sessionLoading && key.name === "escape") {
       this.closeSessions()
-      this.status.content = "Ready"
+      this.status.content = this.readyStatus()
       key.preventDefault()
       return
     }
@@ -874,7 +934,8 @@ export class NanobotTui {
           this.setActive(false)
         }
       } else if (this.composer.plainText) {
-        this.composer.setText("")
+        this.clearComposer()
+        this.status.content = this.readyStatus()
       } else {
         this.quit()
       }
@@ -952,12 +1013,15 @@ export class NanobotTui {
     this.contextPanel.resize(this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
     this.title.visible = this.renderer.height >= 14
+    this.updateTitle()
     this.updateMeta()
   }
 
   private updateMeta(): void {
     if (this.activeTurn) {
-      this.meta.content = this.renderer.width >= 48 ? "ctrl+c stop" : ""
+      this.meta.content = this.renderer.width >= 72 && this.transcriptNavigation.awayFromBottom
+        ? "ctrl+end latest · ctrl+c stop"
+        : this.renderer.width >= 48 ? "ctrl+c stop" : ""
       return
     }
     if (this.commandMenu.visible) {
@@ -976,6 +1040,12 @@ export class NanobotTui {
       this.meta.content = "esc close · pgup/pgdn scroll"
       return
     }
+    if (this.transcriptNavigation.awayFromBottom) {
+      this.meta.content = this.renderer.width >= 72
+        ? "ctrl+end latest · pgup/pgdn scroll"
+        : this.renderer.width >= 48 ? "ctrl+end latest" : ""
+      return
+    }
     this.meta.content = this.renderer.width >= 112
       ? "enter send · alt+enter newline · pgup/pgdn scroll · ctrl+o tools · ctrl+c stop"
       : this.renderer.width >= 72
@@ -987,7 +1057,15 @@ export class NanobotTui {
 
   private setModel(model: string): void {
     this.modelName = model
-    this.modelText.content = model
+    this.updateTitle()
+  }
+
+  private updateTitle(): void {
+    const identity = this.sessionTitle.trim() || "nanobot"
+    this.titleText.maxWidth = Math.max(8, Math.floor(this.renderer.width * 0.38))
+    this.titleText.content = identity
+    const context = this.contextTokens === null ? "" : `  ·  ~${formatTokenCount(this.contextTokens)} ctx`
+    this.modelText.content = `  ·  ${this.modelName}${context}`
   }
 
   private resizeComposer(): void {
@@ -1019,8 +1097,25 @@ export class NanobotTui {
   }
 
   private setComposer(content: string): void {
+    this.draft.clear()
     this.composer.setText(content)
     this.composer.cursorOffset = content.length
+  }
+
+  private clearComposer(): void {
+    this.draft.clear()
+    this.composer.setText("")
+  }
+
+  private handlePaste(event: PasteEvent): void {
+    event.preventDefault()
+    const value = stripAnsiSequences(decodePasteBytes(event.bytes))
+    const insertion = this.draft.paste(value)
+    if (!insertion.text) return
+    this.composer.insertText(insertion.text)
+    if (insertion.compacted) {
+      this.status.content = `Pasted ${insertion.description} · review before sending`
+    }
   }
 
   private async loadCommands(): Promise<void> {
@@ -1045,7 +1140,7 @@ export class NanobotTui {
     }
     this.commandMenu.hide()
     this.contextPanel.hide()
-    this.composer.setText("")
+    this.clearComposer()
     this.sessionLoading = true
     const loadId = ++this.sessionLoadId
     this.status.content = "Loading sessions…"
@@ -1053,6 +1148,11 @@ export class NanobotTui {
       const sessions = await fetchSessions(this.options.apiUrl, this.options.apiToken)
       if (this.quitting || loadId !== this.sessionLoadId) return
       this.sessionLoading = false
+      const current = sessions.find((session) => session.chatId === this.client.activeChatId)
+      if (current) {
+        this.sessionTitle = sessionLabel(current)
+        this.updateTitle()
+      }
       const limit = this.renderer.height >= 20 ? 8 : 4
       this.sessionMenu.open(sessions, this.client.activeChatId, limit)
       this.sessionMenu.update(this.composer.plainText, limit)
@@ -1066,14 +1166,16 @@ export class NanobotTui {
     }
   }
 
-  private switchSession(chatId: string): void {
+  private switchSession(session: SessionSummary): void {
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
     }
-    if (chatId === this.client.activeChatId) {
+    if (session.chatId === this.client.activeChatId) {
+      this.sessionTitle = sessionLabel(session)
+      this.updateTitle()
       this.closeSessions()
-      this.status.content = "Ready"
+      this.status.content = this.readyStatus()
       return
     }
     if (!this.ready) {
@@ -1083,8 +1185,12 @@ export class NanobotTui {
     this.closeSessions()
     try {
       this.ready = false
+      this.sessionMetadataId += 1
+      this.sessionTitle = sessionLabel(session)
+      this.contextTokens = null
+      this.updateTitle()
       this.status.content = "Opening session…"
-      this.client.attach(chatId)
+      this.client.attach(session.chatId)
     } catch (error) {
       this.status.content = error instanceof Error ? error.message : String(error)
     }
@@ -1102,9 +1208,13 @@ export class NanobotTui {
     this.commandMenu.hide()
     this.sessionMenu.hide()
     this.contextPanel.hide()
-    this.composer.setText("")
+    this.clearComposer()
     try {
       this.ready = false
+      this.sessionMetadataId += 1
+      this.sessionTitle = "New chat"
+      this.contextTokens = null
+      this.updateTitle()
       this.status.content = "Starting a new chat…"
       this.client.newChat()
     } catch (error) {
@@ -1132,7 +1242,7 @@ export class NanobotTui {
       return
     }
     this.commandTurns.set(turnId, lifecycle)
-    this.composer.setText("")
+    this.clearComposer()
     this.commandMenu.hide()
     if (lifecycle !== "stop_active_turn") this.transcript.user(content)
     this.recordPrompt(content)
@@ -1182,15 +1292,16 @@ export class NanobotTui {
     this.sessionLoadId += 1
     this.sessionLoading = false
     this.sessionMenu.hide()
-    this.composer.setText("")
+    this.clearComposer()
     this.syncComposerPlaceholder()
+    if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
     this.updateMeta()
   }
 
   private async openContext(): Promise<void> {
     this.commandMenu.hide()
     this.sessionMenu.hide()
-    this.composer.setText("")
+    this.clearComposer()
     this.status.content = "Reading agent context…"
     try {
       const context = await fetchSessionContext(
@@ -1202,6 +1313,8 @@ export class NanobotTui {
         this.status.content = "Context unavailable · new session or older gateway"
         return
       }
+      this.contextTokens = context.estimatedSessionTokens
+      this.updateTitle()
       this.contextPanel.show(context)
       this.status.content = "Context snapshot"
       this.updateMeta()
@@ -1210,11 +1323,44 @@ export class NanobotTui {
     }
   }
 
+  private async refreshSessionMetadata(chatId: string): Promise<void> {
+    if (!this.options.apiUrl || !this.options.apiToken) return
+    const requestId = ++this.sessionMetadataId
+    try {
+      const sessions = await fetchSessions(this.options.apiUrl, this.options.apiToken)
+      if (
+        requestId !== this.sessionMetadataId
+        || chatId !== this.client.activeChatId
+      ) return
+      const session = sessions.find((candidate) => candidate.chatId === chatId)
+      if (!session) return
+      this.sessionTitle = sessionLabel(session)
+      this.updateTitle()
+    } catch {
+      // Session metadata is decorative; conversation transport stays authoritative.
+    }
+  }
+
+  private async refreshContextEstimate(chatId: string): Promise<void> {
+    try {
+      const context = await fetchSessionContext(
+        this.options.apiUrl,
+        this.options.apiToken,
+        chatId,
+      )
+      if (!context || chatId !== this.client.activeChatId || this.contextTokens === null) return
+      this.contextTokens = context.estimatedSessionTokens
+      this.updateTitle()
+    } catch {
+      // Keep the last known estimate; it is intentionally informational.
+    }
+  }
+
   private openDiff(): void {
     this.commandMenu.hide()
     this.sessionMenu.hide()
     this.contextPanel.hide()
-    this.composer.setText("")
+    this.clearComposer()
     this.composer.blur()
     const edits = this.currentFileEdits.length ? this.currentFileEdits : this.lastFileEdits
     this.diffViewer.show(edits)

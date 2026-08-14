@@ -70,6 +70,7 @@ export type InboundEvent =
       turn_id?: string
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
+  | { event: "session_updated"; chat_id: string; scope?: string }
   | { event: "runtime_model_updated"; model_name: string; model_preset?: string | null }
   | { event: "turn_model_updated"; chat_id: string; model_name: string }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; turn_id?: string }
@@ -158,6 +159,7 @@ const CHAT_EVENTS = new Set([
   "turn_end",
   "goal_status",
   "goal_state",
+  "session_updated",
   "turn_model_updated",
   "error",
 ])
@@ -250,6 +252,7 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (name === "turn_end" && !optional(record.latency_ms, "number")) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && (!record.goal_state || typeof record.goal_state !== "object")) return null
+  if (name === "session_updated" && !optional(record.scope, "string")) return null
   if (name === "turn_model_updated" && typeof record.model_name !== "string") return null
   return value as InboundEvent
 }

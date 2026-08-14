@@ -5,8 +5,9 @@ import type { SessionSummary } from "./protocol"
 
 type SessionMenuRow = SessionSummary & { active: boolean }
 
-function sessionLabel(session: SessionSummary): string {
-  return session.title.trim() || session.preview.trim() || "Untitled chat"
+export function sessionLabel(session: SessionSummary): string {
+  const label = session.title.trim() || session.preview.trim() || "Untitled chat"
+  return label.replace(/\s+/gu, " ")
 }
 
 function updatedLabel(value: string | null): string {
