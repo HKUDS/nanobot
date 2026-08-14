@@ -210,6 +210,12 @@ class Session:
         assert self._manager_binding is not None
         self._manager_binding.revoked = True
 
+    def manager_lifecycle_is_bound(self) -> bool:
+        return self._manager_binding is not None
+
+    def shares_manager_lifecycle(self, other: "Session") -> bool:
+        return self._manager_binding is not None and self._manager_binding is other._manager_binding
+
     def manager_lifecycle_is_revoked(self) -> bool:
         return self._manager_binding is not None and self._manager_binding.revoked
 
@@ -1692,11 +1698,19 @@ class SessionManager:
             return
 
         current = self.get_cached(session.key)
-        if current is not None and current is not session:
+        if (
+            current is not None
+            and current is not session
+            and session.manager_lifecycle_is_bound()
+        ):
             # Remember the rejection on the incoming object too. Otherwise it
             # could overwrite a later lifecycle after the current object is
             # invalidated and the cache becomes empty.
-            session.revoke_manager_lifecycle()
+            # Runtime deep copies share the current object's lifecycle. Revoking
+            # that shared binding here would also poison the canonical object;
+            # invalidating or replacing the canonical object will revoke both.
+            if not session.shares_manager_lifecycle(current):
+                session.revoke_manager_lifecycle()
             logger.warning(
                 "Discarding stale save for session {} (cache has a different object)",
                 session.key,

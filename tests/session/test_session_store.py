@@ -167,19 +167,45 @@ def test_save_discards_invalidated_reference_even_if_cache_is_empty(tmp_path) ->
 
 
 def test_save_discards_rejected_competing_reference_after_invalidate(tmp_path) -> None:
-    """A rejected alternate object must not become valid after cache invalidation."""
+    """A rejected runtime copy stays stale without poisoning the current object."""
     store = MagicMock(spec=SessionStore)
     store.load.return_value = None
     manager = SessionManager(tmp_path, store=store)
 
     current = manager.get_or_create("test:competing")
-    competing = Session(key=current.key)
+    competing = deepcopy(current)
     competing.add_message("user", "stale alternate data")
 
     manager.save(competing)
+    store.save.assert_not_called()
+
+    manager.save(current)
+    store.save.assert_called_once_with(current, fsync=False)
+
+    store.save.reset_mock()
     manager.invalidate(current.key)
     manager.save(competing)
 
+    store.save.assert_not_called()
+
+
+def test_save_accepts_unmanaged_replacement_for_compatibility(tmp_path) -> None:
+    """Callers may still intentionally replace a cached session with a fresh object."""
+    store = MagicMock(spec=SessionStore)
+    store.load.return_value = None
+    manager = SessionManager(tmp_path, store=store)
+
+    original = manager.get_or_create("test:replacement")
+    replacement = Session(key=original.key)
+    replacement.add_message("user", "replacement data")
+
+    manager.save(replacement)
+
+    store.save.assert_called_once_with(replacement, fsync=False)
+    assert manager.get_cached(original.key) is replacement
+
+    store.save.reset_mock()
+    manager.save(original)
     store.save.assert_not_called()
 
 
