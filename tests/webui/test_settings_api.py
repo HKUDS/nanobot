@@ -111,6 +111,26 @@ def test_settings_payload_exposes_edenai_provider(
     assert edenai["model_selectable"] is True
 
 
+def test_settings_payload_exposes_orcarouter_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.orcarouter.api_key = "sk-orca-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    orcarouter = next(row for row in payload["providers"] if row["name"] == "orcarouter")
+
+    assert orcarouter["label"] == "OrcaRouter"
+    assert orcarouter["configured"] is True
+    assert orcarouter["default_api_base"] == "https://api.orcarouter.ai/v1"
+    assert orcarouter["model_catalog"] == "catalog"
+    assert orcarouter["model_selectable"] is True
+
+
 def test_settings_payload_includes_relocated_capabilities(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1958,10 +1978,47 @@ def test_provider_models_payload_requires_gateway_key(
     assert payload["models"] == []
 
 
+def test_provider_models_payload_fetches_orcarouter_catalog(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.orcarouter.api_key = "sk-orca-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.orcarouter.ai/v1/models"
+        assert kwargs["headers"]["Authorization"] == "Bearer sk-orca-test"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "orcarouter/auto", "owned_by": "orcarouter"},
+                    {"id": "anthropic/claude-sonnet-4.6", "owned_by": "anthropic"},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["orcarouter"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "catalog"
+    assert [model["id"] for model in payload["models"]] == [
+        "orcarouter/auto",
+        "anthropic/claude-sonnet-4.6",
+    ]
+
+
 def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("skywork")) == "official"
     assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
+    assert _model_catalog_kind(find_by_name("orcarouter")) == "catalog"
     assert _model_catalog_kind(find_by_name("openai_codex")) == "builtin"
 
 
