@@ -169,6 +169,7 @@ def test_custom_instance_round_trips_the_same_child_selectors(tmp_path: Path) ->
 
 def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     calls: list[dict] = []
+    monkeypatch.setenv("NANOBOT_TEST_INHERITED_ENV", "preserved")
 
     def fake_popen(command, **kwargs):
         calls.append({"command": command, "kwargs": kwargs})
@@ -210,6 +211,8 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
         "/tmp/config.json",
     ]
     assert calls[0]["kwargs"]["start_new_session"] is True
+    assert calls[0]["kwargs"]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert calls[0]["kwargs"]["env"]["NANOBOT_TEST_INHERITED_ENV"] == "preserved"
     state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
     assert state["pid"] == 12345
     assert state["identity"] == 12345
