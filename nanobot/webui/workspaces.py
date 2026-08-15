@@ -149,6 +149,7 @@ def workspaces_payload(
     default_workspace: Path,
     default_restrict_to_workspace: bool,
     controls_available: bool,
+    folder_picker_available: bool = False,
 ) -> dict[str, Any]:
     default_access_mode = read_webui_default_access_mode()
     default_scope = (
@@ -167,6 +168,7 @@ def workspaces_payload(
         "controls": {
             "can_change_project": controls_available,
             "can_use_full_access": controls_available,
+            "can_pick_folder": folder_picker_available,
         },
     }
 
@@ -189,6 +191,14 @@ class WebUIWorkspaceController:
         return default_scope_for_webui(
             self._default_workspace,
             self._default_restrict_to_workspace,
+        )
+
+    def restricted_default_scope(self) -> WorkspaceScope:
+        """Return the default workspace with access restricted for this request."""
+        return build_workspace_scope(
+            self._default_workspace,
+            "restricted",
+            source_channel=_WEBUI_SCOPE_CHANNEL,
         )
 
     def _scope_from_metadata_value(
@@ -233,11 +243,17 @@ class WebUIWorkspaceController:
             cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY))
         )
 
-    def payload(self, *, controls_available: bool) -> dict[str, Any]:
+    def payload(
+        self,
+        *,
+        controls_available: bool,
+        folder_picker_available: bool = False,
+    ) -> dict[str, Any]:
         return workspaces_payload(
             default_workspace=self._default_workspace,
             default_restrict_to_workspace=self._default_restrict_to_workspace,
             controls_available=controls_available,
+            folder_picker_available=folder_picker_available,
         )
 
     def scope_from_envelope(

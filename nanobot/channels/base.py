@@ -262,6 +262,7 @@ class BaseChannel(ABC):
         session_key: str | None = None,
         is_dm: bool = False,
         authorization_id: str | None = None,
+        require_existing_session: bool = False,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -314,6 +315,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            require_existing_session=require_existing_session,
         )
 
         await self.bus.publish_inbound(msg)

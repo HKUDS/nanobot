@@ -22,6 +22,7 @@ class WeixinConnectSession:
     channel: WeixinChannel
     current_poll_base_url: str
     refresh_count: int
+    force: bool
     created_wall: float
     deadline: float
     last_error: str | None = None
@@ -72,7 +73,7 @@ class WeixinConnectStore:
 
         channel.connect_open_client()
         try:
-            qrcode_id, qr_url = await channel.connect_fetch_qr_code()
+            qrcode_id, qr_url = await channel.connect_fetch_qr_code(force=force)
         except Exception as exc:
             await self._close_channel(channel)
             raise ChannelConnectError(
@@ -89,6 +90,7 @@ class WeixinConnectStore:
             channel=channel,
             current_poll_base_url=channel.connect_base_url,
             refresh_count=0,
+            force=force,
             created_wall=now_wall,
             deadline=time.monotonic() + 600,
         )
@@ -187,7 +189,7 @@ class WeixinConnectStore:
                 }
             try:
                 session.qrcode_id, session.qr_url = (
-                    await session.channel.connect_fetch_qr_code()
+                    await session.channel.connect_fetch_qr_code(force=session.force)
                 )
             except Exception as exc:
                 self._sessions.pop(session_id, None)
@@ -204,6 +206,17 @@ class WeixinConnectStore:
             )
 
         if status == "binded_redirect":
+            if session.force:
+                self._sessions.pop(session_id, None)
+                await self._close_channel(session.channel)
+                return {
+                    "session_id": session_id,
+                    "status": "failed",
+                    "message": (
+                        "Unable to complete a new WeChat login. "
+                        "Start again and scan with the account you want to connect."
+                    ),
+                }
             if not session.channel.connect_load_state():
                 self._sessions.pop(session_id, None)
                 await self._close_channel(session.channel)
@@ -234,7 +247,7 @@ class WeixinConnectStore:
                 }
             try:
                 session.qrcode_id, session.qr_url = (
-                    await session.channel.connect_fetch_qr_code()
+                    await session.channel.connect_fetch_qr_code(force=session.force)
                 )
             except Exception as exc:
                 self._sessions.pop(session_id, None)

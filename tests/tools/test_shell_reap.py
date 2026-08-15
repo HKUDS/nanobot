@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import shlex
+import subprocess
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +13,12 @@ import pytest
 
 from nanobot.agent.tools.exec_session import _ExecSession
 from nanobot.agent.tools.shell import ExecTool, _reap_pid
+
+
+def _python_command(code: str) -> str:
+    if sys.platform == "win32":
+        return f"{subprocess.list2cmdline([sys.executable])} -u -c {subprocess.list2cmdline([code])}"
+    return f"{shlex.quote(sys.executable)} -u -c {shlex.quote(code)}"
 
 
 def test_reap_pid_noops_without_waitpid():
@@ -112,20 +121,37 @@ async def test_execute_timeout_kills_and_reaps():
     mock_proc.pid = 1002
     mock_proc.returncode = None
     mock_proc.communicate.side_effect = asyncio.TimeoutError()
-    mock_proc.kill = MagicMock()
-    mock_proc.wait = AsyncMock(return_value=-9)
 
     with (
-        patch.object(ExecTool, "_spawn", return_value=mock_proc),
+        patch.object(ExecTool, "_spawn", return_value=mock_proc) as spawn,
         patch.object(ExecTool, "_guard_command", return_value=None),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch.object(ExecTool, "_kill_process_tree", new_callable=AsyncMock) as kill_tree,
     ):
         tool = ExecTool(timeout=1)
         result = await tool.execute(command="sleep 99", timeout=1)
 
     assert "timed out" in result.lower()
-    mock_proc.kill.assert_called_once()
-    reap.assert_called_with(1002)
+    kill_tree.assert_awaited_once_with(mock_proc)
+    assert spawn.await_args.kwargs["process_tree"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_cancellation_kills_process_tree():
+    mock_proc = AsyncMock()
+    mock_proc.pid = 1005
+    mock_proc.returncode = None
+    mock_proc.communicate.side_effect = asyncio.CancelledError()
+
+    with (
+        patch.object(ExecTool, "_spawn", return_value=mock_proc) as spawn,
+        patch.object(ExecTool, "_guard_command", return_value=None),
+        patch.object(ExecTool, "_kill_process_tree", new_callable=AsyncMock) as kill_tree,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await ExecTool().execute(command="sleep 99")
+
+    kill_tree.assert_awaited_once_with(mock_proc)
+    assert spawn.await_args.kwargs["process_tree"] is True
 
 
 @pytest.mark.asyncio
@@ -161,21 +187,88 @@ async def test_execute_exception_during_communicate_kills_live_process():
     mock_proc.pid = 1004
     mock_proc.returncode = None
     mock_proc.communicate.side_effect = OSError("pipe broken")
-    mock_proc.kill = MagicMock()
-    mock_proc.wait = AsyncMock(return_value=-1)
 
     with (
         patch.object(ExecTool, "_spawn", return_value=mock_proc),
         patch.object(ExecTool, "_guard_command", return_value=None),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch.object(ExecTool, "_kill_process_tree", new_callable=AsyncMock) as kill_tree,
     ):
         tool = ExecTool()
         result = await tool.execute(command="broken")
 
     assert "Error executing command" in result
     assert "pipe broken" in result
-    mock_proc.kill.assert_called_once()
-    reap.assert_called_with(1004)
+    kill_tree.assert_awaited_once_with(mock_proc)
+
+
+@pytest.mark.asyncio
+async def test_kill_process_tree_targets_group_after_root_exits():
+    process = AsyncMock()
+    process.pid = 1006
+    process.returncode = 0
+
+    with (
+        patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+        patch("nanobot.agent.tools.shell.os.killpg", create=True) as kill_group,
+        patch("nanobot.agent.tools.shell.signal.SIGKILL", 9, create=True),
+        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+    ):
+        await ExecTool._kill_process_tree(process)
+
+    kill_group.assert_called_once_with(1006, 9)
+    process.kill.assert_not_called()
+    reap.assert_called_once_with(1006)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires Unix process groups")
+@pytest.mark.asyncio
+async def test_execute_timeout_kills_background_process_tree(tmp_path):
+    """A one-shot timeout must stop background descendants before they write."""
+    marker = tmp_path / "child-survived"
+    command = f"(sleep 2; touch {shlex.quote(str(marker))}) >/dev/null 2>&1 & sleep 30"
+
+    result = await ExecTool(working_dir=str(tmp_path), timeout=1).execute(
+        command=command,
+        timeout=1,
+    )
+
+    assert "timed out" in result.lower()
+    await asyncio.sleep(2.5)
+    assert not marker.exists()
+
+
+@pytest.mark.asyncio
+async def test_execute_timeout_kills_descendant_after_root_exits(tmp_path):
+    """Tree ownership must outlive a root shell that exits before timeout."""
+    marker = tmp_path / "child-survived-root"
+    child_code = (
+        "import pathlib,time; time.sleep(3.5); "
+        f"pathlib.Path({str(marker)!r}).write_text('alive')"
+    )
+    child_payload = base64.b64encode(child_code.encode()).decode()
+    parent_code = (
+        "import base64,subprocess,sys; "
+        f"child=base64.b64decode('{child_payload}').decode(); "
+        "subprocess.Popen([sys.executable, '-c', child])"
+    )
+    spawned = []
+    original_spawn = ExecTool._spawn
+
+    async def capture_spawn(*args, **kwargs):
+        process = await original_spawn(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    with patch.object(ExecTool, "_spawn", side_effect=capture_spawn):
+        result = await ExecTool(working_dir=str(tmp_path), timeout=2).execute(
+            command=_python_command(parent_code),
+            timeout=2,
+        )
+
+    assert "timed out" in result.lower()
+    assert spawned[0].returncode == 0
+    await asyncio.sleep(2)
+    assert not marker.exists()
 
 
 def _mock_session_process(*, pid: int, returncode: int | None):

@@ -56,7 +56,7 @@ class TestHandleStop:
         assert "No active task" in out.content
 
     @pytest.mark.asyncio
-    async def test_close_mcp_cancels_active_turn_before_resources(self):
+    async def test_aclose_cancels_active_turn_before_resources(self):
         loop, _bus = _make_loop()
         events: list[str] = []
 
@@ -76,14 +76,13 @@ class TestHandleStop:
 
         loop.subagents.close = close_subagents
         loop._exec_session_manager.close_all = AsyncMock()
-        with patch("nanobot.agent.loop.agent_context.close_mcp", AsyncMock()):
-            await loop.close_mcp()
+        await loop.aclose()
 
         assert events == ["turn_cancelled", "resources_closed"]
         assert task.cancelled()
 
     @pytest.mark.asyncio
-    async def test_close_mcp_serializes_duplicate_cleanup(self):
+    async def test_aclose_serializes_duplicate_cleanup(self):
         loop, _bus = _make_loop()
         entered = asyncio.Event()
         release = asyncio.Event()
@@ -100,14 +99,13 @@ class TestHandleStop:
 
         loop.subagents.close = close_subagents
         loop._exec_session_manager.close_all = AsyncMock()
-        with patch("nanobot.agent.loop.agent_context.close_mcp", AsyncMock()):
-            first = asyncio.create_task(loop.close_mcp())
-            await entered.wait()
-            second = asyncio.create_task(loop.close_mcp())
-            await asyncio.sleep(0)
-            assert not second.done()
-            release.set()
-            await asyncio.gather(first, second)
+        first = asyncio.create_task(loop.aclose())
+        await entered.wait()
+        second = asyncio.create_task(loop.aclose())
+        await asyncio.sleep(0)
+        assert not second.done()
+        release.set()
+        await asyncio.gather(first, second)
 
         assert max_concurrent == 1
 
@@ -172,8 +170,7 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_run_logs_and_continues_after_leaked_cancelled_error(self, monkeypatch):
         loop, bus = _make_loop()
-        loop._connect_mcp = AsyncMock()
-        loop.close_mcp = AsyncMock()
+        loop.aclose = AsyncMock()
         loop.auto_compact.check_expired = MagicMock()
         warnings: list[str] = []
         calls = 0

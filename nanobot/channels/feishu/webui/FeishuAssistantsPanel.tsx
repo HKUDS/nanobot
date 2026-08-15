@@ -15,6 +15,7 @@ import type {
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
 } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 import { FeishuConnectFlow } from "./FeishuConnectFlow";
 
@@ -33,7 +34,6 @@ export function FeishuAssistantsPanel({
 
   return (
     <ChannelInstancesPanel
-      token={token}
       feature={feature}
       showBrandLogos={showBrandLogos}
       chatAppsDocsUrl={chatAppsDocsUrl}
@@ -59,7 +59,7 @@ export function FeishuAssistantsPanel({
           />
         ),
         footer: (
-          <div className="mt-4 overflow-hidden rounded-[16px] border border-border/70 bg-background px-4 py-4">
+          <div className="mt-4 overflow-hidden rounded-floating border border-border/70 bg-background px-4 py-4">
             <div className="text-[13px] font-semibold text-foreground">
               {tx("custom.createAnother", "Create another assistant")}
             </div>
@@ -92,6 +92,7 @@ function FeishuInstanceAction({
   instance: NanobotChannelInstanceInfo;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
+  const { client } = useClient();
   const { t } = useTranslation();
   const tx = channelTranslator(t, "feishu");
   const [busy, setBusy] = useState(false);
@@ -114,7 +115,7 @@ function FeishuInstanceAction({
     setError(null);
     try {
       onFeaturesUpdate(
-        await enableNanobotFeature(token, "feishu", { instanceId: instance.id }),
+        await enableNanobotFeature(client, "feishu", { instanceId: instance.id }),
       );
     } catch (err) {
       setError((err as Error).message);
@@ -143,7 +144,7 @@ function FeishuInstanceAction({
         </Button>
       </div>
       {error ? (
-        <div className="mt-3 rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="mt-3 rounded-control border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
           {error}
         </div>
       ) : null}

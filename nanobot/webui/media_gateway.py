@@ -18,7 +18,6 @@ from nanobot.webui.attachment_ingress import (
 from nanobot.webui.ingress_policy import AttachmentIngressLimits
 from nanobot.webui.media_api import (
     serve_signed_media,
-    sign_media_path,
     sign_or_stage_media_path,
     signed_media_attachments,
 )
@@ -68,13 +67,6 @@ class WebUIMediaGateway:
             payload,
             secret=self.secret,
             request=request,
-            media_dir=self._media_dir,
-        )
-
-    def sign_media_path(self, abs_path: Path) -> str | None:
-        return sign_media_path(
-            abs_path,
-            secret=self.secret,
             media_dir=self._media_dir,
         )
 

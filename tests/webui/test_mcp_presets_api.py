@@ -1,22 +1,63 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from functools import partial
+from pathlib import Path
 
 import pytest
+from mcp.shared.auth import OAuthToken
 
-from nanobot.config.loader import load_config
+from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
+from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
+from nanobot.config.loader import load_config, save_config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
     mcp_presets_action,
     mcp_presets_payload,
+    mcp_presets_settings_action,
     mcp_presets_test_action,
     normalize_mcp_preset_mentions,
 )
 
 
 def _use_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"workspace": str(tmp_path / "workspace")}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+
+def _write_agent_plugin(workspace: Path) -> None:
+    root = workspace / "plugins" / "desktop"
+    root.mkdir(parents=True)
+    for filename, payload in (
+        (
+            "plugin.json",
+            {
+                "$schema": AGENT_PLUGIN_SCHEMA,
+                "name": "desktop",
+                "description": "Control the local desktop.",
+                "extensions": {
+                    "dev.nanobot": {
+                        "displayName": "Desktop Control",
+                        "permissions": ["screen-recording"],
+                    }
+                },
+            },
+        ),
+        (
+            "mcp.json",
+            {
+                "$schema": AGENT_PLUGIN_MCP_SCHEMA,
+                "mcpServers": {"desktop": {"type": "stdio", "command": "echo"}},
+            },
+        ),
+    ):
+        (root / filename).write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,6 +79,9 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "aws-docs",
         "brave-search",
         "postman",
+        "xmind",
+        "notion",
+        "linear",
     }.issubset(names)
     browserbase = next(preset for preset in payload["presets"] if preset["name"] == "browserbase")
     assert browserbase["installed"] is False
@@ -53,6 +97,145 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
     assert manifest["install"]["strategy"] == "config"
     assert manifest["remove"]["verification"] == ["config_absent"]
     assert manifest["trust"]["review_status"] == "builtin_preset"
+
+
+def test_agent_plugin_reuses_mcp_catalog_and_runtime_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    _write_agent_plugin(load_config().workspace_path)
+
+    row = next(item for item in mcp_presets_payload()["presets"] if item["source"] == "agent-plugin")
+    assert (row["name"], row["display_name"], row["requires"]) == (
+        "plugin-desktop", "Desktop Control", "screen-recording"
+    )
+    assert row["installed"] and row["configured"] and not row["enabled"]
+
+    async def reload() -> dict[str, object]:
+        return {"ok": True, "message": "MCP reloaded.", "requires_restart": False}
+
+    plugin_action = partial(
+        mcp_presets_settings_action,
+        query={"name": ["plugin-desktop"]},
+    )
+    enabled = asyncio.run(plugin_action("enable", reload_mcp=reload))
+    enabled_row = next(item for item in enabled["presets"] if item["name"] == "plugin-desktop")
+    assert (enabled_row["enabled"], enabled_row["status"], enabled["requires_restart"]) == (
+        True, "enabled", False
+    )
+
+    disabled = asyncio.run(plugin_action("disable", reload_mcp=reload))
+    disabled_row = next(item for item in disabled["presets"] if item["name"] == "plugin-desktop")
+    assert (disabled_row["installed"], disabled_row["enabled"], disabled_row["status"]) == (
+        True, False, "disabled"
+    )
+
+    with pytest.raises(McpPresetError, match="enable and disable"):
+        asyncio.run(plugin_action("remove"))
+
+    (load_config().workspace_path / "plugins" / "desktop" / "mcp.json").unlink()
+    assert any(item["name"] == "plugin-desktop" for item in mcp_presets_payload()["presets"])
+
+    config_path = tmp_path / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["tools"] = {"mcpServers": {"plugin-desktop": {"type": "stdio", "command": "echo"}}}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    rows = [item for item in mcp_presets_payload()["presets"] if item["name"] == "plugin-desktop"]
+    assert len(rows) == 1 and rows[0]["source"] == "custom"
+
+
+@pytest.mark.asyncio
+async def test_oauth_preset_is_one_click_configured_after_token_storage(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = mcp_presets_action("enable", {"name": ["xmind"]})
+
+    row = next(item for item in payload["presets"] if item["name"] == "xmind")
+    assert row["installed"] is True
+    assert row["configured"] is False
+    assert row["status"] == "authorization_required"
+    assert row["transport"] == "streamableHttp"
+    assert row["auth"] == "oauth"
+    config = load_config()
+    cfg = config.tools.mcp_servers["xmind"]
+    assert cfg.type == "streamableHttp"
+    assert cfg.auth == "oauth"
+    assert cfg.url == "https://app.xmind.com/api/mcp"
+
+    await MCPOAuthStorage("xmind", cfg.url).set_tokens(OAuthToken(access_token="secret"))
+    connected = mcp_presets_payload()
+    row = next(item for item in connected["presets"] if item["name"] == "xmind")
+    assert row["configured"] is True
+    assert row["status"] == "configured"
+
+    failed = mcp_presets_payload(runtime_status={"xmind": "failed"})
+    row = next(item for item in failed["presets"] if item["name"] == "xmind")
+    assert row["configured"] is True
+    assert row["status"] == "configured"
+    assert row["runtime_status"] == "failed"
+    assert "secret" not in str(row)
+
+    healthy = mcp_presets_payload(runtime_status={"xmind": "connected"})
+    row = next(item for item in healthy["presets"] if item["name"] == "xmind")
+    assert row["runtime_status"] == "connected"
+
+    mcp_presets_action("remove", {"name": ["xmind"]})
+    assert await MCPOAuthStorage("xmind", cfg.url).get_tokens() is None
+
+
+@pytest.mark.asyncio
+async def test_settings_list_projects_runtime_snapshot_and_reconnects_custom_server(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["team-docs"],
+            "transport": ["streamableHttp"],
+            "url": ["https://mcp.example.com/mcp"],
+        },
+    )
+    statuses = {"team-docs": "failed"}
+    reload_calls = 0
+
+    async def reload_mcp() -> dict[str, object]:
+        nonlocal reload_calls
+        reload_calls += 1
+        statuses["team-docs"] = "connected"
+        return {
+            "ok": True,
+            "connected": ["team-docs"],
+            "failed": [],
+            "requires_restart": False,
+        }
+
+    listed = await mcp_presets_settings_action(
+        None,
+        {},
+        reload_mcp=reload_mcp,
+        mcp_runtime_status=lambda: statuses,
+    )
+    row = next(item for item in listed["presets"] if item["name"] == "team-docs")
+    assert row["configured"] is True
+    assert row["runtime_status"] == "failed"
+    assert reload_calls == 0
+
+    reconnected = await mcp_presets_settings_action(
+        "reconnect",
+        {"name": ["team-docs"]},
+        reload_mcp=reload_mcp,
+        mcp_runtime_status=lambda: statuses,
+    )
+    row = next(item for item in reconnected["presets"] if item["name"] == "team-docs")
+    assert row["runtime_status"] == "connected"
+    assert reconnected["requires_restart"] is False
+    assert reload_calls == 1
 
 
 def test_enable_browserbase_writes_scrubbed_config_payload(
@@ -271,6 +454,46 @@ def test_test_mcp_preset_connects_and_reports_tools(
     assert payload["last_action"]["tool_names"] == ["mcp_playwright_browser_navigate"]
 
 
+def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    mcp_presets_action("enable", {"name": ["playwright"]})
+    config = load_config()
+    config.tools.mcp_servers["playwright"].enabled_tools = [
+        "mcp_playwright_browser_navigate",
+    ]
+    save_config(config)
+
+    class FakeStack:
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_connect(servers, registry):
+        assert servers["playwright"].enabled_tools == ["*"]
+
+        class FakeTool:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def to_schema(self):
+                return {"name": self.name, "description": "", "parameters": {}}
+
+        for index in range(20):
+            registry.register(FakeTool(f"mcp_playwright_tool_{index:02d}"))
+        return {"playwright": FakeStack()}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+
+    payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
+
+    assert payload["last_action"]["tool_count"] == 20
+    assert len(payload["last_action"]["tool_names"]) == 20
+    row = next(item for item in payload["presets"] if item["name"] == "playwright")
+    assert row["enabled_tools"] == ["mcp_playwright_browser_navigate"]
+
+
 def test_test_mcp_preset_scrubs_connection_errors(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -296,11 +519,11 @@ def test_test_mcp_preset_scrubs_connection_errors(
     assert "<redacted>" in payload["last_action"]["error"]
 
 
-def test_unlisted_oauth_placeholder_is_not_enabled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_oauth_placeholder_is_not_enabled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_config(tmp_path, monkeypatch)
 
     with pytest.raises(McpPresetError) as exc:
-        mcp_presets_action("enable", {"name": ["linear"]})
+        mcp_presets_action("enable", {"name": ["asana"]})
 
     assert exc.value.status == 404
 
@@ -412,6 +635,72 @@ def test_import_mcp_config_and_tool_allowlist(
     row = next(item for item in payload["presets"] if item["name"] == "docs")
     assert row["enabled_tools"] == []
     assert load_config().tools.mcp_servers["docs"].enabled_tools == []
+
+
+def test_import_recognizes_known_and_explicit_oauth_servers(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = custom_mcp_action(
+        "import",
+        {
+            "config": [
+                (
+                    '{"mcpServers":{'
+                    '"notion-work":{"url":"https://mcp.notion.com/mcp"},'
+                    '"company-mcp":{"url":"https://mcp.example.com/mcp","auth":"oauth"},'
+                    '"notion-pat":{"url":"https://mcp.notion.com/mcp",'
+                    '"headers":{"Authorization":"Bearer secret"}}'
+                    '}}'
+                )
+            ],
+        },
+    )
+
+    config = load_config()
+    assert config.tools.mcp_servers["notion-work"].auth == "oauth"
+    assert config.tools.mcp_servers["company-mcp"].auth == "oauth"
+    assert config.tools.mcp_servers["notion-pat"].auth is None
+    rows = {row["name"]: row for row in payload["presets"]}
+    assert rows["notion-work"]["status"] == "authorization_required"
+    assert rows["company-mcp"]["status"] == "authorization_required"
+    assert rows["notion-pat"]["status"] == "configured"
+    assert "Bearer secret" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_replacing_oauth_config_removes_its_stored_credentials(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["company-mcp"],
+            "transport": ["streamableHttp"],
+            "url": [server_url],
+            "auth": ["oauth"],
+        },
+    )
+    await MCPOAuthStorage("company-mcp", server_url).set_tokens(
+        OAuthToken(access_token="secret")
+    )
+    assert mcp_oauth_has_credentials("company-mcp", server_url)
+
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["company-mcp"],
+            "transport": ["streamableHttp"],
+            "url": [server_url],
+        },
+    )
+
+    assert not mcp_oauth_has_credentials("company-mcp", server_url)
 
 
 def test_normalize_mcp_preset_mentions_accepts_configured_custom_server(

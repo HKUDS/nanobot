@@ -197,6 +197,86 @@ def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_login_force_ignores_persisted_account_through_qr_flow(tmp_path) -> None:
+    persisted = {
+        "token": "persisted-token",
+        "get_updates_buf": "persisted-cursor",
+        "context_tokens": {"wx-user": "ctx-persisted"},
+        "typing_tickets": {"wx-user": {"ticket": "ticket-persisted"}},
+        "base_url": "https://persisted.example",
+    }
+    channel = WeixinChannel(
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            token="configured-token",
+            state_dir=str(tmp_path),
+        ),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(
+        json.dumps(persisted),
+        encoding="utf-8",
+    )
+    channel._print_qr_code = lambda _url: None
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"qrcode": "qr-1", "qrcode_img_content": "url-1"},
+            {"qrcode": "qr-2", "qrcode_img_content": "url-2"},
+        ]
+    )
+    channel._api_get_with_base = AsyncMock(
+        side_effect=[
+            {"status": "expired"},
+            {"status": "binded_redirect"},
+        ]
+    )
+
+    ok = await channel.login(force=True)
+
+    assert ok is False
+    assert [call.args[1]["local_token_list"] for call in channel._api_post.await_args_list] == [
+        [],
+        [],
+    ]
+    assert channel._token == ""
+    assert channel._get_updates_buf == ""
+    assert channel._context_tokens == {}
+    assert channel._typing_tickets == {}
+    assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
+    assert json.loads((tmp_path / "account.json").read_text()) == persisted
+
+
+@pytest.mark.asyncio
+async def test_login_without_force_reuses_persisted_account(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(
+        json.dumps(
+            {
+                "token": "persisted-token",
+                "get_updates_buf": "persisted-cursor",
+                "context_tokens": {"wx-user": "ctx-persisted"},
+                "base_url": "https://persisted.example",
+            }
+        ),
+        encoding="utf-8",
+    )
+    channel._qr_login = AsyncMock(return_value=False)
+
+    ok = await channel.login(force=False)
+
+    assert ok is True
+    channel._qr_login.assert_not_awaited()
+    assert channel._token == "persisted-token"
+    assert channel._get_updates_buf == "persisted-cursor"
+    assert channel._context_tokens == {"wx-user": "ctx-persisted"}
+    assert channel.config.base_url == "https://persisted.example"
+
+
+@pytest.mark.asyncio
 async def test_process_message_deduplicates_inbound_ids() -> None:
     channel, bus = _make_channel()
     msg = {

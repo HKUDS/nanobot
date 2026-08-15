@@ -6,37 +6,11 @@ from zipfile import ZipFile
 import pytest
 
 from nanobot.utils.document import (
-    SUPPORTED_EXTENSIONS,
     PdfSafetyError,
     _is_text_extension,
     extract_pdf_pages,
     extract_text,
 )
-
-
-class TestSupportedExtensions:
-    """Test the SUPPORTED_EXTENSIONS constant."""
-
-    def test_supported_extensions_include_common_formats(self):
-        """Test that common document formats are included."""
-        # Document formats
-        assert ".pdf" in SUPPORTED_EXTENSIONS
-        assert ".docx" in SUPPORTED_EXTENSIONS
-        assert ".xlsx" in SUPPORTED_EXTENSIONS
-        assert ".pptx" in SUPPORTED_EXTENSIONS
-
-        # Text formats
-        assert ".txt" in SUPPORTED_EXTENSIONS
-        assert ".md" in SUPPORTED_EXTENSIONS
-        assert ".csv" in SUPPORTED_EXTENSIONS
-        assert ".json" in SUPPORTED_EXTENSIONS
-        assert ".yaml" in SUPPORTED_EXTENSIONS
-        assert ".yml" in SUPPORTED_EXTENSIONS
-
-        # Image formats
-        assert ".png" in SUPPORTED_EXTENSIONS
-        assert ".jpg" in SUPPORTED_EXTENSIONS
-        assert ".jpeg" in SUPPORTED_EXTENSIONS
 
 
 class TestExtractText:

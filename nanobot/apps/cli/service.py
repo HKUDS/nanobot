@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
+from nanobot.agent.skills import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.security.workspace_policy import is_path_within
@@ -27,6 +28,7 @@ from nanobot.security.workspace_policy import is_path_within
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
+AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/registry.json"
 NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main"
 _CATALOG_SOURCES = (
@@ -210,9 +212,25 @@ def _as_object_dict(value: object) -> dict[str, Any] | None:
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
-def _safe_skill_name(name: str) -> str:
+def _skill_name(name: str, *, legacy: bool = False) -> str:
     clean = _SAFE_NAME_RE.sub("-", name.lower()).strip("-")
+    if not legacy:
+        clean = clean.replace("_", "-")
     return f"cli-app-{clean or 'app'}"
+
+
+def _plugin_skill_relative_path(name: str) -> str:
+    skill_name = _skill_name(name)
+    return f"plugins/{skill_name}/skills/{skill_name}/SKILL.md"
+
+
+def cli_app_skill_relative_path(workspace: Path, name: str) -> str:
+    """Return a CLI App's skill path, including the legacy location."""
+    canonical = _plugin_skill_relative_path(name)
+    legacy = f"skills/{_skill_name(name, legacy=True)}/SKILL.md"
+    if not (workspace / canonical).is_file() and (workspace / legacy).is_file():
+        return legacy
+    return canonical
 
 
 def _has_shell_meta(command: str) -> bool:
@@ -442,6 +460,16 @@ class CliAppManager:
         """Return registry names explicitly installed through CLI Apps."""
         return sorted(str(name) for name in self._load_installed())
 
+    def installed_skill_aliases(self) -> dict[str, str]:
+        """Map pre-plugin CLI App skill names to their portable identities."""
+        aliases: dict[str, str] = {}
+        for name in self.installed_names():
+            legacy = _skill_name(name, legacy=True)
+            canonical = _skill_name(name)
+            if legacy != canonical:
+                aliases[legacy] = canonical
+        return aliases
+
     def _fetch_registry(
         self,
         url: str,
@@ -613,7 +641,7 @@ class CliAppManager:
                     "name": installed_name,
                     "entry_point": entry_point,
                     "source": str(data.get("source") or ""),
-                    "skill": f"skills/{_safe_skill_name(installed_name)}/SKILL.md",
+                    "skill": cli_app_skill_relative_path(self.workspace, installed_name),
                     "tool": "run_cli_app",
                 }
             )
@@ -638,9 +666,6 @@ class CliAppManager:
             return False
         install_cmd = str(app.get("install_cmd") or "")
         return not _has_shell_meta(install_cmd)
-
-    def _skill_path(self, name: str) -> Path:
-        return self.workspace / "skills" / _safe_skill_name(name) / "SKILL.md"
 
     def _app_payload(
         self,
@@ -677,7 +702,7 @@ class CliAppManager:
             "status": status,
             "logo_url": logo_url,
             "brand_color": brand_color,
-            "skill_installed": self._skill_path(name).is_file(),
+            "skill_installed": (self.workspace / cli_app_skill_relative_path(self.workspace, name)).is_file(),
             "manifest": self._manifest_payload(app, logo_url=logo_url, brand_color=brand_color),
         }
 
@@ -713,7 +738,8 @@ class CliAppManager:
         name = str(app["name"])
         entry_point = str(app.get("entry_point") or "")
         strategy = self._strategy(app)
-        skill_path = f"skills/{_safe_skill_name(name)}/SKILL.md"
+        skill_path = _plugin_skill_relative_path(name)
+        plugin_path = f"plugins/{_skill_name(name)}"
         capabilities = [
             compact_dict({
                 "type": "cli",
@@ -726,13 +752,13 @@ class CliAppManager:
         install = compact_dict({
             "supported": install_supported,
             "strategy": strategy,
-            "managed_paths": [skill_path],
+            "managed_paths": [plugin_path],
             "verification": ["entry_point_available"] if entry_point else [],
         })
         remove = compact_dict({
             "supported": strategy != "unsupported",
             "strategy": strategy,
-            "managed_paths": [skill_path],
+            "managed_paths": [plugin_path],
             "verification": (
                 ["package_manager_ok", "entry_point_absent", "managed_paths_absent"]
                 if strategy not in {"bundled", "unsupported"}
@@ -964,6 +990,35 @@ class CliAppManager:
             return None
         raise CliAppError("this CLI app uses an unsupported install strategy")
 
+    def _subprocess_env(self) -> dict[str, str]:
+        """Minimal env for CLI app subprocesses — no API keys or secrets.
+
+        Mirrors the shell tool's allowlist so installed apps cannot read
+        provider credentials from the parent process environment.
+        """
+        if sys.platform == "win32":
+            sr = os.environ.get("SYSTEMROOT", r"C:\Windows")
+            env = {
+                "SYSTEMROOT": sr,
+                "COMSPEC": os.environ.get("COMSPEC", f"{sr}\\system32\\cmd.exe"),
+                "USERPROFILE": os.environ.get("USERPROFILE", ""),
+                "HOMEDRIVE": os.environ.get("HOMEDRIVE", "C:"),
+                "HOMEPATH": os.environ.get("HOMEPATH", "\\"),
+                "TEMP": os.environ.get("TEMP", f"{sr}\\Temp"),
+                "TMP": os.environ.get("TMP", f"{sr}\\Temp"),
+                "PATHEXT": os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+                "PATH": os.environ.get("PATH", f"{sr}\\system32;{sr}"),
+                "PYTHONUNBUFFERED": "1",
+            }
+            return env
+        return {
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "TERM": os.environ.get("TERM", "dumb"),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "PYTHONUNBUFFERED": "1",
+        }
+
     def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         command = subprocess.list2cmdline(argv)
         logger.info("CLI Apps: running {}", command)
@@ -974,6 +1029,7 @@ class CliAppManager:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=self._subprocess_env(),
         )
         logger.info("CLI Apps: command exited with code {}: {}", result.returncode, command)
         output = (result.stderr or result.stdout or "").strip()
@@ -1032,11 +1088,10 @@ class CliAppManager:
         name = str(app.get("name") or "unknown")
         display = str(app.get("display_name") or name)
         entry = str(app.get("entry_point") or f"cli-anything-{name}")
-        description = _catalog_description(app) or f"Use {display} from nanobot."
+        description = (_catalog_description(app) or f"Use {display} from nanobot.")[:1024]
         return f"""---
-name: {_safe_skill_name(name)}
-description: >-
-  {description}
+name: {_skill_name(name)}
+description: {json.dumps(description, ensure_ascii=False)}
 ---
 
 # {display}
@@ -1056,10 +1111,17 @@ Prefer machine-readable output when the CLI supports `--json`.
 """
 
     def _with_nanobot_skill_note(self, content: str, app: dict[str, Any]) -> str:
+        name = str(app.get("name") or "unknown")
+        skill_name = _skill_name(name)
+        metadata = parse_skill_metadata(content)
+        if metadata is None or not valid_skill_metadata(metadata | {"name": skill_name}, skill_name):
+            content = self._fallback_skill(app)
+        content, replaced = re.subn(r"(?m)^name\s*:.*$", f"name: {skill_name}", content, count=1)
+        if not replaced:
+            content = content.replace("---\n", f"---\nname: {skill_name}\n", 1)
         marker = "<!-- nanobot-cli-app-note -->"
         if marker in content:
             return content
-        name = str(app.get("name") or "unknown")
         note = f"""{marker}
 ## Nanobot execution
 
@@ -1073,24 +1135,42 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         return note + "\n" + content
 
     def install_skill(self, app: dict[str, Any]) -> Path:
-        path = self._skill_path(str(app["name"]))
+        name = str(app["name"])
+        path = self.workspace / _plugin_skill_relative_path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
         content = self._fetch_skill_content(app) or self._fallback_skill(app)
         content = self._with_nanobot_skill_note(content, app)
         path.write_text(content, encoding="utf-8")
+        plugin_root = path.parents[2]
+        manifest = compact_dict({
+            "$schema": AGENT_PLUGIN_SCHEMA,
+            "name": _skill_name(str(app["name"])),
+            "version": str(app.get("version") or ""),
+            "description": _catalog_description(app),
+        })
+        _write_json(plugin_root / "plugin.json", manifest)
+        legacy_dir = self.workspace / "skills" / _skill_name(str(app["name"]), legacy=True)
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
         return path
 
     def remove_skill(self, name: str) -> None:
-        skill_dir = self._skill_path(name).parent
-        if skill_dir.is_dir():
-            shutil.rmtree(skill_dir)
+        plugin_root = (self.workspace / _plugin_skill_relative_path(name)).parents[2]
+        if plugin_root.is_dir():
+            shutil.rmtree(plugin_root)
+        legacy_dir = self.workspace / "skills" / _skill_name(name, legacy=True)
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
 
     def _record_installed(self, app: dict[str, Any]) -> dict[str, Any]:
+        from nanobot.agent.plugins import set_agent_plugin_enabled
+
         installed = self._load_installed()
         entry = self._installed_entry(app)
         installed[str(app["name"])] = entry
         self._save_installed(installed)
         self.install_skill(app)
+        set_agent_plugin_enabled(self.workspace, _skill_name(str(app["name"])), True)
         return entry
 
     def install(self, name: str) -> dict[str, Any]:
@@ -1381,7 +1461,7 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                 encoding="utf-8",
                 errors="replace",
                 timeout=effective_timeout,
-                env=os.environ.copy(),
+                env=self._subprocess_env(),
             )
         except subprocess.TimeoutExpired:
             return f"CLI app '{name}' timed out after {effective_timeout}s"

@@ -51,6 +51,13 @@ Main files:
 - feeds tool results back into the model;
 - stops when a final answer is produced or runtime limits are hit.
 
+MCP connections are application-owned infrastructure. Composition roots create
+an `MCPProvider`, share its `ToolRegistry` with `AgentLoop`, await `connect()`
+before use, and guarantee `aclose()` during shutdown; the loop does not manage
+that lifecycle. `AgentLoop.from_config()` therefore requires a caller-owned
+`ToolRegistry`; callers using MCP share it with their application-owned
+`MCPProvider`.
+
 Keep this split in mind when debugging. If a problem is about channel routing, session keys, workspace selection, or outbound delivery, start in `agent/loop.py`. If it is about provider calls, tool calls, streaming, or iteration limits, start in `agent/runner.py`.
 
 ## Providers
@@ -142,7 +149,7 @@ Defaults:
 |---|---|
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
-| Sessions | `<workspace>/sessions/*.jsonl` |
+| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` (default: `~/.nanobot/sessions/...`) |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
@@ -157,7 +164,7 @@ a WebUI chat may select a separate project:
 
 | Concern | Path owner |
 |---|---|
-| Sessions, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
+| Session namespace, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
 | Project `AGENTS.md`, relative tool paths, and shell working directory | Effective project workspace |
 | Workspace access mode and project metadata | Session workspace scope |
 
@@ -173,7 +180,7 @@ Session history is the near-term conversation replay. Memory is the longer-term 
 
 | Store | File area |
 |---|---|
-| Session JSONL files | `<workspace>/sessions/` |
+| Session JSONL files | `<config-dir>/sessions/<workspace-id>/` |
 | Long-term memory | `<workspace>/memory/MEMORY.md` |
 | Consolidation source history | `<workspace>/memory/history.jsonl` |
 | Bootstrap identity files | `<workspace>/SOUL.md`, `<workspace>/USER.md`, templates under `nanobot/templates/` |
@@ -201,8 +208,10 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 | Provider | Add `ProviderSpec` in `providers/registry.py`, add schema field in `config/schema.py`, implement provider only if the generic backend is not enough |
 | Channel | Export a `ChannelPlugin` descriptor, keep its runtime and optional setup surfaces in one package, and follow [`channel-package-guide.md`](./channel-package-guide.md) |
 | Tool | Implement a tool under `agent/tools/` or expose a plugin entry point |
-| MCP | Add `tools.mcpServers` config |
-| Skill | Add workspace skill files under `<workspace>/skills/` or built-in skills under `nanobot/skills/` |
+| Agent Plugin | Add a v1 package under `<workspace>/plugins/` and enable it from Apps |
+| MCP | Add `tools.mcpServers` config or bundle the server in an Agent Plugin |
+| Skill | Add workspace skills under `<workspace>/skills/`, bundle them in an Agent Plugin, or add built-in skills under `nanobot/skills/` |
+| CLI App | Add it to the CLI Apps catalog; the installer owns its executable lifecycle and writes a skills-only Agent Plugin |
 
 Prefer existing registry/discovery patterns over ad hoc wiring.
 

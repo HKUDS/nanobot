@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronRight, Circle } from "lucide-react";
+import { ChevronRight, Circle } from "lucide-react";
 
 import {
   floatingItemClassName,
@@ -12,51 +12,11 @@ import { cn } from "@/lib/utils";
 
 const DropdownMenu = DropdownMenuPrimitive.Root;
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
-const DropdownMenuGroup = DropdownMenuPrimitive.Group;
-const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
-const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
+const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 
 const menuItemClassName =
   `${floatingItemClassName} ${floatingItemFocusClassName} cursor-default data-[disabled]:pointer-events-none data-[disabled]:opacity-50`;
-
-const DropdownMenuSubTrigger = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
-    inset?: boolean;
-  }
->(({ className, inset, children, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubTrigger
-    ref={ref}
-    className={cn(
-      menuItemClassName,
-      "data-[state=open]:bg-foreground/[0.055] dark:data-[state=open]:bg-white/[0.08]",
-      inset && "pl-8",
-      className,
-    )}
-    {...props}
-  >
-    {children}
-    <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
-  </DropdownMenuPrimitive.SubTrigger>
-));
-DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
-
-const DropdownMenuSubContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubContent
-    ref={ref}
-    className={cn(
-      floatingSurfaceClassName,
-      "max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
-      className,
-    )}
-    {...props}
-  />
-));
-DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
 
 interface DropdownMenuContentProps
   extends React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> {
@@ -102,31 +62,6 @@ const DropdownMenuItem = React.forwardRef<
   />
 ));
 DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName;
-
-const DropdownMenuCheckboxItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
->(({ className, children, checked, ...props }, ref) => (
-  <DropdownMenuPrimitive.CheckboxItem
-    ref={ref}
-    className={cn(
-      menuItemClassName,
-      "pl-8 pr-2.5",
-      className,
-    )}
-    checked={checked}
-    {...props}
-  >
-    <span className="absolute left-2.5 flex h-3.5 w-3.5 items-center justify-center">
-      <DropdownMenuPrimitive.ItemIndicator>
-        <Check className="h-3.5 w-3.5" />
-      </DropdownMenuPrimitive.ItemIndicator>
-    </span>
-    {children}
-  </DropdownMenuPrimitive.CheckboxItem>
-));
-DropdownMenuCheckboxItem.displayName =
-  DropdownMenuPrimitive.CheckboxItem.displayName;
 
 const DropdownMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
@@ -181,14 +116,46 @@ const DropdownMenuSeparator = React.forwardRef<
 ));
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 
+const DropdownMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
+    inset?: boolean;
+  }
+>(({ className, inset, children, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubTrigger
+    ref={ref}
+    className={cn(menuItemClassName, inset && "pl-8", className)}
+    {...props}
+  >
+    {children}
+    <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+  </DropdownMenuPrimitive.SubTrigger>
+));
+DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
+
+const DropdownMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
+>(({ className, sideOffset = 6, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubContent
+    ref={ref}
+    sideOffset={sideOffset}
+    className={cn(
+      floatingSurfaceClassName,
+      floatingSurfaceMotionClassName,
+      "max-h-[min(var(--radix-dropdown-menu-content-available-height),22rem)] min-w-[11rem] overflow-y-auto",
+      className,
+    )}
+    {...props}
+  />
+));
+DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
+
 export {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuPortal,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,

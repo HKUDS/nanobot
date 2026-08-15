@@ -107,6 +107,11 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
+    finishRunLocally: vi.fn((chatId: string) => {
+      runStartedAtByChatId.delete(chatId);
+      latestRunTurnIdByChatId.delete(chatId);
+    }),
     hasUnsettledRun: () => false,
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
@@ -464,6 +469,54 @@ describe("ThreadShell", () => {
     expect(reference).not.toHaveAttribute("tabindex");
     fireEvent.click(reference);
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
+  });
+
+  it("hides actions for a complete assistant-only message until turn_end", async () => {
+    const client = makeClient();
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("websocket%3Aassistant-only-actions/webui-thread")
+        ? httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "old automation", turnId: "turn-old" },
+          ]))
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("assistant-only-actions")}
+        title="Assistant-only actions"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1));
+    const turnId = "turn-automation";
+    const startedAt = Date.now() / 1000;
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "goal_status",
+      chat_id: "assistant-only-actions",
+      status: "running",
+      started_at: startedAt,
+      turn_id: turnId,
+    }));
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "message",
+      chat_id: "assistant-only-actions",
+      text: "new automation",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getByText("new automation")).toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "turn_end",
+      chat_id: "assistant-only-actions",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2));
   });
 
   it("does not navigate away when clicking the chat title", async () => {
@@ -848,6 +901,48 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
+  it("keeps temporary messages across navigation and drops them after clear", async () => {
+    const client = makeClient();
+    const view = (
+      chatId: string,
+      temporary: boolean,
+      temporaryChatIds: readonly string[],
+    ) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={temporary ? "Temporary chat" : "Regular chat"}
+        temporary={temporary}
+        temporaryChatIds={temporaryChatIds}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const retainedTemporaryChats = ["temporary-live"];
+    const { rerender } = render(view("temporary-live", true, retainedTemporaryChats));
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "keep this only in memory" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "temporary-live",
+      "keep this only in memory",
+    ));
+
+    rerender(view("regular", false, retainedTemporaryChats));
+    await waitFor(() => {
+      expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
+    });
+    rerender(view("temporary-live", true, retainedTemporaryChats));
+    expect(screen.getByText("keep this only in memory")).toBeInTheDocument();
+
+    rerender(view("temporary-cleared", true, ["temporary-cleared"]));
+    await waitFor(() => {
+      expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
+    });
+  });
+
   it("highlights sent skill references without skill metadata", async () => {
     const client = makeClient();
     render(wrap(
@@ -944,6 +1039,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real");
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
@@ -1224,7 +1320,7 @@ describe("ThreadShell", () => {
 
     const greeting = screen.getByRole("heading", { level: 1, name: HERO_GREETING_PATTERN });
     expect(greeting).toHaveAttribute("data-testid", "hero-greeting");
-    expect(greeting).toHaveClass("whitespace-nowrap");
+    expect(greeting).toHaveClass("select-none", "whitespace-nowrap");
     expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create a project plan" })).not.toBeInTheDocument();
@@ -2735,6 +2831,72 @@ describe("ThreadShell", () => {
       "active-resume-chat",
       "queued guidance",
     ));
+  });
+
+  it("keeps active-run timing attached to the original turn after guidance", async () => {
+    const client = makeClient();
+    const turnId = "turn-active-timing";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Atiming-chat/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([{
+            role: "user",
+            content: "research this",
+            turnId,
+          }]));
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("timing-chat")}
+          title="Timing chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("research this")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("timing-chat", {
+        event: "goal_status",
+        chat_id: "timing-chat",
+        status: "running",
+        started_at: Date.now() / 1000 - 215,
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        kind: "progress",
+        text: "web_search()",
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        text: "Continuing the search.",
+        latency_ms: 1_000,
+        turn_id: turnId,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("Continuing the search.")).toBeInTheDocument());
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "How is it going?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByText("How is it going?")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Working for / })).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 1s")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /^Thinking for / })).not.toBeInTheDocument();
   });
 
   it("refreshes the current thread when the page returns to the foreground", async () => {

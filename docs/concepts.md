@@ -26,7 +26,8 @@ The default instance lives under `~/.nanobot/`:
 | Path | Meaning |
 |---|---|
 | `~/.nanobot/config.json` | Instance configuration: providers, model defaults, channels, tools, gateway, API, and runtime options |
-| `~/.nanobot/workspace/` | Agent workspace: memory, sessions, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/workspace/` | Agent workspace: memory, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/sessions/<workspace-id>/` | Session history stored outside the agent-accessible workspace; the opaque ID follows workspace moves |
 
 You can override both with command flags:
 
@@ -125,7 +126,7 @@ nanobot uses two related stores:
 
 | Store | Location | Purpose |
 |---|---|---|
-| Sessions | `<workspace>/sessions/*.jsonl` | Recent conversation turns replayed into context |
+| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` | Recent conversation turns replayed into context |
 | Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
 | Subagent transcripts | `<workspace>/memory/subagents/*.jsonl` | Full conversation transcript of each background subagent run |
 
@@ -133,7 +134,33 @@ Dream is a periodic consolidation job. It reads accumulated history and updates 
 
 Subagent transcripts are written per run at `<workspace>/memory/subagents/<task_id>.jsonl`, one JSON message object per line (the same shape as session history, plus a trailing metadata record with the stop reason). They are kept separate from sessions and `history.jsonl`, so they never leak into main-agent prompt injection or Dream consolidation. The store keeps the newest 50 transcripts per workspace. The main agent can read a transcript with the `read_file` tool using the task id returned by the `spawn` tool, or by listing the `memory/subagents/` directory. Transcript content may include tool outputs the subagent processed, so treat it as untrusted data when re-reading it into a prompt.
 
+The configured workspace contains a `.nanobot/workspace-id` file. It contains only an
+opaque random identifier—never conversation content or credentials. Keep it with workspace
+backups: it lets nanobot find the same external session namespace after the workspace is
+renamed, moved, or restored. A live copy opened alongside the original receives a new ID so
+the two workspaces do not share conversations accidentally.
+
 See [`memory.md`](./memory.md) for the detailed design.
+
+## Apps and Agent Plugins
+
+Agent Plugins are nanobot's common package and activation boundary for
+installable capabilities. They organize existing extension types instead of
+replacing them:
+
+| Part | Role |
+|---|---|
+| Agent Plugin | Installable package that can bundle skills, MCP servers, or both |
+| Skill | Workflow guidance loaded progressively or invoked with `$skill-name` |
+| MCP server | Runtime tools exposed to the agent |
+| CLI App | Locally managed executable whose adapter is packaged and activated like a plugin |
+| Apps | WebUI surface for reviewing and managing these capabilities |
+
+Native providers, channels, built-in tools, standalone workspace skills, and
+directly configured MCP servers keep their existing extension paths. See
+[`webui.md#apps`](./webui.md#apps) for the user-facing flow and
+[`configuration.md#agent-plugins-v1`](./configuration.md#agent-plugins-v1) for
+the package contract.
 
 ## Tools and Safety
 

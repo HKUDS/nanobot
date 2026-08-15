@@ -8,7 +8,7 @@ platform-specific binaries (all subprocess calls are mocked).
 import asyncio
 import shutil
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,6 +19,19 @@ _WINDOWS_ENV_KEYS = {
     "APPDATA", "LOCALAPPDATA", "ProgramData",
     "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
 }
+
+
+class _FakeWindowsJob:
+    creation_flags = 0
+
+    def assign_and_resume(self, pid: int) -> None:
+        pass
+
+    def release(self) -> None:
+        pass
+
+    def terminate(self) -> None:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +145,32 @@ class TestSpawnUnix:
 
 
 class TestSpawnWindows:
+
+    @pytest.mark.asyncio
+    async def test_job_assignment_failure_kills_suspended_process(self):
+        env = {"PATH": ""}
+        process = AsyncMock()
+        process.pid = 123
+        process.returncode = None
+        process.kill = MagicMock()
+        process.wait.return_value = -9
+        job = MagicMock(spec=_FakeWindowsJob)
+        job.creation_flags = 0x4
+        job.assign_and_resume.side_effect = OSError("OpenProcess failed")
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("nanobot.agent.tools.shell.sys", MagicMock(platform="win32")),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", return_value=job),
+            pytest.raises(OSError, match="OpenProcess failed"),
+        ):
+            mock_exec.return_value = process
+            await ExecTool._spawn("echo hi", r"C:\work", env, process_tree=True)
+
+        job.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        process.wait.assert_awaited_once_with()
 
     @pytest.mark.asyncio
     async def test_single_line_uses_powershell(self):
@@ -302,7 +341,9 @@ class TestPathAppendPlatform:
         captured_cmd = None
         captured_env = {}
 
-        async def capture_spawn(cmd, cwd, env, shell_program=None, login=True):
+        async def capture_spawn(
+            cmd, cwd, env, shell_program=None, login=True, *, process_tree=False,
+        ):
             nonlocal captured_cmd
             captured_cmd = cmd
             captured_env.update(env)
@@ -331,7 +372,9 @@ class TestPathAppendPlatform:
         captured_cmd = None
         captured_env = {}
 
-        async def capture_spawn(cmd, cwd, env, shell_program=None, login=True, *, stdin=None):
+        async def capture_spawn(
+            cmd, cwd, env, shell_program=None, login=True, *, stdin=None, process_tree=False,
+        ):
             nonlocal captured_cmd
             captured_cmd = cmd
             captured_env.update(env)
@@ -359,7 +402,9 @@ class TestPathAppendPlatform:
         captured_cmd = None
         captured_env = {}
 
-        async def capture_spawn(cmd, cwd, env, shell_program=None, login=True, *, stdin=None):
+        async def capture_spawn(
+            cmd, cwd, env, shell_program=None, login=True, *, stdin=None, process_tree=False,
+        ):
             nonlocal captured_cmd
             captured_cmd = cmd
             captured_env.update(env)
@@ -389,7 +434,9 @@ class TestPathAppendPlatform:
 
         captured_env = {}
 
-        async def capture_spawn(cmd, cwd, env, shell_program=None, login=True):
+        async def capture_spawn(
+            cmd, cwd, env, shell_program=None, login=True, *, process_tree=False,
+        ):
             captured_env.update(env)
             return mock_proc
 
@@ -412,7 +459,9 @@ class TestPathAppendPlatform:
 
         captured_env = {}
 
-        async def capture_spawn(cmd, cwd, env, shell_program=None, login=True, *, stdin=None):
+        async def capture_spawn(
+            cmd, cwd, env, shell_program=None, login=True, *, stdin=None, process_tree=False,
+        ):
             captured_env.update(env)
             return mock_proc
 
@@ -558,7 +607,9 @@ class TestExecuteEndToEnd:
         mock_proc.returncode = 0
         captured_login = []
 
-        async def capture_spawn(cmd, cwd, env, shell_program=None, login=None, *, stdin=None):
+        async def capture_spawn(
+            cmd, cwd, env, shell_program=None, login=None, *, stdin=None, process_tree=False,
+        ):
             captured_login.append(login)
             return mock_proc
 
@@ -649,6 +700,7 @@ class TestWindowsMultilineExec:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_exec.return_value = mock_proc
@@ -670,6 +722,7 @@ class TestWindowsMultilineExec:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_exec.return_value = mock_proc
@@ -733,6 +786,7 @@ class TestResolveShellWindows:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_exec.return_value = mock_proc
@@ -754,6 +808,7 @@ class TestResolveShellWindows:
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+            patch.object(ExecTool, "_create_windows_job", side_effect=_FakeWindowsJob),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             mock_shell.return_value = mock_proc

@@ -59,16 +59,6 @@ function truncatePreview(text: string, maxLength: number): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
-export function jumpToPrompt(scrollEl: HTMLElement | null, promptId: string | undefined): void {
-  if (!scrollEl || !promptId) return;
-  const target = findPromptElement(scrollEl, promptId);
-  if (!target) return;
-  scrollEl.scrollTo({
-    top: Math.max(0, promptTop(scrollEl, target) - 16),
-    behavior: "smooth",
-  });
-}
-
 export function findPromptElement(scrollEl: HTMLElement, promptId: string): HTMLElement | null {
   const candidates = scrollEl.querySelectorAll<HTMLElement>("[data-user-prompt-id]");
   return Array.from(candidates).find(

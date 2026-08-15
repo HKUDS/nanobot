@@ -104,37 +104,6 @@ export function splitCapabilityMentionSegments(
   return segments.length ? segments : [{ kind: "text", text: value }];
 }
 
-export function CliAppMentionText({
-  text,
-  cliApps,
-  mcpPresets = [],
-  sessionMentions = [],
-}: {
-  text: string;
-  cliApps: CliAppInfo[];
-  mcpPresets?: McpPresetInfo[];
-  sessionMentions?: SessionMention[];
-}) {
-  const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets, sessionMentions);
-  if (!segments.some((segment) => segment.kind !== "text")) return <>{text}</>;
-  return (
-    <>
-      {segments.map((segment, index) => {
-        if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.text}</span>;
-        }
-        return (
-          <CapabilityMentionToken
-            key={`${segment.kind}-${index}`}
-            segment={segment}
-            variant="message"
-          />
-        );
-      })}
-    </>
-  );
-}
-
 export function CapabilityMentionToken({
   segment,
   variant,
@@ -234,7 +203,7 @@ export function CliAppMentionToken({
           <span
             data-testid={`${testIdPrefix}-cli-mention-logo-${app.name}`}
             className={cn(
-              "absolute left-1/2 top-1/2 grid place-items-center overflow-hidden rounded-[3px]",
+              "absolute left-1/2 top-1/2 grid place-items-center overflow-hidden rounded-mark",
               "-translate-x-1/2 -translate-y-1/2",
               isHero ? "h-[0.74em] w-[0.74em]" : "h-[0.72em] w-[0.72em]",
             )}
@@ -291,7 +260,7 @@ export function McpPresetMentionToken({
           <span
             data-testid={`${testIdPrefix}-mcp-mention-logo-${preset.name}`}
             className={cn(
-              "absolute left-1/2 top-1/2 grid place-items-center overflow-hidden rounded-[3px]",
+              "absolute left-1/2 top-1/2 grid place-items-center overflow-hidden rounded-mark",
               "-translate-x-1/2 -translate-y-1/2",
               isHero ? "h-[0.74em] w-[0.74em]" : "h-[0.72em] w-[0.72em]",
             )}

@@ -60,13 +60,13 @@ export function ChannelGuideLink({
         "inline-flex max-w-full items-center gap-2 bg-background/80 font-semibold text-foreground transition-colors hover:bg-background",
         compact
           ? "shrink-0 rounded-full py-1 pl-1 pr-2.5 text-[11.5px]"
-          : "mt-3 rounded-[12px] py-1.5 pl-1.5 pr-3 text-[12px]",
+          : "mt-3 rounded-control py-1.5 pl-1.5 pr-3 text-[12px]",
       )}
     >
       <span
         className={cn(
           "grid shrink-0 place-items-center overflow-hidden bg-muted/70 font-bold",
-          compact ? "h-5 w-5 rounded-full text-[9px]" : "h-6 w-6 rounded-[7px] text-[10px]",
+          compact ? "h-5 w-5 rounded-full text-[9px]" : "h-6 w-6 rounded-compact text-[10px]",
         )}
         style={{ color }}
         aria-hidden
@@ -231,7 +231,7 @@ export function ChannelProviderPresets({
       <div
         role="radiogroup"
         aria-label={t("settings.channels.providerPreset", { defaultValue: "Provider" })}
-        className="grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
+        className="grid rounded-control bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
         style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
       >
         {presets.map((preset) => (
@@ -245,7 +245,7 @@ export function ChannelProviderPresets({
               onApply(preset);
             }}
             className={cn(
-              "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
+              "min-h-8 rounded-compact px-2 py-1.5 transition-colors hover:text-foreground",
               selected === preset.id && "bg-background text-foreground",
             )}
           >
@@ -370,7 +370,7 @@ export function ChannelSetupSteps({
         ))}
       </ol>
       {tryIt ? (
-        <div className="mt-3 rounded-[12px] bg-background/75 px-3 py-2 text-[12px] text-muted-foreground">
+        <div className="mt-3 rounded-control bg-background/75 px-3 py-2 text-[12px] text-muted-foreground">
           <span className="font-medium text-foreground">
             {tx("settings.channels.tryIt", "Try it")}
           </span>

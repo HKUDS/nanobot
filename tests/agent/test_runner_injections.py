@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runner_helpers import make_run_spec
+from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -1047,7 +1048,11 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
     assert loop._cron_turns.deferred_queues[session_key] == [msg]
     assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
 
-    await loop._cron_turns.publish_next_deferred(session_key)
+    await publish_next_deferred_turn(
+        deferred_queues=loop._cron_turns.deferred_queues,
+        publish_inbound=loop.bus.publish_inbound,
+        session_key=session_key,
+    )
     queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
     assert queued is msg
     assert session_key not in loop._cron_turns.deferred_queues
@@ -1097,7 +1102,11 @@ async def test_local_trigger_turn_deferred_while_session_active(tmp_path):
     assert loop._local_trigger_turns.deferred_queues[session_key] == [msg]
     assert loop.pending_local_trigger_ids_for_session(session_key) == {"trg_123"}
 
-    assert await loop._local_trigger_turns.publish_next_deferred(session_key) is True
+    assert await publish_next_deferred_turn(
+        deferred_queues=loop._local_trigger_turns.deferred_queues,
+        publish_inbound=loop.bus.publish_inbound,
+        session_key=session_key,
+    ) is True
     queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
     assert queued is msg
     assert session_key not in loop._local_trigger_turns.deferred_queues

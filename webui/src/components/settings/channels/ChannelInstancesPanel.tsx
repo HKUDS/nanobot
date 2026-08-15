@@ -38,6 +38,7 @@ import type {
   NanobotFeaturesPayload,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelInstancesPanelCustomization = {
   countLabel?: (runningCount: number) => string;
@@ -50,7 +51,6 @@ export type ChannelInstancesPanelCustomization = {
 };
 
 export function ChannelInstancesPanel({
-  token,
   feature,
   showBrandLogos,
   chatAppsDocsUrl,
@@ -58,7 +58,6 @@ export function ChannelInstancesPanel({
   onFeaturesUpdate,
   customization = {},
 }: {
-  token: string;
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
   chatAppsDocsUrl?: string;
@@ -66,6 +65,7 @@ export function ChannelInstancesPanel({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   customization?: ChannelInstancesPanelCustomization;
 }) {
+  const { client } = useClient();
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
@@ -111,8 +111,8 @@ export function ChannelInstancesPanel({
     setNotice(null);
     try {
       const payload = checked
-        ? await enableNanobotFeature(token, feature.name, { instanceId: instance.id })
-        : await disableNanobotFeature(token, feature.name, { instanceId: instance.id });
+        ? await enableNanobotFeature(client, feature.name, { instanceId: instance.id })
+        : await disableNanobotFeature(client, feature.name, { instanceId: instance.id });
       onFeaturesUpdate(payload);
     } catch (err) {
       setNotice((err as Error).message);
@@ -127,7 +127,7 @@ export function ChannelInstancesPanel({
     setNotice(null);
     try {
       const payload = await configureChannel(
-        token,
+        client,
         feature.name,
         channelValuesForSave(instanceFields, fieldValues),
         { enable: selected.enabled, instanceId: selected.id },
@@ -144,7 +144,7 @@ export function ChannelInstancesPanel({
   };
 
   return (
-    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
+    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -177,7 +177,7 @@ export function ChannelInstancesPanel({
             <article
               key={instance.id}
               className={cn(
-                "overflow-hidden rounded-[18px] transition-colors",
+                "overflow-hidden rounded-floating transition-colors",
                 expanded
                   ? "bg-background"
                   : "bg-background/70 hover:bg-muted",
@@ -313,7 +313,7 @@ export function ChannelInstancesPanel({
       {customization.footer}
 
       {notice ? (
-        <div className="mt-3 rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="mt-3 rounded-control border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
           {notice}
         </div>
       ) : null}

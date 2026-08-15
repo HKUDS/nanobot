@@ -140,10 +140,3 @@ class AutomationTurnCoordinator:
             if pending_id:
                 pending_ids.add(pending_id)
         return pending_ids
-
-    async def publish_next_deferred(self, session_key: str) -> bool:
-        return await publish_next_deferred_turn(
-            deferred_queues=self.deferred_queues,
-            publish_inbound=self._publish_inbound,
-            session_key=session_key,
-        )

@@ -1,3 +1,5 @@
+import pytest
+
 from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -979,6 +981,36 @@ def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch(
             assert c not in [f"u{i}" for i in range(8)], (
                 f"Consolidated message {c!r} should not be raw-archived"
             )
+
+
+def test_enforce_file_cap_restores_session_when_archive_fails():
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": []},
+    )
+    session = Session(key="test:archive-failure", provider_state=state)
+    for i in range(8):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+    original_messages = session.messages
+    original_updated_at = session.updated_at
+    session.last_consolidated = 2
+
+    def fail_archive(_messages):
+        raise RuntimeError("history unavailable")
+
+    with pytest.raises(RuntimeError, match="history unavailable"):
+        session.enforce_file_cap(on_archive=fail_archive, limit=4)
+
+    assert session.messages is original_messages
+    assert [message["content"] for message in session.messages] == [
+        f"msg{i}" for i in range(8)
+    ]
+    assert session.last_consolidated == 2
+    assert session.provider_state is state
+    assert session.updated_at == original_updated_at
 
 
 def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():

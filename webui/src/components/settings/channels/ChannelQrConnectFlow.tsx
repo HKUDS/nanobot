@@ -14,6 +14,7 @@ import type {
   ChannelConnectPayload,
   NanobotFeaturesPayload,
 } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelQrConnectLabels = {
   qrAlt: string;
@@ -43,7 +44,6 @@ export type ChannelQrConnectPendingContext = {
 };
 
 export function ChannelQrConnectFlow({
-  token,
   channelName,
   startOptions = {},
   idleLabel,
@@ -69,6 +69,7 @@ export function ChannelQrConnectFlow({
   resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
   suppressSucceeded?: boolean;
 }) {
+  const { client } = useClient();
   const pageVisible = usePageVisibility();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -78,8 +79,6 @@ export function ChannelQrConnectFlow({
   const [error, setError] = useState<string | null>(null);
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
   const startDomain = startOptions.domain;
   const startInstanceId = startOptions.instanceId;
   const startMode = startOptions.mode;
@@ -129,7 +128,7 @@ export function ChannelQrConnectFlow({
       pollInFlight.current = true;
       try {
         const payload = await pollChannelConnect(
-          tokenRef.current,
+          client,
           channelName,
           sessionId,
         );
@@ -163,6 +162,7 @@ export function ChannelQrConnectFlow({
     };
   }, [
     channelName,
+    client,
     connect?.interval_ms,
     connect?.session_id,
     connect?.status,
@@ -175,7 +175,7 @@ export function ChannelQrConnectFlow({
     setBusy(true);
     setError(null);
     try {
-      const payload = await startChannelConnect(tokenRef.current, channelName, {
+      const payload = await startChannelConnect(client, channelName, {
         domain: startDomain,
         instanceId: startInstanceId,
         mode: startMode,
@@ -187,7 +187,7 @@ export function ChannelQrConnectFlow({
     } finally {
       setBusy(false);
     }
-  }, [channelName, startDomain, startForce, startInstanceId, startMode]);
+  }, [channelName, client, startDomain, startForce, startInstanceId, startMode]);
 
   useEffect(() => {
     if (!connectRequestId || connectRequestId === handledRequestId) return;
@@ -203,7 +203,7 @@ export function ChannelQrConnectFlow({
     setBusy(true);
     try {
       const payload = await cancelChannelConnect(
-        tokenRef.current,
+        client,
         channelName,
         connect.session_id,
       );
@@ -223,10 +223,9 @@ export function ChannelQrConnectFlow({
     setError(null);
     try {
       const payload = await pollChannelConnect(
-        tokenRef.current,
+        client,
         channelName,
         connect.session_id,
-        "",
         params,
       );
       setConnect((current) => ({
@@ -252,8 +251,8 @@ export function ChannelQrConnectFlow({
   return (
     <div className="mt-3 space-y-3">
       {pending ? (
-        <div className="grid gap-4 rounded-[14px] border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
-          <div className="grid h-[196px] w-[196px] place-items-center rounded-[14px] border border-border/60 bg-background">
+        <div className="grid gap-4 rounded-control border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
+          <div className="grid h-[196px] w-[196px] place-items-center rounded-control border border-border/60 bg-background">
             {qrDataUrl ? (
               <img
                 src={qrDataUrl}
@@ -294,20 +293,20 @@ export function ChannelQrConnectFlow({
       ) : null}
 
       {succeeded && !suppressSucceeded ? (
-        <div className="flex items-center gap-2 rounded-[12px] border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
+        <div className="flex items-center gap-2 rounded-control border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
           <Check className="h-3.5 w-3.5" aria-hidden />
           {displayMessage ?? labels.connected}
         </div>
       ) : null}
 
       {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
-        <div className="rounded-[12px] border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+        <div className="rounded-control border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
           {displayMessage || labels.stopped}
         </div>
       ) : null}
 
       {error ? (
-        <div className="rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="rounded-control border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
           {error}
         </div>
       ) : null}
