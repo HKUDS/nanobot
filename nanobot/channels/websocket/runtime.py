@@ -380,6 +380,10 @@ class WebSocketChannel(BaseChannel):
             tuple[ServerConnection, str],
             asyncio.Task[None],
         ] = {}
+        # Preserve request/response order for non-replayable mutations from one
+        # UI. Without this, an earlier slow settings response can overwrite a
+        # newer settings snapshot in the client.
+        self._webui_request_locks: dict[ServerConnection, asyncio.Lock] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -476,6 +480,7 @@ class WebSocketChannel(BaseChannel):
             await self._discard_connection_owned_chat(connection, cid)
         self._conn_default.pop(connection, None)
         self._webui_connections.discard(connection)
+        self._webui_request_locks.pop(connection, None)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -900,7 +905,10 @@ class WebSocketChannel(BaseChannel):
             )
             return
         if t == "transcribe_audio":
-            event, payload = await webui_transcription_event(envelope)
+            event, payload = await webui_transcription_event(
+                envelope,
+                config_path=self.gateway.settings.config.path,
+            )
             await self._send_event(connection, event, **payload)
             return
         if t == "message":
@@ -1039,7 +1047,10 @@ class WebSocketChannel(BaseChannel):
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
-            mcp_presets = normalize_mcp_preset_mentions(envelope.get("mcp_presets"))
+            mcp_presets = normalize_mcp_preset_mentions(
+                envelope.get("mcp_presets"),
+                config_path=self.gateway.settings.config.path,
+            )
             if mcp_presets:
                 metadata["mcp_presets"] = mcp_presets
             session_mentions: list[SessionMention] = []
@@ -1198,41 +1209,43 @@ class WebSocketChannel(BaseChannel):
         payload: dict[str, Any],
     ) -> None:
         try:
-            response = await self._http_router.dispatch_webui_mutation(
-                connection,
-                action,
-                payload,
-            )
-            status = response.status_code
-            body = bytes(response.body).decode("utf-8", errors="replace").strip()
-            if 200 <= status < 300:
-                try:
-                    result = json.loads(body)
-                except json.JSONDecodeError:
+            lock = self._webui_request_locks.setdefault(connection, asyncio.Lock())
+            async with lock:
+                response = await self._http_router.dispatch_webui_mutation(
+                    connection,
+                    action,
+                    payload,
+                )
+                status = response.status_code
+                body = bytes(response.body).decode("utf-8", errors="replace").strip()
+                if 200 <= status < 300:
+                    try:
+                        result = json.loads(body)
+                    except json.JSONDecodeError:
+                        await self._send_webui_response(
+                            connection,
+                            request_id,
+                            status=502,
+                            message="WebUI mutation returned an invalid response",
+                        )
+                        return
+                    if action == "sidebar.update" and isinstance(result, dict):
+                        await self._broadcast_webui_event(
+                            "sidebar_state_updated",
+                            state=result,
+                        )
                     await self._send_webui_response(
                         connection,
                         request_id,
-                        status=502,
-                        message="WebUI mutation returned an invalid response",
+                        result=result,
                     )
                     return
-                if action == "sidebar.update" and isinstance(result, dict):
-                    await self._broadcast_webui_event(
-                        "sidebar_state_updated",
-                        state=result,
-                    )
                 await self._send_webui_response(
                     connection,
                     request_id,
-                    result=result,
+                    status=status,
+                    message=body or response.reason_phrase,
                 )
-                return
-            await self._send_webui_response(
-                connection,
-                request_id,
-                status=status,
-                message=body or response.reason_phrase,
-            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1321,6 +1334,7 @@ class WebSocketChannel(BaseChannel):
         if mutation_tasks:
             await asyncio.gather(*mutation_tasks, return_exceptions=True)
         self._webui_request_tasks.clear()
+        self._webui_request_locks.clear()
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()

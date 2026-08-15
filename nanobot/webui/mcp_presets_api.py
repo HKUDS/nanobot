@@ -502,10 +502,10 @@ def _known_preset_names() -> set[str]:
     return {preset.name for preset in MCP_PRESETS}
 
 
-def _known_mcp_names() -> set[str]:
+def _known_mcp_names(config_path: Path | None = None) -> set[str]:
     names = _known_preset_names()
     with suppress(Exception):
-        names.update(load_config().tools.mcp_servers)
+        names.update(load_config(config_path).tools.mcp_servers)
     return names
 
 
@@ -518,11 +518,15 @@ def _clip_ws_string(value: Any, limit: int = 240) -> str | None:
     return text[:limit]
 
 
-def normalize_mcp_preset_mentions(raw: Any) -> list[dict[str, Any]]:
+def normalize_mcp_preset_mentions(
+    raw: Any,
+    *,
+    config_path: Path | None = None,
+) -> list[dict[str, Any]]:
     """Sanitize structured MCP preset mentions sent by the WebUI."""
     if not isinstance(raw, list):
         return []
-    known = _known_mcp_names()
+    known = _known_mcp_names(config_path)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item_value in cast(list[object], raw)[:8]:

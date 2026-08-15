@@ -944,6 +944,65 @@ async def test_authenticated_webui_request_returns_correlated_success(bus: Magic
 
 
 @pytest.mark.asyncio
+async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    dispatch_order: list[str] = []
+
+    async def dispatch(
+        _connection: object,
+        action: str,
+        _payload: dict[str, object],
+    ) -> Any:
+        dispatch_order.append(action)
+        if action == "settings.provider.update":
+            first_started.set()
+            await release_first.wait()
+        return _http_json_response({"action": action})
+
+    channel.gateway.http.dispatch_webui_mutation = dispatch
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-first",
+            "action": "settings.provider.update",
+            "payload": {},
+        },
+    )
+    await first_started.wait()
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-second",
+            "action": "settings.agent.update",
+            "payload": {},
+        },
+    )
+    await asyncio.sleep(0)
+    assert dispatch_order == ["settings.provider.update"]
+
+    release_first.set()
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+
+    assert dispatch_order == [
+        "settings.provider.update",
+        "settings.agent.update",
+    ]
+    responses = [json.loads(call.args[0]) for call in conn.send.await_args_list]
+    assert [response["request_id"] for response in responses] == [
+        "request-first",
+        "request-second",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = AsyncMock()
