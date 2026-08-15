@@ -563,6 +563,7 @@ export const ChatList = memo(function ChatList({
       const next = new Set(current);
       if (range) {
         for (const key of range) next.add(key);
+        for (const key of validKeys) next.add(key);
         return next;
       }
       const remove = validKeys.length > 0 && validKeys.every((key) => next.has(key));
