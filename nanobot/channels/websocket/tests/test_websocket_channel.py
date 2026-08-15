@@ -1003,6 +1003,126 @@ async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMoc
 
 
 @pytest.mark.asyncio
+async def test_webui_request_reuses_inflight_operation_after_reconnect(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    first_conn = AsyncMock()
+    retry_conn = AsyncMock()
+    channel._webui_connections.update({first_conn, retry_conn})
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def mutate(*_args: Any) -> Any:
+        started.set()
+        await release.wait()
+        return _http_json_response({"ran": True})
+
+    channel.gateway.http.dispatch_webui_mutation = AsyncMock(side_effect=mutate)
+    envelope = {
+        "type": "webui_request",
+        "request_id": "request-retry",
+        "action": "automation.run",
+        "payload": {"id": "daily-summary"},
+    }
+
+    await channel._dispatch_envelope(first_conn, "webui-client", envelope)
+    await started.wait()
+    await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
+    pending = tuple(channel._webui_request_tasks.values())
+    release.set()
+    await asyncio.gather(*pending)
+
+    channel.gateway.http.dispatch_webui_mutation.assert_awaited_once_with(
+        first_conn,
+        "automation.run",
+        {"id": "daily-summary"},
+    )
+    expected = {
+        "event": "webui_response",
+        "request_id": "request-retry",
+        "ok": True,
+        "result": {"ran": True},
+    }
+    assert json.loads(first_conn.send.await_args.args[0]) == expected
+    assert json.loads(retry_conn.send.await_args.args[0]) == expected
+
+
+@pytest.mark.asyncio
+async def test_webui_request_replays_completed_result_after_reconnect(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    first_conn = AsyncMock()
+    retry_conn = AsyncMock()
+    channel._webui_connections.update({first_conn, retry_conn})
+    channel.gateway.http.dispatch_webui_mutation = AsyncMock(
+        return_value=_http_json_response({"installed": True})
+    )
+    envelope = {
+        "type": "webui_request",
+        "request_id": "request-completed",
+        "action": "skill.install",
+        "payload": {"skill": "demo"},
+    }
+
+    await channel._dispatch_envelope(first_conn, "webui-client", envelope)
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+
+    channel.gateway.http.dispatch_webui_mutation.assert_awaited_once()
+    assert json.loads(retry_conn.send.await_args.args[0]) == {
+        "event": "webui_response",
+        "request_id": "request-completed",
+        "ok": True,
+        "result": {"installed": True},
+    }
+
+
+@pytest.mark.asyncio
+async def test_webui_request_rejects_request_id_reuse_with_different_payload(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    first_conn = AsyncMock()
+    retry_conn = AsyncMock()
+    channel._webui_connections.update({first_conn, retry_conn})
+    channel.gateway.http.dispatch_webui_mutation = AsyncMock(
+        return_value=_http_json_response({"ran": True})
+    )
+
+    await channel._dispatch_envelope(
+        first_conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-conflict",
+            "action": "automation.run",
+            "payload": {"id": "job-a"},
+        },
+    )
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await channel._dispatch_envelope(
+        retry_conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-conflict",
+            "action": "automation.run",
+            "payload": {"id": "job-b"},
+        },
+    )
+
+    channel.gateway.http.dispatch_webui_mutation.assert_awaited_once()
+    assert json.loads(retry_conn.send.await_args.args[0]) == {
+        "event": "webui_response",
+        "request_id": "request-conflict",
+        "ok": False,
+        "error": {
+            "status": 409,
+            "message": "request_id was already used for a different WebUI mutation",
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = AsyncMock()
