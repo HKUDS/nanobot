@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from nanobot.config.schema import Config, ProvidersConfig
+from nanobot.providers.factory import make_provider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import PROVIDERS, find_by_name
 
@@ -55,7 +56,7 @@ def test_orcarouter_forced_provider_uses_default_api_base() -> None:
     assert config.get_api_base("deepseek/deepseek-chat") == "https://api.orcarouter.ai/v1"
 
 
-def test_orcarouter_gateway_routes_unprefixed_models_when_configured() -> None:
+def test_orcarouter_gateway_routes_auto_model_when_configured() -> None:
     config = Config.model_validate({
         "providers": {
             "orcarouter": {
@@ -72,6 +73,39 @@ def test_orcarouter_gateway_routes_unprefixed_models_when_configured() -> None:
     assert config.get_provider_name("orcarouter/auto") == "orcarouter"
     assert config.get_api_key("orcarouter/auto") == "sk-orca-test-key"
     assert config.get_api_base("orcarouter/auto") == "https://api.orcarouter.ai/v1"
+
+
+def test_legacy_custom_provider_named_orcarouter_keeps_prefix_stripping() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "orcarouter": {
+                "apiKey": "legacy-test-key",
+                "apiBase": "https://legacy-gateway.example/v1",
+            },
+        },
+        "agents": {
+            "defaults": {
+                "model": "orcarouter/custom-model",
+                "provider": "orcarouter",
+            },
+        },
+    })
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = make_provider(config)
+
+    assert isinstance(provider, OpenAICompatProvider)
+    assert provider.api_base == "https://legacy-gateway.example/v1"
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model="orcarouter/custom-model",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+    assert kwargs["model"] == "custom-model"
 
 
 def test_orcarouter_preserves_model_api_id() -> None:
