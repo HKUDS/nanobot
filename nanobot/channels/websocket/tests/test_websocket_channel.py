@@ -3300,7 +3300,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         created_presets = {
             preset["name"]: preset for preset in created_body["model_presets"]
         }
-        assert created_presets["fast-writing"]["label"] == "Fast writing"
+        assert created_presets["fast-writing"]["label"] == "fast-writing"
         assert created_presets["fast-writing"]["provider"] == "openai"
 
         updated_preset = await _webui_mutate(
@@ -3320,7 +3320,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         updated_presets = {
             preset["name"]: preset for preset in updated_preset_body["model_presets"]
         }
-        assert updated_presets["fast-writing"]["label"] == "Codex"
+        assert updated_presets["fast-writing"]["label"] == "fast-writing"
 
         call_order_updated = await _webui_mutate(
             webui_client,
@@ -3437,7 +3437,6 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.agents.defaults.provider == "atomic_chat"
         assert saved.agents.defaults.model_preset == "fast-writing"
         assert saved.agents.defaults.fallback_models == ["deep"]
-        assert saved.model_presets["fast-writing"].label == "Codex"
         assert saved.model_presets["fast-writing"].model == "openai/gpt-5.5"
         assert saved.model_presets["fast-writing"].provider == "openai"
         assert saved.agents.defaults.timezone == "Asia/Shanghai"

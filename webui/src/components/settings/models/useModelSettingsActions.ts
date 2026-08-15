@@ -128,11 +128,11 @@ export function useModelSettingsActions({
     }
 
     if (modelPresetCreating) {
-      const label = form.presetLabel.trim();
+      const name = form.modelPreset.trim();
       const provider = form.provider.trim();
       const model = form.model.trim();
       if (
-        !label ||
+        !name ||
         !provider ||
         !model ||
         form.maxTokens <= 0 ||
@@ -145,7 +145,7 @@ export function useModelSettingsActions({
       setModelConfigurationSaving(true);
       try {
         const payload = await createModelConfiguration(client, {
-          label,
+          name,
           provider,
           model,
           maxTokens: form.maxTokens,
@@ -190,10 +190,6 @@ export function useModelSettingsActions({
     try {
       const payload = await updateModelConfiguration(client, {
         name: selectedPreset.name,
-        label:
-          form.presetLabel.trim() !== selectedPreset.label
-            ? form.presetLabel.trim()
-            : undefined,
         model: form.model !== selectedPreset.model ? form.model : undefined,
         provider: form.provider !== selectedPreset.provider ? form.provider : undefined,
         maxTokens:
@@ -235,7 +231,6 @@ export function useModelSettingsActions({
     setForm((prev) => ({
       ...prev,
       modelPreset: "",
-      presetLabel: "",
       provider,
       model: "",
       maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,

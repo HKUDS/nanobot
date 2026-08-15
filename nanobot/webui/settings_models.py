@@ -778,6 +778,25 @@ def _model_configuration_slug(label: str) -> str:
     return normalized
 
 
+def _model_configuration_name(value: str) -> str:
+    """Validate a user-facing preset name without inventing a second identity."""
+    name = value.strip()
+    if not name:
+        raise WebUISettingsError("configuration name is required")
+    if name.casefold() == "default":
+        raise WebUISettingsError("configuration name is reserved")
+    if len(name) > 48:
+        raise WebUISettingsError("configuration name must be 48 characters or fewer")
+    if not name.isprintable():
+        raise WebUISettingsError("configuration name contains unsupported characters")
+    return name
+
+
+def _model_configuration_name_exists(config: Config, name: str) -> bool:
+    normalized = name.casefold()
+    return any(existing.casefold() == normalized for existing in config.model_presets)
+
+
 def _custom_provider_key(config: Config, display_name: str) -> str:
     slug = _MODEL_CONFIGURATION_SLUG_RE.sub("-", display_name.strip().lower()).strip("-_")
     base = f"custom-{slug or 'provider'}"
@@ -824,7 +843,7 @@ def _unique_model_configuration_name(config: Config, label: str) -> str:
         base = "model"
     candidate = base
     suffix = 2
-    while candidate in config.model_presets:
+    while _model_configuration_name_exists(config, candidate):
         candidate = f"{base}-{suffix}"
         suffix += 1
     return candidate
@@ -928,6 +947,8 @@ def model_settings_payload(
     model_presets = [
         {
             "name": "default",
+            # Kept on the wire for older WebUI clients. It is no longer a
+            # separate product concept and always mirrors the canonical name.
             "label": "Default",
             "active": active_preset_name == "default",
             "is_default": True,
@@ -958,7 +979,7 @@ def model_settings_payload(
         model_presets.append(
             {
                 "name": name,
-                "label": preset.label or name,
+                "label": name,
                 "active": active_preset_name == name,
                 "is_default": False,
                 "model": preset.model,
@@ -1052,20 +1073,24 @@ def create_model_configuration(
     *,
     oauth_status: OAuthStatusReader,
 ) -> str:
-    label = (query_first_alias(query, "label", "displayName") or "").strip()
-    raw_name = (query_first(query, "name") or label).strip()
+    raw_name = query_first(query, "name")
+    legacy_label = query_first_alias(query, "label", "displayName")
     model = (query_first(query, "model") or "").strip()
     provider = (query_first(query, "provider") or "").strip()
 
-    if not label:
-        label = raw_name
     if not model:
         raise WebUISettingsError("model is required")
     if not provider:
         raise WebUISettingsError("provider is required")
 
-    name = _model_configuration_slug(raw_name or label)
-    if name in config.model_presets:
+    # Old clients only sent `label`; preserve their slugging behaviour while
+    # new clients provide the one canonical, user-visible name directly.
+    name = (
+        _model_configuration_name(raw_name)
+        if raw_name is not None
+        else _model_configuration_slug(legacy_label or "")
+    )
+    if _model_configuration_name_exists(config, name):
         raise WebUISettingsError("configuration already exists", status=409)
     _validate_configured_provider(config, provider, oauth_status)
 
@@ -1085,7 +1110,6 @@ def create_model_configuration(
             query_first_alias(query, "reasoning_effort", "reasoningEffort") or ""
         ).strip() or None
     config.model_presets[name] = ModelPresetConfig(
-        label=label,
         model=model,
         provider=provider,
         max_tokens=max_tokens if max_tokens is not None else base.max_tokens,
@@ -1115,15 +1139,6 @@ def update_model_configuration(
         raise WebUISettingsError("unknown model configuration")
 
     changed = False
-    label = query_first_alias(query, "label", "displayName")
-    if label is not None:
-        label = label.strip()
-        if not label:
-            raise WebUISettingsError("label is required")
-        if preset.label != label:
-            preset.label = label
-            changed = True
-
     model = query_first(query, "model")
     if model is not None:
         model = model.strip()
@@ -1228,7 +1243,6 @@ def migrate_model_configurations(config: Config) -> bool:
         label = _model_configuration_label(primary.model)
         name = _unique_model_configuration_name(config, label)
         config.model_presets[name] = ModelPresetConfig(
-            label=label,
             model=primary.model,
             provider=primary.provider,
             max_tokens=primary.max_tokens,
@@ -1247,7 +1261,6 @@ def migrate_model_configurations(config: Config) -> bool:
         label = _model_configuration_label(fallback.model)
         name = _unique_model_configuration_name(config, label)
         config.model_presets[name] = ModelPresetConfig(
-            label=label,
             model=fallback.model,
             provider=fallback.provider,
             max_tokens=(

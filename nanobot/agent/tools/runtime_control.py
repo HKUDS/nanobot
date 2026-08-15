@@ -235,7 +235,6 @@ def _snapshot_model_presets(
 ) -> dict[str, dict[str, object]]:
     return {
         name: {
-            "label": preset.label,
             "model": preset.model,
             "provider": preset.provider,
             "max_tokens": preset.max_tokens,

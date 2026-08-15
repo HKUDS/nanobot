@@ -89,7 +89,7 @@ async function togglePresetEditor(name = "primary") {
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
-  it("distinguishes the editable display name from the stable command name", async () => {
+  it("uses the preset name as the canonical identity", async () => {
     const payload = settingsPayload();
     payload.model_presets[0] = {
       ...payload.model_presets[0],
@@ -104,11 +104,10 @@ describe("Settings models", () => {
 
     await togglePresetEditor("openai");
 
-    expect(screen.getByText("Display name")).toBeInTheDocument();
-    expect(
-      screen.getByText("Shown in the interface. The command name stays /model openai."),
-    ).toBeInTheDocument();
-    expect(screen.getByDisplayValue("minimax")).toBeInTheDocument();
+    const editor = screen.getByTestId("model-preset-editor");
+    expect(within(editor).getByText("Preset name")).toBeInTheDocument();
+    expect(within(editor).getByText("openai")).toBeInTheDocument();
+    expect(within(editor).queryByText("minimax")).not.toBeInTheDocument();
   });
 
   it("keeps generation parameters collapsed until advanced options are opened", async () => {
@@ -188,7 +187,7 @@ describe("Settings models", () => {
       "lg:max-w-6xl",
       "rounded-floating",
     );
-    expect(within(editor).getByDisplayValue("Primary")).toBeInTheDocument();
+    expect(within(editor).getByText("primary")).toBeInTheDocument();
     const deleteButton = within(editor).getByRole("button", { name: "Delete" });
     expect(deleteButton).toBeDisabled();
     expect(deleteButton).toHaveAttribute("aria-describedby", "model-preset-delete-hint");
@@ -244,8 +243,9 @@ describe("Settings models", () => {
       ),
     );
     await togglePresetEditor();
-    fireEvent.change(screen.getByDisplayValue("Primary"), {
-      target: { value: "Primary draft" },
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), {
+      target: { value: "0.4" },
     });
     const primaryRow = screen.getByTestId("model-call-order-row-primary");
     const backupRow = screen.getByTestId("model-call-order-row-backup");
@@ -270,7 +270,7 @@ describe("Settings models", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("Primary draft")).toBeInTheDocument();
+    expect(screen.getByLabelText("Temperature")).toHaveValue(0.4);
     expect(screen.getByRole("button", { name: "Save preset" })).toBeEnabled();
   });
 
@@ -430,7 +430,8 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payloadWithCodex });
 
     const codexRow = await screen.findByTestId("model-call-order-row-codex");
-    expect(codexRow).toHaveTextContent("Codex");
+    expect(codexRow).toHaveTextContent("codex");
+    expect(codexRow).not.toHaveTextContent("Codex");
     expect(codexRow).toHaveTextContent("openai-codex/gpt-5.5");
     expect(codexRow).toHaveTextContent("Disabled");
     expect(codexRow).toHaveAttribute("draggable", "false");
@@ -461,7 +462,7 @@ describe("Settings models", () => {
     const { payload } = settingsPayloadWithBackup();
     const writerPreset = {
       ...payload.model_presets[0],
-      name: "writer",
+      name: "Writer",
       label: "Writer",
       active: false,
       model: "openai/gpt-4o-mini",
@@ -475,7 +476,7 @@ describe("Settings models", () => {
     };
     const orderedPayload: SettingsPayload = {
       ...createdPayload,
-      model_call_order: ["primary", "backup", "writer"],
+      model_call_order: ["primary", "backup", "Writer"],
       created_model_preset: undefined,
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -528,15 +529,15 @@ describe("Settings models", () => {
     await waitFor(() => {
       expect(requestMutationMock).toHaveBeenLastCalledWith(
         "settings.model_call_order.update",
-        { order: ["primary", "backup", "writer"] },
+        { order: ["primary", "backup", "Writer"] },
         20_000,
       );
     });
-    const writerRow = await screen.findByTestId("model-call-order-row-writer");
+    const writerRow = await screen.findByTestId("model-call-order-row-Writer");
     expect(writerRow).not.toHaveTextContent("Disabled");
     expect(writerRow).not.toHaveTextContent(/Fallback/);
     expect(within(writerRow).getByRole("switch", { name: "Disable preset" })).toBeChecked();
-    expect(screen.getByDisplayValue("Writer")).toBeInTheDocument();
+    expect(screen.getAllByText("Writer").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
   });
 

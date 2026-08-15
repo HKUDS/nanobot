@@ -633,7 +633,6 @@ Model presets are the recommended model configuration surface. Use them when you
 {
   "modelPresets": {
     "fast": {
-      "label": "Fast",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
@@ -641,7 +640,6 @@ Model presets are the recommended model configuration surface. Use them when you
       "temperature": 0.1
     },
     "deep": {
-      "label": "Deep",
       "provider": "anthropic",
       "model": "claude-opus-4-5",
       "maxTokens": 8192,
@@ -667,7 +665,6 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
 {
   "modelPresets": {
     "fast": {
-      "label": "Fast",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
@@ -675,7 +672,6 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
       "temperature": 0.1
     },
     "deep": {
-      "label": "Deep",
       "provider": "anthropic",
       "model": "claude-opus-4-5",
       "maxTokens": 8192,
@@ -683,7 +679,6 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
       "temperature": 0.1
     },
     "localSmall": {
-      "label": "Local Small",
       "provider": "ollama",
       "model": "llama3.2",
       "maxTokens": 4096,

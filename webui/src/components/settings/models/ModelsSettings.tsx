@@ -44,7 +44,6 @@ export interface AgentSettingsDraft {
   model: string;
   provider: string;
   modelPreset: string;
-  presetLabel: string;
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
@@ -67,7 +66,6 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   model: "",
   provider: "",
   modelPreset: "",
-  presetLabel: "",
   maxTokens: 8192,
   contextWindowTokens: 200_000,
   temperature: 0.1,
@@ -89,7 +87,6 @@ export function agentDraftFromPayload(
     model: activePreset?.model ?? payload.agent.model,
     provider: activePreset?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "",
     modelPreset: activePresetName,
-    presetLabel: activePreset?.label ?? activePresetName,
     maxTokens: activePreset?.max_tokens ?? payload.agent.max_tokens,
     contextWindowTokens: normalizeContextWindowTokens(
       activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
@@ -126,7 +123,7 @@ export function ModelPresetDeleteDialog({
             {tx(
               "settings.models.deletePresetHelp",
               "This removes the preset “{{name}}”. Provider credentials are not affected.",
-              { name: preset?.label ?? "" },
+              { name: preset?.name ?? "" },
             )}
           </DialogDescription>
         </DialogHeader>
@@ -266,7 +263,7 @@ export function ModelsSettings({
   const modelFieldsMissing =
     !form.model.trim() ||
     !form.provider.trim() ||
-    !form.presetLabel.trim() ||
+    (creating && !form.modelPreset.trim()) ||
     form.maxTokens <= 0 ||
     form.temperature < 0 ||
     form.temperature > 2;
@@ -290,7 +287,6 @@ export function ModelsSettings({
       modelPreset: preset.name,
       model: preset.model,
       provider: preset.provider,
-      presetLabel: preset.label,
       maxTokens: preset.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
@@ -351,30 +347,29 @@ export function ModelsSettings({
         </div>
       ) : null}
       <SettingsRow
-        title={
-          creating
-            ? tx("settings.models.presetName", "Preset name")
-            : tx("settings.models.presetDisplayName", "Display name")
-        }
+        title={tx("settings.models.presetName", "Preset name")}
         description={
           creating
-            ? undefined
-            : tx(
-                "settings.models.presetDisplayNameHelp",
-                "Shown in the interface. The command name stays /model {{name}}.",
-                { name: form.modelPreset },
+            ? tx(
+                "settings.models.presetNameHelp",
+                "Used everywhere, including /model commands. Names must be unique.",
               )
+            : undefined
         }
       >
-        <Input
-          autoFocus={creating}
-          value={form.presetLabel}
-          placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
-          onChange={(event) =>
-            setForm((prev) => ({ ...prev, presetLabel: event.target.value }))
-          }
-          className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-        />
+        {creating ? (
+          <Input
+            autoFocus
+            value={form.modelPreset}
+            placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, modelPreset: event.target.value }))
+            }
+            className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
+          />
+        ) : (
+          <span className="text-[13px] font-medium text-foreground">{form.modelPreset}</span>
+        )}
       </SettingsRow>
       <SettingsRow title={t("settings.rows.provider")}>
         <ProviderPicker
@@ -604,11 +599,11 @@ export function ModelsSettings({
                       draggable={ordered && !callOrderBusy}
                       aria-label={
                         ordered
-                          ? `${preset?.label ?? name}. ${tx(
+                          ? `${name}. ${tx(
                               "settings.models.dragToReorder",
                               "Drag to reorder",
                             )}`
-                          : preset?.label ?? name
+                          : name
                       }
                       data-testid={`model-call-order-row-${name}`}
                       onDragStart={(event) => {
@@ -704,7 +699,7 @@ export function ModelsSettings({
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 flex-wrap items-center gap-2">
                             <span className="truncate text-[14px] font-medium text-foreground">
-                              {preset?.label ?? name}
+                              {name}
                             </span>
                             {orderIndex === 0 ? (
                               <StatusPill tone="success">

@@ -236,7 +236,7 @@ def _dynamic_provider_config(
     return Config.model_validate(raw_config)
 
 
-def test_create_model_configuration_writes_label_without_changing_call_order(
+def test_create_model_configuration_accepts_legacy_label_without_changing_call_order(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -260,11 +260,10 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
     assert payload["agent"]["model"] == "openai/gpt-4o"
     assert payload["created_model_preset"] == "fast-writing"
     rows = {row["name"]: row for row in payload["model_presets"]}
-    assert rows["fast-writing"]["label"] == "Fast writing"
+    assert rows["fast-writing"]["label"] == "fast-writing"
 
     saved = load_config(config_path)
     assert saved.agents.defaults.model_preset is None
-    assert saved.model_presets["fast-writing"].label == "Fast writing"
     assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
     assert saved.model_presets["fast-writing"].provider == "openai"
 
@@ -272,6 +271,40 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
         create_model_configuration(
             {
                 "label": ["Fast writing"],
+                "provider": ["openai"],
+                "model": ["openai/gpt-4.1-mini"],
+            }
+        )
+    assert duplicate.value.status == 409
+
+
+def test_create_model_configuration_preserves_canonical_name(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {
+            "name": ["Fast Writing"],
+            "provider": ["openai"],
+            "model": ["openai/gpt-4.1-mini"],
+        }
+    )
+
+    assert payload["created_model_preset"] == "Fast Writing"
+    rows = {row["name"]: row for row in payload["model_presets"]}
+    assert rows["Fast Writing"]["label"] == "Fast Writing"
+    assert "Fast Writing" in load_config(config_path).model_presets
+
+    with pytest.raises(WebUISettingsError) as duplicate:
+        create_model_configuration(
+            {
+                "name": ["fast writing"],
                 "provider": ["openai"],
                 "model": ["openai/gpt-4.1-mini"],
             }
@@ -353,7 +386,6 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     config = Config()
     config.providers.openai.api_key = "sk-test"
     config.model_presets["codex"] = ModelPresetConfig(
-        label="Old Codex",
         provider="openai",
         model="openai/gpt-4.1",
     )
@@ -382,7 +414,6 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     assert payload["agent"]["model"] == "anthropic/claude-opus-4-5"
     saved = load_config(config_path)
     assert saved.agents.defaults.model_preset is None
-    assert saved.model_presets["codex"].label == "Codex"
     assert saved.model_presets["codex"].provider == "openai_codex"
     assert saved.model_presets["codex"].model == "openai-codex/gpt-5.5"
 
@@ -834,7 +865,6 @@ def test_update_model_configuration_preserves_custom_context_windows(
     config_path = tmp_path / "config.json"
     config = Config()
     config.model_presets["codex"] = ModelPresetConfig(
-        label="Codex",
         provider="openai",
         model="openai/gpt-4.1",
     )

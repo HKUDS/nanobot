@@ -97,7 +97,6 @@ FallbackCandidate = str | InlineFallbackConfig
 class ModelPresetConfig(Base):
     """A named set of model + generation parameters for quick switching."""
 
-    label: str | None = None
     model: str
     provider: str = "auto"
     max_tokens: int = 8192
@@ -463,7 +462,18 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
-        if "default" in self.model_presets:
+        names_by_case: dict[str, str] = {}
+        for preset_name in self.model_presets:
+            if preset_name != preset_name.strip() or not preset_name.isprintable():
+                raise ValueError(f"invalid model_preset name {preset_name!r}")
+            normalized = preset_name.casefold()
+            if normalized in names_by_case:
+                raise ValueError(
+                    "model_preset names must be unique ignoring case: "
+                    f"{names_by_case[normalized]!r} and {preset_name!r}"
+                )
+            names_by_case[normalized] = preset_name
+        if "default" in names_by_case:
             raise ValueError("model_preset name 'default' is reserved for agents.defaults")
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:

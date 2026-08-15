@@ -609,7 +609,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
     expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
   });
 
@@ -645,19 +645,19 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model fast",
     );
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
     fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Fast" }),
+      screen.getByRole("spinbutton", { name: "fast" }),
       { key: "End" },
     );
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
     );
-    expect(await screen.findByText("Extra")).toBeInTheDocument();
+    expect(await screen.findByText("extra")).toBeInTheDocument();
 
     rerender(view("fast"));
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -692,7 +692,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-4 · Company Proxy")).toBeInTheDocument();
+    expect(await screen.findByTitle("fast · gpt-4 · Company Proxy")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
@@ -1070,7 +1070,7 @@ describe("ThreadShell", () => {
       await screen.findByRole("spinbutton", { name: "Default" }),
       { key: "ArrowDown" },
     );
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Message input"), {

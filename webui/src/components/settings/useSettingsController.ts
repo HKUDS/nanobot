@@ -261,8 +261,7 @@ export function useSettingsController({
       form.maxTokens !== selectedPreset.max_tokens ||
       form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       form.temperature !== selectedPreset.temperature ||
-      form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
-      form.presetLabel.trim() !== selectedPreset.label
+      form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "")
     );
   }, [form, settings]);
 

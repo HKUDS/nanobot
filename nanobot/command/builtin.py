@@ -375,16 +375,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
-    parts = args.split()
-    if len(parts) != 1:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: `/model [preset]`",
-            metadata=metadata,
-        )
-
-    name = parts[0]
+    name = args
     try:
         runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:

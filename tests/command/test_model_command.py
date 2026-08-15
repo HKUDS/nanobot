@@ -33,14 +33,14 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     return provider
 
 
-def _make_loop(tmp_path, *, preset_snapshot_loader=None) -> AgentLoop:
+def _make_loop(tmp_path, *, preset_snapshot_loader=None, model_presets=None) -> AgentLoop:
     return AgentLoop(
         bus=MessageBus(),
         provider=_provider("base-model", max_tokens=123),
         workspace=tmp_path,
         model="base-model",
         context_window_tokens=1000,
-        model_presets={
+        model_presets=model_presets or {
             "default": ModelPresetConfig(
                 model="base-model",
                 max_tokens=123,
@@ -104,6 +104,24 @@ async def test_model_command_switches_preset(tmp_path) -> None:
     assert _saved_model_preset(loop) == "fast"
     status = await loop.process_direct("/status", session_key="cli:direct")
     assert status is not None and "openai/gpt-4.1" in status.content
+
+
+@pytest.mark.asyncio
+async def test_model_command_accepts_canonical_names_with_spaces(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        model_presets={
+            "default": ModelPresetConfig(model="base-model"),
+            "Deep Research": ModelPresetConfig(model="deep-model"),
+        },
+    )
+
+    out = await cmd_model(
+        _ctx(loop, "/model deep research", args="deep research"),
+    )
+
+    assert "Switched model preset to `Deep Research`." in out.content
+    assert _saved_model_preset(loop) == "Deep Research"
 
 
 @pytest.mark.asyncio

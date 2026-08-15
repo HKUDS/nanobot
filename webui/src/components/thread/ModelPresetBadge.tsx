@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 
 export interface ModelPresetOption {
   name: string;
-  label: string;
   model?: string | null;
   provider?: string | null;
 }
@@ -99,7 +98,6 @@ export function ModelPresetBadge({
   const activePreset: ModelPresetOption = {
     ...(listedIndex >= 0 ? modelPresets[listedIndex] : undefined),
     name: activeName,
-    label: label || modelPresets[listedIndex]?.label || activeName,
     model: modelDetail ?? modelPresets[listedIndex]?.model,
     provider: provider || modelPresets[listedIndex]?.provider,
   };
@@ -225,7 +223,7 @@ export function ModelPresetBadge({
       aria-valuemax={canSwitch ? presets.length - 1 : undefined}
       aria-valuemin={canSwitch ? 0 : undefined}
       aria-valuenow={canSwitch ? previewIndex : undefined}
-      aria-valuetext={canSwitch ? previewPreset?.label || label : undefined}
+      aria-valuetext={canSwitch ? previewPreset?.name || label : undefined}
       role={canSwitch ? "spinbutton" : undefined}
       type={interactive || canSwitch ? "button" : undefined}
       onClick={interactive ? onClick : undefined}
@@ -290,7 +288,7 @@ export function ModelPresetBadge({
               return (
                 <PresetPill
                   key={virtualIndex}
-                  label={preset.label || preset.name}
+                  label={preset.name}
                   modelDetail={preset.model}
                   provider={preset.provider}
                   isHero={isHero}

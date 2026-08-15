@@ -307,9 +307,9 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
 }
 
 const MODEL_PRESETS = [
-  { name: "kimi", label: "Kimi", provider: "moonshot" },
-  { name: "dflash", label: "DFlash", provider: "deepseek" },
-  { name: "dspro", label: "DS Pro", provider: "deepseek" },
+  { name: "kimi", provider: "moonshot" },
+  { name: "dflash", provider: "deepseek" },
+  { name: "dspro", provider: "deepseek" },
 ];
 
 function renderPresetComposer(variant: "thread" | "hero" = "thread") {
@@ -317,7 +317,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
   render(
     <ThreadComposer
       onSend={vi.fn()}
-      modelLabel="Kimi"
+      modelLabel="kimi"
       modelPreset="kimi"
       modelProvider="moonshot"
       modelPresets={MODEL_PRESETS}
@@ -327,7 +327,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
     />,
   );
   return {
-    badge: screen.getByRole("spinbutton", { name: "Kimi" }),
+    badge: screen.getByRole("spinbutton", { name: "kimi" }),
     onPresetChange,
   };
 }
@@ -604,7 +604,7 @@ describe("ThreadComposer", () => {
     expect(Array.from(pills).every((pill) => pill.querySelector("img"))).toBe(true);
     expect(Array.from(badge.querySelectorAll("img")).every((image) => !image.draggable)).toBe(true);
     const centeredPill = track.querySelector<HTMLElement>("[data-preset-offset='0']");
-    expect(centeredPill).toHaveTextContent("Kimi");
+    expect(centeredPill).toHaveTextContent("kimi");
     expect(centeredPill).toHaveStyle({ transform: "scale(1.0800)" });
     expect(
       track.querySelector<HTMLElement>("[data-preset-offset='1']"),
@@ -615,13 +615,13 @@ describe("ThreadComposer", () => {
       pointerId: 7,
       pointerType: "mouse",
     });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("Kimi");
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("kimi");
     fireEvent.pointerMove(badge, {
       clientY: 123,
       pointerId: 7,
       pointerType: "mouse",
     });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("DS Pro");
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("dspro");
     fireEvent.pointerUp(badge, {
       clientY: 123,
       pointerId: 7,

@@ -378,7 +378,11 @@ function toModelBadgeInfo(
   const model = scopedPreset
     ? preset?.model || null
     : settings?.agent.model || modelName || null;
-  const label = preset?.label?.trim() || scopedPreset || toModelBadgeLabel(model);
+  const label = preset
+    ? preset.is_default
+      ? preset.label?.trim() || "Default"
+      : preset.name.trim()
+    : scopedPreset || toModelBadgeLabel(model);
   const rawProvider = preset?.provider
     || (!scopedPreset ? settings?.agent.provider : null)
     || null;
@@ -419,7 +423,6 @@ function modelPresetOptionsFromSettings(
       const name = preset.name.trim();
       return {
         name,
-        label: preset.label?.trim() || name,
         model: preset.model,
         provider: preset.resolved_provider || preset.provider,
       };
