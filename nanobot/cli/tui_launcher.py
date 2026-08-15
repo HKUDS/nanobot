@@ -123,11 +123,7 @@ def _resolve_tui_command() -> list[str]:
     source_dir = Path(__file__).resolve().parents[2] / "tui"
     bun = shutil.which("bun")
     if bun and (source_dir / "package.json").is_file():
-        if not (source_dir / "node_modules" / "@opentui" / "core").is_dir():
-            raise TuiUnavailableError(
-                f"TUI dependencies are missing; run `bun install --cwd {source_dir}`"
-            )
-        return [bun, str(source_dir / "src" / "index.ts")]
+        return _resolve_source_tui_command(source_dir, bun)
 
     downloaded = _download_release_tui(asset)
     if downloaded is not None:
@@ -137,6 +133,25 @@ def _resolve_tui_command() -> list[str]:
         "this build does not include the native TUI; install Bun for a source checkout "
         "or use `nanobot agent --classic`"
     )
+
+
+def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
+    dependency = source_dir / "node_modules" / "@opentui" / "core"
+    try:
+        install = subprocess.run(
+            [bun, "install", "--frozen-lockfile"],
+            cwd=source_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise TuiUnavailableError(f"could not install TUI dependencies: {exc}") from exc
+    if install.returncode != 0 or not dependency.is_dir():
+        detail = (install.stderr or install.stdout).strip().splitlines()
+        suffix = f": {detail[-1]}" if detail else ""
+        raise TuiUnavailableError(f"could not install TUI dependencies{suffix}")
+    return [bun, str(source_dir / "src" / "index.ts")]
 
 
 def _download_release_tui(asset: str) -> Path | None:

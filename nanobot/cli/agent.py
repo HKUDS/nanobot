@@ -83,18 +83,21 @@ def agent(
     theme = theme.strip().lower()
     if theme not in {"auto", "dark", "light"}:
         raise typer.BadParameter("must be auto, dark, or light", param_hint="--theme")
-    native_tui = (
-        message is None
-        and not classic
-        and markdown
-        and not logs
-        and sys.stdin.isatty()
-        and sys.stdout.isatty()
-    )
+    native_tui = message is None and not classic
     if native_tui:
         from nanobot.cli.tui_launcher import TuiUnavailableError, launch_tui
         from nanobot.config.loader import get_config_path
 
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise typer.BadParameter(
+                "the native TUI requires an interactive terminal; use --message for "
+                "one-shot input or --classic for the legacy prompt",
+                param_hint="terminal",
+            )
+        if not markdown:
+            raise typer.BadParameter("--no-markdown requires --classic", param_hint="--no-markdown")
+        if logs:
+            raise typer.BadParameter("--logs requires --classic", param_hint="--logs")
         try:
             exit_code = launch_tui(
                 runtime_config,
@@ -104,8 +107,9 @@ def agent(
                 theme=theme,
             )
         except TuiUnavailableError as exc:
-            console.print(f"[yellow]Native TUI unavailable: {exc}[/yellow]")
-            console.print("[dim]Falling back to the classic prompt.[/dim]")
+            console.print(f"[red]Native TUI unavailable: {exc}[/red]")
+            console.print("[dim]Use `nanobot agent --classic` only if you want the old prompt.[/dim]")
+            raise typer.Exit(1) from exc
         else:
             if exit_code:
                 raise typer.Exit(exit_code)

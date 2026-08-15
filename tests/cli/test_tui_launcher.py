@@ -1,8 +1,10 @@
 import hashlib
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import typer
 
 from nanobot.cli.agent import agent
 from nanobot.cli.tui_launcher import (
@@ -12,6 +14,7 @@ from nanobot.cli.tui_launcher import (
     _ensure_gateway,
     _initial_tui_chat_id,
     _read_tui_chat_id,
+    _resolve_source_tui_command,
     _resolve_tui_command,
     _websocket_chat_id,
 )
@@ -70,7 +73,7 @@ def test_explicit_tui_binary_must_exist(
         _resolve_tui_command()
 
 
-def test_windows_arm64_uses_the_classic_prompt(
+def test_windows_arm64_fails_instead_of_using_the_classic_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("NANOBOT_TUI_BIN", raising=False)
@@ -118,6 +121,129 @@ def test_interactive_agent_uses_native_tui(
         "session_id": "websocket:terminal-chat",
         "theme": "light",
     }
+
+
+def test_interactive_agent_does_not_silently_fall_back(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    output: list[str] = []
+
+    def unavailable(*_args: object, **_kwargs: object) -> int:
+        raise TuiUnavailableError("missing sidecar")
+
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr("nanobot.cli.agent.console.print", lambda value: output.append(value))
+    monkeypatch.setattr("nanobot.cli.tui_launcher.launch_tui", unavailable)
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdout", SimpleNamespace(isatty=lambda: True))
+
+    with pytest.raises(typer.Exit) as exc_info:
+        agent(
+            message=None,
+            session_id=None,
+            workspace=None,
+            config=None,
+            markdown=True,
+            logs=False,
+            classic=False,
+            theme="auto",
+        )
+
+    assert exc_info.value.exit_code == 1
+    assert output == [
+        "[red]Native TUI unavailable: missing sidecar[/red]",
+        "[dim]Use `nanobot agent --classic` only if you want the old prompt.[/dim]",
+    ]
+
+
+def test_default_agent_does_not_fall_back_outside_a_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: Config())
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdin", SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdout", SimpleNamespace(isatty=lambda: True))
+
+    with pytest.raises(typer.BadParameter, match="requires an interactive terminal"):
+        agent(
+            message=None,
+            session_id=None,
+            workspace=None,
+            config=None,
+            markdown=True,
+            logs=False,
+            classic=False,
+            theme="auto",
+        )
+
+
+@pytest.mark.parametrize(
+    ("markdown", "logs", "option"),
+    [
+        (False, False, "--no-markdown"),
+        (True, True, "--logs"),
+    ],
+)
+def test_classic_options_require_an_explicit_classic_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    markdown: bool,
+    logs: bool,
+    option: str,
+) -> None:
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: Config())
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdout", SimpleNamespace(isatty=lambda: True))
+
+    with pytest.raises(typer.BadParameter, match=f"{option} requires --classic"):
+        agent(
+            message=None,
+            session_id=None,
+            workspace=None,
+            config=None,
+            markdown=markdown,
+            logs=logs,
+            classic=False,
+            theme="auto",
+        )
+
+
+def test_source_checkout_refreshes_locked_tui_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "tui"
+    source_dir.mkdir()
+    (source_dir / "node_modules" / "@opentui" / "core").mkdir(parents=True)
+    bun = str(tmp_path / "bun")
+
+    def install(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command == [bun, "install", "--frozen-lockfile"]
+        assert kwargs["cwd"] == source_dir
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", install)
+
+    assert _resolve_source_tui_command(source_dir, bun) == [
+        bun,
+        str(source_dir / "src" / "index.ts"),
+    ]
+
+
+def test_source_checkout_fails_when_locked_dependencies_cannot_be_refreshed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "tui"
+    source_dir.mkdir()
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, "", "lockfile mismatch"),
+    )
+
+    with pytest.raises(TuiUnavailableError, match="lockfile mismatch"):
+        _resolve_source_tui_command(source_dir, "bun")
 
 
 def test_release_tui_is_verified_and_cached(
