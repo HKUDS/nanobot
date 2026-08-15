@@ -3308,7 +3308,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             "settings.model_configuration.update",
             {
                 "name": "fast-writing",
-                "label": "Codex",
+                "new_name": "Codex",
                 "provider": "openai",
                 "model": "openai/gpt-5.5",
             },
@@ -3320,24 +3320,24 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         updated_presets = {
             preset["name"]: preset for preset in updated_preset_body["model_presets"]
         }
-        assert updated_presets["fast-writing"]["label"] == "fast-writing"
+        assert updated_presets["Codex"]["label"] == "Codex"
 
         call_order_updated = await _webui_mutate(
             webui_client,
             "settings.model_call_order.update",
-            {"order": ["fast-writing", "deep"]},
+            {"order": ["Codex", "deep"]},
         )
         assert call_order_updated.status_code == 200
         call_order_body = call_order_updated.json()
-        assert call_order_body["agent"]["model_preset"] == "fast-writing"
+        assert call_order_body["agent"]["model_preset"] == "Codex"
         assert call_order_body["agent"]["model"] == "openai/gpt-5.5"
-        assert call_order_body["model_call_order"] == ["fast-writing", "deep"]
+        assert call_order_body["model_call_order"] == ["Codex", "deep"]
 
         duplicate_preset = await _webui_mutate(
             webui_client,
             "settings.model_configuration.create",
             {
-                "label": "Fast writing",
+                "name": "codex",
                 "provider": "openai",
                 "model": "openai/gpt-4.1-mini",
             },
@@ -3435,10 +3435,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         saved = load_config(config_path)
         assert saved.agents.defaults.model == "atomic_chat/test"
         assert saved.agents.defaults.provider == "atomic_chat"
-        assert saved.agents.defaults.model_preset == "fast-writing"
+        assert saved.agents.defaults.model_preset == "Codex"
         assert saved.agents.defaults.fallback_models == ["deep"]
-        assert saved.model_presets["fast-writing"].model == "openai/gpt-5.5"
-        assert saved.model_presets["fast-writing"].provider == "openai"
+        assert saved.model_presets["Codex"].model == "openai/gpt-5.5"
+        assert saved.model_presets["Codex"].provider == "openai"
         assert saved.agents.defaults.timezone == "Asia/Shanghai"
         assert saved.agents.defaults.bot_name == "nanobot"
         assert saved.agents.defaults.bot_icon == "🐈"

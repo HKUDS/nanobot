@@ -927,6 +927,7 @@ export async function updateModelConfiguration(
     "settings.model_configuration.update",
     {
       name: configuration.name,
+      ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
       ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
       ...(configuration.model !== undefined ? { model: configuration.model } : {}),
       ...modelGenerationSettingsPayload(configuration),

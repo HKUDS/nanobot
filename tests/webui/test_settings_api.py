@@ -418,6 +418,61 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     assert saved.model_presets["codex"].model == "openai-codex/gpt-5.5"
 
 
+def test_update_model_configuration_renames_preset_and_config_references(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets = {
+        "openai": ModelPresetConfig(model="openai/gpt-4.1"),
+        "backup": ModelPresetConfig(model="anthropic/claude-sonnet-4"),
+    }
+    defaults = config.agents.defaults
+    defaults.model_preset = "openai"
+    defaults.fallback_models = ["backup", "openai"]
+    defaults.dream.model_override = "openai"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_model_configuration(
+        {"name": ["openai"], "new_name": ["Codex"]}
+    )
+
+    assert payload["agent"]["model_preset"] == "Codex"
+    assert payload["model_call_order"] == ["Codex", "backup", "Codex"]
+    assert [row["name"] for row in payload["model_presets"]] == [
+        "default",
+        "Codex",
+        "backup",
+    ]
+    saved = load_config(config_path)
+    assert list(saved.model_presets) == ["Codex", "backup"]
+    assert saved.agents.defaults.model_preset == "Codex"
+    assert saved.agents.defaults.fallback_models == ["backup", "Codex"]
+    assert saved.agents.defaults.dream.model_override == "Codex"
+
+
+def test_update_model_configuration_rejects_duplicate_rename(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets = {
+        "openai": ModelPresetConfig(model="openai/gpt-4.1"),
+        "Codex": ModelPresetConfig(model="openai/gpt-5.5"),
+    }
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError) as duplicate:
+        update_model_configuration({"name": ["openai"], "new_name": ["codex"]})
+
+    assert duplicate.value.status == 409
+    assert set(load_config(config_path).model_presets) == {"openai", "Codex"}
+
+
 def test_settings_payload_exposes_named_model_call_order(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

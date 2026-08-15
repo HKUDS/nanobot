@@ -792,9 +792,40 @@ def _model_configuration_name(value: str) -> str:
     return name
 
 
-def _model_configuration_name_exists(config: Config, name: str) -> bool:
+def _model_configuration_name_exists(
+    config: Config,
+    name: str,
+    *,
+    exclude: str | None = None,
+) -> bool:
     normalized = name.casefold()
-    return any(existing.casefold() == normalized for existing in config.model_presets)
+    return any(
+        existing != exclude and existing.casefold() == normalized
+        for existing in config.model_presets
+    )
+
+
+def _rename_model_configuration(config: Config, old_name: str, new_name: str) -> bool:
+    """Rename one preset and every config reference to it."""
+    if old_name == new_name:
+        return False
+    if _model_configuration_name_exists(config, new_name, exclude=old_name):
+        raise WebUISettingsError("configuration already exists", status=409)
+
+    config.model_presets = {
+        (new_name if name == old_name else name): preset
+        for name, preset in config.model_presets.items()
+    }
+    defaults = config.agents.defaults
+    if defaults.model_preset == old_name:
+        defaults.model_preset = new_name
+    defaults.fallback_models = [
+        new_name if fallback == old_name else fallback
+        for fallback in defaults.fallback_models
+    ]
+    if defaults.dream.model_override == old_name:
+        defaults.dream.model_override = new_name
+    return True
 
 
 def _custom_provider_key(config: Config, display_name: str) -> str:
@@ -1139,6 +1170,13 @@ def update_model_configuration(
         raise WebUISettingsError("unknown model configuration")
 
     changed = False
+    new_name_value = query_first_alias(query, "new_name", "newName")
+    if new_name_value is not None:
+        new_name = _model_configuration_name(new_name_value)
+        changed = _rename_model_configuration(config, name, new_name) or changed
+        name = new_name
+        preset = config.model_presets[name]
+
     model = query_first(query, "model")
     if model is not None:
         model = model.strip()

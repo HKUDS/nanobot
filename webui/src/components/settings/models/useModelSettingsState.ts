@@ -9,6 +9,9 @@ import type { ProviderForm } from "@/components/settings/models/ProviderSettings
 import type { ProviderOAuthAuthorizationRequired, SettingsPayload } from "@/lib/types";
 
 export function useModelSettingsState(initialSettings: SettingsPayload | null) {
+  const initialForm = initialSettings
+    ? agentDraftFromPayload(initialSettings)
+    : DEFAULT_AGENT_SETTINGS_DRAFT;
   const [saving, setSaving] = useState(false);
   const [modelPresetCreating, setModelPresetCreating] = useState(false);
   const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
@@ -28,8 +31,9 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const [providerForms, setProviderForms] = useState<Record<string, ProviderForm>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
-  const [form, setForm] = useState<AgentSettingsDraft>(() =>
-    initialSettings ? agentDraftFromPayload(initialSettings) : DEFAULT_AGENT_SETTINGS_DRAFT,
+  const [form, setForm] = useState<AgentSettingsDraft>(initialForm);
+  const [modelPresetEditingName, setModelPresetEditingName] = useState(
+    initialForm.modelPreset,
   );
   const [modelCallOrder, setModelCallOrder] = useState<string[]>(
     () => initialSettings?.model_call_order ?? [],
@@ -45,6 +49,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     modelMigrationSaving,
     modelPresetBeforeCreateRef,
     modelPresetCreating,
+    modelPresetEditingName,
     modelPresetPendingDelete,
     providerForms,
     providerOAuthCompleting,
@@ -62,6 +67,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     setModelConfigurationSaving,
     setModelMigrationSaving,
     setModelPresetCreating,
+    setModelPresetEditingName,
     setModelPresetPendingDelete,
     setProviderForms,
     setProviderOAuthCompleting,

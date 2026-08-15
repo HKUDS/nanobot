@@ -159,6 +159,7 @@ export function ModelsSettings({
   token,
   form,
   setForm,
+  editingPresetName,
   settings,
   dirty,
   creating,
@@ -181,6 +182,7 @@ export function ModelsSettings({
   token: string;
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
+  editingPresetName: string;
   settings: SettingsPayload;
   dirty: boolean;
   creating: boolean;
@@ -197,7 +199,7 @@ export function ModelsSettings({
   onMigrate: () => void;
   onBeginCreate: () => void;
   onCancelCreate: () => void;
-  onSelectConfiguration: () => void;
+  onSelectConfiguration: (name: string) => void;
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
 }) {
   const { t } = useTranslation();
@@ -230,7 +232,7 @@ export function ModelsSettings({
       preset,
     })),
   ];
-  const selectedPreset = namedPresetsByName.get(form.modelPreset) ?? null;
+  const selectedPreset = namedPresetsByName.get(editingPresetName) ?? null;
   const activeEditorRowKey =
     editorRowKey ??
     presetRows.find((row) => row.name === selectedPreset?.name)?.key ??
@@ -263,7 +265,7 @@ export function ModelsSettings({
   const modelFieldsMissing =
     !form.model.trim() ||
     !form.provider.trim() ||
-    (creating && !form.modelPreset.trim()) ||
+    !form.modelPreset.trim() ||
     form.maxTokens <= 0 ||
     form.temperature < 0 ||
     form.temperature > 2;
@@ -277,7 +279,7 @@ export function ModelsSettings({
   ) => {
     const toggleCurrentPreset =
       !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
-    onSelectConfiguration();
+    onSelectConfiguration(preset.name);
     if (toggleCurrentPreset) {
       setEditorOpen((open) => !open);
       return;
@@ -348,28 +350,21 @@ export function ModelsSettings({
       ) : null}
       <SettingsRow
         title={tx("settings.models.presetName", "Preset name")}
-        description={
-          creating
-            ? tx(
-                "settings.models.presetNameHelp",
-                "Used everywhere, including /model commands. Names must be unique.",
-              )
-            : undefined
-        }
-      >
-        {creating ? (
-          <Input
-            autoFocus
-            value={form.modelPreset}
-            placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, modelPreset: event.target.value }))
-            }
-            className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-          />
-        ) : (
-          <span className="text-[13px] font-medium text-foreground">{form.modelPreset}</span>
+        description={tx(
+          "settings.models.presetNameHelp",
+          "Used everywhere, including /model commands. Names must be unique.",
         )}
+      >
+        <Input
+          autoFocus={creating}
+          aria-label={tx("settings.models.presetName", "Preset name")}
+          value={form.modelPreset}
+          placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, modelPreset: event.target.value }))
+          }
+          className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
+        />
       </SettingsRow>
       <SettingsRow title={t("settings.rows.provider")}>
         <ProviderPicker

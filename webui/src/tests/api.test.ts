@@ -466,6 +466,7 @@ describe("webui API helpers", () => {
   it("serializes model configuration updates", async () => {
     await updateModelConfiguration(mutationTransport, {
       name: "codex",
+      newName: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
       maxTokens: 8192,
@@ -478,6 +479,7 @@ describe("webui API helpers", () => {
       "settings.model_configuration.update",
       {
         name: "codex",
+        new_name: "Codex",
         provider: "openai_codex",
         model: "openai-codex/gpt-5.5",
         max_tokens: 8192,

@@ -106,8 +106,43 @@ describe("Settings models", () => {
 
     const editor = screen.getByTestId("model-preset-editor");
     expect(within(editor).getByText("Preset name")).toBeInTheDocument();
-    expect(within(editor).getByText("openai")).toBeInTheDocument();
+    expect(within(editor).getByRole("textbox", { name: "Preset name" })).toHaveValue(
+      "openai",
+    );
     expect(within(editor).queryByText("minimax")).not.toBeInTheDocument();
+  });
+
+  it("renames an existing preset without losing the editor selection", async () => {
+    const payload = settingsPayload();
+    const renamedPayload: SettingsPayload = {
+      ...payload,
+      agent: { ...payload.agent, model_preset: "Codex" },
+      model_presets: payload.model_presets.map((preset) => ({
+        ...preset,
+        name: "Codex",
+        label: "Codex",
+      })),
+      model_call_order: ["Codex"],
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockResolvedValueOnce(renamedPayload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+
+    const nameInput = screen.getByRole("textbox", { name: "Preset name" });
+    fireEvent.change(nameInput, { target: { value: "Codex" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+
+    await waitFor(() => {
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.update",
+        { name: "primary", new_name: "Codex" },
+        20_000,
+      );
+    });
+    expect(await screen.findByTestId("model-call-order-row-Codex")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("Codex");
   });
 
   it("keeps generation parameters collapsed until advanced options are opened", async () => {
@@ -187,7 +222,9 @@ describe("Settings models", () => {
       "lg:max-w-6xl",
       "rounded-floating",
     );
-    expect(within(editor).getByText("primary")).toBeInTheDocument();
+    expect(within(editor).getByRole("textbox", { name: "Preset name" })).toHaveValue(
+      "primary",
+    );
     const deleteButton = within(editor).getByRole("button", { name: "Delete" });
     expect(deleteButton).toBeDisabled();
     expect(deleteButton).toHaveAttribute("aria-describedby", "model-preset-delete-hint");

@@ -90,6 +90,7 @@ export function useModelSettingsActions({
     modelMigrationSaving,
     modelPresetBeforeCreateRef,
     modelPresetCreating,
+    modelPresetEditingName,
     modelPresetPendingDelete,
     providerForms,
     providerOAuthCompleting,
@@ -105,6 +106,7 @@ export function useModelSettingsActions({
     setModelConfigurationSaving,
     setModelMigrationSaving,
     setModelPresetCreating,
+    setModelPresetEditingName,
     setModelPresetPendingDelete,
     setProviderForms,
     setProviderOAuthCompleting,
@@ -158,6 +160,7 @@ export function useModelSettingsActions({
         applyPayload(payload);
         if (createdPreset) {
           setForm(agentDraftFromPayload(payload, createdPreset));
+          setModelPresetEditingName(createdPreset);
         }
 
         let finalPayload = payload;
@@ -168,6 +171,7 @@ export function useModelSettingsActions({
         }
         if (createdPreset) {
           setForm(agentDraftFromPayload(finalPayload, createdPreset));
+          setModelPresetEditingName(createdPreset);
         }
         modelPresetBeforeCreateRef.current = null;
         onModelNameChange(finalPayload.agent.model || null);
@@ -182,14 +186,16 @@ export function useModelSettingsActions({
 
     if (!modelDirty) return;
     const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === form.modelPreset,
+      (preset) => !preset.is_default && preset.name === modelPresetEditingName,
     );
     if (!selectedPreset) return;
+    const nextName = form.modelPreset.trim();
     const reasoningEffort = form.reasoningEffort || null;
     setSaving(true);
     try {
       const payload = await updateModelConfiguration(client, {
         name: selectedPreset.name,
+        newName: nextName !== selectedPreset.name ? nextName : undefined,
         model: form.model !== selectedPreset.model ? form.model : undefined,
         provider: form.provider !== selectedPreset.provider ? form.provider : undefined,
         maxTokens:
@@ -205,7 +211,8 @@ export function useModelSettingsActions({
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
       });
       applyPayload(payload);
-      setForm(agentDraftFromPayload(payload, selectedPreset.name));
+      setForm(agentDraftFromPayload(payload, nextName));
+      setModelPresetEditingName(nextName);
       onModelNameChange(payload.agent.model || null);
       setError(null);
     } catch (err) {
@@ -227,7 +234,7 @@ export function useModelSettingsActions({
       configuredModelProviderOptions.find((option) => option.name === currentProvider)?.name ??
       configuredModelProviderOptions[0]?.name ??
       "";
-    modelPresetBeforeCreateRef.current = form.modelPreset;
+    modelPresetBeforeCreateRef.current = modelPresetEditingName;
     setForm((prev) => ({
       ...prev,
       modelPreset: "",
@@ -248,6 +255,7 @@ export function useModelSettingsActions({
     const previousPreset = modelPresetBeforeCreateRef.current;
     setModelPresetCreating(false);
     setForm(agentDraftFromPayload(settings, previousPreset ?? undefined));
+    setModelPresetEditingName(previousPreset ?? agentDraftFromPayload(settings).modelPreset);
     modelPresetBeforeCreateRef.current = null;
   };
 

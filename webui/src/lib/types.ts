@@ -1097,6 +1097,7 @@ export interface ModelConfigurationCreate {
 
 export interface ModelConfigurationUpdate {
   name: string;
+  newName?: string;
   provider?: string;
   model?: string;
   maxTokens?: number;

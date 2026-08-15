@@ -93,10 +93,12 @@ export function useSettingsController({
   const {
     editingProviderKeys, expandedProvider, form, modelCallOrder, modelCallOrderSaving,
     modelConfigurationSaving, modelMigrationSaving, modelPresetBeforeCreateRef,
-    modelPresetCreating, modelPresetPendingDelete, providerForms, providerOAuthCompleting,
+    modelPresetCreating, modelPresetEditingName, modelPresetPendingDelete,
+    providerForms, providerOAuthCompleting,
     providerOAuthDialogError, providerOAuthFlow, providerOAuthFlowRef, providerOAuthResponse,
     providerSaving, saving, setForm,
-    setModelCallOrder, setModelPresetCreating, setModelPresetPendingDelete,
+    setModelCallOrder, setModelPresetCreating, setModelPresetEditingName,
+    setModelPresetPendingDelete,
     setProviderForms, setProviderOAuthCompleting, setProviderOAuthDialogError,
     setProviderOAuthFlow, setProviderOAuthResponse, visibleProviderKeys,
   } = modelState;
@@ -147,7 +149,9 @@ export function useSettingsController({
     ) => {
       setSettings(payload);
       if (!options.preserveAgentForm) {
-        setForm(agentDraftFromPayload(payload));
+        const nextForm = agentDraftFromPayload(payload);
+        setForm(nextForm);
+        setModelPresetEditingName(nextForm.modelPreset);
         setModelPresetCreating(false);
       }
       setModelCallOrder(payload.model_call_order ?? []);
@@ -252,10 +256,11 @@ export function useSettingsController({
   const modelDirty = useMemo(() => {
     if (!settings) return false;
     const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === form.modelPreset,
+      (preset) => !preset.is_default && preset.name === modelPresetEditingName,
     );
     if (!selectedPreset) return false;
     return (
+      form.modelPreset.trim() !== selectedPreset.name ||
       form.model !== selectedPreset.model ||
       form.provider !== selectedPreset.provider ||
       form.maxTokens !== selectedPreset.max_tokens ||
@@ -263,7 +268,7 @@ export function useSettingsController({
       form.temperature !== selectedPreset.temperature ||
       form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "")
     );
-  }, [form, settings]);
+  }, [form, modelPresetEditingName, settings]);
 
   const imageGenerationDirty = useMemo(() => {
     if (!settings) return false;
@@ -532,6 +537,7 @@ export function useSettingsController({
     modelMigrationSaving,
     modelPresetBeforeCreateRef,
     modelPresetCreating,
+    modelPresetEditingName,
     modelPresetPendingDelete,
     nanobotFeatureAction,
     nanobotFeatureConfirm,
@@ -581,6 +587,7 @@ export function useSettingsController({
     setMcpOAuthCallbackError,
     setMcpOAuthCallbackUrl,
     setModelPresetCreating,
+    setModelPresetEditingName,
     setModelPresetPendingDelete,
     setNanobotFeatureConfirm,
     setNanobotFeatures,
