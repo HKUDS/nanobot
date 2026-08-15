@@ -420,6 +420,7 @@
       "editPreset": "編輯預設",
       "presetName": "預設名稱",
       "presetNameHelp": "用於介面和 /model 命令；名稱不得重複。",
+      "presetNameDuplicate": "已有同名預設。",
       "presetNamePlaceholder": "快速寫作",
       "advancedOptions": "進階選項",
       "advancedSummary": "上下文 {{context}} · 最大輸出 {{max}} tokens",

@@ -420,6 +420,7 @@
       "editPreset": "Ubah prasetel",
       "presetName": "Nama prasetel",
       "presetNameHelp": "Digunakan di antarmuka dan perintah /model. Nama harus unik.",
+      "presetNameDuplicate": "Preset dengan nama ini sudah ada.",
       "presetNamePlaceholder": "Menulis cepat",
       "advancedOptions": "Opsi lanjutan",
       "advancedSummary": "Konteks {{context}} · Maks. {{max}} token",

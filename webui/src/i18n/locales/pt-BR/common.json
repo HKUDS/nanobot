@@ -144,6 +144,7 @@
       "editPreset": "Editar predefinição",
       "presetName": "Nome da predefinição",
       "presetNameHelp": "Usado na interface e nos comandos /model. Os nomes devem ser únicos.",
+      "presetNameDuplicate": "Já existe uma predefinição com este nome.",
       "presetNamePlaceholder": "Escrita rápida",
       "advancedOptions": "Opções avançadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",

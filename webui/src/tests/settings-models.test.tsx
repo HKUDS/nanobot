@@ -145,6 +145,25 @@ describe("Settings models", () => {
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("Codex");
   });
 
+  it("maps a server-side name conflict back to the preset name field", async () => {
+    const payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockRejectedValueOnce({ status: 409 });
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+
+    const nameInput = screen.getByRole("textbox", { name: "Preset name" });
+    fireEvent.change(nameInput, { target: { value: "Codex" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A preset with this name already exists.",
+    );
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput).toHaveFocus();
+  });
+
   it("keeps generation parameters collapsed until advanced options are opened", async () => {
     vi.stubGlobal(
       "fetch",
@@ -576,6 +595,41 @@ describe("Settings models", () => {
     expect(within(writerRow).getByRole("switch", { name: "Disable preset" })).toBeChecked();
     expect(screen.getAllByText("Writer").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
+  });
+
+  it("shows an inline error when a new preset name already exists", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response),
+    );
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    const nameInput = screen.getByRole("textbox", { name: "Preset name" });
+    fireEvent.change(nameInput, { target: { value: "PRIMARY" } });
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    const modelSearch = await screen.findByRole("combobox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
+    fireEvent.keyDown(modelSearch, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput).toHaveAttribute("aria-describedby", "model-preset-name-error");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "A preset with this name already exists.",
+    );
+    expect(nameInput.parentElement).toHaveClass(
+      "animate-[preset-name-shake_180ms_ease-in-out]",
+    );
+
+    fireEvent.change(nameInput, { target: { value: "Writer" } });
+    expect(nameInput).toHaveAttribute("aria-invalid", "false");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("converts legacy model settings into presets before editing call order", async () => {

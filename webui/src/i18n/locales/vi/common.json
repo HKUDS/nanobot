@@ -420,6 +420,7 @@
       "editPreset": "Sửa cấu hình đặt trước",
       "presetName": "Tên cấu hình đặt trước",
       "presetNameHelp": "Dùng trong giao diện và lệnh /model. Tên phải là duy nhất.",
+      "presetNameDuplicate": "Đã có một cấu hình sẵn với tên này.",
       "presetNamePlaceholder": "Viết nhanh",
       "advancedOptions": "Tùy chọn nâng cao",
       "advancedSummary": "Ngữ cảnh {{context}} · Tối đa {{max}} token",

@@ -144,6 +144,7 @@
       "editPreset": "编辑预设",
       "presetName": "预设名称",
       "presetNameHelp": "用于界面和 /model 命令；名称不能重复。",
+      "presetNameDuplicate": "已存在同名预设。",
       "presetNamePlaceholder": "快速写作",
       "advancedOptions": "高级选项",
       "advancedSummary": "上下文 {{context}} · 最大输出 {{max}} tokens",

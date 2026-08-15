@@ -420,6 +420,7 @@
       "editPreset": "Modifier le préréglage",
       "presetName": "Nom du préréglage",
       "presetNameHelp": "Utilisé dans l’interface et avec /model. Les noms doivent être uniques.",
+      "presetNameDuplicate": "Un préréglage portant ce nom existe déjà.",
       "presetNamePlaceholder": "Rédaction rapide",
       "advancedOptions": "Options avancées",
       "advancedSummary": "Contexte {{context}} · Max. {{max}} tokens",

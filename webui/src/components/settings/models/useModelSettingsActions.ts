@@ -15,6 +15,7 @@ import {
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
+  ApiError,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -107,6 +108,7 @@ export function useModelSettingsActions({
     setModelMigrationSaving,
     setModelPresetCreating,
     setModelPresetEditingName,
+    setModelPresetNameError,
     setModelPresetPendingDelete,
     setProviderForms,
     setProviderOAuthCompleting,
@@ -118,6 +120,33 @@ export function useModelSettingsActions({
     setVisibleProviderKeys,
     visibleProviderKeys,
   } = state;
+
+  const presetNameConflict = (name: string, currentName?: string) => {
+    const normalized = name.toLowerCase();
+    return settings?.model_presets.some(
+      (preset) =>
+        !preset.is_default &&
+        preset.name !== currentName &&
+        preset.name.toLowerCase() === normalized,
+    ) ?? false;
+  };
+
+  const showPresetNameConflict = () => {
+    setModelPresetNameError(
+      t("settings.models.presetNameDuplicate", {
+        defaultValue: "A preset with this name already exists.",
+      }),
+    );
+    setError(null);
+  };
+
+  const handlePresetSaveError = (reason: unknown) => {
+    if (reason instanceof ApiError && reason.status === 409) {
+      showPresetNameConflict();
+      return;
+    }
+    setError((reason as Error).message);
+  };
 
   const saveModelSettings = async () => {
     if (
@@ -144,6 +173,11 @@ export function useModelSettingsActions({
       ) {
         return;
       }
+      if (presetNameConflict(name)) {
+        showPresetNameConflict();
+        return;
+      }
+      setModelPresetNameError(null);
       setModelConfigurationSaving(true);
       try {
         const payload = await createModelConfiguration(client, {
@@ -175,9 +209,10 @@ export function useModelSettingsActions({
         }
         modelPresetBeforeCreateRef.current = null;
         onModelNameChange(finalPayload.agent.model || null);
+        setModelPresetNameError(null);
         setError(null);
       } catch (err) {
-        setError((err as Error).message);
+        handlePresetSaveError(err);
       } finally {
         setModelConfigurationSaving(false);
       }
@@ -190,6 +225,11 @@ export function useModelSettingsActions({
     );
     if (!selectedPreset) return;
     const nextName = form.modelPreset.trim();
+    if (presetNameConflict(nextName, selectedPreset.name)) {
+      showPresetNameConflict();
+      return;
+    }
+    setModelPresetNameError(null);
     const reasoningEffort = form.reasoningEffort || null;
     setSaving(true);
     try {
@@ -214,9 +254,10 @@ export function useModelSettingsActions({
       setForm(agentDraftFromPayload(payload, nextName));
       setModelPresetEditingName(nextName);
       onModelNameChange(payload.agent.model || null);
+      setModelPresetNameError(null);
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      handlePresetSaveError(err);
     } finally {
       setSaving(false);
     }
@@ -235,6 +276,7 @@ export function useModelSettingsActions({
       configuredModelProviderOptions[0]?.name ??
       "";
     modelPresetBeforeCreateRef.current = modelPresetEditingName;
+    setModelPresetNameError(null);
     setForm((prev) => ({
       ...prev,
       modelPreset: "",
@@ -254,6 +296,7 @@ export function useModelSettingsActions({
     if (!settings || modelConfigurationSaving) return;
     const previousPreset = modelPresetBeforeCreateRef.current;
     setModelPresetCreating(false);
+    setModelPresetNameError(null);
     setForm(agentDraftFromPayload(settings, previousPreset ?? undefined));
     setModelPresetEditingName(previousPreset ?? agentDraftFromPayload(settings).modelPreset);
     modelPresetBeforeCreateRef.current = null;

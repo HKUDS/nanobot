@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -160,6 +160,7 @@ export function ModelsSettings({
   form,
   setForm,
   editingPresetName,
+  presetNameError,
   settings,
   dirty,
   creating,
@@ -176,6 +177,7 @@ export function ModelsSettings({
   onMigrate,
   onBeginCreate,
   onCancelCreate,
+  onClearPresetNameError,
   onSelectConfiguration,
   onDeleteConfiguration,
 }: {
@@ -183,6 +185,7 @@ export function ModelsSettings({
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
   editingPresetName: string;
+  presetNameError: string | null;
   settings: SettingsPayload;
   dirty: boolean;
   creating: boolean;
@@ -199,6 +202,7 @@ export function ModelsSettings({
   onMigrate: () => void;
   onBeginCreate: () => void;
   onCancelCreate: () => void;
+  onClearPresetNameError: () => void;
   onSelectConfiguration: (name: string) => void;
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
 }) {
@@ -206,10 +210,15 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const presetNameInputRef = useRef<HTMLInputElement>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (presetNameError) presetNameInputRef.current?.focus();
+  }, [presetNameError]);
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
@@ -355,16 +364,40 @@ export function ModelsSettings({
           "Used everywhere, including /model commands. Names must be unique.",
         )}
       >
-        <Input
-          autoFocus={creating}
-          aria-label={tx("settings.models.presetName", "Preset name")}
-          value={form.modelPreset}
-          placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
-          onChange={(event) =>
-            setForm((prev) => ({ ...prev, modelPreset: event.target.value }))
-          }
-          className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-        />
+        <div
+          className={cn(
+            "w-[min(280px,70vw)] motion-reduce:animate-none",
+            presetNameError && "animate-[preset-name-shake_180ms_ease-in-out]",
+          )}
+        >
+          <Input
+            ref={presetNameInputRef}
+            autoFocus={creating}
+            aria-label={tx("settings.models.presetName", "Preset name")}
+            aria-invalid={Boolean(presetNameError)}
+            aria-describedby={presetNameError ? "model-preset-name-error" : undefined}
+            value={form.modelPreset}
+            placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
+            onChange={(event) => {
+              onClearPresetNameError();
+              setForm((prev) => ({ ...prev, modelPreset: event.target.value }));
+            }}
+            className={cn(
+              "h-8 rounded-full text-[13px]",
+              presetNameError &&
+                "border-destructive/70 focus-visible:border-destructive focus-visible:ring-destructive/25",
+            )}
+          />
+          {presetNameError ? (
+            <p
+              id="model-preset-name-error"
+              role="alert"
+              className="mt-1.5 px-1 text-[12px] leading-4 text-destructive"
+            >
+              {presetNameError}
+            </p>
+          ) : null}
+        </div>
       </SettingsRow>
       <SettingsRow title={t("settings.rows.provider")}>
         <ProviderPicker

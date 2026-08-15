@@ -420,6 +420,7 @@
       "editPreset": "프리셋 편집",
       "presetName": "프리셋 이름",
       "presetNameHelp": "화면과 /model 명령에서 사용됩니다. 이름은 고유해야 합니다.",
+      "presetNameDuplicate": "같은 이름의 프리셋이 이미 있습니다.",
       "presetNamePlaceholder": "빠른 작성",
       "advancedOptions": "고급 옵션",
       "advancedSummary": "컨텍스트 {{context}} · 최대 {{max}} 토큰",

@@ -420,6 +420,7 @@
       "editPreset": "Editar preajuste",
       "presetName": "Nombre del preajuste",
       "presetNameHelp": "Se usa en la interfaz y en /model. Los nombres deben ser únicos.",
+      "presetNameDuplicate": "Ya existe un preajuste con este nombre.",
       "presetNamePlaceholder": "Escritura rápida",
       "advancedOptions": "Opciones avanzadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",

@@ -420,6 +420,7 @@
       "editPreset": "プリセットを編集",
       "presetName": "プリセット名",
       "presetNameHelp": "画面と /model コマンドで使用します。名前は一意である必要があります。",
+      "presetNameDuplicate": "同じ名前のプリセットがすでに存在します。",
       "presetNamePlaceholder": "高速執筆",
       "advancedOptions": "詳細オプション",
       "advancedSummary": "コンテキスト {{context}} · 最大 {{max}} トークン",

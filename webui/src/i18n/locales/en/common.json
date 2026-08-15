@@ -144,6 +144,7 @@
       "editPreset": "Edit preset",
       "presetName": "Preset name",
       "presetNameHelp": "Used in the interface and /model commands. Names must be unique.",
+      "presetNameDuplicate": "A preset with this name already exists.",
       "presetNamePlaceholder": "Fast writing",
       "advancedOptions": "Advanced options",
       "advancedSummary": "Context {{context}} · Max {{max}} tokens",

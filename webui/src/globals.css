@@ -696,6 +696,21 @@
   transform: scale(0.98);
 }
 
+@keyframes preset-name-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  35% {
+    transform: translateX(-2px);
+  }
+
+  70% {
+    transform: translateX(2px);
+  }
+}
+
 @keyframes composer-model-pill-viewport-enter {
   from {
     transform: scale(0.9074);

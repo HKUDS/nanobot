@@ -14,6 +14,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     : DEFAULT_AGENT_SETTINGS_DRAFT;
   const [saving, setSaving] = useState(false);
   const [modelPresetCreating, setModelPresetCreating] = useState(false);
+  const [modelPresetNameError, setModelPresetNameError] = useState<string | null>(null);
   const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
   const [modelCallOrderSaving, setModelCallOrderSaving] = useState(false);
   const [modelMigrationSaving, setModelMigrationSaving] = useState(false);
@@ -50,6 +51,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     modelPresetBeforeCreateRef,
     modelPresetCreating,
     modelPresetEditingName,
+    modelPresetNameError,
     modelPresetPendingDelete,
     providerForms,
     providerOAuthCompleting,
@@ -68,6 +70,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     setModelMigrationSaving,
     setModelPresetCreating,
     setModelPresetEditingName,
+    setModelPresetNameError,
     setModelPresetPendingDelete,
     setProviderForms,
     setProviderOAuthCompleting,
