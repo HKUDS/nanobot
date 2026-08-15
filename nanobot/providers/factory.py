@@ -201,7 +201,7 @@ def _make_provider_core(
             api_key=(p.api_key if p and p.api_key else None)
             or os.environ.get(spec.env_key if spec else "", ""),
             api_base=config.get_api_base(model, preset=preset),
-            default_model=model or "qwen-plus",
+            default_model=model or "qwen3.8-max",
             extra_headers=_provider_extra_headers(spec, p),
             extra_body=p.extra_body if p else None,
             proxy=p.proxy if p else None,

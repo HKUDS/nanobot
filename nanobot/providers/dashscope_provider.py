@@ -8,12 +8,16 @@ https://help.aliyun.com/zh/model-studio/qwen-api-via-dashscope
 
 Wire shape (result_format="message"):
 
-    POST {base}/api/v1/services/aigc/text-generation/generation
     POST {base}/api/v1/services/aigc/multimodal-generation/generation
 
     {"model": "...",
      "input": {"messages": [{"role": "user", "content": "..."}]},
      "parameters": {"result_format": "message", "tools": [...], ...}}
+
+All traffic — text-only included — goes through the multimodal-generation
+endpoint: the classic ``text-generation/generation`` path has been retired on
+the public ``dashscope.aliyuncs.com`` host and answers ``url error``, while
+multimodal-generation serves text, images, tools, and SSE streaming.
 
 Streaming adds ``X-DashScope-SSE: enable`` and ``incremental_output: true``;
 each SSE ``data:`` line carries one output.choices[0].message delta.
@@ -37,10 +41,7 @@ from nanobot.providers.base import (
 )
 
 _DEFAULT_API_BASE = "https://dashscope.aliyuncs.com"
-_TEXT_GENERATION_PATH = "/api/v1/services/aigc/text-generation/generation"
-_MULTIMODAL_GENERATION_PATH = (
-    "/api/v1/services/aigc/multimodal-generation/generation"
-)
+_GENERATION_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 _SSE_HEADERS = {
     "Accept": "text/event-stream",
     "X-DashScope-SSE": "enable",
@@ -64,7 +65,7 @@ class DashScopeProvider(LLMProvider):
         self,
         api_key: str | None = None,
         api_base: str | None = None,
-        default_model: str = "qwen-plus",
+        default_model: str = "qwen3.8-max",
         *,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -179,7 +180,7 @@ class DashScopeProvider(LLMProvider):
         *,
         stream: bool,
     ) -> tuple[dict[str, Any], str]:
-        ds_messages, has_multimodal = self._convert_messages(messages)
+        ds_messages, _has_multimodal = self._convert_messages(messages)
         parameters: dict[str, Any] = {
             "result_format": "message",
             "max_tokens": max_tokens,
@@ -203,8 +204,7 @@ class DashScopeProvider(LLMProvider):
             "input": {"messages": ds_messages},
             "parameters": parameters,
         }
-        path = _MULTIMODAL_GENERATION_PATH if has_multimodal else _TEXT_GENERATION_PATH
-        return payload, path
+        return payload, _GENERATION_PATH
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -395,6 +395,29 @@ class DashScopeProvider(LLMProvider):
         if isinstance(content, str) and content:
             content_parts.append(content)
             content_delta = content
+        elif isinstance(content, list):
+            # Multimodal models stream content as an array of {"text": ...}
+            # parts; each part arrives complete, so track per-slot text and
+            # emit only the growth (works for once-complete and incremental).
+            slots: list[str] = state.setdefault("content_slots", [])
+            part_texts: list[str] = []
+            for raw_part in cast(list[object], content):
+                if isinstance(raw_part, dict):
+                    text = cast(dict[str, Any], raw_part).get("text")
+                    part_texts.append(text if isinstance(text, str) else "")
+            while len(slots) < len(part_texts):
+                slots.append("")
+            for i, text in enumerate(part_texts):
+                seen = slots[i]
+                if text.startswith(seen) and len(text) > len(seen):
+                    delta = text[len(seen):]
+                    slots[i] = text
+                    content_parts.append(delta)
+                    content_delta += delta
+                elif text and text != seen:
+                    slots[i] = text
+                    content_parts.append(text)
+                    content_delta += text
         reasoning = message.get("reasoning_content")
         reasoning_delta = ""
         if isinstance(reasoning, str) and reasoning:

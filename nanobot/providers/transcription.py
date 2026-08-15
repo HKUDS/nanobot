@@ -794,9 +794,16 @@ async def _post_dashscope_asr_with_retry(
         or "audio/wav"
     )
     audio_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+    # The ASR models require the container format in `parameters` (the
+    # qwen-audio-3.0 series rejects requests without it as
+    # UNSUPPORTED_FORMAT / "format is empty").
+    audio_format = path.suffix.lstrip(".").lower() or "wav"
 
     content: list[dict[str, Any]] = [{"audio": audio_url}]
-    parameters: dict[str, Any] = {"asr_options": {"enable_itn": True}}
+    parameters: dict[str, Any] = {
+        "format": audio_format,
+        "asr_options": {"enable_itn": True},
+    }
     if language:
         parameters["asr_options"]["language"] = language
 

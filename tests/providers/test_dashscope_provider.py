@@ -26,7 +26,9 @@ def test_dashscope_native_registry_spec() -> None:
     assert spec.model_catalog == "builtin"
     model_ids = [m.id for m in spec.builtin_models]
     assert "qwen3.8-max" in model_ids
-    assert "qwen-plus" in model_ids
+    # Stable aliases (qwen-plus etc.) are invalid on the native
+    # multimodal-generation endpoint and must not be catalogued.
+    assert "qwen-plus" not in model_ids
 
 
 def test_dashscope_native_config_field_and_provider_resolution() -> None:
@@ -117,7 +119,7 @@ def test_convert_user_content_text_only_list_stays_string() -> None:
 
 
 def _provider() -> DashScopeProvider:
-    return DashScopeProvider(api_key="sk-test", default_model="qwen-plus")
+    return DashScopeProvider(api_key="sk-test")
 
 
 def test_build_payload_places_tools_in_parameters() -> None:
@@ -135,7 +137,7 @@ def test_build_payload_places_tools_in_parameters() -> None:
         "auto",
         stream=False,
     )
-    assert path == "/api/v1/services/aigc/text-generation/generation"
+    assert path == "/api/v1/services/aigc/multimodal-generation/generation"
     assert payload["model"] == "qwen3.8-max"
     assert payload["parameters"]["result_format"] == "message"
     assert payload["parameters"]["max_tokens"] == 1024
@@ -156,12 +158,12 @@ def test_build_payload_stream_and_tool_choice() -> None:
         "required",
         stream=True,
     )
-    assert payload["model"] == "qwen-plus"  # default model fallback
+    assert payload["model"] == "qwen3.8-max"  # default model fallback
     assert payload["parameters"]["incremental_output"] is True
     assert payload["parameters"]["tool_choice"] == "required"
 
 
-def test_build_payload_multimodal_routing_and_thinking() -> None:
+def test_build_payload_image_content_and_thinking() -> None:
     payload, path = _provider()._build_payload(
         [{
             "role": "user",
@@ -429,7 +431,7 @@ async def test_chat_stream_content_and_reasoning_deltas() -> None:
     assert response.usage["prompt_tokens"] == 7
 
     stream_call = fake.stream_calls[0]
-    assert stream_call["path"] == "/api/v1/services/aigc/text-generation/generation"
+    assert stream_call["path"] == "/api/v1/services/aigc/multimodal-generation/generation"
     assert stream_call["headers"]["X-DashScope-SSE"] == "enable"
     assert stream_call["json"]["parameters"]["incremental_output"] is True
 
@@ -492,3 +494,44 @@ async def test_chat_stream_http_error() -> None:
     assert response.finish_reason == "error"
     assert response.error_status_code == 401
     assert response.error_should_retry is False
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_array_content_parts() -> None:
+    """Multimodal-generation streams content as [{"text": ...}] arrays that
+    arrive complete in one chunk; deltas must be emitted exactly once."""
+    lines = [
+        _sse({"output": {"choices": [{
+            "finish_reason": "null",
+            "message": {"content": []},
+        }]}}),
+        _sse({"output": {"choices": [{
+            "finish_reason": "null",
+            "message": {"content": [{"text": "你好呀"}]},
+        }]}}),
+        _sse({"output": {"choices": [{
+            "finish_reason": "null",
+            "message": {"content": []},
+        }]}}),
+        _sse({"output": {
+            "choices": [{"finish_reason": "stop", "message": {"content": []}}],
+            "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+        }}),
+    ]
+    fake = FakeClient(stream_response=FakeStreamResponse(200, lines))
+    provider = DashScopeProvider(api_key="sk-test", client=fake)
+
+    content_deltas: list[str] = []
+
+    async def on_content(text: str) -> None:
+        content_deltas.append(text)
+
+    response = await provider.chat_stream(
+        [{"role": "user", "content": "hi"}],
+        on_content_delta=on_content,
+    )
+
+    assert content_deltas == ["你好呀"]
+    assert response.content == "你好呀"
+    assert response.finish_reason == "stop"
+    assert response.usage["prompt_tokens"] == 5

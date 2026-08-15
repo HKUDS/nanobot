@@ -530,29 +530,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
                 context_window=1000000,
             ),
             ProviderModelSpec(
-                id="qwen-max",
-                label="Qwen-Max",
-                description="Stable alias of the latest Qwen flagship model.",
-            ),
-            ProviderModelSpec(
                 id="qwen3.7-plus",
                 label="Qwen3.7-Plus",
                 description="Balanced model for everyday multimodal work.",
             ),
             ProviderModelSpec(
-                id="qwen-plus",
-                label="Qwen-Plus",
-                description="Stable alias of the latest Qwen plus-tier model.",
-            ),
-            ProviderModelSpec(
                 id="qwen3.7-flash",
                 label="Qwen3.7-Flash",
                 description="Fast and cost-efficient model.",
-            ),
-            ProviderModelSpec(
-                id="qwen-turbo",
-                label="Qwen-Turbo",
-                description="Stable alias of the fastest Qwen model.",
             ),
             ProviderModelSpec(
                 id="qwen3.5-omni-plus",

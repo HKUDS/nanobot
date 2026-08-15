@@ -138,6 +138,7 @@ async def test_transcribe_happy_path(audio_file: Path) -> None:
 
     body = call["json"]
     assert body["model"] == "qwen3-asr-flash"
+    assert body["parameters"]["format"] == "mp3"
     assert body["parameters"]["asr_options"]["enable_itn"] is True
     assert body["parameters"]["asr_options"]["language"] == "zh"
 
