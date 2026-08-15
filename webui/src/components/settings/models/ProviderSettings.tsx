@@ -276,7 +276,7 @@ export function ProviderOAuthLoginDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="w-[min(calc(100vw-2rem),28rem)] rounded-[24px]">
+      <DialogContent className="w-[min(calc(100vw-2rem),28rem)]">
         <form
           className="space-y-4"
           onSubmit={(event) => {
@@ -296,7 +296,7 @@ export function ProviderOAuthLoginDialog({
                   : t("settings.oauth.localCodeHelp")}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-2 rounded-[14px] border border-border/45 bg-muted/35 px-3 py-2.5 text-[12px] text-muted-foreground">
+          <div className="flex items-center gap-2 rounded-control border border-border/45 bg-muted/35 px-3 py-2.5 text-[12px] text-muted-foreground">
             {expectsCallbackUrl && remoteBrowserAccess ? (
               <Clipboard className="h-3.5 w-3.5 shrink-0" aria-hidden />
             ) : (
@@ -341,12 +341,12 @@ export function ProviderOAuthLoginDialog({
           {error ? (
             <p
               role="alert"
-              className="rounded-[14px] border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-[12px] text-destructive"
+              className="rounded-control border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-[12px] text-destructive"
             >
               {error}
             </p>
           ) : null}
-          <DialogFooter className="gap-2 sm:space-x-0">
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={onOpenAuthorization}>
               <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
               {expectsCallbackUrl
@@ -380,7 +380,7 @@ function ProviderRequestOptions({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
 
   return (
-    <div className="overflow-hidden rounded-[18px] border border-border/45 bg-background/75">
+    <div className="overflow-hidden rounded-floating border border-border/45 bg-background/75">
       {options.map((option, index) => {
         const title = tx(option.titleKey, option.title);
         const Icon = option.kind === "priority" ? Zap : Globe2;
@@ -599,7 +599,7 @@ function ProviderAdvancedOptions({
                   onChange={(event) => onChange({ extraHeaders: event.target.value })}
                   placeholder={'{"X-Header":"value"}'}
                   spellCheck={false}
-                  className="min-h-[88px] resize-y rounded-[14px] bg-background font-mono text-[12px]"
+                  className="min-h-[88px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
@@ -613,7 +613,7 @@ function ProviderAdvancedOptions({
                   onChange={(event) => onChange({ extraQuery: event.target.value })}
                   placeholder={'{"api-version":"2024-02-01"}'}
                   spellCheck={false}
-                  className="min-h-[88px] resize-y rounded-[14px] bg-background font-mono text-[12px]"
+                  className="min-h-[88px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
@@ -627,7 +627,7 @@ function ProviderAdvancedOptions({
                   onChange={(event) => onChange({ extraBody: event.target.value })}
                   placeholder={'{"service_tier":"priority"}'}
                   spellCheck={false}
-                  className="min-h-[96px] resize-y rounded-[14px] bg-background font-mono text-[12px]"
+                  className="min-h-[96px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
@@ -825,7 +825,7 @@ export function ProvidersSettings({
             ) : null}
             {isOauthProvider ? (
               <>
-                <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 rounded-floating border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-[13px] font-semibold text-foreground">
                       {tx("settings.oauth.authentication", "OAuth authentication")}
@@ -1240,7 +1240,7 @@ export function ProvidersSettings({
                   className="group flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
                 >
                   <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] bg-muted text-muted-foreground">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
                       <Plus className="h-5 w-5" aria-hidden />
                     </span>
                     <span className="truncate text-[15px] font-semibold text-foreground">
@@ -1334,7 +1334,7 @@ function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-border/45 bg-background"
+        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
       >
         <img
           src={logoUrl}
@@ -1352,7 +1352,7 @@ function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-fallback-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] text-[11px] font-semibold text-white"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
         style={{ backgroundColor: brand.color }}
         aria-hidden
       >

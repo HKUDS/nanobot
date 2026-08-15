@@ -38,6 +38,15 @@
     --temporary-foreground: 17 88% 32%;
     --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
+    /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
+    --radius-mark: 0.25rem;
+    --radius-compact: 0.5rem;
+    --radius-control: 0.75rem;
+    --radius-floating: 1.125rem;
+    --radius-panel: 1.375rem;
+    --radius-modal: 1.375rem;
+    --radius-prominent: 1.75rem;
+    --radius-pill: 9999px;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-selected: 40 1% 89.4%;
@@ -121,7 +130,7 @@
 
   *::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
-    border-radius: 9999px;
+    border-radius: var(--radius-pill);
   }
 
   *::-webkit-scrollbar-thumb:hover {
@@ -567,7 +576,7 @@
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted-foreground) / 0.4);
-    border-radius: 9999px;
+    border-radius: var(--radius-pill);
   }
   .scrollbar-track-transparent {
     scrollbar-gutter: stable;

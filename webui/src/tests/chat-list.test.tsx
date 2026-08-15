@@ -66,7 +66,7 @@ describe("ChatList", () => {
     expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
   });
 
-  it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
+  it("keeps group headers out of session drag while exposing every pane as a source", () => {
     render(
       <ChatList
         sessions={[session({ chatId: "root", title: "Root topic" })]}
@@ -90,9 +90,10 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Tab: Root topic" }).closest(
-      "[data-workbench-tab]",
-    )).toHaveAttribute("draggable", "false");
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
+      .toHaveAttribute("draggable", "false");
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("draggable", "true");
     const pane = screen.getByRole("button", { name: "Research pane" });
     expect(pane).toHaveAttribute("draggable", "true");
     const dataTransfer = {
@@ -146,7 +147,7 @@ describe("ChatList", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
     expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
 
-    const tabRow = screen.getByRole("button", { name: "Tab: Root topic" })
+    const tabRow = screen.getByRole("button", { name: "Group: Root topic" })
       .closest("[data-workbench-tab]")!;
     fireEvent.contextMenu(tabRow);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Dissolve group" }));
@@ -210,7 +211,7 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Tab: Solo pane" }))
+    expect(screen.queryByRole("button", { name: "Group: Solo pane" }))
       .not.toBeInTheDocument();
     expect(screen.getAllByText("Solo pane")).toHaveLength(1);
     expect(screen.queryByRole("list", { name: "Panes in Solo pane" }))
@@ -237,6 +238,88 @@ describe("ChatList", () => {
     expect(onAttachPane).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Fine group · 1/4" }));
     expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:fine");
+  });
+
+  it("moves a dragged topic directly into a visible group", () => {
+    const onAttachPane = vi.fn();
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "solo", title: "Solo topic" }),
+          session({ chatId: "target", title: "Target group" }),
+          session({ chatId: "full", title: "Full group" }),
+        ]}
+        activeKey="websocket:solo"
+        paneGroups={{
+          "websocket:solo": {
+            tabKey: "tab:solo",
+            title: "Solo topic",
+            activePaneKey: "websocket:solo",
+            visible: false,
+            panes: [{ key: "websocket:solo", chatId: "solo", title: "Solo topic" }],
+          },
+          "websocket:target": {
+            tabKey: "tab:target",
+            title: "Target group",
+            activePaneKey: "websocket:target",
+            visible: true,
+            panes: [{ key: "websocket:target", chatId: "target", title: "Target pane" }],
+          },
+          "websocket:full": {
+            tabKey: "tab:full",
+            title: "Full group",
+            activePaneKey: "websocket:full-1",
+            visible: true,
+            panes: [1, 2, 3, 4].map((index) => ({
+              key: `websocket:full-${index}`,
+              chatId: `full-${index}`,
+              title: `Full pane ${index}`,
+            })),
+          },
+        }}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const values = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn((type: string, value: string) => values.set(type, value)),
+      getData: vi.fn((type: string) => values.get(type) ?? ""),
+      types: [SESSION_DRAG_TYPE],
+    } as unknown as DataTransfer;
+    const source = screen.getByRole("button", { name: "Solo topic" });
+    expect(source).toHaveAttribute("draggable", "true");
+    const targetGroup = screen.getByRole("button", { name: "Group: Target group" })
+      .closest("[data-sidebar-tab-group]")!;
+    const targetSurface = targetGroup.querySelector("[data-workbench-tab-surface]")!;
+    const fullGroup = screen.getByRole("button", { name: "Group: Full group" })
+      .closest("[data-sidebar-tab-group]")!;
+    const fullSurface = fullGroup.querySelector("[data-workbench-tab-surface]")!;
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(fullSurface, { dataTransfer });
+    fireEvent.dragOver(fullSurface, { dataTransfer });
+    fireEvent.drop(fullSurface, { dataTransfer });
+
+    expect(fullGroup).not.toHaveAttribute("data-pane-drop-target");
+    expect(onAttachPane).not.toHaveBeenCalled();
+
+    fireEvent.dragEnter(targetSurface, { dataTransfer });
+    fireEvent.dragOver(targetSurface, { dataTransfer });
+
+    expect(targetSurface).toHaveClass("ring-2", "ring-primary/55");
+
+    fireEvent.drop(targetSurface, { dataTransfer });
+
+    expect(onAttachPane).toHaveBeenCalledOnce();
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:target");
   });
 
   it("shows every tab's pane membership in a sidebar tab group", async () => {
@@ -294,7 +377,7 @@ describe("ChatList", () => {
     expect(child.closest("[data-sidebar-pane]"))
       .toHaveAttribute("data-sidebar-pane", "websocket:child");
     expect(child).toHaveAttribute("aria-current", "true");
-    const targetTabRow = screen.getByRole("button", { name: "Tab: Target tab" })
+    const targetTabRow = screen.getByRole("button", { name: "Group: Target tab" })
       .closest("li")!;
     const targetChild = within(targetTabRow).getByRole("button", {
       name: "Target research",
@@ -315,7 +398,7 @@ describe("ChatList", () => {
     expect(onSelect).not.toHaveBeenCalled();
 
     onSelectPane.mockClear();
-    const rootTab = screen.getByRole("button", { name: "Tab: Root topic" });
+    const rootTab = screen.getByRole("button", { name: "Group: Root topic" });
     fireEvent.click(rootTab);
     expect(onSelectPane).not.toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
@@ -361,7 +444,7 @@ describe("ChatList", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(child).toHaveAttribute("draggable", "true");
-    expect(screen.getByRole("button", { name: "Tab: Target tab" }).closest(
+    expect(screen.getByRole("button", { name: "Group: Target tab" }).closest(
       "[data-workbench-tab]",
     )).toHaveAttribute("draggable", "false");
   });
@@ -538,7 +621,7 @@ describe("ChatList", () => {
     const attachTransfer = createDataTransfer();
     fireEvent.dragStart(source, { dataTransfer: attachTransfer });
     const groupSurface = document.querySelector("[data-workbench-tab-surface]")!;
-    const groupHeader = screen.getByRole("button", { name: "Tab: Existing group" });
+    const groupHeader = screen.getByRole("button", { name: "Group: Existing group" });
     expect(groupHeader).toHaveAttribute("draggable", "true");
     fireEvent.dragOver(groupSurface, { dataTransfer: attachTransfer });
     fireEvent.drop(groupSurface, { dataTransfer: attachTransfer });
@@ -721,7 +804,7 @@ describe("ChatList", () => {
       />,
     );
 
-    const tabButton = screen.getByRole("button", { name: "Tab: Root topic" });
+    const tabButton = screen.getByRole("button", { name: "Group: Root topic" });
     const tabGroup = tabButton.closest("[data-sidebar-tab-group]")!;
     const tabHeader = tabButton.closest("[data-workbench-tab]")!;
     const tabSurface = tabButton.closest("[data-workbench-tab-surface]")!;
@@ -734,7 +817,7 @@ describe("ChatList", () => {
     expect(tabSurface).toContainElement(paneList);
     const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
     expect(activePane).toHaveAttribute("aria-current", "true");
-    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-[0.65rem]");
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-control");
     expect(activePane.querySelector("[data-sidebar-selection-track]"))
       .toHaveAttribute("data-active", "true");
     expect(screen.getByRole("button", {
@@ -761,7 +844,7 @@ describe("ChatList", () => {
     expect(within(tabGroup).getByRole("button", {
       name: "Expand panes in Root topic",
     })).toHaveAttribute("aria-expanded", "false");
-    expect(within(tabGroup).getByRole("button", { name: "Tab: Root topic" }))
+    expect(within(tabGroup).getByRole("button", { name: "Group: Root topic" }))
       .not.toHaveAttribute("aria-current");
 
     fireEvent.click(within(tabGroup).getByRole("button", {
@@ -808,8 +891,8 @@ describe("ChatList", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
 
     expect(screen.getByText("1 selected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Tab: Root topic" }));
-    expect(screen.getByRole("button", { name: "Tab: Root topic" }))
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
       .toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Root topic" }))
       .toHaveAttribute("aria-pressed", "true");
@@ -1116,12 +1199,12 @@ describe("ChatList", () => {
     };
     const firstRender = render(<ChatList {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Tab: Root topic" }));
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
     expect(screen.queryByRole("button", { name: "Research pane" })).not.toBeInTheDocument();
     firstRender.unmount();
 
     render(<ChatList {...props} />);
-    expect(screen.getByRole("button", { name: "Tab: Root topic" }))
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
       .toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("button", { name: "Research pane" })).not.toBeInTheDocument();
   });

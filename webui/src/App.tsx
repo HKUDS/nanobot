@@ -20,6 +20,7 @@ import {
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
   attachWorkbenchPane,
+  contiguousWorkbenchSessionOrder,
   createWorkbenchTab,
   detachWorkbenchPane,
   dissolveWorkbenchTab,
@@ -572,7 +573,7 @@ function PairingCodePopup({
       aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}
       className={cn(
         "fixed right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70]",
-        "w-[min(calc(100vw-2rem),24rem)] rounded-[24px]",
+        "w-[min(calc(100vw-2rem),24rem)] rounded-modal",
         floatingSurfaceElevationClassName,
         "p-4",
         "animate-in fade-in-0 slide-in-from-top-2 duration-200",
@@ -2446,8 +2447,30 @@ function Shell({
   }, [onSelectChat]);
 
   const onDetachWorkbenchPane = useCallback((tabKey: string, paneKey: string) => {
-    updateWorkbenchState((current) => detachWorkbenchPane(current, tabKey, paneKey));
-  }, [updateWorkbenchState]);
+    void updateSidebarState((current) => {
+      const tab = workbenchTab(current.workbench, tabKey);
+      if (!tab?.paneKeys.includes(paneKey)) return current;
+      const orderedKeys = orderedSidebarSessionKeys(current);
+      if (!orderedKeys.includes(paneKey)) return current;
+      const nextWorkbench = detachWorkbenchPane(current.workbench, tabKey, paneKey);
+      if (nextWorkbench === current.workbench) return current;
+      const remainingPaneKey = tab.paneKeys.find((key) => key !== paneKey);
+      return {
+        ...current,
+        session_order: remainingPaneKey
+          ? moveSessionBesideWorkbenchBlock(
+              current.workbench,
+              orderedKeys,
+              paneKey,
+              remainingPaneKey,
+              "after",
+            )
+          : contiguousWorkbenchSessionOrder(current.workbench, orderedKeys),
+        workbench: nextWorkbench,
+        view: { ...current.view, sort: "manual" },
+      };
+    });
+  }, [orderedSidebarSessionKeys, updateSidebarState]);
 
   const onCreateWorkbenchTab = useCallback((paneKey: string) => {
     updateWorkbenchState((current) => createWorkbenchTab(current, paneKey));
@@ -2469,6 +2492,8 @@ function Shell({
         || (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES)
       ) return current;
       const orderedKeys = orderedSidebarSessionKeys(current);
+      const nextWorkbench = attachWorkbenchPane(current.workbench, tabKey, paneKey);
+      if (!orderedKeys.includes(paneKey) || nextWorkbench === current.workbench) return current;
       return {
         ...current,
         session_order: moveSessionBesideWorkbenchBlock(
@@ -2478,7 +2503,7 @@ function Shell({
           target.paneKeys.at(-1) ?? target.paneKeys[0],
           "after",
         ),
-        workbench: attachWorkbenchPane(current.workbench, tabKey, paneKey),
+        workbench: nextWorkbench,
         view: { ...current.view, sort: "manual" },
       };
     });
@@ -2488,8 +2513,14 @@ function Shell({
     sourcePaneKey: string,
     targetPaneKey: string,
   ) => {
+    if (sourcePaneKey === targetPaneKey) return;
     void updateSidebarState((current) => {
       const orderedKeys = orderedSidebarSessionKeys(current);
+      if (!orderedKeys.includes(sourcePaneKey) || !orderedKeys.includes(targetPaneKey)) {
+        return current;
+      }
+      const nextWorkbench = addWorkbenchPane(current.workbench, targetPaneKey, sourcePaneKey);
+      if (nextWorkbench === current.workbench) return current;
       const nextOrder = moveSessionBesideWorkbenchBlock(
         current.workbench,
         orderedKeys,
@@ -2497,10 +2528,6 @@ function Shell({
         targetPaneKey,
         "after",
       );
-      const nextWorkbench = addWorkbenchPane(current.workbench, targetPaneKey, sourcePaneKey);
-      if (sameSessionOrder(nextOrder, orderedKeys) && nextWorkbench === current.workbench) {
-        return current;
-      }
       return {
         ...current,
         session_order: nextOrder,
@@ -2592,6 +2619,10 @@ function Shell({
     void updateSidebarState((current) => {
       if (!workbenchTab(current.workbench, sourceTabKey)) return current;
       const orderedKeys = orderedSidebarSessionKeys(current);
+      const targetTab = workbenchTabForPane(current.workbench, targetPaneKey);
+      if (targetTab.tabKey === sourceTabKey || !orderedKeys.includes(targetPaneKey)) {
+        return current;
+      }
       const nextOrder = moveWorkbenchTabBlock(
         current.workbench,
         orderedKeys,
@@ -2876,7 +2907,6 @@ function Shell({
                 addPaneDisabled={creatingPane || activePaneLimitReached}
                 addPaneDisabledLabel={activePaneLimitReached
                   ? t("workbench.paneLimit", {
-                      defaultValue: "Maximum {{count}} panes",
                       count: MAX_WORKBENCH_PANES,
                     })
                   : undefined}
@@ -2970,7 +3000,6 @@ function Shell({
                       composerPortalTarget={context.composerPortalTarget}
                       composerActive={context.active}
                       composerInputAriaLabel={t("workbench.composerAria", {
-                        defaultValue: "Message {{title}}",
                         title: pane.title,
                       })}
                       emptyComposerVariant="thread"
@@ -3050,9 +3079,9 @@ function Shell({
             <RenameChatDialog
               open
               title={pendingTabRename.label}
-              dialogTitle={t("workbench.renameTabTitle")}
-              description={t("workbench.renameTabDescription")}
-              placeholder={t("workbench.renameTabPlaceholder")}
+              dialogTitle={t("workbench.renameGroupTitle")}
+              description={t("workbench.renameGroupDescription")}
+              placeholder={t("workbench.renameGroupPlaceholder")}
               onCancel={() => setPendingTabRename(null)}
               onConfirm={onConfirmTabRename}
             />

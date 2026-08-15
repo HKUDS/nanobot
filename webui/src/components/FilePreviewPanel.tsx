@@ -183,7 +183,7 @@ export function FilePreviewPanel({
                     ) : null}
                     <span
                       className={cn(
-                        "min-w-0 truncate rounded-[4px] px-1 py-0.5",
+                        "min-w-0 truncate rounded-mark px-1 py-0.5",
                         isLast
                           ? "font-medium text-foreground"
                           : "max-w-[26vw] shrink text-muted-foreground/78",

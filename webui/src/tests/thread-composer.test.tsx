@@ -554,7 +554,7 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
-    expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
+    expect(input.parentElement?.parentElement?.className).toContain("rounded-panel");
     expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
     expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
@@ -1807,7 +1807,7 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("rejects session drops that are unavailable to the composer", () => {
+  it("rejects self-session drops that are unavailable to the composer", () => {
     render(
       <ThreadComposer
         onSend={vi.fn()}

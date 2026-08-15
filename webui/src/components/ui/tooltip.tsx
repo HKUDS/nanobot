@@ -18,7 +18,7 @@ const TooltipContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         floatingSurfaceElevationClassName,
-        "z-50 overflow-hidden rounded-[10px] px-3 py-1.5 text-xs animate-in fade-in-0 zoom-in-95",
+        "z-50 overflow-hidden rounded-control px-3 py-1.5 text-xs animate-in fade-in-0 zoom-in-95",
         className,
       )}
       {...props}

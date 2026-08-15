@@ -1009,7 +1009,7 @@ export const ChatList = memo(function ChatList({
                           <div
                             data-workbench-tab-surface
                             className={cn(
-                              "min-w-0",
+                              "min-w-0 transition-[background-color,box-shadow]",
                               projectMode && "-ms-0.5",
                               deleteSelectionMode && (tabSelected || tabPartiallySelected)
                                 && "ring-1 ring-inset ring-sidebar-foreground/25",
@@ -1157,7 +1157,7 @@ export const ChatList = memo(function ChatList({
                             actionMenus.openFromContextMenu(event, actionMenuId)
                           )}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-1 rounded-[0.65rem] px-2 text-[13px]",
+                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
                             SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
@@ -1330,9 +1330,7 @@ export const ChatList = memo(function ChatList({
                               {paneGroup && onCreateTab ? (
                                 <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
                                   <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
-                                  {t("workbench.createGroup", {
-                                    defaultValue: "Create group",
-                                  })}
+                                  {t("workbench.createGroup")}
                                 </DropdownMenuItem>
                               ) : null}
                               {paneGroup && onAttachPane ? (
@@ -1504,7 +1502,7 @@ function WorkbenchTabHeader({
       onDragEnd={onDragEnd}
       onContextMenu={(event) => actionMenus.openFromContextMenu(event, actionMenuId)}
       className={cn(
-        "group/tab flex min-w-0 items-center gap-0.5 rounded-[0.65rem] px-1.5 text-sidebar-foreground/85",
+        "group/tab flex min-w-0 items-center gap-0.5 rounded-control px-1.5 text-sidebar-foreground/85",
         collapsed ? "min-h-6" : "min-h-7",
         draggable && "cursor-grab active:cursor-grabbing",
       )}
@@ -1568,7 +1566,7 @@ function WorkbenchTabHeader({
               {onDissolve ? (
                 <DropdownMenuItem onSelect={onDissolve}>
                   <Ungroup className="h-4 w-4 shrink-0" />
-                  {t("workbench.dissolveTab", { defaultValue: "Dissolve group" })}
+                  {t("workbench.dissolveTab")}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem
@@ -1577,9 +1575,7 @@ function WorkbenchTabHeader({
                 className="whitespace-nowrap"
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
-                {t("workbench.deleteConversations", {
-                  defaultValue: "Delete all chats",
-                })}
+                {t("workbench.deleteConversations")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1693,10 +1689,7 @@ function ActivePaneRows({
   return (
     <ul
       id={id}
-      aria-label={t("workbench.panesInTab", {
-        defaultValue: "Panes in {{title}}",
-        title: tabTitle,
-      })}
+      aria-label={t("workbench.panesInTab", { title: tabTitle })}
       className="mt-0.5 space-y-0.5 rounded-es-[14px] border-s-2 border-sidebar-foreground/25 pb-1"
     >
       {panes.map((pane) => {
@@ -1706,10 +1699,7 @@ function ActivePaneRows({
           : updated.has(pane.chatId) && !active
             ? "updated"
             : null;
-        const paneActionsLabel = t("workbench.paneActions", {
-          defaultValue: "{{title}} pane actions",
-          title: pane.title,
-        });
+        const paneActionsLabel = t("workbench.paneActions", { title: pane.title });
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
         const isArchived = archived.has(pane.key);
@@ -1739,7 +1729,7 @@ function ActivePaneRows({
                 actionMenus.openFromContextMenu(event, actionMenuId)
               )}
               className={cn(
-                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-[0.65rem] px-2 text-[13px]",
+                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
                 SIDEBAR_SELECTION_ITEM_CLASS,
                 compact ? "min-h-7" : "min-h-8",
                 active
@@ -1835,10 +1825,7 @@ function ActivePaneRows({
                   {onDetachPane ? (
                     <DropdownMenuItem onSelect={() => onDetachPane(group.tabKey, pane.key)}>
                       <Unplug className="h-4 w-4 shrink-0" />
-                      {t("workbench.detachPane", {
-                        defaultValue: "Remove",
-                        title: pane.title,
-                      })}
+                      {t("workbench.detachPane", { title: pane.title })}
                     </DropdownMenuItem>
                   ) : null}
                   {onAttachPane ? (
@@ -1934,7 +1921,7 @@ function MoveToGroupSubmenu({
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <MoveRight className="h-4 w-4 shrink-0" aria-hidden />
-        {t("workbench.moveTo", { defaultValue: "Move to" })}
+        {t("workbench.moveTo")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         {targets.map((target) => (

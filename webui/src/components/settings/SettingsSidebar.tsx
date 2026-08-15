@@ -102,7 +102,7 @@ export function SettingsSidebar({
             <button
               type="button"
               aria-label={`${t("settings.sidebar.title")}: ${activeLabel}`}
-              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-[14px] bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-accent/80 lg:hidden"
+              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-control bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-accent/80 lg:hidden"
             >
               <ActiveIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
               <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
@@ -176,7 +176,7 @@ export function SettingsSidebar({
             type="button"
             variant="ghost"
             onClick={onLogout}
-            className="h-9 w-full justify-start gap-2 rounded-[10px] px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
+            className="h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
           >
             <LogOut className="h-4 w-4" aria-hidden />
             {t("app.account.logout")}
