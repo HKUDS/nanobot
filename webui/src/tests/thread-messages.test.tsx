@@ -1171,6 +1171,27 @@ describe("ThreadMessages", () => {
       .not.toBeInTheDocument();
   });
 
+  it("falls back to the latest user boundary while the active turn id is pending", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "old-user", role: "user", content: "old question", turnId: "old", createdAt: 1 },
+          { id: "old", role: "assistant", content: "old answer", turnId: "old", createdAt: 2 },
+          { id: "new-user", role: "user", content: "new question", turnId: "new", createdAt: 3 },
+          { id: "live", role: "assistant", content: "live slice", turnId: "new", createdAt: 4 },
+        ]}
+        isStreaming
+        activeTurnId={null}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]'))
+      .toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]'))
+      .toHaveLength(1);
+  });
+
   it("shows copy on adjacent assistant text slices", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },

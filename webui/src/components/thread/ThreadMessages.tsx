@@ -147,7 +147,7 @@ export function ThreadMessages({
               unit.type === "activity"
                 ? liveActivityClusterIndices.has(index)
                 : isStreaming && (
-                    unit.message.turnId
+                    unit.message.turnId && activeTurnId !== null
                       ? unit.message.turnId === activeTurnId
                       : index > currentTurnStartIndex
                   )
