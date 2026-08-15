@@ -225,7 +225,8 @@ export function useModelSettingsActions({
     );
     if (!selectedPreset) return;
     const nextName = form.modelPreset.trim();
-    if (presetNameConflict(nextName, selectedPreset.name)) {
+    const nameChanged = form.modelPreset !== selectedPreset.name;
+    if (nameChanged && presetNameConflict(nextName, selectedPreset.name)) {
       showPresetNameConflict();
       return;
     }
@@ -235,7 +236,7 @@ export function useModelSettingsActions({
     try {
       const payload = await updateModelConfiguration(client, {
         name: selectedPreset.name,
-        newName: nextName !== selectedPreset.name ? nextName : undefined,
+        newName: nameChanged ? nextName : undefined,
         model: form.model !== selectedPreset.model ? form.model : undefined,
         provider: form.provider !== selectedPreset.provider ? form.provider : undefined,
         maxTokens:

@@ -5,6 +5,7 @@ import pytest
 import nanobot.session as session_api
 from nanobot.session import Session, SessionManager
 from nanobot.session.manager import FILE_MAX_MESSAGES, SessionStore
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
 def test_store_types_are_not_public_session_api() -> None:
@@ -59,6 +60,38 @@ def test_manager_delegates_persistence_to_store(tmp_path) -> None:
     assert manager.delete_session(stored.key) is True
     store.delete.assert_called_once_with(stored.key)
     assert manager.get_cached(stored.key) is None
+
+
+def test_manager_renames_model_preset_in_live_and_persisted_sessions(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager(workspace, sessions_root=sessions_root)
+    selected = manager.get_or_create("websocket:selected")
+    selected.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    manager.save(selected)
+    other = manager.get_or_create("websocket:other")
+    other.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "backup"
+    manager.save(other)
+    transient = manager.get_or_create_transient("websocket:temporary")
+    transient.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+
+    assert manager.rename_model_preset("openai", "Codex") == 2
+    assert selected.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+    assert transient.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+
+    reloaded = SessionManager(workspace, sessions_root=sessions_root)
+    assert (
+        reloaded.get_or_create("websocket:selected").metadata[
+            SESSION_MODEL_PRESET_METADATA_KEY
+        ]
+        == "Codex"
+    )
+    assert (
+        reloaded.get_or_create("websocket:other").metadata[
+            SESSION_MODEL_PRESET_METADATA_KEY
+        ]
+        == "backup"
+    )
 
 
 def test_manager_applies_file_cap_before_store_save(tmp_path) -> None:

@@ -462,18 +462,10 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
-        names_by_case: dict[str, str] = {}
-        for preset_name in self.model_presets:
-            if preset_name != preset_name.strip() or not preset_name.isprintable():
-                raise ValueError(f"invalid model_preset name {preset_name!r}")
-            normalized = preset_name.casefold()
-            if normalized in names_by_case:
-                raise ValueError(
-                    "model_preset names must be unique ignoring case: "
-                    f"{names_by_case[normalized]!r} and {preset_name!r}"
-                )
-            names_by_case[normalized] = preset_name
-        if "default" in names_by_case:
+        # Keep persisted names accepted by previous releases loadable. New
+        # names are normalized and checked case-insensitively at mutation
+        # boundaries, where conflicts can be reported without breaking startup.
+        if "default" in self.model_presets:
             raise ValueError("model_preset name 'default' is reserved for agents.defaults")
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:

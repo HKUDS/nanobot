@@ -10,6 +10,8 @@ import pytest
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
+from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     _docs_version,
@@ -434,9 +436,17 @@ def test_update_model_configuration_renames_preset_and_config_references(
     defaults.dream.model_override = "openai"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    session_manager = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "sessions",
+    )
+    session = session_manager.get_or_create("websocket:selected")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    session_manager.save(session)
 
     payload = update_model_configuration(
-        {"name": ["openai"], "new_name": ["Codex"]}
+        {"name": ["openai"], "new_name": ["Codex"]},
+        rename_model_preset=session_manager.rename_model_preset,
     )
 
     assert payload["agent"]["model_preset"] == "Codex"
@@ -451,6 +461,11 @@ def test_update_model_configuration_renames_preset_and_config_references(
     assert saved.agents.defaults.model_preset == "Codex"
     assert saved.agents.defaults.fallback_models == ["backup", "Codex"]
     assert saved.agents.defaults.dream.model_override == "Codex"
+    persisted = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "sessions",
+    ).get_or_create("websocket:selected")
+    assert persisted.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
 
 
 def test_update_model_configuration_rejects_duplicate_rename(
@@ -471,6 +486,33 @@ def test_update_model_configuration_rejects_duplicate_rename(
 
     assert duplicate.value.status == 409
     assert set(load_config(config_path).model_presets) == {"openai", "Codex"}
+
+
+def test_update_model_configuration_rolls_back_sessions_when_config_save_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config(
+        model_presets={"openai": ModelPresetConfig(model="openai/gpt-4.1")}
+    )
+    save_config(config, config_path)
+    calls: list[tuple[str, str]] = []
+
+    def fail_save(_config: Config, _path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nanobot.webui.settings_api._save_settings_config", fail_save)
+
+    with pytest.raises(OSError, match="disk full"):
+        update_model_configuration(
+            {"name": ["openai"], "new_name": ["Codex"]},
+            config_path=config_path,
+            rename_model_preset=lambda old, new: calls.append((old, new)) or 1,
+        )
+
+    assert calls == [("openai", "Codex"), ("Codex", "openai")]
+    assert list(load_config(config_path).model_presets) == ["openai"]
 
 
 def test_settings_payload_exposes_named_model_call_order(

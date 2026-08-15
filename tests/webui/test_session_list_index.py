@@ -52,6 +52,20 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert rows[0]["model_preset"] == "fast"
 
 
+def test_webui_session_list_refreshes_after_model_preset_rename(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:renamed-preset")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    session.add_message("user", "hello")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["model_preset"] == "openai"
+
+    assert manager.rename_model_preset("openai", "Codex") == 1
+
+    assert list_webui_sessions(manager)[0]["model_preset"] == "Codex"
+
+
 def test_webui_session_index_uses_unique_temp_file(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:unique-index-temp")

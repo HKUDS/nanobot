@@ -112,6 +112,47 @@ describe("Settings models", () => {
     expect(within(editor).queryByText("minimax")).not.toBeInTheDocument();
   });
 
+  it("edits a legacy case-conflicting preset without treating its own name as a rename", async () => {
+    const payload = settingsPayload();
+    const primary = {
+      ...payload.model_presets[0],
+      name: "Fast",
+      label: "Fast",
+      active: true,
+    };
+    const legacyConflict = {
+      ...primary,
+      name: "fast",
+      label: "fast",
+      active: false,
+    };
+    const legacyPayload: SettingsPayload = {
+      ...payload,
+      agent: { ...payload.agent, model_preset: "Fast" },
+      model_presets: [primary, legacyConflict],
+      model_call_order: ["Fast", "fast"],
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockResolvedValueOnce(legacyPayload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: legacyPayload });
+    await togglePresetEditor("Fast");
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), {
+      target: { value: "0.4" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+
+    await waitFor(() => {
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.update",
+        { name: "Fast", temperature: 0.4 },
+        20_000,
+      );
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("renames an existing preset without losing the editor selection", async () => {
     const payload = settingsPayload();
     const renamedPayload: SettingsPayload = {

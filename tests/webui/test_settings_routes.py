@@ -24,9 +24,15 @@ def _router(
     config_path: Path | None = None,
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
     mcp_reload: Callable[[], Awaitable[dict[str, object]]] | None = None,
+    rename_model_preset: Callable[[str, str], int] | None = None,
+    refresh_runtime_config: Callable[[], None] | None = None,
 ) -> WebUISettingsRouter:
     return WebUISettingsRouter(
-        settings=WebUISettingsServices.create(config_path or get_config_path()),
+        settings=WebUISettingsServices.create(
+            config_path or get_config_path(),
+            rename_model_preset=rename_model_preset,
+            refresh_runtime_config=refresh_runtime_config,
+        ),
         bus=SimpleNamespace(),
         logger=SimpleNamespace(exception=lambda *_args: None),
         check_api_token=lambda _request: authorized,
@@ -344,6 +350,38 @@ async def test_model_preset_mutation_routes(
     assert response.status_code == 200
     assert json.loads(response.body)["routed"] == function_name
     assert captured["query"] == expected_query
+
+
+@pytest.mark.asyncio
+async def test_model_update_route_forwards_session_rename_dependency(monkeypatch) -> None:
+    rename_model_preset = MagicMock(return_value=2)
+    refresh_runtime_config = MagicMock()
+    captured: dict[str, object] = {}
+
+    def update(query, *, config_path=None, rename_model_preset=None):
+        captured.update(query=query, rename_model_preset=rename_model_preset)
+        return {"updated": True}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.update_model_configuration", update)
+    path = "/api/settings/model-configurations/update"
+    request = _mutation_request(path, {"name": "openai", "new_name": "Codex"})
+
+    response = await _router(
+        rename_model_preset=rename_model_preset,
+        refresh_runtime_config=refresh_runtime_config,
+    ).dispatch(
+        None,
+        request,
+        path,
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert captured == {
+        "query": {"name": ["openai"], "new_name": ["Codex"]},
+        "rename_model_preset": rename_model_preset,
+    }
+    refresh_runtime_config.assert_called_once_with()
 
 
 @pytest.mark.asyncio

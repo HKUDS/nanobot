@@ -260,7 +260,7 @@ export function useSettingsController({
     );
     if (!selectedPreset) return false;
     return (
-      form.modelPreset.trim() !== selectedPreset.name ||
+      form.modelPreset !== selectedPreset.name ||
       form.model !== selectedPreset.model ||
       form.provider !== selectedPreset.provider ||
       form.maxTokens !== selectedPreset.max_tokens ||

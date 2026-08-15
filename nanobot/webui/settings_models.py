@@ -1661,9 +1661,18 @@ class ModelSettingsHandler:
                     restart_section="runtime",
                 )
 
+            if action == "model-update":
+                payload = self.settings.mutate(
+                    operations.update_model,
+                    request.query,
+                    rename_model_preset=self.settings.rename_model_preset,
+                )
+                if self.settings.refresh_runtime_config is not None:
+                    self.settings.refresh_runtime_config()
+                return SettingsRouteResult.success(payload, decorate_restart=True)
+
             mutation = {
                 "model-create": operations.create_model,
-                "model-update": operations.update_model,
                 "model-delete": operations.delete_model,
                 "models-migrate": operations.migrate_models,
                 "call-order-update": operations.update_call_order,

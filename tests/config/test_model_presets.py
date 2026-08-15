@@ -289,14 +289,23 @@ def test_legacy_model_preset_label_is_ignored() -> None:
     assert "label" not in config.model_presets["gpt-5-6-sol"].model_dump()
 
 
-def test_model_preset_names_are_unique_ignoring_case() -> None:
-    with pytest.raises(ValueError, match="unique ignoring case"):
-        Config.model_validate({
-            "modelPresets": {
-                "Fast": {"model": "openai/gpt-4.1-mini"},
-                "fast": {"model": "openai/gpt-4.1"},
-            }
-        })
+@pytest.mark.parametrize(
+    "model_presets",
+    [
+        {"Default": {"model": "openai/gpt-4.1"}},
+        {
+            "Fast": {"model": "openai/gpt-4.1-mini"},
+            "fast": {"model": "openai/gpt-4.1"},
+        },
+        {" fast ": {"model": "openai/gpt-4.1"}},
+    ],
+)
+def test_model_preset_names_accepted_by_earlier_releases_remain_loadable(
+    model_presets: dict[str, dict[str, str]],
+) -> None:
+    config = Config.model_validate({"modelPresets": model_presets})
+
+    assert list(config.model_presets) == list(model_presets)
 
 
 def test_model_presets_serializes_with_camel_case_root_key() -> None:
