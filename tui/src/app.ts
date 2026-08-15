@@ -411,17 +411,16 @@ export class NanobotTui {
     })
     this.title.add(this.titleText)
     this.title.add(this.modelText)
+    const composerSurface = this.composerSurface()
     this.composerFrame = new BoxRenderable(renderer, {
       id: "nanobot-tui-composer-frame",
       width: "100%",
-      minHeight: 3,
+      minHeight: 1,
       flexShrink: 0,
-      border: true,
-      borderStyle: "rounded",
-      borderColor: this.palette.border,
+      border: false,
       paddingLeft: 1,
       paddingRight: 1,
-      backgroundColor: RGBA.defaultBackground(),
+      backgroundColor: composerSurface,
     })
     this.composer = new TextareaRenderable(renderer, {
       id: "nanobot-tui-composer",
@@ -433,8 +432,8 @@ export class NanobotTui {
       placeholderColor: this.palette.faint,
       textColor: this.palette.text,
       focusedTextColor: this.palette.text,
-      backgroundColor: RGBA.defaultBackground(),
-      focusedBackgroundColor: RGBA.defaultBackground(),
+      backgroundColor: composerSurface,
+      focusedBackgroundColor: composerSurface,
       cursorColor: this.palette.accent,
       showCursor: true,
       keyBindings: [
@@ -1040,7 +1039,7 @@ export class NanobotTui {
     this.sessionMenu.setTheme(commandMenuTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
-    this.composerFrame.borderColor = this.palette.border
+    this.updateComposerAppearance()
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
     this.composer.cursorColor = this.palette.accent
@@ -1113,7 +1112,20 @@ export class NanobotTui {
   private resizeComposer(): void {
     const maxHeight = Math.max(1, Math.min(12, Math.floor(this.renderer.height / 3)))
     this.composer.maxHeight = maxHeight
-    this.composerFrame.maxHeight = maxHeight + 2
+    this.composerFrame.maxHeight = maxHeight
+  }
+
+  private composerSurface(): RGBA {
+    return this.backgroundKnown
+      ? RGBA.fromHex(this.palette.userBackground)
+      : RGBA.defaultBackground()
+  }
+
+  private updateComposerAppearance(): void {
+    const surface = this.composerSurface()
+    this.composerFrame.backgroundColor = surface
+    this.composer.backgroundColor = surface
+    this.composer.focusedBackgroundColor = surface
   }
 
   private syncComposerPlaceholder(): void {

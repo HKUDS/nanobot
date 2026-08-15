@@ -766,7 +766,13 @@ describe("NanobotTui layout", () => {
     const internals = app as unknown as {
       palette: { referenceBackground: string; text: string; border: string }
       shell: { backgroundColor: { intent: string } }
-      composer: { backgroundColor: { intent: string }; textColor: { toInts(): number[] } }
+      composerFrame: {
+        backgroundColor: { intent: string; toInts(): number[] }
+      }
+      composer: {
+        backgroundColor: { intent: string; toInts(): number[] }
+        textColor: { toInts(): number[] }
+      }
       transcript: {
         markdown: Set<{ syntaxStyle: object }>
         frames: Set<{ borderColor: { toInts(): number[] } }>
@@ -791,11 +797,42 @@ describe("NanobotTui layout", () => {
       border: "#D4D4D8",
     })
     expect(internals.shell.backgroundColor.intent).toBe("default")
-    expect(internals.composer.backgroundColor.intent).toBe("default")
+    expect(internals.composerFrame.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
+    expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect(sessionFrame?.borderColor.toInts().slice(0, 3)).toEqual([212, 212, 216])
     expect(userRow?.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
+  })
+
+  test("uses a quiet surface instead of a boxed composer", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, theme: "light" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const internals = app as unknown as {
+      ready: boolean
+      composerFrame: {
+        border: boolean | string[]
+        backgroundColor: { toInts(): number[] }
+      }
+      composer: { backgroundColor: { toInts(): number[] } }
+    }
+
+    expect(internals.composerFrame.border).toBeFalse()
+    expect(internals.composerFrame.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
+    expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => internals.ready)
+    await setup.renderOnce()
+
+    const composerLine = setup.captureCharFrame().split("\n")
+      .find((line) => line.includes("Ask nanobot anything")) || ""
+    expect(composerLine).not.toContain("│")
   })
 
   test("uses asymmetric roles instead of chat bubbles", async () => {
