@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Trash2,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -660,6 +661,8 @@ export function ProvidersSettings({
   onToggleProviderKeyEditing,
   onChangeProviderForm,
   onSaveProvider,
+  onDeleteProvider,
+  onResetProvider,
   onCreateCustomProvider,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
@@ -683,6 +686,8 @@ export function ProvidersSettings({
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
+  onDeleteProvider: (provider: string) => void;
+  onResetProvider: (provider: string) => void;
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
@@ -697,6 +702,8 @@ export function ProvidersSettings({
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
     emptyCustomProviderDraft,
   );
+  const [pendingDelete, setPendingDelete] = useState<SettingsPayload["providers"][number] | null>(null);
+  const [pendingReset, setPendingReset] = useState<SettingsPayload["providers"][number] | null>(null);
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const unconfiguredProviders = useMemo(
     () =>
@@ -1028,6 +1035,29 @@ export function ProvidersSettings({
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 <div className="flex items-center justify-end gap-2">
+                  {provider.is_custom ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setPendingDelete(provider)}
+                      disabled={saving}
+                      className="mr-auto rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      {tx("settings.providers.delete", "Delete provider")}
+                    </Button>
+                  ) : provider.name !== "custom" && provider.configured && provider.auth_type === "api_key" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setPendingReset(provider)}
+                      disabled={saving}
+                      className="mr-auto rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      {tx("settings.providers.reset", "Remove configuration")}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1199,6 +1229,28 @@ export function ProvidersSettings({
   ) : null;
   return (
     <div className="space-y-6">
+      <ProviderActionDialog
+        provider={pendingDelete}
+        title={tx("settings.providers.deleteTitle", "Delete custom provider?")}
+        description={tx("settings.providers.deleteHelp", "This removes the provider and its saved credentials.")}
+        actionLabel={tx("settings.actions.delete", "Delete")}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) onDeleteProvider(pendingDelete.name);
+          setPendingDelete(null);
+        }}
+      />
+      <ProviderActionDialog
+        provider={pendingReset}
+        title={tx("settings.providers.resetTitle", "Remove provider configuration?")}
+        description={tx("settings.providers.resetHelp", "This clears the saved credentials and options.")}
+        actionLabel={tx("settings.actions.remove", "Remove")}
+        onOpenChange={(open) => !open && setPendingReset(null)}
+        onConfirm={() => {
+          if (pendingReset) onResetProvider(pendingReset.name);
+          setPendingReset(null);
+        }}
+      />
       {imageProviderRestartPending && onRestart ? (
         <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
           <p className="text-[13px] leading-5 text-muted-foreground">
@@ -1297,6 +1349,41 @@ export function ProvidersSettings({
         </SettingsGroup>
       </section>
     </div>
+  );
+}
+
+function ProviderActionDialog({
+  provider,
+  title,
+  description,
+  actionLabel,
+  onOpenChange,
+  onConfirm,
+}: {
+  provider: SettingsPayload["providers"][number] | null;
+  title: string;
+  description: string;
+  actionLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={provider !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[440px] rounded-[24px]">
+        <DialogHeader className="text-left">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:space-x-0">
+          <Button type="button" variant="ghost" className="rounded-full" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" className="rounded-full" onClick={onConfirm}>
+            {actionLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

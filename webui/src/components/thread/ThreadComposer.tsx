@@ -192,6 +192,7 @@ interface ThreadComposerProps {
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
   onModelPresetChange?: (name: string) => void;
+  modelPresetError?: string | null;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -910,6 +911,7 @@ export function ThreadComposer({
   modelPreset = null,
   modelPresets = [],
   onModelPresetChange,
+  modelPresetError = null,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -2374,7 +2376,7 @@ export function ThreadComposer({
             )}
           />
         </div>
-        {inlineError ? (
+        {inlineError || modelPresetError ? (
           <div
             role="alert"
             className={cn(
@@ -2383,7 +2385,7 @@ export function ThreadComposer({
               voiceErrorFading && "mb-0 max-h-0 border-transparent py-0 opacity-0",
             )}
           >
-            {inlineError}
+            {inlineError || modelPresetError}
           </div>
         ) : null}
         <div

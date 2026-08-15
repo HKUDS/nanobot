@@ -327,7 +327,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
     />,
   );
   return {
-    badge: screen.getByRole("spinbutton", { name: "Kimi" }),
+    badge: screen.getByRole("button", { name: "Kimi" }),
     onPresetChange,
   };
 }
@@ -350,6 +350,20 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("opens an accessible preset menu with provider and model details", async () => {
+    const { badge, onPresetChange } = renderPresetComposer();
+    const user = userEvent.setup();
+
+    await user.click(badge);
+
+    const option = await screen.findByRole("menuitemradio", { name: /DFlash.*deepseek/ });
+    expect(option).toHaveTextContent("DFlash");
+    expect(option).toHaveTextContent("deepseek");
+    await user.click(option);
+
+    expect(onPresetChange).toHaveBeenCalledWith("dflash");
+  });
+
   it("locks an async send and keeps the draft when it is rejected", async () => {
     let resolveSend!: (accepted: boolean) => void;
     const onSend = vi.fn(() => new Promise<boolean>((resolve) => {
@@ -528,7 +542,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    const badge = screen.getByRole("spinbutton", { name: "gpt-5.6-sol" });
+    const badge = screen.getByRole("button", { name: "gpt-5.6-sol" });
     expect(badge).toHaveClass("w-fit", "max-w-[min(18rem,44vw)]");
     expect(badge).not.toHaveClass("w-[5.75rem]");
     expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();

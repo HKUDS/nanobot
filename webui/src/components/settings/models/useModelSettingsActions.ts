@@ -19,12 +19,14 @@ import {
   createModelConfiguration,
   createProviderSettings,
   deleteModelConfiguration,
+  deleteProviderSettings,
   loginProviderOAuth,
   logoutProviderOAuth,
   migrateModelConfigurations,
   updateModelCallOrder,
   updateModelConfiguration,
   updateProviderSettings,
+  resetProviderSettings,
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
@@ -419,6 +421,41 @@ export function useModelSettingsActions({
     }
   };
 
+  const deleteProvider = async (providerName: string) => {
+    if (providerSaving) return;
+    setProviderSaving(providerName);
+    try {
+      const payload = await deleteProviderSettings(client, providerName);
+      applyPayload(payload);
+      setExpandedProvider(null);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProviderSaving(null);
+    }
+  };
+
+  const resetProvider = async (providerName: string) => {
+    if (providerSaving) return;
+    setProviderSaving(providerName);
+    try {
+      const payload = await resetProviderSettings(client, providerName);
+      applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, image: true }));
+      }
+      await maybeRestartHostEngine(payload);
+      resetProviderDraft(providerName);
+      setExpandedProvider(null);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProviderSaving(null);
+    }
+  };
+
   const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
     if (providerSaving) return;
     let popup: Window | null = null;
@@ -549,10 +586,12 @@ export function useModelSettingsActions({
     changeModelCallOrder,
     completeProviderOAuthResponse,
     createCustomProvider,
+    deleteProvider,
     handleDeleteModelConfiguration,
     handleMigrateModelConfigurations,
     handleToggleProvider,
     resetProviderDraft,
+    resetProvider,
     runProviderOAuth,
     saveModelSettings,
     saveProvider,

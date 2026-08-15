@@ -846,4 +846,76 @@ describe("Settings providers", () => {
       screen.getByRole("button", { name: "Add your own model provider" }),
     ).toBeInTheDocument();
   });
+
+  it("deletes a custom provider after confirmation", async () => {
+    const base = settingsPayload();
+    const provider = {
+      name: "custom-company-gateway",
+      label: "Company Gateway",
+      is_custom: true,
+      configured: true,
+      api_key_required: false,
+      api_key_hint: "sk-c••••pany",
+      api_base: "https://gateway.example/v1",
+    };
+    const payload: SettingsPayload = { ...base, providers: [provider] };
+    const deletedPayload: SettingsPayload = { ...payload, providers: [] };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockResolvedValueOnce(deletedPayload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: /^Company Gateway/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete custom provider?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.delete",
+      { provider: "custom-company-gateway" },
+      20_000,
+    ));
+  });
+
+  it("removes a configured API-key provider after confirmation", async () => {
+    const base = settingsPayload();
+    const provider = {
+      name: "openrouter",
+      label: "OpenRouter",
+      configured: true,
+      auth_type: "api_key" as const,
+      api_key_required: true,
+      api_key_hint: "sk-••••oken",
+      api_base: "https://openrouter.ai/api/v1",
+    };
+    const payload: SettingsPayload = { ...base, providers: [provider] };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload,
+      providers: [{ ...provider, configured: false, api_key_hint: null, api_base: null }],
+    });
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: /^OpenRouter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove configuration" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove provider configuration?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.reset",
+      { provider: "openrouter" },
+      20_000,
+    ));
+  });
 });
