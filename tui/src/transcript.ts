@@ -321,7 +321,6 @@ export class Transcript {
       && unseenOutput === this.navigation.unseenOutput
     ) return
     this.navigation = { awayFromBottom, unseenOutput }
-    this.root.verticalScrollBar.visible = awayFromBottom
     this.emitNavigation()
   }
 

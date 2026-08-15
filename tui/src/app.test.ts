@@ -1134,7 +1134,7 @@ describe("NanobotTui layout", () => {
     app.accept({ event: "stream_end", chat_id: "chat" })
     await setup.renderOnce()
     expect(scroll.scrollTop).toBe(0)
-    expect(scroll.verticalScrollBar.visible).toBe(true)
+    expect(scroll.verticalScrollBar.visible).toBe(false)
     expect(internals.status.plainText).toContain("Ctrl+End latest")
 
     setup.mockInput.pressKey("\u001B[6~")
@@ -1148,8 +1148,8 @@ describe("NanobotTui layout", () => {
     expect(internals.status.plainText).not.toContain("Ctrl+End latest")
 
     setup.mockInput.pressKey("HOME", { ctrl: true })
-    await waitUntil(() => scroll.verticalScrollBar.visible)
-    expect(scroll.verticalScrollBar.visible).toBe(true)
+    await waitUntil(() => internals.status.plainText.includes("Ctrl+End latest"))
+    expect(scroll.verticalScrollBar.visible).toBe(false)
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
     await setup.renderOnce()
