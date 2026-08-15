@@ -377,11 +377,15 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
-        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
+        # SessionManager owns every durable deletion entrypoint, including the
+        # WebUI and fork rollback paths.  Observe that boundary once instead of
+        # duplicating cleanup in each consumer.
+        self.sessions.set_delete_observer(self._file_state_store.discard)
+        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
+        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
         self.subagents = SubagentManager(

@@ -1523,6 +1523,7 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
+        self._delete_observer: Callable[[str], None] | None = None
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1551,6 +1552,10 @@ class SessionManager:
     def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
         """Archive unconsolidated overflow whenever a session is persisted."""
         self._file_cap_archiver = archiver
+
+    def set_delete_observer(self, observer: Callable[[str], None]) -> None:
+        """Observe explicit session deletion for process-local state cleanup."""
+        self._delete_observer = observer
 
     @staticmethod
     def safe_key(key: str) -> str:
@@ -1684,7 +1689,10 @@ class SessionManager:
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
         self.invalidate(key)
-        return self._store.delete(key)
+        deleted = self._store.delete(key)
+        if self._delete_observer is not None:
+            self._delete_observer(key)
+        return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
         """Restore session files to the pre-relocation path for an explicit rollback."""
