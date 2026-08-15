@@ -51,6 +51,21 @@ function jsonResponse(body: unknown): Response {
   } as Response;
 }
 
+function createDataTransfer(): DataTransfer {
+  const values = new Map<string, string>();
+  const types: string[] = [];
+  return {
+    effectAllowed: "none",
+    dropEffect: "none",
+    types,
+    setData: (type: string, value: string) => {
+      values.set(type, value);
+      if (!types.includes(type)) types.push(type);
+    },
+    getData: (type: string) => values.get(type) ?? "",
+  } as unknown as DataTransfer;
+}
+
 function mockFetchRoutes(routes: Record<string, unknown>): void {
   vi.stubGlobal(
     "fetch",
@@ -1934,6 +1949,64 @@ describe("App layout", () => {
     expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
   });
 
+  it("keeps automatic sorting after an equivalent sidebar drop", async () => {
+    mockSessions = [
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        title: "Alpha",
+        preview: "",
+      },
+      {
+        key: "websocket:beta",
+        channel: "websocket",
+        chatId: "beta",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Beta",
+        preview: "",
+      },
+    ];
+    const initialState = {
+      schema_version: 1,
+      pinned_keys: [],
+      archived_keys: [],
+      session_order: ["websocket:alpha", "websocket:beta"],
+      title_overrides: {},
+      tags_by_key: {},
+      collapsed_groups: {},
+      workbench: { version: 1, tabs: {} },
+      view: {
+        density: "comfortable",
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: false,
+        sort: "updated_desc",
+      },
+      updated_at: null,
+    };
+    mockFetchRoutes({ "/api/webui/sidebar-state": initialState });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const source = await within(sidebar).findByRole("button", { name: /^Alpha$/ });
+    const target = within(sidebar).getByRole("button", { name: /^Beta$/ }).closest("li")!;
+    const dataTransfer = createDataTransfer();
+    setSidebarStateSpy.mockClear();
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragOver(target, { dataTransfer, clientY: 0 });
+    fireEvent.drop(target, { dataTransfer, clientY: 0 });
+
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+  });
+
   it("sorts chats by displayed title when A-Z is persisted", async () => {
     mockSessions = [
       {
@@ -3109,6 +3182,95 @@ describe("App layout", () => {
     const alphaRoot = within(alphaGroup).getByRole("button", { name: "Alpha tab" });
     expect(alphaChild.compareDocumentPosition(alphaRoot) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
+  });
+
+  it("keeps the surrounding sidebar order when a pane leaves a group", async () => {
+    mockSessions = [
+      {
+        key: "websocket:group-root",
+        channel: "websocket",
+        chatId: "group-root",
+        createdAt: "2026-08-01T10:00:00Z",
+        updatedAt: "2026-08-01T10:00:00Z",
+        title: "Group root",
+        preview: "",
+      },
+      {
+        key: "websocket:group-child",
+        channel: "websocket",
+        chatId: "group-child",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Group child",
+        preview: "",
+      },
+      {
+        key: "websocket:middle",
+        channel: "websocket",
+        chatId: "middle",
+        createdAt: "2026-08-04T10:00:00Z",
+        updatedAt: "2026-08-04T10:00:00Z",
+        title: "Middle topic",
+        preview: "",
+      },
+      {
+        key: "websocket:tail",
+        channel: "websocket",
+        chatId: "tail",
+        createdAt: "2026-08-03T10:00:00Z",
+        updatedAt: "2026-08-03T10:00:00Z",
+        title: "Tail topic",
+        preview: "",
+      },
+    ];
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": {
+        workbench: {
+          version: 1,
+          tabs: {
+            "tab:websocket:group-root": {
+              explicit: true,
+              title: "Stable group",
+              paneKeys: ["websocket:group-root", "websocket:group-child"],
+              layout: "columns",
+            },
+          },
+        },
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(sidebar).findByRole("button", { name: "Group: Stable group" }))
+      .toBeInTheDocument();
+    setSidebarStateSpy.mockClear();
+
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "Group child pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_order: [
+          "websocket:group-root",
+          "websocket:group-child",
+          "websocket:middle",
+          "websocket:tail",
+        ],
+        view: expect.objectContaining({ sort: "manual" }),
+        workbench: expect.objectContaining({
+          tabs: expect.objectContaining({
+            "tab:websocket:group-root": expect.objectContaining({
+              paneKeys: ["websocket:group-root"],
+            }),
+          }),
+        }),
+      }),
+    ));
   });
 
   it("uses one active pane without workbench editing controls on mobile", async () => {

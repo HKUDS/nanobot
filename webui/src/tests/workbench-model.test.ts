@@ -10,8 +10,13 @@ import {
   dissolveWorkbenchTab,
   normalizeWorkbenchState,
   orderWorkbenchTabs,
+  contiguousWorkbenchSessionOrder,
+  moveSessionBesideWorkbenchBlock,
+  moveSessionWithinWorkbenchTab,
+  moveWorkbenchTabBlock,
   reconcileWorkbench,
   renameWorkbenchTab,
+  reorderWorkbenchPane,
   setWorkbenchLayout,
   setWorkbenchPaneLayoutOrder,
   setWorkbenchSplitRatios,
@@ -157,6 +162,93 @@ describe("workbench model", () => {
       { tabKey: workbenchTabForPane(state, "pane-e").tabKey, paneKeys: ["pane-e"] },
     ]);
     expect(Object.keys(state.tabs)).toHaveLength(2);
+  });
+
+  it("uses the persisted session rank when manual ordering is enabled", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "pane-a", "pane-c");
+    state = addWorkbenchPane(state, "pane-b", "pane-d");
+    const alphaTabKey = workbenchTabForPane(state, "pane-a").tabKey;
+    const betaTabKey = workbenchTabForPane(state, "pane-b").tabKey;
+
+    const tabs = orderWorkbenchTabs(
+      state,
+      ["pane-d", "pane-c", "pane-b", "pane-a"],
+      new Map([
+        ["pane-a", "2026-08-06T10:00:00Z"],
+        ["pane-b", "2026-08-03T10:00:00Z"],
+        ["pane-c", "2026-08-05T10:00:00Z"],
+        ["pane-d", "2026-08-04T10:00:00Z"],
+      ]),
+      true,
+    );
+
+    expect(tabs.map(({ tabKey }) => tabKey)).toEqual([betaTabKey, alphaTabKey]);
+  });
+
+  it("keeps grouped sessions contiguous and moves sessions beside whole groups", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "group-a", "group-b");
+    state = addWorkbenchPane(state, "group-c", "group-d");
+    const interleaved = ["group-a", "solo", "group-c", "group-b", "group-d"];
+
+    expect(contiguousWorkbenchSessionOrder(state, interleaved)).toEqual([
+      "group-a",
+      "group-b",
+      "solo",
+      "group-c",
+      "group-d",
+    ]);
+    expect(moveSessionBesideWorkbenchBlock(
+      state,
+      interleaved,
+      "solo",
+      "group-c",
+      "before",
+    )).toEqual(["group-a", "group-b", "solo", "group-c", "group-d"]);
+    expect(moveSessionBesideWorkbenchBlock(
+      state,
+      interleaved,
+      "group-b",
+      "group-c",
+      "after",
+    )).toEqual(["group-a", "solo", "group-c", "group-d", "group-b"]);
+  });
+
+  it("moves a whole group as one top-level block", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "group-a", "group-b");
+    state = addWorkbenchPane(state, "other-a", "other-b");
+    const sourceTabKey = workbenchTabForPane(state, "group-a").tabKey;
+
+    expect(moveWorkbenchTabBlock(
+      state,
+      ["group-a", "group-b", "solo", "other-a", "other-b"],
+      sourceTabKey,
+      "other-a",
+      "after",
+    )).toEqual(["solo", "other-a", "other-b", "group-a", "group-b"]);
+    expect(moveWorkbenchTabBlock(
+      state,
+      ["group-a", "group-b", "solo", "other-a", "other-b"],
+      sourceTabKey,
+      "group-b",
+      "after",
+    )).toEqual(["group-a", "group-b", "solo", "other-a", "other-b"]);
+  });
+
+  it("reorders panes inside their group without dissolving it", () => {
+    let state = addWorkbenchPane(EMPTY_WORKBENCH_STATE, "pane-a", "pane-b");
+    state = addWorkbenchPane(state, "pane-a", "pane-c");
+    const tabKey = workbenchTabForPane(state, "pane-a").tabKey;
+
+    state = reorderWorkbenchPane(state, tabKey, "pane-c", "pane-a", "before");
+    expect(workbenchTab(state, tabKey)?.paneKeys).toEqual(["pane-c", "pane-a", "pane-b"]);
+    expect(moveSessionWithinWorkbenchTab(
+      state,
+      ["pane-a", "pane-b", "pane-c", "solo"],
+      tabKey,
+      "pane-c",
+      "pane-a",
+      "before",
+    )).toEqual(["pane-c", "pane-a", "pane-b", "solo"]);
   });
 
   it("caps a group at four panes", () => {
