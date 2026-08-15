@@ -308,6 +308,11 @@ export class NanobotClient {
     return v === undefined ? null : v;
   }
 
+  /** Canonical lifecycle turn currently owning the run for *chatId*, if known. */
+  getRunTurnId(chatId: string): string | null {
+    return this.latestRunTurnIdByChatId.get(chatId) ?? null;
+  }
+
   /** Clear the optimistic run state immediately after the user stops a turn. */
   finishRunLocally(chatId: string): void {
     const unsettled = [...(this.unsettledRunTurnIdsByChatId.get(chatId) ?? [])];

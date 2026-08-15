@@ -107,6 +107,7 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
     finishRunLocally: vi.fn((chatId: string) => {
       runStartedAtByChatId.delete(chatId);
       latestRunTurnIdByChatId.delete(chatId);
@@ -2782,6 +2783,72 @@ describe("ThreadShell", () => {
       "active-resume-chat",
       "queued guidance",
     ));
+  });
+
+  it("keeps active-run timing attached to the original turn after guidance", async () => {
+    const client = makeClient();
+    const turnId = "turn-active-timing";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Atiming-chat/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([{
+            role: "user",
+            content: "research this",
+            turnId,
+          }]));
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("timing-chat")}
+          title="Timing chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("research this")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("timing-chat", {
+        event: "goal_status",
+        chat_id: "timing-chat",
+        status: "running",
+        started_at: Date.now() / 1000 - 215,
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        kind: "progress",
+        text: "web_search()",
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        text: "Continuing the search.",
+        latency_ms: 1_000,
+        turn_id: turnId,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("Continuing the search.")).toBeInTheDocument());
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "How is it going?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByText("How is it going?")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Working for / })).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 1s")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /^Thinking for / })).not.toBeInTheDocument();
   });
 
   it("refreshes the current thread when the page returns to the foreground", async () => {

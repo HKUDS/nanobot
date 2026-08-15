@@ -76,8 +76,10 @@ export function ThreadMessages({
   );
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
-    () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
-    [isStreaming, units],
+    () => isStreaming
+      ? currentActivityClusterIndices(units, activeTurnId)
+      : new Set<number>(),
+    [activeTurnId, isStreaming, units],
   );
   const pendingTurn = useMemo(
     () => pendingTurnProjection(messages, activeTurnId),
@@ -362,8 +364,24 @@ function ForkBoundaryDivider({ label }: { label: string }) {
   );
 }
 
-function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
+function currentActivityClusterIndices(
+  units: DisplayUnit[],
+  activeTurnId: string | null,
+): Set<number> {
   const indices = new Set<number>();
+  if (activeTurnId) {
+    for (let i = units.length - 1; i >= 0; i -= 1) {
+      const unit = units[i];
+      if (
+        unit.type === "activity"
+        && unit.messages.some((message) => message.turnId === activeTurnId)
+      ) {
+        indices.add(i);
+        return indices;
+      }
+    }
+  }
+
   let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
