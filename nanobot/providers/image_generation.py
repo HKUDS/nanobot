@@ -2112,9 +2112,6 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
         return images
 
 
-_DASHSCOPE_POLL_INTERVAL_S = 3.0
-_DASHSCOPE_POLL_MAX_ATTEMPTS = 100  # 5 min at 3s intervals
-
 _DASHSCOPE_ASPECT_SIZES = {
     "1:1": "1024*1024",
     "9:16": "720*1280",
@@ -2136,12 +2133,13 @@ def _dashscope_size(aspect_ratio: str | None, image_size: str | None) -> str:
 
 
 class DashScopeImageGenerationClient(ImageGenerationProvider):
-    """Async client for DashScope (Bailian) native image synthesis.
+    """Synchronous client for DashScope (Bailian) image generation.
 
-    DashScope uses the async task pattern shared across its AIGC services:
-    POST with ``X-DashScope-Async: enable`` returns ``output.task_id``, then
-    GET /api/v1/tasks/{task_id} is polled until ``output.task_status`` is
-    SUCCEEDED or FAILED.
+    qwen-image / wan models serve through the same multimodal-generation
+    endpoint as chat: one POST returns signed image URLs inside
+    ``output.choices[0].message.content[*].image``. (The classic async
+    ``text2image/image-synthesis`` task flow has been retired on the public
+    host and answers ``url error``.)
     """
 
     provider_name = "dashscope_native"
@@ -2150,6 +2148,7 @@ class DashScopeImageGenerationClient(ImageGenerationProvider):
         "DashScope API key is not configured. "
         "Set providers.dashscope_native.apiKey."
     )
+    default_timeout = 180.0
 
     def _default_base_url(self) -> str:
         return "https://dashscope.aliyuncs.com"
@@ -2169,28 +2168,30 @@ class DashScopeImageGenerationClient(ImageGenerationProvider):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "X-DashScope-Async": "enable",
             **self.extra_headers,
         }
 
+        content: list[dict[str, Any]] = [
+            {"image": image_path_to_data_url(path)}
+            for path in list(reference_images or [])
+        ]
+        content.append({"text": prompt})
+        parameters: dict[str, Any] = {
+            "prompt_extend": True,
+            "size": _dashscope_size(aspect_ratio, image_size),
+        }
+        parameters.update(self.extra_body)
         body: dict[str, Any] = {
             "model": model,
-            "input": {"prompt": prompt},
-            "parameters": {
-                "size": _dashscope_size(aspect_ratio, image_size),
-                "n": 1,
-            },
+            "input": {"messages": [{"role": "user", "content": content}]},
+            "parameters": parameters,
         }
-        refs = list(reference_images or [])
-        if refs:
-            body["input"]["ref_img"] = image_path_to_data_url(refs[0])
-        body["parameters"].update(self.extra_body)
 
-        submit_url = f"{self.api_base}/api/v1/services/aigc/text2image/image-synthesis"
+        url = f"{self.api_base}/api/v1/services/aigc/multimodal-generation/generation"
         client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
         try:
             try:
-                response = await client.post(submit_url, headers=headers, json=body)
+                response = await client.post(url, headers=headers, json=body)
             except httpx.TimeoutException as exc:
                 raise ImageGenerationError(
                     "DashScope image generation request timed out"
@@ -2208,69 +2209,36 @@ class DashScopeImageGenerationClient(ImageGenerationProvider):
                     f"DashScope image generation failed: {detail}"
                 ) from exc
 
-            task_data = cast(dict[str, Any], response.json())
-            output = cast(dict[str, Any], task_data.get("output") or {})
-            task_id = output.get("task_id")
-            if not task_id:
+            data = cast(dict[str, Any], response.json())
+            if data.get("code") or data.get("message"):
                 raise ImageGenerationError(
-                    f"DashScope did not return a task_id: {response.text[:500]}"
+                    f"DashScope image generation failed: "
+                    f"{data.get('code')}: {data.get('message')}"
                 )
-
-            images = await self._poll_task(
-                client, cast(str, task_id), headers
-            )
-            self._require_images(images, task_data)
-            return GeneratedImageResponse(images=images, content="", raw=task_data)
+            images = await self._collect_images(data)
+            self._require_images(images, data)
+            return GeneratedImageResponse(images=images, content="", raw=data)
         finally:
             if self._client is None:
                 await client.aclose()
 
-    async def _poll_task(
-        self,
-        client: httpx.AsyncClient,
-        task_id: str,
-        submit_headers: dict[str, str],
-    ) -> list[str]:
-        poll_url = f"{self.api_base}/api/v1/tasks/{task_id}"
-        for _ in range(_DASHSCOPE_POLL_MAX_ATTEMPTS):
-            try:
-                response = await client.get(poll_url, headers=submit_headers)
-            except httpx.RequestError:
-                await asyncio.sleep(_DASHSCOPE_POLL_INTERVAL_S)
-                continue
-
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                detail = _http_error_detail(response)
-                raise ImageGenerationError(
-                    f"DashScope task polling failed: {detail}"
-                ) from exc
-
-            data = cast(dict[str, Any], response.json())
-            output = cast(dict[str, Any], data.get("output") or {})
-            status = output.get("task_status")
-
-            if status == "SUCCEEDED":
-                return await self._collect_images(output)
-            if status in ("FAILED", "CANCELED", "UNKNOWN"):
-                raise ImageGenerationError(
-                    f"DashScope image generation task {status}: {data}"
-                )
-
-            await asyncio.sleep(_DASHSCOPE_POLL_INTERVAL_S)
-
-        raise ImageGenerationError(
-            f"DashScope image generation timed out after "
-            f"{_DASHSCOPE_POLL_MAX_ATTEMPTS} polls"
+    async def _collect_images(self, data: dict[str, Any]) -> list[str]:
+        output = cast(dict[str, Any], data.get("output") or {})
+        choices = output.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return []
+        choice = (
+            cast(dict[str, Any], choices[0]) if isinstance(choices[0], dict) else {}
         )
-
-    async def _collect_images(self, output: dict[str, Any]) -> list[str]:
+        message = cast(dict[str, Any], choice.get("message") or {})
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
         images: list[str] = []
-        for raw_result in cast(list[object], output.get("results") or []):
-            if not isinstance(raw_result, dict):
+        for raw_part in cast(list[object], content):
+            if not isinstance(raw_part, dict):
                 continue
-            url = cast(dict[str, Any], raw_result).get("url")
+            url = cast(dict[str, Any], raw_part).get("image")
             if isinstance(url, str) and url:
                 images.append(
                     await _download_image_data_url(url, proxy=self.proxy)
