@@ -1636,12 +1636,14 @@ describe("NanobotClient", () => {
       event: "turn_model_updated",
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
+      model_preset: "Deep Research",
     });
 
     expect(chatHandler).toHaveBeenCalledWith({
       event: "turn_model_updated",
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
+      model_preset: "Deep Research",
     });
   });
 

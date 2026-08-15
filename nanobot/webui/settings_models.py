@@ -1646,6 +1646,11 @@ class ModelSettingsHandler:
         self.settings = settings
         self.logger = logger
 
+    def _refresh_runtime_config(self) -> None:
+        """Make a successful model-settings mutation visible to live clients now."""
+        if self.settings.refresh_runtime_config is not None:
+            self.settings.refresh_runtime_config()
+
     async def handle(
         self,
         action: str,
@@ -1655,6 +1660,7 @@ class ModelSettingsHandler:
         try:
             if action == "agent-update":
                 payload = self.settings.mutate(operations.update_agent, request.query)
+                self._refresh_runtime_config()
                 return SettingsRouteResult.success(
                     payload,
                     decorate_restart=True,
@@ -1667,8 +1673,7 @@ class ModelSettingsHandler:
                     request.query,
                     rename_model_preset=self.settings.rename_model_preset,
                 )
-                if self.settings.refresh_runtime_config is not None:
-                    self.settings.refresh_runtime_config()
+                self._refresh_runtime_config()
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
             mutation = {
@@ -1680,6 +1685,7 @@ class ModelSettingsHandler:
             }.get(action)
             if mutation is not None:
                 payload = self.settings.mutate(mutation, request.query)
+                self._refresh_runtime_config()
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
             if action == "provider-update":
@@ -1690,6 +1696,7 @@ class ModelSettingsHandler:
                 payload, image_restart_cleared = await operations.apply_image_runtime_change(
                     payload
                 )
+                self._refresh_runtime_config()
                 return SettingsRouteResult.success(
                     payload,
                     decorate_restart=True,

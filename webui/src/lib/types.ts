@@ -1271,6 +1271,7 @@ export type InboundEvent =
       event: "turn_model_updated";
       chat_id: string;
       model_name: string;
+      model_preset?: string | null;
     }
   | ({
       event: "turn_end";

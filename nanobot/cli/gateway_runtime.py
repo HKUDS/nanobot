@@ -658,7 +658,7 @@ def _run_gateway(
         return agent.model.strip() or None
 
     def _webui_refresh_runtime_config() -> None:
-        agent.invalidate_runtime_config()
+        agent.refresh_runtime_config()
 
     def _webui_skill_state_action(disabled_skills: set[str]) -> None:
         config.agents.defaults.disabled_skills = sorted(disabled_skills)

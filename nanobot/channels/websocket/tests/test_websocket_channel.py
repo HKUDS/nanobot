@@ -1642,7 +1642,10 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
             channel="websocket",
             chat_id="chat-1",
             content="",
-            event=TurnModelUpdatedEvent(model="deepseek/deepseek-chat"),
+            event=TurnModelUpdatedEvent(
+                model="deepseek/deepseek-chat",
+                model_preset="Deep Research",
+            ),
         )
     )
 
@@ -1651,6 +1654,7 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "event": "turn_model_updated",
         "chat_id": "chat-1",
         "model_name": "deepseek/deepseek-chat",
+        "model_preset": "Deep Research",
     }
     chat_two.send.assert_not_awaited()
 

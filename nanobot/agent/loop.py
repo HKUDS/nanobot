@@ -533,9 +533,15 @@ class AgentLoop:
         self.subagents.max_iterations = self.max_iterations
 
     def invalidate_runtime_config(self) -> None:
-        """Invalidate runtime config and notify clients to refresh its catalog."""
+        """Invalidate runtime config for lazy refresh at the next admission."""
         self.runtime_resolver.invalidate()
-        self._publish_runtime_selection(self.runtime_resolver.runtime)
+
+    def refresh_runtime_config(self) -> LLMRuntime:
+        """Refresh runtime config now and publish the canonical selection."""
+        self.runtime_resolver.invalidate()
+        runtime = self.runtime_resolver.admit()
+        self._publish_runtime_selection(runtime)
+        return runtime
 
     def runtime_for_session(
         self,
@@ -1787,7 +1793,7 @@ class AgentLoop:
                 session.provider_state = None
                 self.sessions.save(session)
             ctx.input_persisted_early = True
-        ctx.delivery.record_runtime(runtime)
+        await ctx.delivery.runtime_admitted(runtime)
 
         ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:

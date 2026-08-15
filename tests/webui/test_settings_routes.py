@@ -308,6 +308,18 @@ async def test_oauth_completion_reads_websocket_payload(
     ("route_path", "function_name", "payload", "expected_query"),
     [
         (
+            "/api/settings/update",
+            "update_agent_settings",
+            {"model_preset": "Codex"},
+            {"model_preset": ["Codex"]},
+        ),
+        (
+            "/api/settings/model-configurations/create",
+            "create_model_configuration",
+            {"name": "Codex", "model": "openai-codex/gpt-5.6"},
+            {"name": ["Codex"], "model": ["openai-codex/gpt-5.6"]},
+        ),
+        (
             "/api/settings/model-configurations/delete",
             "delete_model_configuration",
             {"name": "spare"},
@@ -325,10 +337,22 @@ async def test_oauth_completion_reads_websocket_payload(
             {"order": ["backup"]},
             {"order": ['["backup"]']},
         ),
+        (
+            "/api/settings/provider/create",
+            "create_provider_settings",
+            {"name": "team", "api_base": "https://llm.example/v1"},
+            {"name": ["team"], "api_base": ["https://llm.example/v1"]},
+        ),
+        (
+            "/api/settings/provider/update",
+            "update_provider_settings",
+            {"provider": "team", "api_base": "https://llm.example/v2"},
+            {"provider": ["team"], "api_base": ["https://llm.example/v2"]},
+        ),
     ],
 )
 @pytest.mark.asyncio
-async def test_model_preset_mutation_routes(
+async def test_runtime_config_mutation_routes_refresh_live_runtime(
     monkeypatch,
     route_path: str,
     function_name: str,
@@ -336,6 +360,7 @@ async def test_model_preset_mutation_routes(
     expected_query: dict[str, list[str]],
 ) -> None:
     captured: dict[str, object] = {}
+    refresh_runtime_config = MagicMock()
 
     def mutate(query, *, config_path=None):
         captured["query"] = query
@@ -344,12 +369,15 @@ async def test_model_preset_mutation_routes(
     monkeypatch.setattr(f"nanobot.webui.settings_routes.{function_name}", mutate)
     request = _mutation_request(route_path, payload)
 
-    response = await _router().dispatch(None, request, route_path)
+    response = await _router(
+        refresh_runtime_config=refresh_runtime_config,
+    ).dispatch(None, request, route_path)
 
     assert response is not None
     assert response.status_code == 200
     assert json.loads(response.body)["routed"] == function_name
     assert captured["query"] == expected_query
+    refresh_runtime_config.assert_called_once_with()
 
 
 @pytest.mark.asyncio

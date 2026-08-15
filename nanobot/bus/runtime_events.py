@@ -41,6 +41,14 @@ class SessionTurnStarted:
 
 
 @dataclass(frozen=True)
+class TurnRuntimeAdmitted:
+    """The immutable model runtime selected for one admitted turn."""
+
+    context: RuntimeEventContext
+    runtime: LLMRuntime
+
+
+@dataclass(frozen=True)
 class TurnRunStatusChanged:
     """Visible run status changed for a turn."""
 
@@ -85,6 +93,7 @@ class RuntimeModelChanged:
 
 RuntimeEvent = (
     SessionTurnStarted
+    | TurnRuntimeAdmitted
     | SessionTurnPersisted
     | TurnRunStatusChanged
     | TurnCompleted
@@ -93,6 +102,7 @@ RuntimeEvent = (
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
+    | type[TurnRuntimeAdmitted]
     | type[SessionTurnPersisted]
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
@@ -201,6 +211,26 @@ class RuntimeEventPublisher:
                     session_key=session_key,
                     metadata=msg.metadata,
                 )
+            )
+        )
+
+    async def turn_runtime_admitted(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        runtime: LLMRuntime,
+    ) -> None:
+        """Record and publish the runtime selected for one turn."""
+        self.record_turn_runtime(session_key, runtime)
+        await self.bus.publish(
+            TurnRuntimeAdmitted(
+                context=self._context(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    session_key=session_key,
+                    metadata=msg.metadata,
+                ),
+                runtime=runtime,
             )
         )
 

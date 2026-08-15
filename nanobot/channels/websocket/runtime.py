@@ -1407,6 +1407,7 @@ class WebSocketChannel(BaseChannel):
                 await self.send_turn_model_updated(
                     msg.chat_id,
                     model_name=event.model,
+                    model_preset=event.model_preset,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -1774,6 +1775,7 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         *,
         model_name: Any,
+        model_preset: Any = None,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1788,6 +1790,8 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "model_name": model_name.strip(),
         }
+        if isinstance(model_preset, str) and model_preset.strip():
+            body["model_preset"] = model_preset.strip()
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")
