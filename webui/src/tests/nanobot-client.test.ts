@@ -183,12 +183,12 @@ describe("NanobotClient", () => {
     const firstSocket = lastSocket();
     firstSocket.fakeOpen();
 
-    const pending = client.requestMutation<{ ran: boolean }>(
-      "automation.run",
-      { id: "daily-summary" },
-    );
+    const payload = { id: "daily-summary", options: { force: false } };
+    const pending = client.requestMutation<{ ran: boolean }>("automation.run", payload);
     const frame = firstSocket.sent.at(-1) as string;
     const requestId = JSON.parse(frame).request_id;
+    payload.id = "weekly-summary";
+    payload.options.force = true;
     const settled = expect(pending).resolves.toEqual({ ran: true });
     firstSocket.fakeCloseWithCode(1006);
 

@@ -109,10 +109,8 @@ interface PendingRequest<T> {
   timer: ReturnType<typeof setTimeout>;
 }
 
-type WebUIRequestFrame = Extract<Outbound, { type: "webui_request" }>;
-
 interface PendingWebUIRequest extends PendingRequest<unknown> {
-  frame: WebUIRequestFrame;
+  serializedFrame: string;
 }
 
 export class WebUIMutationError extends Error {
@@ -868,6 +866,13 @@ export class NanobotClient {
     }
 
     return new Promise<T>((resolve, reject) => {
+      let serializedFrame: string;
+      try {
+        serializedFrame = JSON.stringify(frame);
+      } catch {
+        reject(new WebUIMutationError(503, "Could not encode WebUI request"));
+        return;
+      }
       const timer = setTimeout(() => {
         this.pendingWebUIRequests.delete(requestId);
         reject(
@@ -881,10 +886,10 @@ export class NanobotClient {
         resolve: (value) => resolve(value as T),
         reject,
         timer,
-        frame,
+        serializedFrame,
       });
       try {
-        socket.send(JSON.stringify(frame));
+        socket.send(serializedFrame);
       } catch {
         clearTimeout(timer);
         this.pendingWebUIRequests.delete(requestId);
@@ -1028,7 +1033,7 @@ export class NanobotClient {
       this.rawSend({ type: "attach", chat_id: chatId });
     }
     for (const pending of this.pendingWebUIRequests.values()) {
-      this.rawSend(pending.frame);
+      this.rawSendSerialized(pending.serializedFrame);
     }
     // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
@@ -1474,6 +1479,15 @@ export class NanobotClient {
     } catch {
       // Send failure will materialize as a close; queue the frame for retry.
       this.sendQueue.push(frame);
+    }
+  }
+
+  private rawSendSerialized(serializedFrame: string): void {
+    if (!this.socket) return;
+    try {
+      this.socket.send(serializedFrame);
+    } catch {
+      // The pending request remains available for the next successful reconnect.
     }
   }
 }
