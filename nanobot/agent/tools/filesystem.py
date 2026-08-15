@@ -153,9 +153,21 @@ class _FsTool(Tool):
             from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
 
             try:
-                plugin_skill_dirs = list(
-                    enabled_agent_plugin_skill_dirs(Path(self._workspace))
+                access = current_tool_workspace(
+                    self._workspace,
+                    restrict_to_workspace=self._restrict_to_workspace,
+                    sandbox_restricts_workspace=self._sandbox_restricts_workspace,
                 )
+                if self._effective_allowed_root(access.allowed_root) is not None:
+                    candidate = Path(path).expanduser()
+                    if not candidate.is_absolute() and access.project_path is not None:
+                        candidate = access.project_path / candidate
+                    plugin_skill_dirs = list(
+                        enabled_agent_plugin_skill_dirs(
+                            Path(self._workspace),
+                            requested_path=candidate.resolve(strict=False),
+                        )
+                    )
             except (OSError, RuntimeError):
                 pass
         return self._resolve_with_extra(

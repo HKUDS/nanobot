@@ -26,21 +26,10 @@ _MAX_LOGO_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True, slots=True)
-class _PackageEntry:
-    path: str
-    mode: int
-    size: int
-    mtime_ns: int
-    ctime_ns: int
-    device: int
-    inode: int
-    link_target: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class _PackageSnapshot:
     root: Path
-    entries: tuple[_PackageEntry, ...]
+    fingerprint: str
+    skill_dirs: tuple[Path, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,41 +83,66 @@ def enabled_agent_plugin_skills(workspace: Path) -> list[tuple[str, Path]]:
     """Verify and return skills from plugins the user has explicitly enabled."""
     skills: list[tuple[str, Path]] = []
     packages: list[_PackageSnapshot] = []
-    cacheable = True
     for plugin in _installed_plugins(workspace):
-        before = _package_snapshot(plugin.root)
-        if before is None:
-            cacheable = False
-            continue
-        if not _enabled(workspace, plugin):
-            continue
         plugin_skills = _discover_plugin_skills(plugin.name, plugin.root)
-        after = _package_snapshot(plugin.root)
-        if after is None or after != before:
-            cacheable = False
+        fingerprint = _enabled_package_fingerprint(workspace, plugin)
+        if fingerprint is None:
             continue
         skills.extend(plugin_skills)
-        packages.append(after)
+        if plugin_skills:
+            packages.append(
+                _PackageSnapshot(
+                    root=plugin.root,
+                    fingerprint=fingerprint,
+                    skill_dirs=tuple(path.parent for _name, path in plugin_skills),
+                )
+            )
 
     key = _skill_cache_key(workspace)
-    if cacheable:
-        _SKILL_CACHE[key] = _SkillCacheEntry(tuple(skills), tuple(packages))
-    else:
-        _SKILL_CACHE.pop(key, None)
+    _SKILL_CACHE[key] = _SkillCacheEntry(tuple(skills), tuple(packages))
     return skills
 
 
-def enabled_agent_plugin_skill_dirs(workspace: Path) -> tuple[Path, ...]:
-    """Return verified skill roots, revalidating packages when they change."""
+def enabled_agent_plugin_skill_dirs(
+    workspace: Path,
+    *,
+    requested_path: str | Path | None = None,
+) -> tuple[Path, ...]:
+    """Return skill roots authorized for one read, revalidating their package."""
     key = _skill_cache_key(workspace)
     cached = _SKILL_CACHE.get(key)
-    if cached is None or any(
-        _package_snapshot(package.root) != package for package in cached.packages
-    ):
-        skills = tuple(enabled_agent_plugin_skills(workspace))
-    else:
-        skills = cached.skills
-    return tuple(path.parent for _name, path in skills)
+    if cached is None:
+        enabled_agent_plugin_skills(workspace)
+        cached = _SKILL_CACHE.get(key)
+    if cached is None:
+        return ()
+
+    target = (
+        Path(requested_path).expanduser().resolve(strict=False)
+        if requested_path is not None
+        else None
+    )
+    packages = tuple(
+        package
+        for package in cached.packages
+        if target is None
+        or any(target == root or target.is_relative_to(root) for root in package.skill_dirs)
+    )
+    if any(_package_fingerprint(package.root) != package.fingerprint for package in packages):
+        # Re-run the full activation check so a changed package loses its
+        # marker and cannot become readable again through this cache.
+        _invalidate_skill_cache(workspace)
+        enabled_agent_plugin_skills(workspace)
+        return ()
+
+    if target is None:
+        return tuple(root for package in packages for root in package.skill_dirs)
+    return tuple(
+        root
+        for package in packages
+        for root in package.skill_dirs
+        if target == root or target.is_relative_to(root)
+    )
 
 
 def _skill_cache_key(workspace: Path) -> tuple[Path, Path]:
@@ -142,32 +156,27 @@ def _invalidate_skill_cache(workspace: Path) -> None:
     _SKILL_CACHE.pop(_skill_cache_key(workspace), None)
 
 
-def _package_snapshot(root: Path) -> _PackageSnapshot | None:
-    """Capture cheap package metadata used to guard cached authorization."""
+def _package_fingerprint(root: Path) -> str | None:
+    """Hash package paths, link targets, and file contents."""
+    digest = sha256()
     try:
-        candidates = [root, *sorted(root.rglob("*"))]
-        entries: list[_PackageEntry] = []
-        for candidate in candidates:
-            stat = candidate.lstat()
-            entries.append(
-                _PackageEntry(
-                    path="." if candidate == root else candidate.relative_to(root).as_posix(),
-                    mode=stat.st_mode,
-                    size=stat.st_size,
-                    mtime_ns=stat.st_mtime_ns,
-                    ctime_ns=stat.st_ctime_ns,
-                    device=stat.st_dev,
-                    inode=stat.st_ino,
-                    link_target=(
-                        candidate.readlink().as_posix()
-                        if candidate.is_symlink()
-                        else None
-                    ),
-                )
-            )
+        for candidate in sorted(root.rglob("*")):
+            relative = candidate.relative_to(root).as_posix()
+            digest.update(relative.encode())
+            if candidate.is_symlink():
+                digest.update(b"\0link\0")
+                digest.update(candidate.readlink().as_posix().encode())
+            elif candidate.is_file():
+                digest.update(b"\0file\0")
+                digest.update(candidate.read_bytes())
+            elif candidate.is_dir():
+                digest.update(b"\0dir\0")
+            else:
+                return None
+            digest.update(b"\0")
     except OSError:
         return None
-    return _PackageSnapshot(root=root, entries=tuple(entries))
+    return digest.hexdigest()
 
 
 def _load_manifest(plugin_root: Path) -> AgentPlugin | None:
@@ -404,53 +413,47 @@ def _plugin_data_dir(workspace: Path, name: str, *, create: bool) -> Path:
     return current
 
 
-def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
+def _enabled_package_fingerprint(workspace: Path, plugin: AgentPlugin) -> str | None:
+    """Return the content fingerprint when this exact package is enabled."""
     marker = _plugin_data_dir(workspace, plugin.name, create=False) / "enabled"
     try:
         if not marker.is_file():
-            return False
+            return None
         current = marker.read_text(encoding="utf-8")
         activation = _activation_marker(plugin)
         if activation is None:
             marker.unlink(missing_ok=True)
             _invalidate_skill_cache(workspace)
-            return False
+            return None
+        payload = cast(dict[str, object], json.loads(activation))
+        fingerprint = payload.get("fingerprint")
+        if not isinstance(fingerprint, str):
+            return None
         if current == activation:
-            return True
+            return fingerprint
         if current == str(plugin.root):
             marker.write_text(activation, encoding="utf-8")
             marker.chmod(0o600)
-            return True
+            return fingerprint
         marker.unlink(missing_ok=True)
         _invalidate_skill_cache(workspace)
-        return False
-    except OSError:
+        return None
+    except (OSError, json.JSONDecodeError):
         _invalidate_skill_cache(workspace)
-        return False
+        return None
+
+
+def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
+    return _enabled_package_fingerprint(workspace, plugin) is not None
 
 
 def _activation_marker(plugin: AgentPlugin) -> str | None:
     """Bind activation to one immutable package snapshot."""
-    digest = sha256()
-    try:
-        for candidate in sorted(plugin.root.rglob("*")):
-            relative = candidate.relative_to(plugin.root).as_posix()
-            digest.update(relative.encode())
-            if candidate.is_symlink():
-                digest.update(b"\0link\0")
-                digest.update(candidate.readlink().as_posix().encode())
-            elif candidate.is_file():
-                digest.update(b"\0file\0")
-                digest.update(candidate.read_bytes())
-            elif candidate.is_dir():
-                digest.update(b"\0dir\0")
-            else:
-                return None
-            digest.update(b"\0")
-    except OSError:
+    fingerprint = _package_fingerprint(plugin.root)
+    if fingerprint is None:
         return None
     return json.dumps(
-        {"fingerprint": digest.hexdigest(), "root": str(plugin.root)},
+        {"fingerprint": fingerprint, "root": str(plugin.root)},
         separators=(",", ":"),
         sort_keys=True,
     )
