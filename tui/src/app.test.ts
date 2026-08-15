@@ -949,7 +949,7 @@ describe("NanobotTui layout", () => {
       palette: Record<string, string> & { referenceBackground: string; faint: string }
     }
     const assertContrast = () => {
-      for (const tone of ["text", "muted", "accent", "success", "error", "user", "warm", "cool"]) {
+      for (const tone of ["text", "muted", "accent", "link", "success", "error", "user", "warm", "cool"]) {
         expect(contrastRatio(internals.palette[tone] ?? "", internals.palette.referenceBackground)).toBeGreaterThanOrEqual(4.5)
       }
       expect(contrastRatio(internals.palette.faint, internals.palette.referenceBackground)).toBeGreaterThanOrEqual(3)
@@ -962,8 +962,12 @@ describe("NanobotTui layout", () => {
     }
 
     assertContrast()
+    expect(internals.palette.accent).toBe("#EF8E30")
+    expect(internals.palette.user).toBe("#EF8E30")
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
     assertContrast()
+    expect(internals.palette.accent).toBe("#B94D0B")
+    expect(internals.palette.user).toBe("#B94D0B")
   })
 
   test("replaces streamed drafts with canonical stream-end text", async () => {

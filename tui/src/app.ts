@@ -83,6 +83,7 @@ interface Palette {
   faint: string
   border: string
   accent: string
+  link: string
   success: string
   error: string
   user: string
@@ -97,10 +98,11 @@ const DARK: Palette = {
   muted: "#A1A1AA",
   faint: "#71717A",
   border: "#3F3F46",
-  accent: "#8B7CF6",
+  accent: "#EF8E30",
+  link: "#60A5FA",
   success: "#5CC489",
   error: "#F87171",
-  user: "#60A5FA",
+  user: "#EF8E30",
   // Codex-style turn anchor: 12% white over the reference dark background.
   userBackground: "#2B2C2E",
   warm: "#C26A25",
@@ -113,10 +115,11 @@ const LIGHT: Palette = {
   muted: "#6F6F78",
   faint: "#8A8A94",
   border: "#D4D4D8",
-  accent: "#5B4BC4",
+  accent: "#B94D0B",
+  link: "#1D4ED8",
   success: "#166534",
   error: "#B91C1C",
-  user: "#1D4ED8",
+  user: "#B94D0B",
   // Codex-style turn anchor: 4% black over the reference light background.
   userBackground: "#F0F0F0",
   warm: "#C2410C",
@@ -164,17 +167,17 @@ function syntaxStyle(palette: Palette): SyntaxStyle {
     keyword: { ...color(palette.accent), bold: true },
     string: color(palette.success),
     comment: { ...color(palette.muted), italic: true },
-    number: color(palette.user),
+    number: color(palette.link),
     function: color(palette.warm),
     type: color(palette.cool),
     variable: color(palette.text),
-    property: color(palette.user),
+    property: color(palette.link),
     "markup.heading": { ...color(palette.accent), bold: true },
     "markup.strong": { ...color(palette.text), bold: true },
     "markup.italic": { ...color(palette.muted), italic: true },
-    "markup.link": { ...color(palette.user), underline: true },
-    "markup.link.label": { ...color(palette.user), underline: true },
-    "markup.link.url": { ...color(palette.user), underline: true },
+    "markup.link": { ...color(palette.link), underline: true },
+    "markup.link.label": { ...color(palette.link), underline: true },
+    "markup.link.url": { ...color(palette.link), underline: true },
     "markup.raw": color(palette.warm),
     conceal: color(palette.faint),
   })
