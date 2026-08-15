@@ -1030,8 +1030,22 @@ describe("NanobotTui layout", () => {
     await setup.renderOnce()
     let frame = setup.captureCharFrame()
 
-    expect(frame).toMatch(/[◐◓◑◒] Thinking\s+0s/u)
+    expect(frame).toMatch(/Thinking\s+0s/u)
+    expect(frame).not.toMatch(/[◐◓◑◒⠋⠙⠹⠸]/u)
     expect(frame).not.toContain("hidden reasoning")
+    const status = (app as unknown as {
+      status: {
+        content: { chunks: Array<{ fg?: { toInts(): number[] } }> }
+        plainText: string
+      }
+    }).status
+    expect(status.plainText).toMatch(/^Thinking\s+0s/u)
+    const shimmerColors = new Set(
+      status.content.chunks
+        .slice(0, "Thinking".length)
+        .map((chunk) => chunk.fg?.toInts().join(",")),
+    )
+    expect(shimmerColors.size).toBeGreaterThan(1)
 
     app.accept({
       event: "message",
@@ -1044,7 +1058,8 @@ describe("NanobotTui layout", () => {
     await setup.renderOnce()
     frame = setup.captureCharFrame()
 
-    expect(frame).toMatch(/[◐◓◑◒] Working\s+0s/u)
+    expect(frame).toMatch(/Working\s+0s/u)
+    expect(frame).not.toMatch(/[◐◓◑◒⠋⠙⠹⠸]/u)
     expect(frame).toContain("› exec")
     app.accept({ event: "turn_end", chat_id: "chat" })
   })

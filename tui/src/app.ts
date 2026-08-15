@@ -2,6 +2,7 @@ import {
   BoxRenderable,
   CliRenderEvents,
   RGBA,
+  StyledText,
   SyntaxStyle,
   TextareaRenderable,
   TextRenderable,
@@ -12,6 +13,7 @@ import {
   type CliRenderer,
   type KeyEvent,
   type PasteEvent,
+  type TextChunk,
   type ThemeMode,
   type TreeSitterClient,
 } from "@opentui/core"
@@ -122,6 +124,9 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
+const SHIMMER_PAUSE = 16
+const SHIMMER_BAND = 4
+const SHIMMER_INTERVAL_MS = 80
 const LOCAL_COMMANDS: TuiCommand[] = [
   {
     command: "/sessions",
@@ -217,6 +222,37 @@ function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewer
     removedBackground: backgroundKnown ? light ? "#FCE8EA" : "#352024" : null,
     syntax: syntaxStyle(palette),
   }
+}
+
+function shimmerStatus(
+  label: string,
+  suffix: string,
+  frame: number,
+  palette: Palette,
+): StyledText {
+  const chars = Array.from(label)
+  const base = RGBA.fromHex(palette.muted).toInts()
+  const highlight = RGBA.fromHex(palette.text).toInts()
+  // Sweep immediately, then leave a quiet pause before repeating. The text
+  // keeps a constant width throughout, so the footer never jitters.
+  const position = frame % (chars.length + SHIMMER_PAUSE)
+  const chunks: TextChunk[] = chars.map((text, index) => {
+    const distance = Math.abs(index - position)
+    const intensity = distance > SHIMMER_BAND
+      ? 0
+      : (1 + Math.cos(Math.PI * distance / SHIMMER_BAND)) / 2
+    return {
+      __isChunk: true,
+      text,
+      fg: RGBA.fromInts(
+        Math.round(base[0] + (highlight[0] - base[0]) * intensity),
+        Math.round(base[1] + (highlight[1] - base[1]) * intensity),
+        Math.round(base[2] + (highlight[2] - base[2]) * intensity),
+      ),
+    }
+  })
+  chunks.push({ __isChunk: true, text: suffix, fg: RGBA.fromHex(palette.muted) })
+  return new StyledText(chunks)
 }
 
 function formatElapsed(milliseconds: number): string {
@@ -800,7 +836,7 @@ export class NanobotTui {
       this.shimmerTimer = setInterval(() => {
         this.shimmerFrame += 1
         this.renderActiveStatus()
-      }, 120)
+      }, SHIMMER_INTERVAL_MS)
       return
     }
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
@@ -810,14 +846,17 @@ export class NanobotTui {
   }
 
   private renderActiveStatus(): void {
-    const frames = ["◐", "◓", "◑", "◒"]
-    const frame = frames[this.shimmerFrame % frames.length]
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
     const progress = this.lastProgress
       ? ` · ${this.lastProgress.replace(/^\s*[·›✓×]\s*/u, "")}`
       : ""
     const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
-    this.status.content = `${frame} ${this.activeLabel}  ${elapsed}${progress}${navigation}`
+    this.status.content = shimmerStatus(
+      this.activeLabel,
+      `  ${elapsed}${progress}${navigation}`,
+      this.shimmerFrame,
+      this.palette,
+    )
   }
 
   private readyStatus(detail = ""): string {
