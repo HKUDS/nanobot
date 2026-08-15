@@ -12,6 +12,7 @@ import {
 } from "@opentui/core"
 
 import type { FileEditEvent, HistoryMessage } from "./protocol"
+import { hideScrollbars } from "./scrollbox"
 
 export interface DiffViewerTheme {
   text: string
@@ -152,9 +153,10 @@ export class DiffViewer {
         paddingTop: 1,
         paddingBottom: 1,
       },
-      verticalScrollbarOptions: { visible: true },
+      verticalScrollbarOptions: { visible: false },
       horizontalScrollbarOptions: { visible: false },
     })
+    hideScrollbars(this.scroll)
     this.footer = new TextRenderable(renderer, {
       id: "nanobot-tui-diff-footer",
       content: "←/→ file · pgup/pgdn scroll · esc close",

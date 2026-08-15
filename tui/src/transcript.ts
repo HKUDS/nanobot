@@ -11,6 +11,7 @@ import {
 } from "@opentui/core"
 
 import type { FileEditEvent, HistoryMessage, ToolProgressEvent } from "./protocol"
+import { hideScrollbars } from "./scrollbox"
 
 export interface TranscriptTheme {
   text: string
@@ -88,8 +89,7 @@ export class Transcript {
       horizontalScrollbarOptions: { visible: false },
       onMouseScroll: () => this.scheduleNavigationUpdate(),
     })
-    this.root.verticalScrollBar.visible = false
-    this.root.horizontalScrollBar.visible = false
+    hideScrollbars(this.root)
   }
 
   setTheme(theme: TranscriptTheme): void {
@@ -151,7 +151,7 @@ export class Transcript {
     this.wrote = false
     this.nextId = 0
     this.navigation = { awayFromBottom: false, unseenOutput: false }
-    this.root.verticalScrollBar.visible = false
+    hideScrollbars(this.root)
     this.header(header)
     this.emitNavigation()
   }

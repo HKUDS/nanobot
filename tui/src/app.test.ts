@@ -20,6 +20,18 @@ const options: AppOptions = {
   theme: "auto",
 }
 
+interface HiddenScrollBar {
+  visible: boolean
+  slider: { visible: boolean }
+  startArrow: { visible: boolean }
+  endArrow: { visible: boolean }
+}
+
+interface HiddenScrollBox {
+  verticalScrollBar: HiddenScrollBar
+  horizontalScrollBar: HiddenScrollBar
+}
+
 function occurrences(frame: string, value: string): number {
   return frame.split(value).length - 1
 }
@@ -718,6 +730,8 @@ describe("NanobotTui layout", () => {
       shell: { backgroundColor: { intent: string } }
       composerFrame: { backgroundColor: { intent: string } }
       composer: { backgroundColor: { intent: string } }
+      transcript: { root: HiddenScrollBox }
+      diffViewer: { scroll: HiddenScrollBox }
     }
     const lines = setup.captureSpans().lines
     const spans = lines.flatMap((line) => line.spans)
@@ -730,6 +744,14 @@ describe("NanobotTui layout", () => {
     expect(internals.composer.backgroundColor.intent).toBe("default")
     expect(spans.length).toBeGreaterThan(0)
     expect(brandedRows).toHaveLength(0)
+    for (const scrollBox of [internals.transcript.root, internals.diffViewer.scroll]) {
+      for (const bar of [scrollBox.verticalScrollBar, scrollBox.horizontalScrollBar]) {
+        expect(bar.visible).toBeFalse()
+        expect(bar.slider.visible).toBeFalse()
+        expect(bar.startArrow.visible).toBeFalse()
+        expect(bar.endArrow.visible).toBeFalse()
+      }
+    }
   })
 
   test("rethemes the complete retained interface when the terminal appearance changes", async () => {
