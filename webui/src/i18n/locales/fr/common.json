@@ -420,6 +420,8 @@
       "editPreset": "Modifier le préréglage",
       "presetName": "Nom du préréglage",
       "presetNameHelp": "Un nom court utilisé dans les paramètres des modèles.",
+      "presetDisplayName": "Nom d’affichage",
+      "presetDisplayNameHelp": "Affiché dans l’interface. Le nom de commande reste /model {{name}}.",
       "presetNamePlaceholder": "Rédaction rapide",
       "advancedOptions": "Options avancées",
       "advancedSummary": "Contexte {{context}} · Max. {{max}} tokens",

@@ -144,6 +144,8 @@
       "editPreset": "Edit preset",
       "presetName": "Preset name",
       "presetNameHelp": "A short name used throughout model settings.",
+      "presetDisplayName": "Display name",
+      "presetDisplayNameHelp": "Shown in the interface. The command name stays /model {{name}}.",
       "presetNamePlaceholder": "Fast writing",
       "advancedOptions": "Advanced options",
       "advancedSummary": "Context {{context}} · Max {{max}} tokens",

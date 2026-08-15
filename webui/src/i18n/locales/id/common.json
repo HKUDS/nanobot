@@ -420,6 +420,8 @@
       "editPreset": "Ubah prasetel",
       "presetName": "Nama prasetel",
       "presetNameHelp": "Nama singkat yang digunakan di pengaturan model.",
+      "presetDisplayName": "Nama tampilan",
+      "presetDisplayNameHelp": "Ditampilkan di antarmuka. Nama perintah tetap /model {{name}}.",
       "presetNamePlaceholder": "Menulis cepat",
       "advancedOptions": "Opsi lanjutan",
       "advancedSummary": "Konteks {{context}} · Maks. {{max}} token",

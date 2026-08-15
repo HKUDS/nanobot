@@ -420,6 +420,8 @@
       "editPreset": "Editar preajuste",
       "presetName": "Nombre del preajuste",
       "presetNameHelp": "Un nombre corto para usar en los ajustes de modelos.",
+      "presetDisplayName": "Nombre para mostrar",
+      "presetDisplayNameHelp": "Se muestra en la interfaz. El nombre del comando sigue siendo /model {{name}}.",
       "presetNamePlaceholder": "Escritura rápida",
       "advancedOptions": "Opciones avanzadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",

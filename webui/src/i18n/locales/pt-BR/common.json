@@ -144,6 +144,8 @@
       "editPreset": "Editar predefinição",
       "presetName": "Nome da predefinição",
       "presetNameHelp": "Um nome curto usado nas configurações de modelo.",
+      "presetDisplayName": "Nome de exibição",
+      "presetDisplayNameHelp": "Exibido na interface. O nome do comando continua sendo /model {{name}}.",
       "presetNamePlaceholder": "Escrita rápida",
       "advancedOptions": "Opções avançadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",

@@ -420,6 +420,8 @@
       "editPreset": "編輯預設",
       "presetName": "預設名稱",
       "presetNameHelp": "模型設定中使用的簡短名稱。",
+      "presetDisplayName": "顯示名稱",
+      "presetDisplayNameHelp": "顯示在介面中；命令名稱仍為 /model {{name}}。",
       "presetNamePlaceholder": "快速寫作",
       "advancedOptions": "進階選項",
       "advancedSummary": "上下文 {{context}} · 最大輸出 {{max}} tokens",

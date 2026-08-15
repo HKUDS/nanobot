@@ -420,6 +420,8 @@
       "editPreset": "프리셋 편집",
       "presetName": "프리셋 이름",
       "presetNameHelp": "모델 설정에서 사용할 짧은 이름입니다.",
+      "presetDisplayName": "표시 이름",
+      "presetDisplayNameHelp": "화면에 표시되는 이름입니다. 명령 이름은 /model {{name}} 그대로 유지됩니다.",
       "presetNamePlaceholder": "빠른 작성",
       "advancedOptions": "고급 옵션",
       "advancedSummary": "컨텍스트 {{context}} · 최대 {{max}} 토큰",

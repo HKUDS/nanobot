@@ -420,6 +420,8 @@
       "editPreset": "Sửa cấu hình đặt trước",
       "presetName": "Tên cấu hình đặt trước",
       "presetNameHelp": "Tên ngắn dùng trong phần thiết lập mô hình.",
+      "presetDisplayName": "Tên hiển thị",
+      "presetDisplayNameHelp": "Tên được hiển thị trong giao diện. Tên lệnh vẫn là /model {{name}}.",
       "presetNamePlaceholder": "Viết nhanh",
       "advancedOptions": "Tùy chọn nâng cao",
       "advancedSummary": "Ngữ cảnh {{context}} · Tối đa {{max}} token",

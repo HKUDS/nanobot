@@ -144,6 +144,8 @@
       "editPreset": "编辑预设",
       "presetName": "预设名称",
       "presetNameHelp": "在模型设置中使用的简短名称。",
+      "presetDisplayName": "显示名称",
+      "presetDisplayNameHelp": "显示在界面中；命令名称仍为 /model {{name}}。",
       "presetNamePlaceholder": "快速写作",
       "advancedOptions": "高级选项",
       "advancedSummary": "上下文 {{context}} · 最大输出 {{max}} tokens",

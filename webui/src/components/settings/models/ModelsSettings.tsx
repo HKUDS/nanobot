@@ -350,7 +350,22 @@ export function ModelsSettings({
           </span>
         </div>
       ) : null}
-      <SettingsRow title={tx("settings.models.presetName", "Preset name")}>
+      <SettingsRow
+        title={
+          creating
+            ? tx("settings.models.presetName", "Preset name")
+            : tx("settings.models.presetDisplayName", "Display name")
+        }
+        description={
+          creating
+            ? undefined
+            : tx(
+                "settings.models.presetDisplayNameHelp",
+                "Shown in the interface. The command name stays /model {{name}}.",
+                { name: form.modelPreset },
+              )
+        }
+      >
         <Input
           autoFocus={creating}
           value={form.presetLabel}

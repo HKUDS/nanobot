@@ -420,6 +420,8 @@
       "editPreset": "プリセットを編集",
       "presetName": "プリセット名",
       "presetNameHelp": "モデル設定で使用する短い名前です。",
+      "presetDisplayName": "表示名",
+      "presetDisplayNameHelp": "画面に表示される名前です。コマンド名は /model {{name}} のままです。",
       "presetNamePlaceholder": "高速執筆",
       "advancedOptions": "詳細オプション",
       "advancedSummary": "コンテキスト {{context}} · 最大 {{max}} トークン",
