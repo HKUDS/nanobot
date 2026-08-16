@@ -97,7 +97,9 @@ jobs:
             python-version: "3.14"
             coverage: false
             # Keep each test file in one worker while using both hosted-runner cores.
-            pytest_args: "-n 2 --dist loadfile"
+            # Keep test names visible until a Windows-only control-event
+            # interruption can be attributed to its active worker/file.
+            pytest_args: "-n 2 --dist loadfile -vv"
 
     steps:
       - uses: actions/checkout@v4
