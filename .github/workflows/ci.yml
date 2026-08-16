@@ -96,11 +96,9 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests share the hosted runner's
-            # Windows console. Separate xdist workers can therefore deliver a
-            # control event across worker boundaries; run this compatibility
-            # matrix serially, as nanobot itself does in one client process.
-            pytest_args: "--full-trace"
+            # Real PowerShell/process-tree tests are run serially below. Keep
+            # them out of xdist so workers never share a Windows console.
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/tools/test_exec_platform.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +146,13 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          --durations=25 --durations-min=1.0
+
+      - name: Run Windows process compatibility tests
+        if: runner.os == 'Windows'
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/tools/test_exec_platform.py
           --durations=25 --durations-min=1.0
 
   webui:
