@@ -500,7 +500,7 @@ class WebSocketChannel(BaseChannel):
             await self._discard_connection_owned_chat(connection, cid)
         self._conn_default.pop(connection, None)
         self._webui_connections.discard(connection)
-        self._webui_request_locks.pop(connection, None)
+        self._discard_webui_request_lock_if_idle(connection)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -1212,6 +1212,7 @@ class WebSocketChannel(BaseChannel):
         ).digest()
         self._prune_webui_request_operations()
         operation = self._webui_request_operations.get(request_id)
+        is_replay = operation is not None
         if operation is not None and (
             operation.action != action or operation.payload_digest != payload_digest
         ):
@@ -1255,6 +1256,7 @@ class WebSocketChannel(BaseChannel):
                 connection,
                 request_id,
                 operation.task,
+                sequence=is_replay,
             )
         )
         self._webui_request_tasks[key] = delivery_task
@@ -1279,13 +1281,36 @@ class WebSocketChannel(BaseChannel):
         for _, request_id in completed[:-_WEBUI_REQUEST_CACHE_MAX]:
             self._webui_request_operations.pop(request_id, None)
 
+    def _discard_webui_request_lock_if_idle(self, connection: ServerConnection) -> None:
+        if connection in self._webui_connections:
+            return
+        if any(task_connection is connection for task_connection, _ in self._webui_request_tasks):
+            return
+        self._webui_request_locks.pop(connection, None)
+
     async def _deliver_webui_request(
         self,
         connection: ServerConnection,
         request_id: str,
         operation_task: asyncio.Task[_WebUIRequestResult],
+        *,
+        sequence: bool = False,
     ) -> None:
         try:
+            if sequence:
+                # Make replayed work the predecessor for subsequent mutations on
+                # this connection without blocking its receive loop.
+                lock = self._webui_request_locks.setdefault(connection, asyncio.Lock())
+                async with lock:
+                    result = await asyncio.shield(operation_task)
+                    await self._send_webui_response(
+                        connection,
+                        request_id,
+                        result=result.result,
+                        status=result.status,
+                        message=result.message,
+                    )
+                return
             result = await asyncio.shield(operation_task)
             await self._send_webui_response(
                 connection,
@@ -1296,6 +1321,7 @@ class WebSocketChannel(BaseChannel):
             )
         finally:
             self._webui_request_tasks.pop((connection, request_id), None)
+            self._discard_webui_request_lock_if_idle(connection)
 
     async def _execute_webui_request(
         self,

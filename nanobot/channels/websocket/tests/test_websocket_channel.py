@@ -1003,7 +1003,7 @@ async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMoc
 
 
 @pytest.mark.asyncio
-async def test_webui_request_survives_disconnect_and_reuses_inflight_operation(
+async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
     bus: MagicMock,
 ) -> None:
     channel = _ch(bus)
@@ -1013,11 +1013,14 @@ async def test_webui_request_survives_disconnect_and_reuses_inflight_operation(
     channel._webui_connections.update({first_conn, retry_conn})
     started = asyncio.Event()
     release = asyncio.Event()
+    dispatch_order: list[str] = []
 
-    async def mutate(*_args: Any) -> Any:
-        started.set()
-        await release.wait()
-        return _http_json_response({"ran": True})
+    async def mutate(_connection: object, action: str, _payload: dict[str, Any]) -> Any:
+        dispatch_order.append(action)
+        if action == "automation.run":
+            started.set()
+            await release.wait()
+        return _http_json_response({"action": action})
 
     channel.gateway.http.dispatch_webui_mutation = AsyncMock(side_effect=mutate)
     envelope = {
@@ -1026,28 +1029,47 @@ async def test_webui_request_survives_disconnect_and_reuses_inflight_operation(
         "action": "automation.run",
         "payload": {"id": "daily-summary"},
     }
+    queued_envelope = {
+        "type": "webui_request",
+        "request_id": "request-queued",
+        "action": "automation.update",
+        "payload": {"id": "daily-summary"},
+    }
 
     await channel._dispatch_envelope(first_conn, "webui-client", envelope)
     await started.wait()
+    await channel._dispatch_envelope(first_conn, "webui-client", queued_envelope)
+    assert dispatch_order == ["automation.run"]
+
     await channel._cleanup_connection(first_conn)
     assert first_conn not in channel._webui_connections
     await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
+    await channel._dispatch_envelope(retry_conn, "webui-client", queued_envelope)
+    await channel._dispatch_envelope(
+        retry_conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-next",
+            "action": "automation.delete",
+            "payload": {"id": "daily-summary"},
+        },
+    )
+    await asyncio.sleep(0)
+    assert dispatch_order == ["automation.run"]
+
     pending = tuple(channel._webui_request_tasks.values())
     release.set()
     await asyncio.gather(*pending)
 
-    channel.gateway.http.dispatch_webui_mutation.assert_awaited_once_with(
-        first_conn,
-        "automation.run",
-        {"id": "daily-summary"},
-    )
-    expected = {
-        "event": "webui_response",
-        "request_id": "request-retry",
-        "ok": True,
-        "result": {"ran": True},
-    }
-    assert json.loads(retry_conn.send.await_args.args[0]) == expected
+    assert dispatch_order == ["automation.run", "automation.update", "automation.delete"]
+    responses = [json.loads(call.args[0]) for call in retry_conn.send.await_args_list]
+    assert [response["request_id"] for response in responses] == [
+        "request-retry",
+        "request-queued",
+        "request-next",
+    ]
+    assert first_conn not in channel._webui_request_locks
 
 
 @pytest.mark.asyncio
