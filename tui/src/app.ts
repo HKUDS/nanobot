@@ -256,7 +256,7 @@ function shimmerStatus(
 ): StyledText {
   const chars = Array.from(label)
   const base = RGBA.fromHex(palette.muted).toInts()
-  const highlight = RGBA.fromHex(palette.text).toInts()
+  const highlight = RGBA.fromHex(palette.accent).toInts()
   // Sweep immediately, then leave a quiet pause before repeating. The text
   // keeps a constant width throughout, so the footer never jitters.
   const position = frame % (chars.length + SHIMMER_PAUSE)

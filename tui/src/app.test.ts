@@ -1270,6 +1270,7 @@ describe("NanobotTui layout", () => {
         .map((chunk) => chunk.fg?.toInts().join(",")),
     )
     expect(shimmerColors.size).toBeGreaterThan(1)
+    expect([...shimmerColors].some((value) => value?.startsWith("239,142,48"))).toBe(true)
 
     app.accept({
       event: "message",
