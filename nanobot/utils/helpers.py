@@ -722,8 +722,7 @@ def _estimate_prompt_tokens_with_source(
                 parts.append(value)
 
     message_payload = "\n".join(parts)
-    # Chat APIs add ~4 tokens/message framing plus a ~3-token request prefix.
-    per_message_overhead = len(messages) * 4 + 3
+    per_message_overhead = len(messages) * 4
     try:
         enc = _get_token_encoding(model)
         tool_tokens = (

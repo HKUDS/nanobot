@@ -1080,10 +1080,13 @@ class Consolidator:
                 replay_max_messages,
                 runtime=runtime,
             )
+            estimate_kwargs: dict[str, int] = {}
+            if known_usage is not None:
+                estimate_kwargs["known_usage"] = known_usage
             estimated, source = self.estimate_session_prompt_tokens(
                 session,
                 runtime=runtime,
-                known_usage=known_usage,
+                **estimate_kwargs,
             )
             if estimated <= 0:
                 self._persist_last_summary(session, last_summary)
