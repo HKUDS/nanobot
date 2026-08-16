@@ -118,15 +118,12 @@ def test_foreground_gateway_claim_is_discoverable_and_released(tmp_path, monkeyp
         config_path="/tmp/config.json",
     )
 
-    runtime.claim_current_process(options)
-
-    status = runtime.status()
-    assert status.running is True
-    assert status.pid == os.getpid()
-    assert status.port == 18790
-    assert status.command == tuple(runtime._build_child_command(options))
-
-    runtime.release_current_process()
+    with runtime.foreground_instance(options):
+        status = runtime.status()
+        assert status.running is True
+        assert status.pid == os.getpid()
+        assert status.port == 18790
+        assert status.command == tuple(runtime._build_child_command(options))
 
     assert runtime.status().running is False
     assert not runtime.paths.state_path.exists()
@@ -135,15 +132,24 @@ def test_foreground_gateway_claim_is_discoverable_and_released(tmp_path, monkeyp
 def test_foreground_gateway_release_preserves_a_replacement_state(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
-    runtime.claim_current_process(GatewayStartOptions(port=18790))
-    replacement = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
-    replacement["pid"] = os.getpid() + 1
-    replacement["identity"] = replacement["pid"]
-    runtime.paths.state_path.write_text(json.dumps(replacement), encoding="utf-8")
-
-    runtime.release_current_process()
+    with runtime.foreground_instance(GatewayStartOptions(port=18790)):
+        replacement = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
+        replacement["pid"] = os.getpid() + 1
+        replacement["identity"] = replacement["pid"]
+        runtime.paths.state_path.write_text(json.dumps(replacement), encoding="utf-8")
 
     assert runtime.paths.state_path.exists()
+
+
+def test_foreground_gateway_clears_its_state_after_an_error(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        with runtime.foreground_instance(GatewayStartOptions(port=18790)):
+            raise RuntimeError("startup failed")
+
+    assert not runtime.paths.state_path.exists()
 
 
 def test_stop_reaps_an_owned_child_without_consuming_the_shutdown_timeout(

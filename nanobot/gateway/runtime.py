@@ -10,10 +10,11 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Generator, cast
 
 from filelock import FileLock
 
@@ -103,8 +104,16 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
     def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
         return build_gateway_command(self.python_executable, options)
 
-    def claim_current_process(self, options: ProcessStartOptions) -> None:
-        """Publish the running foreground gateway for local client discovery."""
+    @contextmanager
+    def foreground_instance(self, options: ProcessStartOptions) -> Generator[None]:
+        """Publish this foreground gateway while it is available to local clients."""
+        self._claim_current_process(options)
+        try:
+            yield
+        finally:
+            self._release_current_process()
+
+    def _claim_current_process(self, options: ProcessStartOptions) -> None:
         with self._lifecycle_lock():
             state = self._read_state() or {}
             pid = os.getpid()
@@ -123,8 +132,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             )
             self._write_state(state)
 
-    def release_current_process(self) -> None:
-        """Remove this foreground gateway's state without touching a replacement."""
+    def _release_current_process(self) -> None:
         with self._lifecycle_lock():
             state = self._read_state()
             if state and self._record_matches_process(state, os.getpid()):

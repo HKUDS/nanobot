@@ -954,8 +954,5 @@ def _run_gateway(
             finally:
                 restore_shutdown_handlers()
 
-    gateway_runtime.claim_current_process(gateway_start_options)
-    try:
+    with gateway_runtime.foreground_instance(gateway_start_options):
         asyncio.run(run())
-    finally:
-        gateway_runtime.release_current_process()
