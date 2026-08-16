@@ -112,7 +112,9 @@ Then start an interactive terminal chat with:
 nanobot agent
 ```
 
-In interactive mode, `Enter` sends and `Alt+Enter` inserts a newline. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
+In interactive mode, `Enter` sends and `Ctrl+J` inserts a newline. While a turn is running,
+`Enter` steers it, `Tab` queues a follow-up, and `Alt+Up` edits the latest queued message. Exit
+with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
 ## Choose One Next Step
 

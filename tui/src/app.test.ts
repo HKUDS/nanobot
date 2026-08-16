@@ -167,6 +167,32 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual(["你好"])
   })
 
+  test("inserts a newline without sending and gives the composer breathing room", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({
+      width: 72,
+      height: 20,
+      screenMode: "alternate-screen",
+      kittyKeyboard: true,
+    })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      composerFrame: { height: number }
+    }
+
+    await setup.mockInput.typeText("first")
+    setup.mockInput.pressKey("j", { ctrl: true })
+    await setup.mockInput.typeText("second")
+    await setup.flush()
+
+    expect(ui.composer.plainText).toBe("first\nsecond")
+    expect(sent).toEqual([])
+    expect(ui.composerFrame.height).toBeGreaterThanOrEqual(3)
+  })
+
   test("clears the placeholder on the first typed character", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)
@@ -214,7 +240,7 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.plainText).toBe("")
   })
 
-  test("queues follow-ups and promotes the armed prompt to steering", async () => {
+  test("steers with Enter, queues with Tab, and restores queued text with Alt+Up", async () => {
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
@@ -229,6 +255,7 @@ describe("NanobotTui layout", () => {
       ready: boolean
       composer: TextareaRenderable
       mentionCandidates: Array<Record<string, unknown>>
+      queuePreview: { root: { visible: boolean } }
     }
     await waitUntil(() => ui.ready)
     ui.mentionCandidates = [{
@@ -244,10 +271,6 @@ describe("NanobotTui layout", () => {
 
     ui.composer.setText("ask @github next")
     ui.composer.submit()
-    await waitUntil(() => ui.composer.plainText === "")
-    expect(sent).toEqual(["first"])
-
-    ui.composer.submit()
     await waitUntil(() => sent.length === 2)
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],
@@ -256,8 +279,17 @@ describe("NanobotTui layout", () => {
     })
 
     ui.composer.setText("after this turn")
-    ui.composer.submit()
+    setup.mockInput.pressTab()
     await waitUntil(() => ui.composer.plainText === "")
+    expect(sent).toHaveLength(2)
+    expect(ui.queuePreview.root.visible).toBeTrue()
+
+    setup.mockInput.pressArrow("up", { meta: true })
+    expect(ui.composer.plainText).toBe("after this turn")
+    expect(ui.queuePreview.root.visible).toBeFalse()
+    setup.mockInput.pressTab()
+    await waitUntil(() => ui.composer.plainText === "")
+
     app.accept({
       event: "error",
       chat_id: "chat",
@@ -272,6 +304,7 @@ describe("NanobotTui layout", () => {
     app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
     await waitUntil(() => sent.length === 3)
     expect(sent[2]).toBe("after this turn")
+    expect(ui.queuePreview.root.visible).toBeFalse()
     app.accept({ event: "goal_status", chat_id: "chat", status: "idle", turn_id: "prior" })
     expect((app as unknown as { activeTurn: boolean }).activeTurn).toBeTrue()
   })
@@ -1554,6 +1587,24 @@ describe("NanobotTui layout", () => {
     )
 
     app.stop()
+
+    expect(closed).toBe(true)
+    expect(setup.renderer.isDestroyed).toBe(true)
+  })
+
+  test("exits immediately when Ctrl+C is pressed on an idle empty composer", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    let closed = false
+    const transport = client()
+    transport.close = () => { closed = true }
+    NanobotTui.mount(
+      setup.renderer,
+      options,
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+
+    setup.mockInput.pressCtrlC()
 
     expect(closed).toBe(true)
     expect(setup.renderer.isDestroyed).toBe(true)

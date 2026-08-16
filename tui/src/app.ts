@@ -66,6 +66,12 @@ import {
   type MentionQuery,
 } from "./mention-menu"
 import { PromptQueue, type QueuedPrompt } from "./prompt-queue"
+import { QueuePreview, type QueuePreviewTheme } from "./queue-preview"
+import {
+  contextualFooterHints,
+  type FooterMode,
+  type FooterHintTheme,
+} from "./footer-hints"
 
 interface AppOptions {
   wsUrl: string
@@ -248,6 +254,23 @@ function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewer
   }
 }
 
+function queuePreviewTheme(palette: Palette): QueuePreviewTheme {
+  return {
+    accent: palette.accent,
+    muted: palette.muted,
+    faint: palette.faint,
+  }
+}
+
+function footerHintTheme(palette: Palette): FooterHintTheme {
+  return {
+    accent: palette.accent,
+    danger: palette.error,
+    muted: palette.muted,
+    separator: palette.faint,
+  }
+}
+
 function shimmerStatus(
   label: string,
   suffix: string,
@@ -329,6 +352,7 @@ export class NanobotTui {
   private readonly branchMenu: BranchMenu
   private readonly contextPanel: ContextPanel
   private readonly diffViewer: DiffViewer
+  private readonly queuePreview: QueuePreview
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
   private readonly title: BoxRenderable
@@ -422,6 +446,7 @@ export class NanobotTui {
       diffViewerTheme(this.palette, this.backgroundKnown),
       treeSitterClient,
     )
+    this.queuePreview = new QueuePreview(renderer, queuePreviewTheme(this.palette))
     this.client = client || new NanobotClient({
       url: options.wsUrl,
       chatId: options.chatId,
@@ -494,8 +519,12 @@ export class NanobotTui {
       cursorColor: this.palette.accent,
       showCursor: true,
       keyBindings: [
-        { name: "return", action: "submit" },
+        { name: "return", shift: true, action: "newline" },
         { name: "return", meta: true, action: "newline" },
+        { name: "return", ctrl: true, action: "newline" },
+        { name: "j", ctrl: true, action: "newline" },
+        { name: "linefeed", action: "newline" },
+        { name: "return", action: "submit" },
       ],
       onContentChange: () => {
         this.draft.prune(this.composer.plainText)
@@ -523,7 +552,7 @@ export class NanobotTui {
     })
     this.meta = new TextRenderable(renderer, {
       id: "nanobot-tui-meta",
-      content: "enter send · alt+enter newline · ctrl+c stop",
+      content: "",
       fg: this.palette.faint,
       height: 1,
       width: "auto",
@@ -549,6 +578,7 @@ export class NanobotTui {
     this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
     this.shell.add(this.title)
+    this.shell.add(this.queuePreview.root)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
     this.shell.add(this.diffViewer.root)
@@ -640,13 +670,7 @@ export class NanobotTui {
       if (candidate) this.chooseMention(candidate, this.activeMentionQuery)
       return
     }
-    if (!visibleContent) {
-      if (this.activeTurn) {
-        const steering = this.promptQueue.takeSteering()
-        if (steering) this.sendPrompt(steering, true)
-      }
-      return
-    }
+    if (!visibleContent) return
     const completion = this.commandMenu.completion(visibleContent)
     if (completion) {
       this.setComposer(completion)
@@ -678,13 +702,7 @@ export class NanobotTui {
     }
     const prompt = { content, options: mentionOptions(content, this.availableMentions()) }
     if (this.activeTurn) {
-      this.promptQueue.enqueue(prompt)
-      this.clearComposer()
-      this.commandMenu.hide()
-      this.mentionMenu.hide()
-      this.recordPrompt(content)
-      this.renderActiveStatus()
-      this.updateMeta()
+      this.sendPrompt(prompt, true)
       return
     }
     this.sendPrompt(prompt)
@@ -1014,14 +1032,54 @@ export class NanobotTui {
     if (!this.ready || this.activeTurn || this.quitting) return
     const prompt = this.promptQueue.takeFollowUp()
     if (!prompt) return
+    this.syncQueuePreview()
     this.sendPrompt(prompt)
   }
 
   private restoreQueuedPrompts(): void {
     const queued = this.promptQueue.restore()
     if (!queued.length) return
+    this.syncQueuePreview()
     const current = this.draft.expand(this.composer.plainText).trim()
     this.setComposer([current, ...queued.map((prompt) => prompt.content)].filter(Boolean).join("\n\n"))
+  }
+
+  private queueFollowUp(): void {
+    if (!this.activeTurn || !this.ready) return
+    const visibleContent = this.composer.plainText.trim()
+    const content = this.draft.expand(visibleContent).trim()
+    if (!content) return
+    this.promptQueue.enqueue({
+      content,
+      options: mentionOptions(content, this.availableMentions()),
+    })
+    this.clearComposer()
+    this.commandMenu.hide()
+    this.mentionMenu.hide()
+    this.recordPrompt(content)
+    this.syncQueuePreview()
+    this.renderActiveStatus()
+    this.updateMeta()
+  }
+
+  private editLastFollowUp(): boolean {
+    const prompt = this.promptQueue.takeLast()
+    if (!prompt) return false
+    const current = this.draft.expand(this.composer.plainText).trim()
+    this.setComposer([prompt.content, current].filter(Boolean).join("\n\n"))
+    this.syncQueuePreview()
+    this.renderActiveStatus()
+    this.updateMeta()
+    return true
+  }
+
+  private clearPromptQueue(): void {
+    this.promptQueue.clear()
+    this.syncQueuePreview()
+  }
+
+  private syncQueuePreview(): void {
+    this.queuePreview.update(this.promptQueue.snapshot().map(({ content }) => content))
   }
 
   private handleTranscriptNavigation(state: TranscriptNavigation): void {
@@ -1123,6 +1181,15 @@ export class NanobotTui {
         key.preventDefault()
         return
       }
+    }
+    if (this.activeTurn && !key.ctrl && !key.meta && key.name === "tab") {
+      this.queueFollowUp()
+      key.preventDefault()
+      return
+    }
+    if (this.activeTurn && key.meta && key.name === "up") {
+      if (this.editLastFollowUp()) key.preventDefault()
+      return
     }
     if (key.ctrl && key.name === "o") {
       const expanded = this.transcript.toggleActivityDetails()
@@ -1227,6 +1294,7 @@ export class NanobotTui {
     this.branchMenu.setTheme(commandMenuTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
+    this.queuePreview.setTheme(queuePreviewTheme(this.palette))
     this.updateComposerAppearance()
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
@@ -1235,6 +1303,7 @@ export class NanobotTui {
     this.modelText.fg = this.palette.muted
     this.status.fg = this.palette.muted
     this.meta.fg = this.palette.faint
+    this.updateMeta()
   }
 
   private handleResize = (): void => {
@@ -1247,53 +1316,19 @@ export class NanobotTui {
   }
 
   private updateMeta(): void {
-    if (this.mentionMenu.visible) {
-      this.meta.content = this.renderer.width >= 64
-        ? "↑↓ choose · tab/enter insert · esc close"
-        : "enter insert · esc close"
-      return
-    }
-    if (this.activeTurn) {
-      this.meta.content = this.renderer.width >= 96
-        ? "enter queue · enter again steer · ctrl+c stop"
-        : this.renderer.width >= 64 ? "enter queue · ctrl+c stop" : ""
-      return
-    }
-    if (this.branchMenu.visible) {
-      this.meta.content = this.renderer.width >= 64
-        ? "type to filter · ↑↓ choose · enter branch · esc close"
-        : "enter branch · esc close"
-      return
-    }
-    if (this.commandMenu.visible) {
-      this.meta.content = this.renderer.width >= 72
-        ? "↑↓ choose · tab complete · esc close"
-        : "tab complete · esc close"
-      return
-    }
-    if (this.sessionMenu.visible) {
-      this.meta.content = this.renderer.width >= 64
-        ? "type to filter · ↑↓ choose · enter open · esc close"
-        : "enter open · esc close"
-      return
-    }
-    if (this.contextPanel.visible) {
-      this.meta.content = "esc close · pgup/pgdn scroll"
-      return
-    }
-    if (this.transcriptNavigation.awayFromBottom) {
-      this.meta.content = this.renderer.width >= 72
-        ? "ctrl+end latest · pgup/pgdn scroll"
-        : this.renderer.width >= 48 ? "ctrl+end latest" : ""
-      return
-    }
-    this.meta.content = this.renderer.width >= 112
-      ? "enter send · alt+enter newline · pgup/pgdn scroll · ctrl+o tools · ctrl+c stop"
-      : this.renderer.width >= 72
-        ? "enter send · alt+enter newline · ctrl+c stop"
-        : this.renderer.width >= 48
-        ? "enter send · alt+enter newline"
-        : ""
+    const mode: FooterMode = this.mentionMenu.visible ? "mention"
+      : this.activeTurn ? "active"
+      : this.branchMenu.visible ? "branch"
+      : this.commandMenu.visible ? "command"
+      : this.sessionMenu.visible ? "session"
+      : this.contextPanel.visible ? "context"
+      : this.transcriptNavigation.awayFromBottom ? "history"
+      : "ready"
+    this.meta.content = contextualFooterHints(
+      mode,
+      this.renderer.width,
+      footerHintTheme(this.palette),
+    )
   }
 
   private setTurnModel(model: string, preset?: string | null): void {
@@ -1342,9 +1377,14 @@ export class NanobotTui {
   }
 
   private resizeComposer(): void {
-    const maxHeight = Math.max(1, Math.min(12, Math.floor(this.renderer.height / 3)))
-    this.composer.maxHeight = maxHeight
-    this.composerFrame.maxHeight = maxHeight
+    const verticalPadding = this.renderer.height >= 12 ? 1 : 0
+    const maxContentHeight = Math.max(1, Math.min(12, Math.floor(this.renderer.height / 3)))
+    this.composer.minHeight = 1
+    this.composer.maxHeight = maxContentHeight
+    this.composerFrame.paddingTop = verticalPadding
+    this.composerFrame.paddingBottom = verticalPadding
+    this.composerFrame.minHeight = 1 + verticalPadding * 2
+    this.composerFrame.maxHeight = maxContentHeight + verticalPadding * 2
   }
 
   private composerSurface(): RGBA {
@@ -1513,7 +1553,7 @@ export class NanobotTui {
     try {
       if (!this.client.forkChat) throw new Error("branching is unavailable")
       this.ready = false
-      this.promptQueue.clear()
+      this.clearPromptQueue()
       this.sessionMetadataId += 1
       this.sessionTitle = `Fork · ${preview.slice(0, 48)}`
       this.contextTokens = null
@@ -1596,7 +1636,7 @@ export class NanobotTui {
     this.closeSessions()
     try {
       this.ready = false
-      this.promptQueue.clear()
+      this.clearPromptQueue()
       this.sessionMetadataId += 1
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
@@ -1628,7 +1668,7 @@ export class NanobotTui {
     this.clearComposer()
     try {
       this.ready = false
-      this.promptQueue.clear()
+      this.clearPromptQueue()
       this.sessionMetadataId += 1
       this.sessionTitle = "New chat"
       this.sessionModelPreset = null

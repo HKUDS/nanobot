@@ -15,6 +15,15 @@ class FakeProcess:
         self.pid = pid
 
 
+class PollableProcess(FakeProcess):
+    def __init__(self, pid: int = 12345):
+        super().__init__(pid)
+        self.returncode: int | None = None
+
+    def poll(self):
+        return self.returncode
+
+
 def _paths(tmp_path: Path) -> GatewayRuntimePaths:
     return GatewayRuntimePaths.for_instance(data_dir=tmp_path)
 
@@ -85,6 +94,38 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     assert state["pid"] == 12345
     assert state["identity"] == 12345
     assert state["port"] == 18790
+
+
+def test_stop_reaps_an_owned_child_without_consuming_the_shutdown_timeout(
+    tmp_path,
+    monkeypatch,
+):
+    process = PollableProcess()
+    sleeps: list[float] = []
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Darwin",
+        popen=lambda *_args, **_kwargs: process,
+        sleep=sleeps.append,
+    )
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.getpgid",
+        lambda _pid: process.pid,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.killpg",
+        lambda _pgid, _signal: setattr(process, "returncode", -15),
+        raising=False,
+    )
+
+    assert runtime.start_background(GatewayStartOptions(port=18790)).ok is True
+    sleeps.clear()
+    result = runtime.stop(timeout_s=20)
+
+    assert result.ok is True
+    assert sleeps == []
 
 
 def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypatch):

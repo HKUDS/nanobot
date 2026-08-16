@@ -21,8 +21,11 @@ Type `/` to discover slash commands published by the connected gateway. Use the 
 to move, `Tab` to complete, and `Esc` to close the menu.
 
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
-same gateway metadata used by the WebUI. While nanobot is working, `Enter` queues a follow-up;
-press `Enter` again on an empty composer to steer the current turn with the newest queued prompt.
+same gateway metadata used by the WebUI. While nanobot is working, `Enter` steers the current
+turn, `Tab` queues a follow-up for the next turn, and `Alt+Up` returns the latest queued message
+to the composer for editing. The pending queue stays visible above the composer.
+Use `Ctrl+J` for a newline; `Shift+Enter`, `Alt+Enter`, and `Ctrl+Enter` are also accepted when
+the terminal can distinguish them.
 Unsent prompts return to the composer if the turn stops or fails.
 
 Use `/sessions` to search and switch persisted conversations without leaving the terminal.

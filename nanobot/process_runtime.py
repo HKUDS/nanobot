@@ -87,6 +87,10 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         self._popen = popen
         self._subprocess_run = subprocess_run
         self._sleep = sleep
+        # Keep the handle for children spawned by this runtime. On POSIX an
+        # exited child remains visible to kill(pid, 0) until its parent reaps
+        # it; poll() both reaps it and reports the real lifecycle state.
+        self._owned_process: Any | None = None
 
     @classmethod
     def refresh_state_pid(cls, *, paths: ProcessRuntimePaths) -> None:
@@ -125,6 +129,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
                 stderr=subprocess.STDOUT,
                 **self._popen_platform_kwargs(),
             )
+        self._owned_process = process
 
         pid = int(process.pid)
         self._sleep(0.2)
@@ -335,6 +340,14 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
     def _is_pid_running(self, pid: int) -> bool:
         if pid <= 0:
             return False
+        owned_process = self._owned_process
+        if owned_process is not None and getattr(owned_process, "pid", None) == pid:
+            poll = getattr(owned_process, "poll", None)
+            if callable(poll):
+                try:
+                    return poll() is None
+                except OSError:
+                    pass
         if self.platform_name == "Windows":
             return _windows_process_identity(pid) is not None
         try:

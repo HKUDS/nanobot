@@ -5,13 +5,13 @@ import { PromptQueue } from "./prompt-queue"
 const prompt = (content: string) => ({ content, options: {} })
 
 describe("PromptQueue", () => {
-  test("promotes the newest armed prompt to steering", () => {
+  test("returns the latest follow-up for editing", () => {
     const queue = new PromptQueue()
     queue.enqueue(prompt("next one"))
     queue.enqueue(prompt("steer now"))
 
-    expect(queue.takeSteering()?.content).toBe("steer now")
-    expect(queue.takeSteering()).toBeNull()
+    expect(queue.takeLast()?.content).toBe("steer now")
+    expect(queue.snapshot().map(({ content }) => content)).toEqual(["next one"])
     expect(queue.takeFollowUp()?.content).toBe("next one")
   })
 
