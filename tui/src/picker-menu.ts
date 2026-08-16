@@ -10,6 +10,7 @@ export interface PickerMenuTheme {
   text: string
   muted: string
   border: string
+  selectedBackground?: string
 }
 
 interface PickerMenuOptions<T> {
@@ -17,6 +18,8 @@ interface PickerMenuOptions<T> {
   searchText: (item: T) => string
   render: (item: T) => string
   emptyText?: string
+  maxWidth?: number
+  onSelect?: (item: T) => void
 }
 
 /** Shared retained picker for command discovery and session navigation. */
@@ -36,6 +39,7 @@ export class PickerMenu<T> {
     this.root = new BoxRenderable(renderer, {
       id: options.id,
       width: "100%",
+      ...(options.maxWidth ? { maxWidth: options.maxWidth } : {}),
       flexShrink: 0,
       flexDirection: "column",
       border: true,
@@ -121,7 +125,22 @@ export class PickerMenu<T> {
         height: 1,
         wrapMode: "none",
         fg: selected ? this.theme.text : this.theme.muted,
+        ...(selected && this.theme.selectedBackground
+          ? { backgroundColor: RGBA.fromHex(this.theme.selectedBackground) }
+          : {}),
         attributes: selected ? TextAttributes.BOLD : 0,
+        onMouseOver: () => {
+          if (this.selected === index) return
+          this.selected = index
+          this.render()
+        },
+        onMouseDown: (event) => {
+          if (event.button !== 0) return
+          event.preventDefault()
+          event.stopPropagation()
+          this.selected = index
+          this.options.onSelect?.(item)
+        },
       }))
     }
   }

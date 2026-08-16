@@ -1466,6 +1466,47 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
 
 
 @pytest.mark.asyncio
+async def test_workspace_scope_change_invalidates_other_attached_clients(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    origin = AsyncMock()
+    origin.remote_address = ("127.0.0.1", 50123)
+    peer = AsyncMock()
+    peer.remote_address = ("127.0.0.1", 50124)
+    channel._attach(origin, "shared")
+    channel._attach(peer, "shared")
+
+    await channel._dispatch_envelope(
+        origin,
+        "terminal-a",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "shared",
+            "workspace_scope": {
+                "project_path": str(tmp_path),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    peer_event = json.loads(peer.send.await_args.args[0])
+    assert peer_event == {
+        "event": "session_updated",
+        "chat_id": "shared",
+        "scope": "metadata",
+    }
+    origin_event = json.loads(origin.send.await_args.args[0])
+    assert origin_event["workspace_scope"]["access_mode"] == "full"
+
+
+@pytest.mark.asyncio
 async def test_webui_scope_expands_home_project_path(
     bus: MagicMock,
     tmp_path,

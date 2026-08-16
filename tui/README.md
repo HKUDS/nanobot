@@ -13,6 +13,10 @@ bun run --cwd tui build
 
 The renderer uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
 
+The model preset and workspace access labels above the composer are live controls. Click either
+label, then click a choice; arrow keys, `Enter`, and `Esc` provide the same flow without a mouse.
+Changes reuse the gateway's normal model command and workspace policy checks.
+
 When you scroll away from the latest output, the scrollbar and `Ctrl+End` hint appear only until
 you return to the bottom. Large pastes are represented by a short editable placeholder in the
 composer; nanobot sends the original text unchanged.

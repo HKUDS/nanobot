@@ -42,6 +42,18 @@ export interface MediaAttachment {
   name?: string
 }
 
+export interface WorkspaceScopePayload {
+  project_path: string
+  project_name?: string
+  access_mode: "restricted" | "full"
+  restrict_to_workspace?: boolean
+}
+
+export interface RuntimeControls {
+  modelPresets: Array<{ name: string; model: string }>
+  canUseFullAccess: boolean
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -105,7 +117,12 @@ export type InboundEvent =
       turn_id?: string
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
-  | { event: "session_updated"; chat_id: string; scope?: string }
+  | {
+      event: "session_updated"
+      chat_id: string
+      scope?: string
+      workspace_scope?: WorkspaceScopePayload
+    }
   | { event: "runtime_model_updated"; model_name: string; model_preset?: string | null }
   | {
       event: "turn_model_updated"
@@ -117,9 +134,10 @@ export type InboundEvent =
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; turn_id?: string }
 
 type OutboundEvent =
-  | { type: "new_chat" }
+  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
+  | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | {
       type: "message"
       chat_id: string
@@ -222,6 +240,7 @@ export interface SessionSummary {
   updatedAt: string | null
   runStartedAt: number | null
   modelPreset: string | null
+  workspaceScope?: WorkspaceScopePayload | null
   pinned: boolean
   archived: boolean
 }
@@ -315,6 +334,14 @@ function isMediaAttachment(value: unknown): value is MediaAttachment {
     && optional(value.name, "string")
 }
 
+function isWorkspaceScope(value: unknown): value is WorkspaceScopePayload {
+  return isRecord(value)
+    && typeof value.project_path === "string"
+    && (value.access_mode === "restricted" || value.access_mode === "full")
+    && optional(value.project_name, "string")
+    && optional(value.restrict_to_workspace, "boolean")
+}
+
 function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (!isRecord(value)) return null
   const record = value
@@ -389,7 +416,11 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && (!record.goal_state || typeof record.goal_state !== "object")) return null
-  if (name === "session_updated" && !optional(record.scope, "string")) return null
+  if (
+    name === "session_updated"
+    && (!optional(record.scope, "string")
+      || (record.workspace_scope !== undefined && !isWorkspaceScope(record.workspace_scope)))
+  ) return null
   if (
     name === "turn_model_updated"
     && (typeof record.model_name !== "string"
@@ -538,6 +569,37 @@ export async function fetchSlashCommands(
   })
 }
 
+export async function fetchRuntimeControls(
+  apiUrl: string,
+  apiToken: string,
+): Promise<RuntimeControls> {
+  if (!apiUrl || !apiToken) return { modelPresets: [], canUseFullAccess: false }
+  const headers = { Authorization: `Bearer ${apiToken}` }
+  const [settingsResponse, workspacesResponse] = await Promise.all([
+    fetch(`${apiUrl}/api/settings`, { headers }),
+    fetch(`${apiUrl}/api/workspaces`, { headers }).catch(() => null),
+  ])
+  if (!settingsResponse.ok) {
+    throw new Error(`settings request failed: HTTP ${settingsResponse.status}`)
+  }
+  const settings = await settingsResponse.json() as { model_presets?: unknown[] }
+  const workspaces = workspacesResponse?.ok
+    ? await workspacesResponse.json() as { controls?: unknown }
+    : {}
+  const modelPresets = (settings.model_presets || []).flatMap((value) => {
+    if (!isRecord(value) || typeof value.name !== "string" || typeof value.model !== "string") {
+      return []
+    }
+    const name = value.name.trim()
+    return name ? [{ name, model: value.model.trim() }] : []
+  })
+  const controls = isRecord(workspaces.controls) ? workspaces.controls : {}
+  return {
+    modelPresets,
+    canUseFullAccess: controls.can_use_full_access === true,
+  }
+}
+
 export async function fetchSessions(
   apiUrl: string,
   apiToken: string,
@@ -581,6 +643,7 @@ export async function fetchSessions(
       modelPreset: typeof value.model_preset === "string" && value.model_preset.trim()
         ? value.model_preset.trim()
         : null,
+      ...(isWorkspaceScope(value.workspace_scope) ? { workspaceScope: value.workspace_scope } : {}),
       pinned: pinned.has(value.key),
       archived: archived.has(value.key),
     }]
@@ -750,8 +813,8 @@ export class NanobotClient {
     this.write({ type: "attach", chat_id: chatId })
   }
 
-  newChat(): void {
-    this.write({ type: "new_chat" })
+  newChat(scope?: WorkspaceScopePayload): void {
+    this.write({ type: "new_chat", ...(scope ? { workspace_scope: scope } : {}) })
   }
 
   forkChat(sourceChatId: string, beforeUserIndex: number, title?: string): void {
@@ -761,6 +824,11 @@ export class NanobotClient {
       before_user_index: beforeUserIndex,
       ...(title?.trim() ? { title: title.trim() } : {}),
     })
+  }
+
+  setWorkspaceScope(scope: WorkspaceScopePayload): void {
+    if (!this.chatId) throw new Error("chat is not ready")
+    this.write({ type: "set_workspace_scope", chat_id: this.chatId, workspace_scope: scope })
   }
 
   private handleMessage(raw: string): void {

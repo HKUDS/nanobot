@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { CliRenderEvents, TextareaRenderable } from "@opentui/core"
+import { CliRenderEvents, TextareaRenderable, TextRenderable } from "@opentui/core"
 import {
   MockTreeSitterClient,
   createTestRenderer,
@@ -7,7 +7,7 @@ import {
 } from "@opentui/core/testing"
 
 import { NanobotTui, type AppOptions } from "./app"
-import type { MessageOptions, SlashCommand } from "./protocol"
+import type { MessageOptions, SlashCommand, WorkspaceScopePayload } from "./protocol"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -61,6 +61,7 @@ function client(
   newChats: string[] = [],
   sentOptions: MessageOptions[] = [],
   forks: Array<{ source: string; before: number; title?: string }> = [],
+  scopes: WorkspaceScopePayload[] = [],
 ) {
   return {
     activeChatId: "chat",
@@ -74,11 +75,14 @@ function client(
     attach(chatId: string) {
       attached.push(chatId)
     },
-    newChat() {
+    newChat(_scope?: WorkspaceScopePayload) {
       newChats.push("new")
     },
     forkChat(source: string, before: number, title?: string) {
       forks.push({ source, before, ...(title ? { title } : {}) })
+    },
+    setWorkspaceScope(scope: WorkspaceScopePayload) {
+      scopes.push(scope)
     },
   }
 }
@@ -485,7 +489,7 @@ describe("NanobotTui layout", () => {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean }
       titleText: { plainText: string }
-      modelText: { plainText: string }
+      runtimeControls: { modelText: { plainText: string } }
     }
 
     try {
@@ -499,8 +503,8 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => attached.length === 1)
       expect(attached).toEqual(["other"])
       expect(ui.titleText.plainText).toContain("Release checklist")
-      expect(ui.modelText.plainText).toContain("Deep Research")
-      expect(ui.modelText.plainText).not.toContain("test/model")
+      expect(ui.runtimeControls.modelText.plainText).toContain("Deep Research")
+      expect(ui.runtimeControls.modelText.plainText).not.toContain("test/model")
 
       app.accept({ event: "attached", chat_id: "other" })
       await Bun.sleep(1)
@@ -509,7 +513,7 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => newChats.length === 1)
       expect(newChats).toEqual(["new"])
       expect(ui.titleText.plainText).toContain("New chat")
-      expect(ui.modelText.plainText).toContain("test/model")
+      expect(ui.runtimeControls.modelText.plainText).toContain("test/model")
     } finally {
       globalThis.fetch = original
     }
@@ -518,7 +522,7 @@ describe("NanobotTui layout", () => {
   test("tracks canonical presets without overwriting a session override", async () => {
     setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)
-    const ui = app as unknown as { modelText: { plainText: string } }
+    const ui = app as unknown as { runtimeControls: { modelText: { plainText: string } } }
 
     app.accept({ event: "attached", chat_id: "chat", model_preset: "Codex" })
     app.accept({
@@ -528,7 +532,7 @@ describe("NanobotTui layout", () => {
       model_preset: "Codex",
     })
     await setup.flush()
-    expect(ui.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
+    expect(ui.runtimeControls.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
 
     app.accept({
       event: "runtime_model_updated",
@@ -536,8 +540,8 @@ describe("NanobotTui layout", () => {
       model_preset: "DeepSeek",
     })
     await setup.flush()
-    expect(ui.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
-    expect(ui.modelText.plainText).not.toContain("DeepSeek")
+    expect(ui.runtimeControls.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
+    expect(ui.runtimeControls.modelText.plainText).not.toContain("DeepSeek")
   })
 
   test("returns a default-following chat to the canonical default preset", async () => {
@@ -548,7 +552,7 @@ describe("NanobotTui layout", () => {
       client(),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
-    const ui = app as unknown as { modelText: { plainText: string } }
+    const ui = app as unknown as { runtimeControls: { modelText: { plainText: string } } }
 
     app.accept({ event: "attached", chat_id: "chat", model_preset: null })
     app.accept({
@@ -558,8 +562,8 @@ describe("NanobotTui layout", () => {
     })
     await setup.flush()
 
-    expect(ui.modelText.plainText).toContain("deepseek/deepseek-chat")
-    expect(ui.modelText.plainText).not.toContain("Codex")
+    expect(ui.runtimeControls.modelText.plainText).toContain("deepseek/deepseek-chat")
+    expect(ui.runtimeControls.modelText.plainText).not.toContain("Codex")
   })
 
   test("refreshes the canonical preset after the model command completes", async () => {
@@ -583,7 +587,7 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       commandMenu: { setCommands(commands: SlashCommand[]): void }
-      modelText: { plainText: string }
+      runtimeControls: { modelText: { plainText: string } }
     }
 
     try {
@@ -605,9 +609,79 @@ describe("NanobotTui layout", () => {
         text: "Switched model preset to Deep Research.",
         turn_id: "turn",
       })
-      await waitUntil(() => ui.modelText.plainText.includes("Deep Research"))
+      await waitUntil(() => ui.runtimeControls.modelText.plainText.includes("Deep Research"))
 
       expect(sent).toEqual(["/model deep research"])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("opens composer runtime controls by mouse and applies canonical choices", async () => {
+    const original = globalThis.fetch
+    const sent: string[] = []
+    const scopes: WorkspaceScopePayload[] = []
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/api/settings")) return new Response(JSON.stringify({
+        model_presets: [
+          { name: "default", model: "test/model" },
+          { name: "fast", model: "fast/model" },
+        ],
+      }))
+      if (url.endsWith("/api/workspaces")) return new Response(JSON.stringify({
+        controls: { can_use_full_access: true },
+      }))
+      return new Response(JSON.stringify({ sessions: [] }))
+    }) as typeof fetch
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      client(sent, [], [], [], [], scopes),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      runtimeControls: {
+        modelText: TextRenderable
+        accessText: TextRenderable
+        visible: boolean
+        menuRoot: { getChildren(): unknown[] }
+      }
+    }
+
+    try {
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.flush()
+      await setup.mockMouse.click(
+        ui.runtimeControls.modelText.x + 2,
+        ui.runtimeControls.modelText.y,
+      )
+      await waitUntil(() => ui.runtimeControls.visible)
+      await setup.flush()
+      const modelRows = ui.runtimeControls.menuRoot.getChildren() as TextRenderable[]
+      const fast = modelRows.find((row) => row.plainText.includes("fast"))
+      if (!fast) throw new Error("fast model row was not rendered")
+      await setup.mockMouse.click(fast.x + 2, fast.y)
+      await waitUntil(() => sent.includes("/model fast"))
+
+      await setup.mockMouse.click(
+        ui.runtimeControls.accessText.x + 2,
+        ui.runtimeControls.accessText.y,
+      )
+      await waitUntil(() => ui.runtimeControls.visible)
+      await setup.flush()
+      const accessRows = ui.runtimeControls.menuRoot.getChildren() as TextRenderable[]
+      const full = accessRows.find((row) => row.plainText.includes("Full access"))
+      if (!full) throw new Error("full access row was not rendered")
+      await setup.mockMouse.click(full.x + 2, full.y)
+
+      expect(scopes).toEqual([{
+        project_path: "/tmp/nanobot-workspace",
+        access_mode: "full",
+        restrict_to_workspace: false,
+      }])
     } finally {
       globalThis.fetch = original
     }
@@ -784,7 +858,7 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       contextPanel: { visible: boolean }
-      modelText: { plainText: string }
+      runtimeControls: { contextText: { plainText: string } }
     }
 
     try {
@@ -792,7 +866,7 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => ui.contextPanel.visible)
       await setup.flush()
-      expect(ui.modelText.plainText).toContain("~2.2k ctx")
+      expect(ui.runtimeControls.contextText.plainText).toContain("~2.2k ctx")
       const frame = setup.captureCharFrame()
 
       expect(frame).toContain("Agent context")

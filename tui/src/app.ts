@@ -34,6 +34,7 @@ import {
   type SlashCommand,
   type SessionSummary,
   type TokenUsage,
+  type WorkspaceScopePayload,
 } from "./protocol"
 import {
   CommandMenu,
@@ -67,6 +68,7 @@ import {
 } from "./mention-menu"
 import { PromptQueue, type QueuedPrompt } from "./prompt-queue"
 import { QueuePreview, type QueuePreviewTheme } from "./queue-preview"
+import { RuntimeControls } from "./runtime-controls"
 import {
   contextualFooterHints,
   type FooterMode,
@@ -93,8 +95,9 @@ interface ChatClient {
   close(): void
   send(content: string, options?: MessageOptions): string
   attach(chatId: string): void
-  newChat(): void
+  newChat(scope?: WorkspaceScopePayload): void
   forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void
+  setWorkspaceScope(scope: WorkspaceScopePayload): void
 }
 
 interface Palette {
@@ -227,6 +230,15 @@ function commandMenuTheme(palette: Palette): CommandMenuTheme {
     text: palette.text,
     muted: palette.muted,
     border: palette.border,
+    selectedBackground: palette.userBackground,
+  }
+}
+
+function runtimeControlsTheme(palette: Palette) {
+  return {
+    ...commandMenuTheme(palette),
+    accent: palette.accent,
+    faint: palette.faint,
   }
 }
 
@@ -350,6 +362,7 @@ export class NanobotTui {
   private readonly sessionMenu: SessionMenu
   private readonly mentionMenu: MentionMenu
   private readonly branchMenu: BranchMenu
+  private readonly runtimeControls: RuntimeControls
   private readonly contextPanel: ContextPanel
   private readonly diffViewer: DiffViewer
   private readonly queuePreview: QueuePreview
@@ -357,7 +370,6 @@ export class NanobotTui {
   private readonly shell: BoxRenderable
   private readonly title: BoxRenderable
   private readonly titleText: TextRenderable
-  private readonly modelText: TextRenderable
   private readonly composerFrame: BoxRenderable
   private readonly composer: TextareaRenderable
   private readonly status: TextRenderable
@@ -411,6 +423,7 @@ export class NanobotTui {
   private sessionLoading = false
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
   private readonly modelCommandTurns = new Set<string>()
+  private readonly silentCommandTurns = new Set<string>()
   private currentFileEdits: FileEditEvent[] = []
   private lastFileEdits: FileEditEvent[] = []
 
@@ -484,15 +497,36 @@ export class NanobotTui {
       truncate: true,
       fg: this.palette.muted,
     })
-    this.modelText = new TextRenderable(renderer, {
-      id: "nanobot-tui-model-text",
-      content: `  ·  ${this.modelName}`,
-      height: 1,
-      flexShrink: 1,
-      fg: this.palette.muted,
-    })
+    this.runtimeControls = new RuntimeControls(
+      renderer,
+      runtimeControlsTheme(this.palette),
+      {
+        apiUrl: options.apiUrl,
+        apiToken: options.apiToken,
+        model: this.modelName,
+        modelPreset: this.modelPreset,
+        workspace: options.workspace,
+        access: options.access,
+        available: () => ({ ready: this.ready, active: this.activeTurn }),
+        beforeOpen: () => this.closeTransientMenus(),
+        refreshScope: () => this.refreshSessionMetadata(this.client.activeChatId),
+        onModel: (preset) => this.sendGatewayCommand(`/model ${preset}`, "side_channel", true),
+        onAccess: (scope) => {
+          try {
+            this.client.setWorkspaceScope(scope)
+            this.status.content = "Changing access…"
+          } catch (error) {
+            this.status.content = error instanceof Error ? error.message : String(error)
+          }
+        },
+        onStatus: (message) => { this.status.content = message },
+        onVisibilityChange: () => this.updateMeta(),
+      },
+    )
     this.title.add(this.titleText)
-    this.title.add(this.modelText)
+    this.title.add(this.runtimeControls.modelText)
+    this.title.add(this.runtimeControls.accessText)
+    this.title.add(this.runtimeControls.contextText)
     const composerSurface = this.composerSurface()
     this.composerFrame = new BoxRenderable(renderer, {
       id: "nanobot-tui-composer-frame",
@@ -528,6 +562,7 @@ export class NanobotTui {
       ],
       onContentChange: () => {
         this.draft.prune(this.composer.plainText)
+        this.runtimeControls.hide()
         if (this.contextPanel.visible && this.composer.plainText) this.contextPanel.hide()
         this.syncComposerPlaceholder()
         if (this.sessionMenu.visible) this.syncSessionMenu()
@@ -577,6 +612,7 @@ export class NanobotTui {
     this.shell.add(this.mentionMenu.root)
     this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
+    this.shell.add(this.runtimeControls.menuRoot)
     this.shell.add(this.title)
     this.shell.add(this.queuePreview.root)
     this.shell.add(this.composerFrame)
@@ -654,6 +690,10 @@ export class NanobotTui {
     const content = this.draft.expand(visibleContent).trim()
     if (this.sessionLoading) {
       this.status.content = "Loading sessions…"
+      return
+    }
+    if (this.runtimeControls.visible) {
+      this.runtimeControls.choose()
       return
     }
     if (this.sessionMenu.visible) {
@@ -821,10 +861,11 @@ export class NanobotTui {
           const lifecycle = this.commandTurns.get(event.turn_id)
           if (lifecycle !== "agent_turn") {
             this.commandTurns.delete(event.turn_id)
+            const silent = this.silentCommandTurns.delete(event.turn_id)
             if (this.modelCommandTurns.delete(event.turn_id)) {
               void this.refreshSessionMetadata(event.chat_id)
             }
-            this.transcript.assistant(event.text)
+            if (!silent) this.transcript.assistant(event.text)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -907,6 +948,7 @@ export class NanobotTui {
         this.setDefaultModel(event.model_name, event.model_preset)
         return
       case "session_updated":
+        if (event.workspace_scope) this.applyWorkspaceScope(event.workspace_scope)
         if (
           !this.sessionTitle
           || this.sessionTitle === "New chat"
@@ -921,6 +963,7 @@ export class NanobotTui {
         if (event.turn_id) {
           this.commandTurns.delete(event.turn_id)
           this.modelCommandTurns.delete(event.turn_id)
+          this.silentCommandTurns.delete(event.turn_id)
         }
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) {
           this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
@@ -1147,6 +1190,7 @@ export class NanobotTui {
       key.preventDefault()
       return
     }
+    if (this.runtimeControls.handleKey(key)) return
     if (this.sessionMenu.visible) {
       if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
         this.sessionMenu.move(key.name === "up" ? -1 : 1)
@@ -1328,6 +1372,7 @@ export class NanobotTui {
     this.sessionMenu.setTheme(commandMenuTheme(this.palette))
     this.mentionMenu.setTheme(commandMenuTheme(this.palette))
     this.branchMenu.setTheme(commandMenuTheme(this.palette))
+    this.runtimeControls.setTheme(runtimeControlsTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
     this.queuePreview.setTheme(queuePreviewTheme(this.palette))
@@ -1336,7 +1381,6 @@ export class NanobotTui {
     this.composer.focusedTextColor = this.palette.text
     this.composer.cursorColor = this.palette.accent
     this.titleText.fg = this.palette.muted
-    this.modelText.fg = this.palette.muted
     this.status.fg = this.palette.muted
     this.meta.fg = this.palette.faint
     this.updateMeta()
@@ -1347,12 +1391,14 @@ export class NanobotTui {
     this.contextPanel.resize(this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
     this.title.visible = this.renderer.height >= 14
+    this.runtimeControls.resize(this.renderer.width)
     this.updateTitle()
     this.updateMeta()
   }
 
   private updateMeta(): void {
-    const mode: FooterMode = this.mentionMenu.visible ? "mention"
+    const mode: FooterMode = this.runtimeControls.visible ? "runtime"
+      : this.mentionMenu.visible ? "mention"
       : this.activeTurn ? "active"
       : this.branchMenu.visible ? "branch"
       : this.commandMenu.visible ? "command"
@@ -1389,6 +1435,10 @@ export class NanobotTui {
     this.applyModelPreset(session.modelPreset)
   }
 
+  private applySessionScope(session: SessionSummary): void {
+    if (session.workspaceScope) this.applyWorkspaceScope(session.workspaceScope)
+  }
+
   private applyModelPreset(preset: string | null): void {
     const currentModel = this.modelName
     const currentPreset = this.modelPreset
@@ -1408,10 +1458,8 @@ export class NanobotTui {
       : `  ·  ~${formatTokenCount(this.contextTokens)}${this.contextWindowTokens
         ? `/${formatTokenCount(this.contextWindowTokens)}`
         : ""} ctx`
-    const runtime = this.modelPreset !== "default"
-      ? [this.modelPreset, this.modelName].filter(Boolean).join("  ·  ")
-      : this.modelName
-    this.modelText.content = `  ·  ${runtime}${context}`
+    this.runtimeControls.updateModel(this.modelName, this.modelPreset)
+    this.runtimeControls.updateContext(context)
   }
 
   private resizeComposer(): void {
@@ -1530,6 +1578,21 @@ export class NanobotTui {
     this.syncCommandMenu()
   }
 
+  private closeTransientMenus(): void {
+    this.commandMenu.hide()
+    this.sessionMenu.hide()
+    this.mentionMenu.hide()
+    this.branchMenu.hide()
+    this.contextPanel.hide()
+    this.activeMentionQuery = null
+  }
+
+  private applyWorkspaceScope(scope: WorkspaceScopePayload): void {
+    this.runtimeControls.updateWorkspaceScope(scope)
+    this.updateTitle()
+    if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
+  }
+
   private async loadMentions(): Promise<void> {
     try {
       this.mentionCandidates = await fetchMentionCandidates(
@@ -1639,6 +1702,7 @@ export class NanobotTui {
       if (current) {
         this.sessionTitle = sessionLabel(current)
         this.applySessionModel(current)
+        this.applySessionScope(current)
         this.updateTitle()
       }
       const limit = this.renderer.height >= 20 ? 8 : 4
@@ -1662,6 +1726,7 @@ export class NanobotTui {
     if (session.chatId === this.client.activeChatId) {
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
+      this.applySessionScope(session)
       this.updateTitle()
       this.closeSessions()
       this.status.content = this.readyStatus()
@@ -1678,6 +1743,7 @@ export class NanobotTui {
       this.sessionMetadataId += 1
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
+      this.applySessionScope(session)
       this.contextTokens = null
       this.lastUsage = null
       this.readyDetail = ""
@@ -1717,7 +1783,7 @@ export class NanobotTui {
       this.readyDetail = ""
       this.updateTitle()
       this.status.content = "Starting a new chat…"
-      this.client.newChat()
+      this.client.newChat(this.runtimeControls.workspaceScope)
     } catch (error) {
       this.status.content = error instanceof Error ? error.message : String(error)
     }
@@ -1726,6 +1792,7 @@ export class NanobotTui {
   private sendGatewayCommand(
     content: string,
     lifecycle: ResolvedSlashCommandLifecycle,
+    silent = false,
   ): void {
     if (!this.ready) {
       this.status.content = "Preparing chat…"
@@ -1743,11 +1810,12 @@ export class NanobotTui {
       return
     }
     this.commandTurns.set(turnId, lifecycle)
+    if (silent) this.silentCommandTurns.add(turnId)
     if (/^\/model(?:\s|$)/iu.test(content)) this.modelCommandTurns.add(turnId)
     this.clearComposer()
     this.commandMenu.hide()
-    if (lifecycle !== "stop_active_turn") this.transcript.user(content)
-    this.recordPrompt(content)
+    if (!silent && lifecycle !== "stop_active_turn") this.transcript.user(content)
+    if (!silent) this.recordPrompt(content)
 
     if (lifecycle === "agent_turn") {
       this.activeTurnId = turnId
@@ -1844,6 +1912,7 @@ export class NanobotTui {
       if (!session) return
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
+      this.applySessionScope(session)
       this.updateTitle()
     } catch {
       // Session metadata is decorative; conversation transport stays authoritative.

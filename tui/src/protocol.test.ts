@@ -4,6 +4,7 @@ import {
   NanobotClient,
   fetchHistory,
   fetchMentionCandidates,
+  fetchRuntimeControls,
   fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
@@ -99,6 +100,10 @@ describe("gateway protocol", () => {
       client.attach("other-chat")
       client.newChat()
       client.forkChat("terminal", 3, "Alternative")
+      client.setWorkspaceScope({
+        project_path: "/tmp/project",
+        access_mode: "restricted",
+      })
 
       const outbound = socket.sent.map((value) => JSON.parse(value) as Record<string, unknown>)
       expect(outbound[0]).toEqual({ type: "attach", chat_id: "terminal" })
@@ -117,6 +122,14 @@ describe("gateway protocol", () => {
         before_user_index: 3,
         title: "Alternative",
       })
+      expect(outbound[5]).toEqual({
+        type: "set_workspace_scope",
+        chat_id: "terminal",
+        workspace_scope: {
+          project_path: "/tmp/project",
+          access_mode: "restricted",
+        },
+      })
       expect(events.map((event) => event.event)).toEqual(["ready", "attached"])
       expect(events[1]).toEqual({
         event: "attached",
@@ -125,6 +138,48 @@ describe("gateway protocol", () => {
       })
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("loads runtime model and access controls from canonical APIs", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/api/settings")) return new Response(JSON.stringify({
+        model_presets: [
+          { name: "Codex", model: "openai-codex/gpt-5.6" },
+          { name: "broken" },
+        ],
+      }))
+      return new Response(JSON.stringify({ controls: { can_use_full_access: true } }))
+    }) as typeof fetch
+
+    try {
+      expect(await fetchRuntimeControls("http://nanobot.test", "secret")).toEqual({
+        modelPresets: [{ name: "Codex", model: "openai-codex/gpt-5.6" }],
+        canUseFullAccess: true,
+      })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("keeps model selection available when workspace controls are unavailable", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => Promise.resolve(
+      String(input).endsWith("/api/settings")
+        ? new Response(JSON.stringify({
+          model_presets: [{ name: "fast", model: "openai/gpt-5.6" }],
+        }))
+        : new Response("", { status: 404 }),
+    )) as typeof fetch
+    try {
+      expect(await fetchRuntimeControls("http://nanobot.test", "secret")).toEqual({
+        modelPresets: [{ name: "fast", model: "openai/gpt-5.6" }],
+        canUseFullAccess: false,
+      })
+    } finally {
+      globalThis.fetch = original
     }
   })
 
