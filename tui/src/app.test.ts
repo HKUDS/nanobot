@@ -14,6 +14,7 @@ const options: AppOptions = {
   apiUrl: "",
   apiToken: "",
   model: "test/model",
+  modelPreset: "default",
   workspace: "/tmp/nanobot-workspace",
   version: "test",
   access: "workspace access",
@@ -284,6 +285,7 @@ describe("NanobotTui layout", () => {
           title: "Release checklist",
           preview: "Prepare stable release",
           updated_at: "2026-08-12T10:00:00Z",
+          model_preset: "Deep Research",
         },
       ],
     })))) as unknown as typeof fetch
@@ -302,6 +304,7 @@ describe("NanobotTui layout", () => {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean }
       titleText: { plainText: string }
+      modelText: { plainText: string }
     }
 
     try {
@@ -315,6 +318,8 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => attached.length === 1)
       expect(attached).toEqual(["other"])
       expect(ui.titleText.plainText).toContain("Release checklist")
+      expect(ui.modelText.plainText).toContain("Deep Research")
+      expect(ui.modelText.plainText).not.toContain("test/model")
 
       app.accept({ event: "attached", chat_id: "other" })
       await Bun.sleep(1)
@@ -323,6 +328,105 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => newChats.length === 1)
       expect(newChats).toEqual(["new"])
       expect(ui.titleText.plainText).toContain("New chat")
+      expect(ui.modelText.plainText).toContain("test/model")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("tracks canonical presets without overwriting a session override", async () => {
+    setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const ui = app as unknown as { modelText: { plainText: string } }
+
+    app.accept({ event: "attached", chat_id: "chat", model_preset: "Codex" })
+    app.accept({
+      event: "turn_model_updated",
+      chat_id: "chat",
+      model_name: "openai/gpt-5.6",
+      model_preset: "Codex",
+    })
+    await setup.flush()
+    expect(ui.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
+
+    app.accept({
+      event: "runtime_model_updated",
+      model_name: "deepseek/deepseek-chat",
+      model_preset: "DeepSeek",
+    })
+    await setup.flush()
+    expect(ui.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
+    expect(ui.modelText.plainText).not.toContain("DeepSeek")
+  })
+
+  test("returns a default-following chat to the canonical default preset", async () => {
+    setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, model: "openai/gpt-5.6", modelPreset: "Codex" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as { modelText: { plainText: string } }
+
+    app.accept({ event: "attached", chat_id: "chat", model_preset: null })
+    app.accept({
+      event: "runtime_model_updated",
+      model_name: "deepseek/deepseek-chat",
+      model_preset: null,
+    })
+    await setup.flush()
+
+    expect(ui.modelText.plainText).toContain("deepseek/deepseek-chat")
+    expect(ui.modelText.plainText).not.toContain("Codex")
+  })
+
+  test("refreshes the canonical preset after the model command completes", async () => {
+    setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      if (String(input).endsWith("/api/webui/sidebar-state")) {
+        return Promise.resolve(new Response(JSON.stringify({})))
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        sessions: [{ key: "websocket:chat", model_preset: "Deep Research" }],
+      })))
+    }) as typeof fetch
+    const sent: string[] = []
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      client(sent),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      commandMenu: { setCommands(commands: SlashCommand[]): void }
+      modelText: { plainText: string }
+    }
+
+    try {
+      app.accept({ event: "attached", chat_id: "chat", model_preset: null })
+      ui.commandMenu.setCommands([{
+        command: "/model",
+        title: "Model",
+        description: "Show or switch model presets",
+        argHint: "[preset]",
+        lifecycle: "side_channel",
+        acceptsArgs: true,
+      }])
+      ui.composer.setText("/model deep research")
+      ui.composer.submit()
+      await waitUntil(() => sent.length === 1)
+      app.accept({
+        event: "message",
+        chat_id: "chat",
+        text: "Switched model preset to Deep Research.",
+        turn_id: "turn",
+      })
+      await waitUntil(() => ui.modelText.plainText.includes("Deep Research"))
+
+      expect(sent).toEqual(["/model deep research"])
     } finally {
       globalThis.fetch = original
     }

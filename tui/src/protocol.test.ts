@@ -70,7 +70,13 @@ describe("gateway protocol", () => {
       socket.emit("message", {
         data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client" }),
       })
-      socket.emit("message", { data: JSON.stringify({ event: "attached", chat_id: "terminal" }) })
+      socket.emit("message", {
+        data: JSON.stringify({
+          event: "attached",
+          chat_id: "terminal",
+          model_preset: "Deep Research",
+        }),
+      })
       client.send("hello")
       client.attach("other-chat")
       client.newChat()
@@ -83,6 +89,11 @@ describe("gateway protocol", () => {
       expect(outbound[2]).toEqual({ type: "attach", chat_id: "other-chat" })
       expect(outbound[3]).toEqual({ type: "new_chat" })
       expect(events.map((event) => event.event)).toEqual(["ready", "attached"])
+      expect(events[1]).toEqual({
+        event: "attached",
+        chat_id: "terminal",
+        model_preset: "Deep Research",
+      })
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
     }
@@ -128,12 +139,15 @@ describe("gateway protocol", () => {
         data: JSON.stringify({ event: "session_updated", chat_id: "one", scope: 42 }),
       })
       socket.emit("message", {
+        data: JSON.stringify({ event: "attached", chat_id: "one", model_preset: 42 }),
+      })
+      socket.emit("message", {
         data: JSON.stringify({ event: "session_updated", chat_id: "one", scope: "metadata" }),
       })
       socket.emit("message", { data: JSON.stringify({ event: "future_gateway_event" }) })
       socket.emit("message", { data: JSON.stringify({ event: "error", detail: "global failure" }) })
       expect(statuses).toContain("error:gateway sent an invalid event")
-      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(5)
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(6)
       expect(events).toContainEqual({
         event: "session_updated",
         chat_id: "one",
@@ -383,6 +397,7 @@ describe("gateway protocol", () => {
             created_at: "2026-08-12T10:00:00Z",
             updated_at: "2026-08-13T10:00:00Z",
             run_started_at: 123,
+            model_preset: "Deep Research",
           },
           { key: "cli:direct", title: "Not a WebUI session" },
           { key: 42 },
@@ -398,6 +413,7 @@ describe("gateway protocol", () => {
         createdAt: "2026-08-12T10:00:00Z",
         updatedAt: "2026-08-13T10:00:00Z",
         runStartedAt: 123,
+        modelPreset: "Deep Research",
         pinned: true,
         archived: false,
       }])

@@ -45,6 +45,7 @@ from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOUR
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
     http_error as _http_error,
@@ -260,6 +261,33 @@ async def _new_temporary_chat(
     assert payload["temporary"] is True
     connection.send.reset_mock()
     return payload["chat_id"]
+
+
+@pytest.mark.asyncio
+async def test_attach_exposes_the_session_canonical_model_preset(bus, tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:pinned-model")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "Deep Research"
+    sessions.save(session)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    connection = AsyncMock()
+
+    await channel._dispatch_envelope(
+        connection,
+        "tui-client",
+        {"type": "attach", "chat_id": "pinned-model"},
+    )
+
+    payload = json.loads(connection.send.await_args_list[0].args[0])
+    assert payload == {
+        "event": "attached",
+        "chat_id": "pinned-model",
+        "model_preset": "Deep Research",
+    }
 
 
 @pytest.mark.asyncio

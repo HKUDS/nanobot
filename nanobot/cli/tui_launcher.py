@@ -70,6 +70,7 @@ def launch_tui(
                 "NANOBOT_TUI_API_URL": lease.base_url,
                 "NANOBOT_TUI_API_TOKEN": str(bootstrap.get("api_token") or ""),
                 "NANOBOT_TUI_MODEL": _model_display(config)[0],
+                "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
                 "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
                 "NANOBOT_TUI_VERSION": __version__,
                 "NANOBOT_TUI_ACCESS": (

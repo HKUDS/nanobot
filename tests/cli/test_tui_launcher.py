@@ -17,8 +17,9 @@ from nanobot.cli.tui_launcher import (
     _resolve_source_tui_command,
     _resolve_tui_command,
     _websocket_chat_id,
+    launch_tui,
 )
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
 
 
 def test_authenticated_ws_url_preserves_existing_query(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,6 +62,55 @@ def test_default_tui_resumes_but_explicit_session_wins(tmp_path: Path) -> None:
     assert _initial_tui_chat_id(None, path) == "saved-chat"
     assert _initial_tui_chat_id("cli:direct", path) == "tui-direct"
     assert _initial_tui_chat_id("websocket:chosen", path) == "chosen"
+
+
+def test_launcher_passes_the_canonical_model_preset_to_the_tui(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    config.model_presets["Deep Research"] = ModelPresetConfig(model="openai/gpt-5.6")
+    config.agents.defaults.model_preset = "Deep Research"
+    closed: list[bool] = []
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._ensure_gateway",
+        lambda *args, **kwargs: SimpleNamespace(
+            base_url="http://127.0.0.1:8765",
+            close=lambda: closed.append(True),
+        ),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._fetch_bootstrap",
+        lambda *args, **kwargs: {
+            "ws_url": "ws://127.0.0.1:8765/ws",
+            "token": "socket-token",
+            "api_token": "api-token",
+        },
+    )
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> subprocess.CompletedProcess:
+        assert command == ["nanobot-tui"]
+        assert check is False
+        captured.update(env)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", run)
+
+    result = launch_tui(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=None,
+        session_id=None,
+        theme="auto",
+    )
+
+    assert result == 0
+    assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
+    assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
+    assert closed == [True]
 
 
 def test_explicit_tui_binary_must_exist(

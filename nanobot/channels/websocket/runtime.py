@@ -52,6 +52,7 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.goal_state import goal_state_ws_blob
+from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -433,6 +434,19 @@ class WebSocketChannel(BaseChannel):
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
 
+    def _attached_model_fields(self, chat_id: str) -> dict[str, str | None]:
+        """Expose the session's canonical preset on the attach handshake."""
+        sessions = self.gateway.session_manager
+        if sessions is None:
+            return {}
+        snapshot = sessions.read_session_metadata(f"websocket:{chat_id}")
+        metadata = snapshot.get("metadata") if isinstance(snapshot, dict) else None
+        try:
+            return {"model_preset": model_preset_from_metadata(metadata)}
+        except ValueError:
+            self.logger.warning("ignoring invalid model preset metadata for chat_id={}", chat_id)
+            return {"model_preset": None}
+
     def _detach(self, connection: ServerConnection, chat_id: str) -> None:
         chats = self._conn_chats.get(connection)
         if chats is not None:
@@ -478,7 +492,12 @@ class WebSocketChannel(BaseChannel):
         """Attach and hydrate a newly created WebUI chat fork."""
         scope = self._workspaces.scope_for_session_key(fork_key)
         self._attach(connection, fork_id)
-        await self._send_event(connection, "attached", chat_id=fork_id)
+        await self._send_event(
+            connection,
+            "attached",
+            chat_id=fork_id,
+            **self._attached_model_fields(fork_id),
+        )
         await self._send_event(
             connection,
             "session_updated",
@@ -810,7 +829,12 @@ class WebSocketChannel(BaseChannel):
                 return
             self._workspaces.persist_scope(new_id, scope)
             self._attach(connection, new_id)
-            await self._send_event(connection, "attached", chat_id=new_id)
+            await self._send_event(
+                connection,
+                "attached",
+                chat_id=new_id,
+                **self._attached_model_fields(new_id),
+            )
             await self._send_event(
                 connection,
                 "session_updated",
@@ -861,7 +885,12 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(connection, "error", detail=exc.detail, chat_id=cid)
                 return
             self._attach(connection, cid)
-            await self._send_event(connection, "attached", chat_id=cid)
+            await self._send_event(
+                connection,
+                "attached",
+                chat_id=cid,
+                **self._attached_model_fields(cid),
+            )
             await self._hydrate_after_subscribe(cid)
             return
         if t == "set_sidebar_state":

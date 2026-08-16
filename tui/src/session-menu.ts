@@ -29,11 +29,20 @@ export class SessionMenu {
   constructor(renderer: CliRenderer, theme: PickerMenuTheme) {
     this.picker = new PickerMenu(renderer, theme, {
       id: "nanobot-tui-session-menu",
-      searchText: (session) => `${sessionLabel(session)} ${session.preview} ${session.chatId}`,
+      searchText: (session) => [
+        sessionLabel(session),
+        session.modelPreset || "",
+        session.preview,
+        session.chatId,
+      ].join(" "),
       render: (session) => {
         const age = updatedLabel(session.updatedAt)
         const preview = session.preview.trim()
-        const detail = [age, preview && preview !== sessionLabel(session) ? preview : ""]
+        const detail = [
+          session.modelPreset,
+          age,
+          preview && preview !== sessionLabel(session) ? preview : "",
+        ]
           .filter(Boolean)
           .join(" · ")
         const marker = session.active ? "● " : session.pinned ? "◆ " : session.archived ? "◇ " : ""

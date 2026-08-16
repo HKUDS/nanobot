@@ -38,7 +38,7 @@ export interface FileDiff {
 
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string }
+  | { event: "attached"; chat_id: string; model_preset?: string | null }
   | { event: "message_accepted"; chat_id: string; turn_id: string }
   | {
       event: "message"
@@ -72,7 +72,12 @@ export type InboundEvent =
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
   | { event: "session_updated"; chat_id: string; scope?: string }
   | { event: "runtime_model_updated"; model_name: string; model_preset?: string | null }
-  | { event: "turn_model_updated"; chat_id: string; model_name: string }
+  | {
+      event: "turn_model_updated"
+      chat_id: string
+      model_name: string
+      model_preset?: string | null
+    }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; turn_id?: string }
 
 type OutboundEvent =
@@ -135,6 +140,7 @@ export interface SessionSummary {
   createdAt: string | null
   updatedAt: string | null
   runStartedAt: number | null
+  modelPreset: string | null
   pinned: boolean
   archived: boolean
 }
@@ -232,6 +238,12 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   }
   if (!CHAT_EVENTS.has(name)) return undefined // Forward-compatible additive event.
   if (typeof record.chat_id !== "string") return null
+  if (
+    name === "attached"
+    && record.model_preset !== undefined
+    && record.model_preset !== null
+    && typeof record.model_preset !== "string"
+  ) return null
   if (["message", "delta", "reasoning_delta"].includes(name) && typeof record.text !== "string") {
     return null
   }
@@ -253,7 +265,13 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && (!record.goal_state || typeof record.goal_state !== "object")) return null
   if (name === "session_updated" && !optional(record.scope, "string")) return null
-  if (name === "turn_model_updated" && typeof record.model_name !== "string") return null
+  if (
+    name === "turn_model_updated"
+    && (typeof record.model_name !== "string"
+      || (record.model_preset !== undefined
+        && record.model_preset !== null
+        && typeof record.model_preset !== "string"))
+  ) return null
   return value as InboundEvent
 }
 
@@ -411,6 +429,9 @@ export async function fetchSessions(
       createdAt: typeof value.created_at === "string" ? value.created_at : null,
       updatedAt: typeof value.updated_at === "string" ? value.updated_at : null,
       runStartedAt: typeof value.run_started_at === "number" ? value.run_started_at : null,
+      modelPreset: typeof value.model_preset === "string" && value.model_preset.trim()
+        ? value.model_preset.trim()
+        : null,
       pinned: pinned.has(value.key),
       archived: archived.has(value.key),
     }]
