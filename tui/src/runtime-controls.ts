@@ -33,7 +33,7 @@ interface RuntimeControlsOptions {
   onModel: (name: string) => void
   onAccess: (scope: WorkspaceScopePayload) => void
   onStatus: (message: string) => void
-  onVisibilityChange: () => void
+  onVisibilityChange: (visible: boolean) => void
 }
 
 /** Model and workspace policy controls expose one small, mouse-optional interface. */
@@ -139,7 +139,7 @@ export class RuntimeControls {
     this.kind = null
     this.menu.hide()
     this.renderColors()
-    this.options.onVisibilityChange()
+    this.options.onVisibilityChange(false)
   }
 
   setTheme(theme: RuntimeControlsTheme): void {
@@ -261,7 +261,7 @@ export class RuntimeControls {
 
   private opened(): void {
     this.renderColors()
-    this.options.onVisibilityChange()
+    this.options.onVisibilityChange(true)
   }
 
   private apply(choice: Choice): void {

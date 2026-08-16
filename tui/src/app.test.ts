@@ -650,6 +650,7 @@ describe("NanobotTui layout", () => {
         visible: boolean
         menuRoot: { getChildren(): unknown[] }
       }
+      composer: TextareaRenderable
       titleText: TextRenderable
       status: TextRenderable
       meta: TextRenderable
@@ -680,8 +681,11 @@ describe("NanobotTui layout", () => {
       expect(modelRows.every((row) => !row.selectable)).toBe(true)
       const fast = modelRows.find((row) => row.plainText.includes("fast"))
       if (!fast) throw new Error("fast model row was not rendered")
+      ui.composer.blur()
+      expect(ui.composer.focused).toBe(false)
       await setup.mockMouse.click(fast.x + 2, fast.y)
       await waitUntil(() => sent.includes("/model fast"))
+      expect(ui.composer.focused).toBe(true)
 
       await setup.mockMouse.click(
         ui.runtimeControls.accessText.x + 2,
@@ -692,7 +696,10 @@ describe("NanobotTui layout", () => {
       const accessRows = ui.runtimeControls.menuRoot.getChildren() as TextRenderable[]
       const full = accessRows.find((row) => row.plainText.includes("Full access"))
       if (!full) throw new Error("full access row was not rendered")
+      ui.composer.blur()
+      expect(ui.composer.focused).toBe(false)
       await setup.mockMouse.click(full.x + 2, full.y)
+      expect(ui.composer.focused).toBe(true)
 
       expect(scopes).toEqual([{
         project_path: "/tmp/nanobot-workspace",

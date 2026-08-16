@@ -531,7 +531,10 @@ export class NanobotTui {
           }
         },
         onStatus: (message) => { this.status.content = message },
-        onVisibilityChange: () => this.updateMeta(),
+        onVisibilityChange: (visible) => {
+          this.updateMeta()
+          if (!visible) this.composer.focus()
+        },
       },
     )
     this.title.add(this.titleText)
