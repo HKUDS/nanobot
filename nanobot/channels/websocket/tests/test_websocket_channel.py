@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -1003,10 +1003,13 @@ async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMoc
 
 
 @pytest.mark.asyncio
-async def test_webui_request_reuses_inflight_operation_after_reconnect(bus: MagicMock) -> None:
+async def test_webui_request_survives_disconnect_and_reuses_inflight_operation(
+    bus: MagicMock,
+) -> None:
     channel = _ch(bus)
     first_conn = AsyncMock()
     retry_conn = AsyncMock()
+    first_conn.send.side_effect = ConnectionClosed(Close(1006, ""), Close(1006, ""), True)
     channel._webui_connections.update({first_conn, retry_conn})
     started = asyncio.Event()
     release = asyncio.Event()
@@ -1026,6 +1029,8 @@ async def test_webui_request_reuses_inflight_operation_after_reconnect(bus: Magi
 
     await channel._dispatch_envelope(first_conn, "webui-client", envelope)
     await started.wait()
+    await channel._cleanup_connection(first_conn)
+    assert first_conn not in channel._webui_connections
     await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
     pending = tuple(channel._webui_request_tasks.values())
     release.set()
@@ -1042,7 +1047,6 @@ async def test_webui_request_reuses_inflight_operation_after_reconnect(bus: Magi
         "ok": True,
         "result": {"ran": True},
     }
-    assert json.loads(first_conn.send.await_args.args[0]) == expected
     assert json.loads(retry_conn.send.await_args.args[0]) == expected
 
 
@@ -1120,6 +1124,54 @@ async def test_webui_request_rejects_request_id_reuse_with_different_payload(
             "message": "request_id was already used for a different WebUI mutation",
         },
     }
+
+
+def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nanobot.channels.websocket.runtime as websocket_module
+
+    channel = _ch(bus)
+    now = 1_000.0
+    monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
+    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations["pending"] = SimpleNamespace(completed_at=None)
+    operations["expired"] = SimpleNamespace(
+        completed_at=now - websocket_module._WEBUI_REQUEST_CACHE_TTL_S
+    )
+    operations["fresh"] = SimpleNamespace(completed_at=now - 1)
+
+    channel._prune_webui_request_operations()
+
+    assert "pending" in operations
+    assert "expired" not in operations
+    assert "fresh" in operations
+
+
+def test_webui_request_cache_prunes_oldest_completed_at_capacity(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nanobot.channels.websocket.runtime as websocket_module
+
+    channel = _ch(bus)
+    now = 1_000.0
+    monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
+    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations["pending"] = SimpleNamespace(completed_at=None)
+    for index in range(websocket_module._WEBUI_REQUEST_CACHE_MAX + 1):
+        operations[f"completed-{index}"] = SimpleNamespace(
+            completed_at=now - 1 + index / 1_000
+        )
+
+    channel._prune_webui_request_operations()
+
+    assert "pending" in operations
+    assert "completed-0" not in operations
+    assert "completed-1" in operations
+    completed = [operation for operation in operations.values() if operation.completed_at is not None]
+    assert len(completed) == websocket_module._WEBUI_REQUEST_CACHE_MAX
 
 
 @pytest.mark.asyncio

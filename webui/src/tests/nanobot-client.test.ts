@@ -172,7 +172,7 @@ describe("NanobotClient", () => {
     });
   });
 
-  it("retries in-flight WebUI mutations with the same request id after reconnect", async () => {
+  it("replays the exact serialized mutation frame after reconnect", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: true,
