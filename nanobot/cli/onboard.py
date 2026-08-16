@@ -1594,7 +1594,6 @@ def _pause(message: str = "Press Enter to continue...") -> None:
 def _set_primary_quick_start_preset(config: Config, provider_name: str, model: str) -> None:
     """Store the primary preset used by Quick Start."""
     config.model_presets["primary"] = ModelPresetConfig(
-        label="Primary",
         model=model,
         provider=provider_name,
     )

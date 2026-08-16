@@ -260,6 +260,9 @@ function reasoningOnlyMessageFromAnswer(message: UIMessage): UIMessage {
     isStreaming: message.reasoningStreaming,
     activitySegmentId: message.activitySegmentId,
     latencyMs: message.latencyMs,
+    turnId: message.turnId,
+    turnPhase: "reasoning",
+    turnSeq: message.turnSeq,
   };
 }
 

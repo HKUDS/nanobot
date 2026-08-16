@@ -58,7 +58,7 @@ export function OverviewSettings({
   const activePresetName = settings.agent.model_preset;
   const activePreset =
     activePresetName && activePresetName !== "default"
-      ? settings.model_presets.find((preset) => preset.name === activePresetName)?.label ??
+      ? settings.model_presets.find((preset) => preset.name === activePresetName)?.name ??
         activePresetName
       : null;
   const activeProvider = settings.agent.resolved_provider ?? settings.agent.provider;

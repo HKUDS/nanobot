@@ -1404,21 +1404,6 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 {
   "modelPresets": {
     "fast": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4.5",
-      "maxTokens": 4096,
-      "contextWindowTokens": 65536
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "fast",
-      "fallbackModels": ["deep", "localSmall"]
-    }
-  },
-  "modelPresets": {
-    "fast": {
-      "label": "Fast",
       "model": "gpt-4.1-mini",
       "provider": "openai",
       "maxTokens": 4096,
@@ -1427,7 +1412,6 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
       "reasoningEffort": "low"
     },
     "deep": {
-      "label": "Deep",
       "model": "claude-opus-4-5",
       "provider": "anthropic",
       "maxTokens": 8192,
@@ -1435,22 +1419,28 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
       "reasoningEffort": "high"
     },
     "localSmall": {
-      "label": "Local Small",
       "model": "llama3.2",
       "provider": "ollama",
       "maxTokens": 4096,
       "contextWindowTokens": 32768,
       "temperature": 0.2
     }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": ["deep", "localSmall"]
+    }
   }
 }
 ```
 
-`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+`modelPresets` is a top-level object. Each key (`fast`, `deep`, `coding`, etc.) is the preset's one canonical name: it is shown in the interface, passed to `/model <name>`, and referenced by defaults, fallbacks, sessions, and Dream. New and renamed presets must be unique ignoring case. Existing keys accepted by earlier releases remain loadable so upgrades do not break startup. Each preset supports:
+
+Older configs may still contain a `label` inside a preset. It is accepted when loading for compatibility but ignored; the object key remains the canonical name.
 
 | Field | Description |
 |-------|-------------|
-| `label` | Optional display name shown in model lists. |
 | `model` | Model name to use for this preset. |
 | `provider` | Provider name, or `"auto"` to use provider auto-detection. |
 | `maxTokens` | Maximum completion/output tokens. |

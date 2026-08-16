@@ -76,6 +76,7 @@ from nanobot.session.goal_state import (
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import (
+    SESSION_CACHE_MAX_SIZE,
     Session,
     SessionManager,
     replay_max_messages_for_context,
@@ -376,11 +377,15 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
-        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
-        self._file_state_store = FileStateStore()
+        self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
+        # SessionManager owns every durable deletion entrypoint, including the
+        # WebUI and fork rollback paths.  Observe that boundary once instead of
+        # duplicating cleanup in each consumer.
+        self.sessions.set_delete_observer(self._file_state_store.discard)
+        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
+        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
         self.subagents = SubagentManager(
@@ -528,9 +533,15 @@ class AgentLoop:
         self.subagents.max_iterations = self.max_iterations
 
     def invalidate_runtime_config(self) -> None:
-        """Invalidate runtime config and notify clients to refresh its catalog."""
+        """Invalidate runtime config for lazy refresh at the next admission."""
         self.runtime_resolver.invalidate()
-        self._publish_runtime_selection(self.runtime_resolver.runtime)
+
+    def refresh_runtime_config(self) -> LLMRuntime:
+        """Refresh runtime config now and publish the canonical selection."""
+        self.runtime_resolver.invalidate()
+        runtime = self.runtime_resolver.admit()
+        self._publish_runtime_selection(runtime)
+        return runtime
 
     def runtime_for_session(
         self,
@@ -818,7 +829,12 @@ class AgentLoop:
             self.sessions.invalidate(key)
             await self._cancel_active_tasks(key)
         finally:
+            self.discard_session_file_state(key)
             self._discarding_sessions.discard(key)
+
+    def discard_session_file_state(self, key: str) -> None:
+        """Forget ephemeral file-read state for a reset or removed session."""
+        self._file_state_store.discard(key)
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -1777,7 +1793,7 @@ class AgentLoop:
                 session.provider_state = None
                 self.sessions.save(session)
             ctx.input_persisted_early = True
-        ctx.delivery.record_runtime(runtime)
+        await ctx.delivery.runtime_admitted(runtime)
 
         ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:

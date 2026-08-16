@@ -49,6 +49,30 @@ def _provider_extra_headers(
     return headers or None
 
 
+def _provider_spec_for_config(
+    provider_name: str,
+    provider_config: ProviderConfig | None,
+) -> ProviderSpec | None:
+    spec = find_by_name(provider_name)
+    if (
+        spec is not None
+        and spec.name == "orcarouter"
+        and provider_config is not None
+        and provider_config.api_base
+        and provider_config.api_base.rstrip("/").lower()
+        != spec.default_api_base.rstrip("/").lower()
+    ):
+        # Before OrcaRouter became a built-in provider, this name was valid for a
+        # dynamic custom provider. Preserve that provider's model-prefix behavior
+        # when an existing config points the name at a different endpoint.
+        return create_dynamic_spec(
+            provider_name,
+            display_name=provider_config.display_name or "",
+            thinking_style=provider_config.thinking_style or "",
+        )
+    return spec
+
+
 def _resolve_provider_setup(
     config: Config,
     *,
@@ -61,7 +85,7 @@ def _resolve_provider_setup(
     p = config.get_provider(model, preset=preset)
     if not provider_name:
         raise ValueError(f"No provider is configured for model '{model}'.")
-    spec = find_by_name(provider_name)
+    spec = _provider_spec_for_config(provider_name, p)
     if not spec and p:
         if not p.api_base:
             raise ValueError(f"Provider '{provider_name}' requires api_base in config.")

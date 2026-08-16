@@ -11,6 +11,7 @@ from mcp.shared.auth import OAuthToken
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
 from nanobot.config.loader import load_config, save_config
+from nanobot.config.schema import Config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
@@ -722,3 +723,29 @@ def test_normalize_mcp_preset_mentions_accepts_configured_custom_server(
     ])
 
     assert payload == [{"name": "docs", "display_name": "Docs", "transport": "streamableHttp"}]
+
+
+def test_normalize_mcp_mentions_uses_explicit_gateway_config(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default_path = tmp_path / "default.json"
+    config_path = tmp_path / "gateway.json"
+    save_config(Config(), default_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", default_path)
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["gateway-docs"],
+            "transport": ["streamableHttp"],
+            "url": ["https://example.com/mcp"],
+        },
+        config_path=config_path,
+    )
+
+    payload = normalize_mcp_preset_mentions(
+        [{"name": "gateway-docs", "display_name": "Gateway docs"}],
+        config_path=config_path,
+    )
+
+    assert payload == [{"name": "gateway-docs", "display_name": "Gateway docs"}]

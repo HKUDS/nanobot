@@ -199,6 +199,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
     ),
+    # OrcaRouter: global gateway, keys start with "sk-orca-"
+    ProviderSpec(
+        name="orcarouter",
+        keywords=("orcarouter",),
+        env_key="ORCAROUTER_API_KEY",
+        display_name="OrcaRouter",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="sk-orca-",
+        detect_by_base_keyword="orcarouter",
+        default_api_base="https://api.orcarouter.ai/v1",
+    ),
     # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
     # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
     ProviderSpec(

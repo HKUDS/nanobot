@@ -10,6 +10,8 @@ import pytest
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
+from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     _docs_version,
@@ -109,6 +111,26 @@ def test_settings_payload_exposes_edenai_provider(
     assert edenai["default_api_base"] == "https://api.edenai.run/v3"
     assert edenai["model_catalog"] == "catalog"
     assert edenai["model_selectable"] is True
+
+
+def test_settings_payload_exposes_orcarouter_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.orcarouter.api_key = "sk-orca-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    orcarouter = next(row for row in payload["providers"] if row["name"] == "orcarouter")
+
+    assert orcarouter["label"] == "OrcaRouter"
+    assert orcarouter["configured"] is True
+    assert orcarouter["default_api_base"] == "https://api.orcarouter.ai/v1"
+    assert orcarouter["model_catalog"] == "catalog"
+    assert orcarouter["model_selectable"] is True
 
 
 def test_settings_payload_includes_relocated_capabilities(
@@ -216,7 +238,7 @@ def _dynamic_provider_config(
     return Config.model_validate(raw_config)
 
 
-def test_create_model_configuration_writes_label_without_changing_call_order(
+def test_create_model_configuration_accepts_legacy_label_without_changing_call_order(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,11 +262,10 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
     assert payload["agent"]["model"] == "openai/gpt-4o"
     assert payload["created_model_preset"] == "fast-writing"
     rows = {row["name"]: row for row in payload["model_presets"]}
-    assert rows["fast-writing"]["label"] == "Fast writing"
+    assert rows["fast-writing"]["label"] == "fast-writing"
 
     saved = load_config(config_path)
     assert saved.agents.defaults.model_preset is None
-    assert saved.model_presets["fast-writing"].label == "Fast writing"
     assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
     assert saved.model_presets["fast-writing"].provider == "openai"
 
@@ -252,6 +273,40 @@ def test_create_model_configuration_writes_label_without_changing_call_order(
         create_model_configuration(
             {
                 "label": ["Fast writing"],
+                "provider": ["openai"],
+                "model": ["openai/gpt-4.1-mini"],
+            }
+        )
+    assert duplicate.value.status == 409
+
+
+def test_create_model_configuration_preserves_canonical_name(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {
+            "name": ["Fast Writing"],
+            "provider": ["openai"],
+            "model": ["openai/gpt-4.1-mini"],
+        }
+    )
+
+    assert payload["created_model_preset"] == "Fast Writing"
+    rows = {row["name"]: row for row in payload["model_presets"]}
+    assert rows["Fast Writing"]["label"] == "Fast Writing"
+    assert "Fast Writing" in load_config(config_path).model_presets
+
+    with pytest.raises(WebUISettingsError) as duplicate:
+        create_model_configuration(
+            {
+                "name": ["fast writing"],
                 "provider": ["openai"],
                 "model": ["openai/gpt-4.1-mini"],
             }
@@ -333,7 +388,6 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     config = Config()
     config.providers.openai.api_key = "sk-test"
     config.model_presets["codex"] = ModelPresetConfig(
-        label="Old Codex",
         provider="openai",
         model="openai/gpt-4.1",
     )
@@ -362,9 +416,103 @@ def test_update_model_configuration_edits_named_preset_without_selecting(
     assert payload["agent"]["model"] == "anthropic/claude-opus-4-5"
     saved = load_config(config_path)
     assert saved.agents.defaults.model_preset is None
-    assert saved.model_presets["codex"].label == "Codex"
     assert saved.model_presets["codex"].provider == "openai_codex"
     assert saved.model_presets["codex"].model == "openai-codex/gpt-5.5"
+
+
+def test_update_model_configuration_renames_preset_and_config_references(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets = {
+        "openai": ModelPresetConfig(model="openai/gpt-4.1"),
+        "backup": ModelPresetConfig(model="anthropic/claude-sonnet-4"),
+    }
+    defaults = config.agents.defaults
+    defaults.model_preset = "openai"
+    defaults.fallback_models = ["backup", "openai"]
+    defaults.dream.model_override = "openai"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    session_manager = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "sessions",
+    )
+    session = session_manager.get_or_create("websocket:selected")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    session_manager.save(session)
+
+    payload = update_model_configuration(
+        {"name": ["openai"], "new_name": ["Codex"]},
+        rename_model_preset=session_manager.rename_model_preset,
+    )
+
+    assert payload["agent"]["model_preset"] == "Codex"
+    assert payload["model_call_order"] == ["Codex", "backup", "Codex"]
+    assert [row["name"] for row in payload["model_presets"]] == [
+        "default",
+        "Codex",
+        "backup",
+    ]
+    saved = load_config(config_path)
+    assert list(saved.model_presets) == ["Codex", "backup"]
+    assert saved.agents.defaults.model_preset == "Codex"
+    assert saved.agents.defaults.fallback_models == ["backup", "Codex"]
+    assert saved.agents.defaults.dream.model_override == "Codex"
+    persisted = SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "sessions",
+    ).get_or_create("websocket:selected")
+    assert persisted.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+
+
+def test_update_model_configuration_rejects_duplicate_rename(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets = {
+        "openai": ModelPresetConfig(model="openai/gpt-4.1"),
+        "Codex": ModelPresetConfig(model="openai/gpt-5.5"),
+    }
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError) as duplicate:
+        update_model_configuration({"name": ["openai"], "new_name": ["codex"]})
+
+    assert duplicate.value.status == 409
+    assert set(load_config(config_path).model_presets) == {"openai", "Codex"}
+
+
+def test_update_model_configuration_rolls_back_sessions_when_config_save_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config(
+        model_presets={"openai": ModelPresetConfig(model="openai/gpt-4.1")}
+    )
+    save_config(config, config_path)
+    calls: list[tuple[str, str]] = []
+
+    def fail_save(_config: Config, _path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nanobot.webui.settings_api._save_settings_config", fail_save)
+
+    with pytest.raises(OSError, match="disk full"):
+        update_model_configuration(
+            {"name": ["openai"], "new_name": ["Codex"]},
+            config_path=config_path,
+            rename_model_preset=lambda old, new: calls.append((old, new)) or 1,
+        )
+
+    assert calls == [("openai", "Codex"), ("Codex", "openai")]
+    assert list(load_config(config_path).model_presets) == ["openai"]
 
 
 def test_settings_payload_exposes_named_model_call_order(
@@ -814,7 +962,6 @@ def test_update_model_configuration_preserves_custom_context_windows(
     config_path = tmp_path / "config.json"
     config = Config()
     config.model_presets["codex"] = ModelPresetConfig(
-        label="Codex",
         provider="openai",
         model="openai/gpt-4.1",
     )
@@ -1319,7 +1466,10 @@ def test_settings_payload_includes_token_usage_summary(
 
     from nanobot.webui.token_usage import record_token_usage
 
-    record_token_usage({"prompt_tokens": 10, "completion_tokens": 5})
+    record_token_usage(
+        {"prompt_tokens": 10, "completion_tokens": 5},
+        timezone_name=config.agents.defaults.timezone,
+    )
 
     payload = settings_payload()
 
@@ -1344,7 +1494,10 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
 
     from nanobot.webui.token_usage import record_token_usage
 
-    record_token_usage({"prompt_tokens": 20, "completion_tokens": 2})
+    record_token_usage(
+        {"prompt_tokens": 20, "completion_tokens": 2},
+        timezone_name=config.agents.defaults.timezone,
+    )
 
     payload = settings_usage_payload()
 
@@ -1958,10 +2111,47 @@ def test_provider_models_payload_requires_gateway_key(
     assert payload["models"] == []
 
 
+def test_provider_models_payload_fetches_orcarouter_catalog(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.orcarouter.api_key = "sk-orca-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.orcarouter.ai/v1/models"
+        assert kwargs["headers"]["Authorization"] == "Bearer sk-orca-test"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "orcarouter/auto", "owned_by": "orcarouter"},
+                    {"id": "anthropic/claude-sonnet-4.6", "owned_by": "anthropic"},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["orcarouter"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "catalog"
+    assert [model["id"] for model in payload["models"]] == [
+        "orcarouter/auto",
+        "anthropic/claude-sonnet-4.6",
+    ]
+
+
 def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("skywork")) == "official"
     assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
+    assert _model_catalog_kind(find_by_name("orcarouter")) == "catalog"
     assert _model_catalog_kind(find_by_name("openai_codex")) == "builtin"
 
 

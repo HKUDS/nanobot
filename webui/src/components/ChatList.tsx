@@ -298,6 +298,7 @@ export const ChatList = memo(function ChatList({
   const [selectedDeleteKeys, setSelectedDeleteKeys] = useState<Set<string>>(
     () => new Set(),
   );
+  const deleteSelectionAnchorRef = useRef<string | null>(null);
 
   useEffect(() => {
     const clearPaneDropTarget = () => setPaneDropTarget(null);
@@ -421,6 +422,7 @@ export const ChatList = memo(function ChatList({
       if (event.key !== "Escape") return;
       setDeleteSelectionMode(false);
       setSelectedDeleteKeys(new Set());
+      deleteSelectionAnchorRef.current = null;
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -530,15 +532,40 @@ export const ChatList = memo(function ChatList({
   const updated = new Set(updatedChatIds);
   const compact = density === "compact";
   const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
+  const selectableDeleteKeys = Array.from(new Set(limitedGroups.flatMap((group) => (
+    group.sessions.flatMap((session) => {
+      const paneGroup = paneGroups[session.key];
+      const isWorkbenchTab = paneGroup?.visible
+        ?? ((paneGroup?.panes.length ?? 0) > 1);
+      return isWorkbenchTab
+        ? paneGroup?.panes.map((pane) => pane.key) ?? [session.key]
+        : [session.key];
+    })
+  ))));
 
   const beginDeleteSelection = (keys: string[]) => {
+    const validKeys = keys.filter((key) => deleteItemsByKey.has(key));
     setDeleteSelectionMode(true);
-    setSelectedDeleteKeys(new Set(keys.filter((key) => deleteItemsByKey.has(key))));
+    setSelectedDeleteKeys(new Set(validKeys));
+    deleteSelectionAnchorRef.current = validKeys[0] ?? null;
   };
-  const toggleDeleteSelection = (keys: string[]) => {
+  const toggleDeleteSelection = (
+    keys: string[],
+    shiftKey = false,
+    targetKey = keys[0],
+  ) => {
+    const validKeys = keys.filter((key) => deleteItemsByKey.has(key));
+    const anchorKey = deleteSelectionAnchorRef.current;
+    const range = shiftKey && anchorKey && targetKey
+      ? selectionRange(selectableDeleteKeys, anchorKey, targetKey)
+      : null;
     setSelectedDeleteKeys((current) => {
       const next = new Set(current);
-      const validKeys = keys.filter((key) => deleteItemsByKey.has(key));
+      if (range) {
+        for (const key of range) next.add(key);
+        for (const key of validKeys) next.add(key);
+        return next;
+      }
       const remove = validKeys.length > 0 && validKeys.every((key) => next.has(key));
       for (const key of validKeys) {
         if (remove) next.delete(key);
@@ -546,10 +573,12 @@ export const ChatList = memo(function ChatList({
       }
       return next;
     });
+    if (!range) deleteSelectionAnchorRef.current = targetKey ?? null;
   };
   const closeDeleteSelection = () => {
     setDeleteSelectionMode(false);
     setSelectedDeleteKeys(new Set());
+    deleteSelectionAnchorRef.current = null;
   };
   const requestDeleteItems = (items: SidebarDeleteItem[]) => {
     if (items.length === 0) return;
@@ -801,7 +830,11 @@ export const ChatList = memo(function ChatList({
                                 selected={tabSelected}
                                 partiallySelected={tabPartiallySelected}
                                 onToggle={() => togglePaneGroup(s.key)}
-                                onToggleSelection={() => toggleDeleteSelection(tabDeleteKeys)}
+                                onToggleSelection={(shiftKey) => toggleDeleteSelection(
+                                  tabDeleteKeys,
+                                  shiftKey,
+                                  tabDeleteKeys[0],
+                                )}
                                 onRequestRename={onRequestRenameTab
                                   ? () => onRequestRenameTab(s.key, title)
                                   : undefined}
@@ -901,9 +934,9 @@ export const ChatList = memo(function ChatList({
                           <SidebarItemTooltip label={tooltipTitle}>
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={(event) => {
                                 if (deleteSelectionMode) {
-                                  toggleDeleteSelection(tabDeleteKeys);
+                                  toggleDeleteSelection(tabDeleteKeys, event.shiftKey, s.key);
                                   return;
                                 }
                                 if (!topicActive) onSelect(s.key);
@@ -1143,7 +1176,7 @@ function WorkbenchTabHeader({
   selected: boolean;
   partiallySelected: boolean;
   onToggle: () => void;
-  onToggleSelection: () => void;
+  onToggleSelection: (shiftKey: boolean) => void;
   onRequestRename?: () => void;
   onDissolve?: () => void;
   onRequestDelete: () => void;
@@ -1167,7 +1200,10 @@ function WorkbenchTabHeader({
       <SidebarItemTooltip label={title}>
         <button
           type="button"
-          onClick={deleteSelectionMode ? onToggleSelection : onToggle}
+          onClick={(event) => {
+            if (deleteSelectionMode) onToggleSelection(event.shiftKey);
+            else onToggle();
+          }}
           draggable={false}
           aria-label={t("workbench.tabAria", { title })}
           aria-expanded={deleteSelectionMode ? undefined : !collapsed}
@@ -1313,7 +1349,11 @@ function ActivePaneRows({
   ) => void;
   deleteSelectionMode: boolean;
   selectedDeleteKeys: ReadonlySet<string>;
-  onToggleDeleteSelection: (keys: string[]) => void;
+  onToggleDeleteSelection: (
+    keys: string[],
+    shiftKey?: boolean,
+    targetKey?: string,
+  ) => void;
   onBeginDeleteSelection: (keys: string[]) => void;
   actionMenuPortalContainer?: HTMLElement | null;
   actionMenus: SidebarActionMenuController;
@@ -1368,9 +1408,9 @@ function ActivePaneRows({
               <SidebarItemTooltip label={pane.title}>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(event) => {
                     if (deleteSelectionMode) {
-                      onToggleDeleteSelection([pane.key]);
+                      onToggleDeleteSelection([pane.key], event.shiftKey, pane.key);
                       return;
                     }
                     onSelectPane?.(group.tabKey, pane.key);
@@ -1482,6 +1522,15 @@ function ActivePaneRows({
       })}
     </ul>
   );
+}
+
+function selectionRange(order: string[], anchorKey: string, targetKey: string): string[] | null {
+  const anchorIndex = order.indexOf(anchorKey);
+  const targetIndex = order.indexOf(targetKey);
+  if (anchorIndex < 0 || targetIndex < 0) return null;
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  return order.slice(start, end + 1);
 }
 
 function SelectionIndicator({

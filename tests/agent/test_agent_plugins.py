@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -254,6 +255,99 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
     assert "outside allowed directory" in write_result
     assert "outside allowed directory" in disabled_result
     assert resource.read_text(encoding="utf-8") == "plugin reference"
+
+
+@pytest.mark.asyncio
+async def test_restricted_project_revokes_cached_plugin_read_after_replacement(
+    tmp_path: Path,
+) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    project.mkdir()
+    plugin = _plugin(agent_workspace)
+    skill = _skill(plugin / "skills", "demo-skill")
+    resource = skill / "reference.md"
+    resource.write_text("trusted", encoding="utf-8")
+    read_tool = ReadFileTool.create(
+        ToolContext(
+            config=ToolsConfig(restrict_to_workspace=True),
+            workspace=str(agent_workspace),
+        )
+    )
+    set_agent_plugin_enabled(agent_workspace, "demo", True)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        trusted_result = await read_tool.execute(path=str(resource))
+        original_stat = resource.stat()
+        resource.write_text("hostile", encoding="utf-8")
+        os.utime(
+            resource,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+        )
+        replacement_result = await read_tool.execute(path=str(resource))
+    finally:
+        reset_workspace_scope(token)
+
+    assert "trusted" in trusted_result
+    assert "outside allowed directory" in replacement_result
+    assert discover_agent_plugins(agent_workspace)[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_project_reads_do_not_rescan_cached_plugin_packages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    project.mkdir()
+    project_file = project / "notes.md"
+    project_file.write_text("project notes", encoding="utf-8")
+    plugin = _plugin(agent_workspace)
+    skill = _skill(plugin / "skills", "demo-skill")
+    resource = skill / "reference.md"
+    resource.write_text("plugin reference", encoding="utf-8")
+    set_agent_plugin_enabled(agent_workspace, "demo", True)
+    assert enabled_agent_plugin_skill_dirs(agent_workspace) == (skill,)
+
+    fingerprint_checks = 0
+    package_fingerprint = agent_plugins._package_fingerprint
+
+    def count_fingerprint_checks(root: Path) -> str | None:
+        nonlocal fingerprint_checks
+        fingerprint_checks += 1
+        return package_fingerprint(root)
+
+    monkeypatch.setattr(agent_plugins, "_package_fingerprint", count_fingerprint_checks)
+    read_tool = ReadFileTool.create(
+        ToolContext(
+            config=ToolsConfig(restrict_to_workspace=True),
+            workspace=str(agent_workspace),
+        )
+    )
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        project_result = await read_tool.execute(path=str(project_file))
+        assert fingerprint_checks == 0
+        plugin_result = await read_tool.execute(path=str(resource))
+    finally:
+        reset_workspace_scope(token)
+
+    assert "project notes" in project_result
+    assert "plugin reference" in plugin_result
+    assert fingerprint_checks == 1
 
 
 def test_plugin_state_symlink_cannot_escape_config_root(

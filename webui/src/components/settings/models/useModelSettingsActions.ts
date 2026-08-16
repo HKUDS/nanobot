@@ -15,6 +15,7 @@ import {
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
+  ApiError,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -90,6 +91,7 @@ export function useModelSettingsActions({
     modelMigrationSaving,
     modelPresetBeforeCreateRef,
     modelPresetCreating,
+    modelPresetEditingName,
     modelPresetPendingDelete,
     providerForms,
     providerOAuthCompleting,
@@ -105,6 +107,8 @@ export function useModelSettingsActions({
     setModelConfigurationSaving,
     setModelMigrationSaving,
     setModelPresetCreating,
+    setModelPresetEditingName,
+    setModelPresetNameError,
     setModelPresetPendingDelete,
     setProviderForms,
     setProviderOAuthCompleting,
@@ -117,6 +121,33 @@ export function useModelSettingsActions({
     visibleProviderKeys,
   } = state;
 
+  const presetNameConflict = (name: string, currentName?: string) => {
+    const normalized = name.toLowerCase();
+    return settings?.model_presets.some(
+      (preset) =>
+        !preset.is_default &&
+        preset.name !== currentName &&
+        preset.name.toLowerCase() === normalized,
+    ) ?? false;
+  };
+
+  const showPresetNameConflict = () => {
+    setModelPresetNameError(
+      t("settings.models.presetNameDuplicate", {
+        defaultValue: "A preset with this name already exists.",
+      }),
+    );
+    setError(null);
+  };
+
+  const handlePresetSaveError = (reason: unknown) => {
+    if (reason instanceof ApiError && reason.status === 409) {
+      showPresetNameConflict();
+      return;
+    }
+    setError((reason as Error).message);
+  };
+
   const saveModelSettings = async () => {
     if (
       !settings ||
@@ -128,11 +159,11 @@ export function useModelSettingsActions({
     }
 
     if (modelPresetCreating) {
-      const label = form.presetLabel.trim();
+      const name = form.modelPreset.trim();
       const provider = form.provider.trim();
       const model = form.model.trim();
       if (
-        !label ||
+        !name ||
         !provider ||
         !model ||
         form.maxTokens <= 0 ||
@@ -142,10 +173,15 @@ export function useModelSettingsActions({
       ) {
         return;
       }
+      if (presetNameConflict(name)) {
+        showPresetNameConflict();
+        return;
+      }
+      setModelPresetNameError(null);
       setModelConfigurationSaving(true);
       try {
         const payload = await createModelConfiguration(client, {
-          label,
+          name,
           provider,
           model,
           maxTokens: form.maxTokens,
@@ -158,6 +194,7 @@ export function useModelSettingsActions({
         applyPayload(payload);
         if (createdPreset) {
           setForm(agentDraftFromPayload(payload, createdPreset));
+          setModelPresetEditingName(createdPreset);
         }
 
         let finalPayload = payload;
@@ -168,12 +205,14 @@ export function useModelSettingsActions({
         }
         if (createdPreset) {
           setForm(agentDraftFromPayload(finalPayload, createdPreset));
+          setModelPresetEditingName(createdPreset);
         }
         modelPresetBeforeCreateRef.current = null;
         onModelNameChange(finalPayload.agent.model || null);
+        setModelPresetNameError(null);
         setError(null);
       } catch (err) {
-        setError((err as Error).message);
+        handlePresetSaveError(err);
       } finally {
         setModelConfigurationSaving(false);
       }
@@ -182,18 +221,22 @@ export function useModelSettingsActions({
 
     if (!modelDirty) return;
     const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === form.modelPreset,
+      (preset) => !preset.is_default && preset.name === modelPresetEditingName,
     );
     if (!selectedPreset) return;
+    const nextName = form.modelPreset.trim();
+    const nameChanged = form.modelPreset !== selectedPreset.name;
+    if (nameChanged && presetNameConflict(nextName, selectedPreset.name)) {
+      showPresetNameConflict();
+      return;
+    }
+    setModelPresetNameError(null);
     const reasoningEffort = form.reasoningEffort || null;
     setSaving(true);
     try {
       const payload = await updateModelConfiguration(client, {
         name: selectedPreset.name,
-        label:
-          form.presetLabel.trim() !== selectedPreset.label
-            ? form.presetLabel.trim()
-            : undefined,
+        newName: nameChanged ? nextName : undefined,
         model: form.model !== selectedPreset.model ? form.model : undefined,
         provider: form.provider !== selectedPreset.provider ? form.provider : undefined,
         maxTokens:
@@ -209,11 +252,13 @@ export function useModelSettingsActions({
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
       });
       applyPayload(payload);
-      setForm(agentDraftFromPayload(payload, selectedPreset.name));
+      setForm(agentDraftFromPayload(payload, nextName));
+      setModelPresetEditingName(nextName);
       onModelNameChange(payload.agent.model || null);
+      setModelPresetNameError(null);
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      handlePresetSaveError(err);
     } finally {
       setSaving(false);
     }
@@ -231,11 +276,11 @@ export function useModelSettingsActions({
       configuredModelProviderOptions.find((option) => option.name === currentProvider)?.name ??
       configuredModelProviderOptions[0]?.name ??
       "";
-    modelPresetBeforeCreateRef.current = form.modelPreset;
+    modelPresetBeforeCreateRef.current = modelPresetEditingName;
+    setModelPresetNameError(null);
     setForm((prev) => ({
       ...prev,
       modelPreset: "",
-      presetLabel: "",
       provider,
       model: "",
       maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,
@@ -252,7 +297,9 @@ export function useModelSettingsActions({
     if (!settings || modelConfigurationSaving) return;
     const previousPreset = modelPresetBeforeCreateRef.current;
     setModelPresetCreating(false);
+    setModelPresetNameError(null);
     setForm(agentDraftFromPayload(settings, previousPreset ?? undefined));
+    setModelPresetEditingName(previousPreset ?? agentDraftFromPayload(settings).modelPreset);
     modelPresetBeforeCreateRef.current = null;
   };
 

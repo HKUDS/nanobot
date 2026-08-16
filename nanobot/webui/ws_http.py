@@ -254,10 +254,10 @@ def _request_query(request: WsRequest) -> dict[str, list[str]]:
     return query
 
 
-def _default_model_name_from_config() -> str | None:
+def _default_model_name_from_config(config_path: Path | None = None) -> str | None:
     try:
         from nanobot.config.loader import load_config
-        model = load_config().resolve_preset().model.strip()
+        model = load_config(config_path).resolve_preset().model.strip()
         return model or None
     except Exception as e:
         logger.debug("bootstrap model_name could not load from config: {}", e)
@@ -266,6 +266,7 @@ def _default_model_name_from_config() -> str | None:
 
 def _resolve_bootstrap_model_name(
     runtime_name: Callable[[], str | None] | None,
+    config_path: Path | None = None,
 ) -> str:
     if runtime_name is not None:
         try:
@@ -277,7 +278,7 @@ def _resolve_bootstrap_model_name(
                 stripped = raw.strip()
                 if stripped:
                     return stripped
-    return _default_model_name_from_config() or ""
+    return _default_model_name_from_config(config_path) or ""
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +604,10 @@ class GatewayHTTPHandler:
                 "limits": self.ingress.bootstrap_limits(
                     max_frame_bytes=self.config.max_message_bytes,
                 ),
-                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+                "model_name": _resolve_bootstrap_model_name(
+                    self.runtime_model_name,
+                    self.settings.config.path,
+                ),
                 "runtime_surface": self._runtime_surface,
                 "runtime_capabilities": self._capabilities,
             }
@@ -634,7 +638,10 @@ class GatewayHTTPHandler:
             "limits": self.ingress.bootstrap_limits(
                 max_frame_bytes=self.config.max_message_bytes,
             ),
-            "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+            "model_name": _resolve_bootstrap_model_name(
+                self.runtime_model_name,
+                self.settings.config.path,
+            ),
             "runtime_surface": self._runtime_surface,
             "runtime_capabilities": self._capabilities,
         }
@@ -1236,9 +1243,9 @@ class GatewayHTTPHandler:
         if _is_local_browser_request(connection, request.headers):
             return True
         try:
-            from nanobot.config.loader import load_config
-
-            return bool(load_config().tools.webui_allow_remote_package_install)
+            return bool(
+                self.settings.config.load().tools.webui_allow_remote_package_install
+            )
         except Exception:
             self._log.exception("failed to load remote package install policy")
             return False
@@ -1252,11 +1259,14 @@ class GatewayHTTPHandler:
         if raw_enabled not in {"true", "false"}:
             return _http_error(400, "enabled must be true or false")
         try:
-            action = set_webui_skill_enabled(
-                self.skills_workspace_path,
-                name,
-                enabled=raw_enabled == "true",
-                disabled_skills=self.disabled_skills,
+            action = self.settings.config.run_serialized(
+                lambda config_path: set_webui_skill_enabled(
+                    self.skills_workspace_path,
+                    name,
+                    enabled=raw_enabled == "true",
+                    disabled_skills=self.disabled_skills,
+                    config_path=config_path,
+                )
             )
         except SkillManagementError as exc:
             return _http_error(exc.status, exc.message)
@@ -1280,10 +1290,13 @@ class GatewayHTTPHandler:
             return _http_error(403, "remote skill deletion is disabled")
         name = _query_first(_request_query(request), "name") or ""
         try:
-            action = delete_webui_skill(
-                self.skills_workspace_path,
-                name,
-                disabled_skills=self.disabled_skills,
+            action = self.settings.config.run_serialized(
+                lambda config_path: delete_webui_skill(
+                    self.skills_workspace_path,
+                    name,
+                    disabled_skills=self.disabled_skills,
+                    config_path=config_path,
+                )
             )
         except SkillManagementError as exc:
             return _http_error(exc.status, exc.message)

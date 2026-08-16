@@ -306,7 +306,8 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         # A background compactor may have replaced the command's original
         # Session object while awaiting its provider. Clear the current object
         # only after that lifecycle has finished.
-        session = loop.sessions.get_or_create(ctx.key)
+        loop.discard_session_file_state(ctx.key)
+        session = ctx.session or loop.sessions.get_or_create(ctx.key)
         snapshot = session.messages[session.last_consolidated:]
         runtime = None
         if snapshot:
@@ -378,16 +379,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
-    parts = args.split()
-    if len(parts) != 1:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: `/model [preset]`",
-            metadata=metadata,
-        )
-
-    name = parts[0]
+    name = args
     try:
         runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:

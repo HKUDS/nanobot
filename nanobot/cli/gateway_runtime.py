@@ -657,6 +657,9 @@ def _run_gateway(
     def _webui_runtime_model_name() -> str | None:
         return agent.model.strip() or None
 
+    def _webui_refresh_runtime_config() -> None:
+        agent.refresh_runtime_config()
+
     def _webui_skill_state_action(disabled_skills: set[str]) -> None:
         config.agents.defaults.disabled_skills = sorted(disabled_skills)
         agent.context.skills.disabled_skills = set(disabled_skills)
@@ -671,6 +674,7 @@ def _run_gateway(
         cron_service=cron,
         local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_refresh_runtime_config=_webui_refresh_runtime_config,
         webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
         webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
         webui_static_dist=webui_static_dist,

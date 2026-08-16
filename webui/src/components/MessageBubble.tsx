@@ -52,6 +52,8 @@ import type {
 
 interface MessageBubbleProps {
   message: UIMessage;
+  /** The containing agent turn has not received turn_end yet. */
+  isTurnStreaming?: boolean;
   /** Give temporary-chat user turns the dashed private-mode treatment. */
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
@@ -260,6 +262,7 @@ function UserDeliveryStatus({
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
+  isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
   cliApps = [],
@@ -381,7 +384,8 @@ export function MessageBubble({
     : "";
   const automationTriggeredLabel = t("message.automationTriggered");
 
-  const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
+  const showAssistantActions =
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming && !empty;
   const showCopyButton = showCopyAction && showAssistantActions;
   const showForkButton = showAssistantActions && !!onForkFromHere;
   const forkLabel = t("message.forkFromHere");

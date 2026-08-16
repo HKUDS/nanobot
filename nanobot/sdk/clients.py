@@ -138,6 +138,7 @@ class SessionClient:
 
     def clear(self, session_key: str) -> SessionSnapshot:
         """Clear one session and persist the empty session."""
+        self._loop.discard_session_file_state(session_key)
         session = self._loop.sessions.get_or_create(session_key)
         session.clear()
         self._loop.sessions.save(session)

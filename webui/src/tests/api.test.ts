@@ -439,7 +439,7 @@ describe("webui API helpers", () => {
 
   it("serializes model configuration creation", async () => {
     await createModelConfiguration(mutationTransport, {
-      label: "Fast writing",
+      name: "Fast writing",
       provider: "openai",
       model: "openai/gpt-4.1-mini",
       maxTokens: 4096,
@@ -451,7 +451,7 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenCalledWith(
       "settings.model_configuration.create",
       {
-        label: "Fast writing",
+        name: "Fast writing",
         provider: "openai",
         model: "openai/gpt-4.1-mini",
         max_tokens: 4096,
@@ -466,7 +466,7 @@ describe("webui API helpers", () => {
   it("serializes model configuration updates", async () => {
     await updateModelConfiguration(mutationTransport, {
       name: "codex",
-      label: "Codex",
+      newName: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
       maxTokens: 8192,
@@ -479,7 +479,7 @@ describe("webui API helpers", () => {
       "settings.model_configuration.update",
       {
         name: "codex",
-        label: "Codex",
+        new_name: "Codex",
         provider: "openai_codex",
         model: "openai-codex/gpt-5.5",
         max_tokens: 8192,

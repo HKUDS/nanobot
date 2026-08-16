@@ -216,17 +216,18 @@ function isStaleThreadSnapshot(
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
-function latestActiveTurnId(messages: UIMessage[]): string | null {
+function latestActiveTurnId(messages: UIMessage[], runStartedAt: number | null): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.isStreaming && message.turnId) return message.turnId;
   }
+  if (runStartedAt === null) return null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (
-      message.role === "user"
-      && message.deliveryStatus !== "failed"
+      message.role !== "user"
       && message.turnId
+      && message.createdAt >= runStartedAt * 1000
     ) return message.turnId;
   }
   return null;
@@ -377,7 +378,11 @@ function toModelBadgeInfo(
   const model = scopedPreset
     ? preset?.model || null
     : settings?.agent.model || modelName || null;
-  const label = preset?.label?.trim() || scopedPreset || toModelBadgeLabel(model);
+  const label = preset
+    ? preset.is_default
+      ? preset.label?.trim() || "Default"
+      : preset.name.trim()
+    : scopedPreset || toModelBadgeLabel(model);
   const rawProvider = preset?.provider
     || (!scopedPreset ? settings?.agent.provider : null)
     || null;
@@ -418,7 +423,6 @@ function modelPresetOptionsFromSettings(
       const name = preset.name.trim();
       return {
         name,
-        label: preset.label?.trim() || name,
         model: preset.model,
         provider: preset.resolved_provider || preset.provider,
       };
@@ -808,14 +812,20 @@ export function ThreadShell({
   const currentGoalState = messagesReady ? goalState : undefined;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
   const restoredViewportTurnId = useMemo(
-    () => turnActive ? latestActiveTurnId(displayMessages) : null,
-    [displayMessages, turnActive],
+    () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
+    [currentRunStartedAt, displayMessages, turnActive],
   );
   const rememberedViewportTurnId = chatId
     ? activeViewportTurnByChatIdRef.current.get(chatId) ?? null
     : null;
+  const canonicalRunTurnId = chatId && messagesReady && turnActive
+    ? client.getRunTurnId(chatId)
+    : null;
   const viewportTurnId = messagesReady && turnActive
-    ? rememberedViewportTurnId ?? restoredViewportTurnId
+    ? canonicalRunTurnId
+      ?? rememberedViewportTurnId
+      ?? historyActiveTurnId
+      ?? restoredViewportTurnId
     : null;
   const activeTurnStartedHere =
     viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;
@@ -1313,7 +1323,12 @@ export function ThreadShell({
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
       setFallbackModelName(null);
       const submitted = send(content, images, withWorkspaceScope(options));
-      if (chatId && submitted && !submitted.sideChannel) {
+      if (
+        chatId
+        && submitted
+        && !submitted.sideChannel
+        && options?.continueActiveTurn !== true
+      ) {
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
         setSubmittedViewportTurnId(submitted.turnId);
       }

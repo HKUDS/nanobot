@@ -7,7 +7,7 @@ domains; this module preserves the established Python and HTTP-facing seams.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -234,14 +234,32 @@ def update_model_configuration(
     query: QueryParams,
     *,
     config_path: Path | None = None,
+    rename_model_preset: Callable[[str, str], int] | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.update_model_configuration(
+    names_before = set(config.model_presets)
+    changed = models.update_model_configuration(
         config,
         query,
         oauth_status=_oauth_provider_status,
-    ):
-        _save_settings_config(config, config_path)
+    )
+    if changed:
+        removed = names_before - set(config.model_presets)
+        added = set(config.model_presets) - names_before
+        rename = (
+            (next(iter(removed)), next(iter(added)))
+            if len(removed) == len(added) == 1
+            else None
+        )
+        if rename is not None and rename_model_preset is not None:
+            rename_model_preset(*rename)
+            try:
+                _save_settings_config(config, config_path)
+            except BaseException:
+                rename_model_preset(rename[1], rename[0])
+                raise
+        else:
+            _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 
 

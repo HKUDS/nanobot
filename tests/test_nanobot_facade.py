@@ -1500,10 +1500,15 @@ async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
     exported.messages[0]["content"] = "mutated copy"
     assert bot.sessions.get("sdk:first").messages[0]["content"] == "hello"
 
+    state_before_clear = bot._loop._file_state_store.for_session("sdk:first")
     cleared = bot.sessions.clear("sdk:first")
     assert cleared.messages == []
+    state_after_clear = bot._loop._file_state_store.for_session("sdk:first")
+    assert state_after_clear is not state_before_clear
     assert bot.sessions.flush() >= 1
+    state_before_delete = state_after_clear
     assert bot.sessions.delete("sdk:first") is True
+    assert bot._loop._file_state_store.for_session("sdk:first") is not state_before_delete
     assert bot.sessions.get("sdk:first") is None
 
 

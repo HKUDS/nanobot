@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.file_state import FileStateStore
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import cmd_new, register_builtin_commands
@@ -251,6 +252,11 @@ class TestCmdNewUnifiedSession:
         # and no RuntimeWarning is emitted.
         admitted_runtime = MagicMock(name="admitted_runtime")
         reset_lock = asyncio.Lock()
+        file_state_store = FileStateStore()
+        previous_file_state = file_state_store.for_session("unified:default")
+        tracked_file = tmp_path / "tracked.txt"
+        tracked_file.write_text("tracked", encoding="utf-8")
+        previous_file_state.record_read(tracked_file)
         loop = SimpleNamespace(
             sessions=sessions,
             consolidator=SimpleNamespace(
@@ -258,6 +264,7 @@ class TestCmdNewUnifiedSession:
                 get_lock=MagicMock(return_value=reset_lock),
             ),
             _cancel_active_tasks=AsyncMock(return_value=0),
+            discard_session_file_state=file_state_store.discard,
             llm_runtime=MagicMock(return_value=MagicMock()),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
@@ -282,6 +289,9 @@ class TestCmdNewUnifiedSession:
         sessions.invalidate("unified:default")
         reloaded = sessions.get_or_create("unified:default")
         assert reloaded.messages == []
+        reset_file_state = file_state_store.for_session("unified:default")
+        assert reset_file_state is not previous_file_state
+        assert reset_file_state.is_unchanged(tracked_file) is False
         loop.consolidator.archive.assert_called_once_with(
             expected_snapshot,
             runtime=admitted_runtime,
@@ -310,6 +320,7 @@ class TestCmdNewUnifiedSession:
                 get_lock=MagicMock(return_value=reset_lock),
             ),
             _cancel_active_tasks=AsyncMock(return_value=0),
+            discard_session_file_state=MagicMock(),
             runtime_for_session=MagicMock(return_value=MagicMock()),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )

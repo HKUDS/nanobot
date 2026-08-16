@@ -662,6 +662,86 @@ describe("ChatList", () => {
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
   });
 
+  it("selects a contiguous session range with Shift-click", async () => {
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "first", title: "First topic" }),
+          session({ chatId: "second", title: "Second topic" }),
+          session({ chatId: "third", title: "Third topic" }),
+          session({ chatId: "fourth", title: "Fourth topic" }),
+        ]}
+        activeKey="websocket:first"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for First topic",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Fourth topic" }), {
+      shiftKey: true,
+    });
+
+    expect(screen.getByText("4 selected")).toBeInTheDocument();
+    for (const title of ["First topic", "Second topic", "Third topic", "Fourth topic"]) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    }
+  });
+
+  it("includes every pane when a Shift-click range ends on a grouped tab", async () => {
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "first", title: "First topic" }),
+          session({ chatId: "root", title: "Root topic" }),
+        ]}
+        activeKey="websocket:first"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for First topic",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }), {
+      shiftKey: true,
+    });
+
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Research pane" }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
   it("shows temporary chats separately and lets the user reopen or close them", async () => {
     const temporarySession = session({
       key: "temporary:temporary-one",

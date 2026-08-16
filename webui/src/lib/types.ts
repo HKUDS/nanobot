@@ -522,7 +522,8 @@ export interface SettingsPayload {
   };
   model_presets: Array<{
     name: string;
-    label: string;
+    /** @deprecated Compatibility alias. New clients must use `name`. */
+    label?: string;
     active: boolean;
     is_default: boolean;
     model: string;
@@ -1085,8 +1086,7 @@ export interface SettingsUpdate {
 }
 
 export interface ModelConfigurationCreate {
-  name?: string;
-  label: string;
+  name: string;
   provider: string;
   model: string;
   maxTokens?: number;
@@ -1097,7 +1097,7 @@ export interface ModelConfigurationCreate {
 
 export interface ModelConfigurationUpdate {
   name: string;
-  label?: string;
+  newName?: string;
   provider?: string;
   model?: string;
   maxTokens?: number;
@@ -1271,6 +1271,7 @@ export type InboundEvent =
       event: "turn_model_updated";
       chat_id: string;
       model_name: string;
+      model_preset?: string | null;
     }
   | ({
       event: "turn_end";

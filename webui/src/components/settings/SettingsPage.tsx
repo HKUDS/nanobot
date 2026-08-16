@@ -136,6 +136,8 @@ export function SettingsPage({
     modelMigrationSaving,
     modelPresetBeforeCreateRef,
     modelPresetCreating,
+    modelPresetEditingName,
+    modelPresetNameError,
     modelPresetPendingDelete,
     nanobotFeatureAction,
     nanobotFeatureConfirm,
@@ -185,6 +187,8 @@ export function SettingsPage({
     setMcpOAuthCallbackError,
     setMcpOAuthCallbackUrl,
     setModelPresetCreating,
+    setModelPresetEditingName,
+    setModelPresetNameError,
     setModelPresetPendingDelete,
     setNanobotFeatureConfirm,
     setNanobotFeatures,
@@ -240,6 +244,8 @@ export function SettingsPage({
               token={token}
               form={form}
               setForm={setForm}
+              editingPresetName={modelPresetEditingName}
+              presetNameError={modelPresetNameError}
               settings={settings}
               dirty={modelDirty}
               creating={modelPresetCreating}
@@ -256,8 +262,11 @@ export function SettingsPage({
               onMigrate={handleMigrateModelConfigurations}
               onBeginCreate={beginModelPresetCreation}
               onCancelCreate={cancelModelPresetCreation}
-              onSelectConfiguration={() => {
+              onClearPresetNameError={() => setModelPresetNameError(null)}
+              onSelectConfiguration={(name) => {
                 setModelPresetCreating(false);
+                setModelPresetEditingName(name);
+                setModelPresetNameError(null);
                 modelPresetBeforeCreateRef.current = null;
               }}
               onDeleteConfiguration={setModelPresetPendingDelete}

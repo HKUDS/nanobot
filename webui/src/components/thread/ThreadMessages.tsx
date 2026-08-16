@@ -76,8 +76,10 @@ export function ThreadMessages({
   );
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
-    () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
-    [isStreaming, units],
+    () => isStreaming
+      ? currentActivityClusterIndices(units, activeTurnId)
+      : new Set<number>(),
+    [activeTurnId, isStreaming, units],
   );
   const pendingTurn = useMemo(
     () => pendingTurnProjection(messages, activeTurnId),
@@ -89,6 +91,9 @@ export function ThreadMessages({
     && pendingTurn !== null
     && !pendingTurn.hasVisibleOutput
   ) ? pendingTurn : null;
+  const currentTurnStartIndex = isStreaming
+    ? activeTurnStartIndex(units, activeTurnId)
+    : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
   let nextUserIndex = hiddenUserMessageCount;
 
@@ -138,7 +143,15 @@ export function ThreadMessages({
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             deferOffscreenRender={deferOffscreenRender}
-            isTurnStreaming={liveActivityClusterIndices.has(index)}
+            isTurnStreaming={
+              unit.type === "activity"
+                ? liveActivityClusterIndices.has(index)
+                : isStreaming && (
+                    unit.message.turnId && activeTurnId !== null
+                      ? unit.message.turnId === activeTurnId
+                      : index > currentTurnStartIndex
+                  )
+            }
             forkIndex={forkIndex}
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
             forkBoundaryLabel={t("thread.forkedFromHistory")}
@@ -278,6 +291,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         ) : (
           <MessageBubble
             message={unit.message}
+            isTurnStreaming={isTurnStreaming}
             temporary={temporary}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
@@ -313,6 +327,27 @@ function threadDisplayUnitPropsEqual(
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
   );
+}
+
+function activeTurnStartIndex(units: DisplayUnit[], activeTurnId: string | null): number {
+  if (activeTurnId) {
+    const index = units.findIndex((unit) => (
+      unit.type === "message"
+      && unit.message.role === "user"
+      && unit.message.deliveryStatus !== "failed"
+      && unit.message.turnId === activeTurnId
+    ));
+    if (index >= 0) return index;
+  }
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    const unit = units[i];
+    if (
+      unit.type === "message"
+      && unit.message.role === "user"
+      && unit.message.deliveryStatus !== "failed"
+    ) return i;
+  }
+  return -1;
 }
 
 function displayUnitsEqual(previous: DisplayUnit, next: DisplayUnit): boolean {
@@ -362,8 +397,24 @@ function ForkBoundaryDivider({ label }: { label: string }) {
   );
 }
 
-function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
+function currentActivityClusterIndices(
+  units: DisplayUnit[],
+  activeTurnId: string | null,
+): Set<number> {
   const indices = new Set<number>();
+  if (activeTurnId) {
+    for (let i = units.length - 1; i >= 0; i -= 1) {
+      const unit = units[i];
+      if (
+        unit.type === "activity"
+        && unit.messages.some((message) => message.turnId === activeTurnId)
+      ) {
+        indices.add(i);
+        return indices;
+      }
+    }
+  }
+
   let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
