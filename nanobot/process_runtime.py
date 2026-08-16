@@ -356,17 +356,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
                     return poll() is None
                 except OSError:
                     pass
-        if self.platform_name == "Windows":
-            return _windows_process_identity(pid) is not None
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError:
-            return False
-        return True
+        return process_is_running(pid, platform_name=self.platform_name)
 
     def _process_identity(self, pid: int) -> str | int | None:
         if self.platform_name == "Windows":
@@ -453,6 +443,25 @@ def _platform_name() -> str:
     if sys.platform == "darwin":
         return "Darwin"
     return "Linux"
+
+
+def process_is_running(pid: int, *, platform_name: str | None = None) -> bool:
+    """Probe a PID without delivering a control event on Windows."""
+    if pid <= 0:
+        return False
+    if (platform_name or _platform_name()) == "Windows":
+        # On Windows ``os.kill(pid, 0)`` sends CTRL_C_EVENT (whose value is 0)
+        # instead of performing the harmless POSIX existence probe.
+        return _windows_process_identity(pid) is not None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _utc_now() -> str:

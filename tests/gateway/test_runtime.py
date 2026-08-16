@@ -18,6 +18,7 @@ from nanobot.gateway import (
     GatewayStatus,
 )
 from nanobot.gateway.runtime import monitor_gateway_clients
+from nanobot.process_runtime import process_is_running
 
 
 class FakeProcess:
@@ -434,6 +435,20 @@ def test_start_background_uses_windows_process_group_flags(tmp_path, monkeypatch
     assert result.ok is True
     assert "creationflags" in calls[0]["kwargs"]
     assert "start_new_session" not in calls[0]["kwargs"]
+
+
+def test_windows_process_probe_never_sends_ctrl_c(monkeypatch):
+    monkeypatch.setattr(
+        "nanobot.process_runtime._windows_process_identity",
+        lambda pid: "created-at" if pid == 12345 else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.kill",
+        lambda *_args: pytest.fail("Windows process probes must not call os.kill(pid, 0)"),
+    )
+
+    assert process_is_running(12345, platform_name="Windows") is True
+    assert process_is_running(54321, platform_name="Windows") is False
 
 
 def test_status_clears_stale_state(tmp_path, monkeypatch):

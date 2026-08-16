@@ -26,6 +26,7 @@ from nanobot.process_runtime import (
     ProcessRuntimePaths,
     ProcessStartOptions,
     ProcessStatus,
+    process_is_running,
 )
 
 GatewayStartOptions = ProcessStartOptions
@@ -374,7 +375,7 @@ class GatewayClientLease:
 
     def _process_is_running(self, pid: int) -> bool:
         checker = getattr(self.runtime, "process_is_running", None)
-        return bool(checker(pid)) if callable(checker) else _pid_is_running(pid)
+        return bool(checker(pid)) if callable(checker) else process_is_running(pid)
 
     @staticmethod
     def _clients(state: dict[str, object]) -> dict[str, object]:
@@ -442,17 +443,3 @@ def _instance_suffix(*, workspace: str | None, config_path: str | None) -> str |
     if not raw:
         return None
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def _pid_is_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
