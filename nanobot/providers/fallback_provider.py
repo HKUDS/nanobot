@@ -460,6 +460,8 @@ class FallbackProvider(LLMProvider):
             raise
         except Exception as exc:
             error_name = type(exc).__name__.lower()
+            detail = str(exc).strip() or type(exc).__name__
+            detail_lower = detail.lower()
             error_kind: str | None = None
             error_should_retry: bool | None = None
             if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
@@ -471,7 +473,7 @@ class FallbackProvider(LLMProvider):
             elif any(
                 token in error_name
                 for token in ("auth", "credential", "permissiondenied", "unauthor")
-            ):
+            ) or any(token in detail_lower for token in _AUTHENTICATION_ERROR_TOKENS):
                 error_kind = "authentication"
             elif "ratelimit" in error_name or "throttl" in error_name:
                 error_kind = "rate_limit"
@@ -489,7 +491,6 @@ class FallbackProvider(LLMProvider):
             except (TypeError, ValueError):
                 error_status_code = None
 
-            detail = str(exc).strip() or type(exc).__name__
             return LLMResponse(
                 content=f"Error calling LLM: {detail}",
                 finish_reason="error",
