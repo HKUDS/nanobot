@@ -1534,7 +1534,9 @@ export class NanobotTui {
     if (this.host.hosted) {
       this.titleText.maxWidth = Math.max(8, this.renderer.width - 4)
       this.titleText.content = this.currentTask ? `› ${this.currentTask}` : ""
-      this.title.visible = Boolean(this.currentTask) && this.renderer.height >= 8
+      // In a hosted pane this is the resume anchor, not decorative chrome.
+      // Keep it visible even when Herdr temporarily makes the pane very short.
+      this.title.visible = Boolean(this.currentTask)
       this.syncHostMetadata()
       return
     }

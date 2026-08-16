@@ -1946,6 +1946,10 @@ describe("NanobotTui in a Herdr pane", () => {
       action: "Approval required",
     })
 
+    setup.resize(42, 6)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("› Ship the Herdr integration")
+
     app.accept({
       event: "user_message",
       chat_id: "chat",
