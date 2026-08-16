@@ -503,6 +503,7 @@ def test_posix_process_identity_includes_start_time_and_accepts_legacy_state(
     monkeypatch,
 ):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr("nanobot.process_runtime._platform_name", lambda: "Linux")
     monkeypatch.setattr("nanobot.process_runtime.os.getpgid", lambda _pid: 42, raising=False)
     monkeypatch.setattr(runtime, "_posix_process_started_at", lambda _pid: "987654")
 
