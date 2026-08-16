@@ -351,7 +351,10 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         return process_is_running(pid, platform_name=self.platform_name)
 
     def _process_identity(self, pid: int) -> str | int | None:
-        if self.platform_name == "Windows":
+        # Process inspection must follow the host API even when tests inject a
+        # target platform.  On Windows, falling through to POSIX calls is not
+        # merely unsupported: ``os.kill(pid, 0)`` broadcasts CTRL_C_EVENT.
+        if _platform_name() == "Windows" or self.platform_name == "Windows":
             return _windows_process_identity(pid)
         try:
             process_group = os.getpgid(pid)
@@ -441,7 +444,8 @@ def process_is_running(pid: int, *, platform_name: str | None = None) -> bool:
     """Probe a PID without delivering a control event on Windows."""
     if pid <= 0:
         return False
-    if (platform_name or _platform_name()) == "Windows":
+    host_platform = _platform_name()
+    if host_platform == "Windows" or platform_name == "Windows":
         # On Windows ``os.kill(pid, 0)`` sends CTRL_C_EVENT (whose value is 0)
         # instead of performing the harmless POSIX existence probe.
         return _windows_process_identity(pid) is not None

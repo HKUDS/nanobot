@@ -440,6 +440,37 @@ def test_windows_process_probe_never_sends_ctrl_c(monkeypatch):
     assert process_is_running(54321, platform_name="Windows") is False
 
 
+def test_windows_host_probe_stays_safe_when_target_platform_is_posix(monkeypatch):
+    monkeypatch.setattr("nanobot.process_runtime._platform_name", lambda: "Windows")
+    monkeypatch.setattr(
+        "nanobot.process_runtime._windows_process_identity",
+        lambda pid: "created-at" if pid == 12345 else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.kill",
+        lambda *_args: pytest.fail("Windows process probes must not call os.kill(pid, 0)"),
+    )
+
+    assert process_is_running(12345, platform_name="Linux") is True
+    assert process_is_running(54321, platform_name="Darwin") is False
+
+
+def test_windows_host_identity_stays_safe_when_target_platform_is_posix(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr("nanobot.process_runtime._platform_name", lambda: "Windows")
+    monkeypatch.setattr(
+        "nanobot.process_runtime._windows_process_identity",
+        lambda pid: "created-at" if pid == 12345 else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.getpgid",
+        lambda *_args: pytest.fail("Windows process identities must not use POSIX APIs"),
+        raising=False,
+    )
+
+    assert runtime.process_identity(12345) == "created-at"
+
+
 def test_status_clears_stale_state(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     runtime.paths.run_dir.mkdir(parents=True)
