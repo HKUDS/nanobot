@@ -9,7 +9,7 @@ bun run --cwd tui test
 bun run --cwd tui build
 ```
 
-`nanobot agent` launches this client, attaches to an existing local gateway or leases one for the process lifetime, and passes an authenticated local endpoint through environment variables. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified sidecar. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is only selected with `nanobot agent --classic`.
+`nanobot agent` launches this client, attaches to the shared local gateway or starts it in the background, and passes an authenticated local endpoint through environment variables. Exiting one client leaves that gateway available to other terminals and the WebUI; stop it explicitly with `nanobot gateway stop`. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified sidecar. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is only selected with `nanobot agent --classic`.
 
 The renderer uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
 
@@ -22,10 +22,11 @@ to move, `Tab` to complete, and `Esc` to close the menu.
 
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` steers the current
-turn, `Tab` queues a follow-up for the next turn, and `Alt+Up` returns the latest queued message
-to the composer for editing. The pending queue stays visible above the composer.
-Use `Ctrl+J` for a newline; `Shift+Enter`, `Alt+Enter`, and `Ctrl+Enter` are also accepted when
-the terminal can distinguish them.
+turn, `Tab` queues a follow-up for the next turn, and `Option+Up` on macOS (`Alt+Up` on
+Windows/Linux) returns the latest queued message to the composer for editing. The pending queue
+stays visible above the composer.
+Use `Shift+Enter` for a newline; `Ctrl+J` is the universal fallback when a terminal cannot
+distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable.
 Unsent prompts return to the composer if the turn stops or fails.
 
 Use `/sessions` to search and switch persisted conversations without leaving the terminal.
@@ -33,6 +34,14 @@ Use `/sessions` to search and switch persisted conversations without leaving the
 command keeps its cross-channel behavior and resets the current chat. The next launch returns to
 the last session unless `--session` selects another one. When earlier transcript pages exist,
 press `PageUp` at the top to load them in place.
+
+The native client accepts bare WebSocket chat IDs or `websocket:<id>` selectors. Use
+`nanobot agent --classic --session <channel:id>` to resume a session owned by another channel;
+the TUI never silently maps one channel's identity into the WebSocket namespace.
+
+Sessions are live across clients: if two terminals or the WebUI attach to the same session, an
+accepted user message and the resulting agent/tool stream appear on every attached client while
+the gateway executes the input only once.
 
 `/branch` creates a new saved conversation from a completed reply without changing the source
 session. The picker uses durable history indices, so paginated transcripts branch at the selected

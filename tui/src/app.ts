@@ -586,6 +586,7 @@ export class NanobotTui {
 
     this.renderer.keyInput.on("keypress", this.handleKey)
     this.renderer.on(CliRenderEvents.THEME_MODE, this.handleTheme)
+    this.renderer.on(CliRenderEvents.CAPABILITIES, this.handleCapabilities)
     this.renderer.on(CliRenderEvents.RESIZE, this.handleResize)
     this.renderer.on(CliRenderEvents.DESTROY, this.handleDestroy)
     this.renderer.console.onCopySelection = (text) => void this.copySelection(text)
@@ -720,12 +721,17 @@ export class NanobotTui {
     this.commandMenu.hide()
     this.mentionMenu.hide()
     this.recordPrompt(prompt.content)
-    this.transcript.user(prompt.content)
+    this.transcript.user(prompt.content, turnId)
     if (steering) {
       this.status.content = `Steering current turn${this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""}`
       this.updateMeta()
       return true
     }
+    this.beginTurn(turnId)
+    return true
+  }
+
+  private beginTurn(turnId: string | null, startedAt?: number): void {
     this.activeTurnId = turnId
     this.readyDetail = ""
     this.finalMessage = ""
@@ -733,8 +739,23 @@ export class NanobotTui {
     this.lastProgress = ""
     this.activeLabel = "Thinking"
     this.currentFileEdits = []
-    this.setActive(true)
-    return true
+    this.setActive(true, startedAt)
+  }
+
+  private reconcileTurnOwnership(event: {
+    turn_id?: string
+    active_turn_id?: string
+    starts_turn?: boolean
+    started_at?: number
+  }): void {
+    if (event.active_turn_id && this.activeTurn) {
+      this.activeTurnId = event.active_turn_id
+    } else if (event.active_turn_id || (event.starts_turn && !this.activeTurn)) {
+      this.beginTurn(
+        event.active_turn_id || event.turn_id || null,
+        typeof event.started_at === "number" ? event.started_at * 1000 : undefined,
+      )
+    }
   }
 
   accept(event: InboundEvent): void {
@@ -777,7 +798,18 @@ export class NanobotTui {
 
     switch (event.event) {
       case "message_accepted":
+        this.reconcileTurnOwnership(event)
         return
+      case "user_message": {
+        const attachments = event.media_urls?.map((media) => media.name).filter(Boolean) || []
+        const content = [
+          event.text,
+          attachments.length ? `Attachments: ${attachments.join(", ")}` : "",
+        ].filter(Boolean).join("\n")
+        if (this.transcript.user(content, event.turn_id)) this.recordPrompt(event.text)
+        this.reconcileTurnOwnership(event)
+        return
+      }
       case "delta":
         this.setActive(true)
         this.activeLabel = "Writing"
@@ -1277,6 +1309,10 @@ export class NanobotTui {
     this.applyTheme(mode)
   }
 
+  private handleCapabilities = (): void => {
+    this.updateMeta()
+  }
+
   private resolveThemeMode(detected: ThemeMode | null): ThemeMode {
     return this.options.theme === "auto" ? detected ?? "dark" : this.options.theme
   }
@@ -1328,6 +1364,8 @@ export class NanobotTui {
       mode,
       this.renderer.width,
       footerHintTheme(this.palette),
+      process.platform,
+      Boolean(this.renderer.capabilities?.kitty_keyboard),
     )
   }
 

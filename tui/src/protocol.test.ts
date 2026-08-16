@@ -38,11 +38,25 @@ class FakeSocket {
 describe("gateway protocol", () => {
   test("represents lifecycle frames without browser state", () => {
     const events: InboundEvent[] = [
+      {
+        event: "user_message",
+        chat_id: "one",
+        text: "question",
+        turn_id: "turn-one",
+        active_turn_id: "turn-one",
+        starts_turn: true,
+        media_urls: [{ kind: "file", url: "/api/media/sig/file", name: "report.pdf" }],
+      },
       { event: "delta", chat_id: "one", text: "hello" },
       { event: "stream_end", chat_id: "one", resuming: false },
       { event: "turn_end", chat_id: "one", latency_ms: 12 },
     ]
-    expect(events.map((event) => event.event)).toEqual(["delta", "stream_end", "turn_end"])
+    expect(events.map((event) => event.event)).toEqual([
+      "user_message",
+      "delta",
+      "stream_end",
+      "turn_end",
+    ])
   })
 
   test("attaches and sends turns through the gateway envelope", () => {
@@ -141,6 +155,13 @@ describe("gateway protocol", () => {
       socket.emit("message", { data: JSON.stringify({ event: "delta", chat_id: "one" }) })
       socket.emit("message", {
         data: JSON.stringify({
+          event: "user_message",
+          chat_id: "one",
+          text: "missing lifecycle",
+        }),
+      })
+      socket.emit("message", {
+        data: JSON.stringify({
           event: "message",
           chat_id: "one",
           text: "bad tool",
@@ -154,6 +175,15 @@ describe("gateway protocol", () => {
         data: JSON.stringify({ event: "session_updated", chat_id: "one", scope: 42 }),
       })
       socket.emit("message", {
+        data: JSON.stringify({
+          event: "user_message",
+          chat_id: "one",
+          text: "bad media",
+          starts_turn: false,
+          media_urls: [{ kind: "archive", url: "/api/media/sig/file" }],
+        }),
+      })
+      socket.emit("message", {
         data: JSON.stringify({ event: "attached", chat_id: "one", model_preset: 42 }),
       })
       socket.emit("message", {
@@ -162,7 +192,7 @@ describe("gateway protocol", () => {
       socket.emit("message", { data: JSON.stringify({ event: "future_gateway_event" }) })
       socket.emit("message", { data: JSON.stringify({ event: "error", detail: "global failure" }) })
       expect(statuses).toContain("error:gateway sent an invalid event")
-      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(6)
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(8)
       expect(events).toContainEqual({
         event: "session_updated",
         chat_id: "one",
@@ -274,7 +304,7 @@ describe("gateway protocol", () => {
       requested = String(input)
       return Promise.resolve(new Response(JSON.stringify({
         messages: [
-          { role: "user", content: "hello" },
+          { role: "user", content: "hello", turnId: "turn-1" },
           {
             role: "tool",
             kind: "trace",
@@ -293,7 +323,7 @@ describe("gateway protocol", () => {
       const history = await fetchHistory("http://nanobot.test", "token", "chat", "newer-page")
       expect(history).toEqual({
         messages: [
-          { role: "user", content: "hello" },
+          { role: "user", content: "hello", turnId: "turn-1" },
           {
             role: "activity",
             content: "read_file",

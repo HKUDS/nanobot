@@ -8,6 +8,8 @@ import {
   type TextChunk,
 } from "@opentui/core"
 
+import { optionArrowUp } from "./platform-keys"
+
 export interface QueuePreviewTheme {
   accent: string
   muted: string
@@ -21,11 +23,13 @@ export class QueuePreview {
   readonly root: BoxRenderable
   private readonly header: TextRenderable
   private readonly rows: TextRenderable[]
+  private readonly editKey: string
   private theme: QueuePreviewTheme
   private messages: readonly string[] = []
 
-  constructor(renderer: CliRenderer, theme: QueuePreviewTheme) {
+  constructor(renderer: CliRenderer, theme: QueuePreviewTheme, platform: string = process.platform) {
     this.theme = theme
+    this.editKey = optionArrowUp(platform)
     this.root = new BoxRenderable(renderer, {
       id: "nanobot-tui-queue-preview",
       width: "100%",
@@ -64,7 +68,7 @@ export class QueuePreview {
     this.header.content = new StyledText([
       chunk("Queued next", this.theme.accent, true),
       chunk(`  ${messages.length}`, this.theme.faint),
-      chunk("  ·  alt+↑ edit last", this.theme.faint),
+      chunk(`  ·  ${this.editKey} edit last`, this.theme.faint),
     ])
     this.rows.forEach((row, index) => {
       const message = visible[index]

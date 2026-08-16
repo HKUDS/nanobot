@@ -1,5 +1,7 @@
 import { RGBA, StyledText, TextAttributes, type TextChunk } from "@opentui/core"
 
+import { optionArrowUp } from "./platform-keys"
+
 export interface FooterHint {
   key: string
   label: string
@@ -27,8 +29,10 @@ export function contextualFooterHints(
   mode: FooterMode,
   width: number,
   theme: FooterHintTheme,
+  platform: string = process.platform,
+  shiftedEnter = false,
 ): StyledText {
-  return footerHints(hintsFor(mode, width), theme)
+  return footerHints(hintsFor(mode, width, platform, shiftedEnter), theme)
 }
 
 /** Give shortcuts visual hierarchy without turning the footer into a toolbar. */
@@ -43,12 +47,17 @@ export function footerHints(hints: readonly FooterHint[], theme: FooterHintTheme
   return new StyledText(chunks)
 }
 
-function hintsFor(mode: FooterMode, width: number): FooterHint[] {
+function hintsFor(
+  mode: FooterMode,
+  width: number,
+  platform: string,
+  shiftedEnter: boolean,
+): FooterHint[] {
   if (mode === "mention") return width >= 64
     ? [hint("↑↓", "choose"), hint("tab/enter", "insert"), hint("esc", "close")]
     : [hint("enter", "insert"), hint("esc", "close")]
   if (mode === "active") return width >= 96
-    ? [hint("enter", "steer"), hint("tab", "queue"), hint("alt+↑", "edit"), stopHint()]
+    ? [hint("enter", "steer"), hint("tab", "queue"), hint(optionArrowUp(platform), "edit"), stopHint()]
     : width >= 64 ? [hint("enter", "steer"), hint("tab", "queue"), stopHint()] : []
   if (mode === "branch") return width >= 64
     ? [hint("type", "filter"), hint("↑↓", "choose"), hint("enter", "branch"), hint("esc", "close")]
@@ -63,15 +72,16 @@ function hintsFor(mode: FooterMode, width: number): FooterHint[] {
   if (mode === "history") return width >= 72
     ? [hint("ctrl+end", "latest"), hint("pgup/pgdn", "scroll")]
     : width >= 48 ? [hint("ctrl+end", "latest")] : []
+  const newline = shiftedEnter ? "shift+enter" : "ctrl+j"
   if (width >= 112) return [
     hint("enter", "send"),
-    hint("ctrl+j", "newline"),
+    hint(newline, "newline"),
     hint("pgup/pgdn", "scroll"),
     hint("ctrl+o", "tools"),
     stopHint(),
   ]
-  if (width >= 72) return [hint("enter", "send"), hint("ctrl+j", "newline"), stopHint()]
-  return width >= 48 ? [hint("enter", "send"), hint("ctrl+j", "newline")] : []
+  if (width >= 72) return [hint("enter", "send"), hint(newline, "newline"), stopHint()]
+  return width >= 48 ? [hint("enter", "send"), hint(newline, "newline")] : []
 }
 
 function hint(key: string, label: string): FooterHint {

@@ -59,6 +59,7 @@ export class Transcript {
   private readonly activities = new Set<Activity>()
   private readonly frames = new Set<BoxRenderable>()
   private readonly userRows = new Set<BoxRenderable>()
+  private readonly userTurnIds = new Set<string>()
   private wrote = false
   private nextId = 0
   private navigation: TranscriptNavigation = { awayFromBottom: false, unseenOutput: false }
@@ -150,6 +151,7 @@ export class Transcript {
     this.activities.clear()
     this.frames.clear()
     this.userRows.clear()
+    this.userTurnIds.clear()
     this.wrote = false
     this.nextId = 0
     this.navigation = { awayFromBottom: false, unseenOutput: false }
@@ -160,7 +162,7 @@ export class Transcript {
 
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
-      if (message.role === "user") this.user(message.content)
+      if (message.role === "user") this.user(message.content, message.turnId)
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
@@ -175,7 +177,9 @@ export class Transcript {
     let index = 1 // Keep the launch header first.
     for (const message of messages) {
       if (message.role === "user") {
+        if (message.turnId && this.userTurnIds.has(message.turnId)) continue
         this.writeRole("›", message.content, "user", index++)
+        if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeMarkdown(message.content, false, index++)
       } else {
@@ -200,10 +204,13 @@ export class Transcript {
     return this.root.scrollTop <= 0
   }
 
-  user(content: string): void {
+  user(content: string, turnId?: string): boolean {
+    if (turnId && this.userTurnIds.has(turnId)) return false
     this.noteOutput()
     this.finishActivity()
     this.writeRole("›", content, "user")
+    if (turnId) this.userTurnIds.add(turnId)
+    return true
   }
 
   assistant(content: string): void {

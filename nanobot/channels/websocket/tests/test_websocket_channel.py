@@ -4263,7 +4263,87 @@ async def test_authorized_webui_turn_is_acked_after_bus_acceptance(
         "event": "message_accepted",
         "chat_id": "chat-accepted",
         "turn_id": "turn-accepted",
+        "starts_turn": True,
+        "active_turn_id": "turn-accepted",
+        "started_at": wth.websocket_turn_wall_started_at("chat-accepted"),
     }
+
+
+@pytest.mark.asyncio
+async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    origin = AsyncMock()
+    origin.remote_address = ("127.0.0.1", 50123)
+    peer = AsyncMock()
+    outsider = AsyncMock()
+    channel._attach(peer, "shared-chat")
+    channel._attach(outsider, "other-chat")
+
+    await channel._dispatch_envelope(
+        origin,
+        "terminal-a",
+        {
+            "type": "message",
+            "chat_id": "shared-chat",
+            "content": "hello from A",
+            "webui": True,
+            "turn_id": "turn-a",
+        },
+    )
+    await channel._dispatch_envelope(
+        origin,
+        "terminal-a",
+        {
+            "type": "message",
+            "chat_id": "shared-chat",
+            "content": "one more detail",
+            "webui": True,
+            "turn_id": "steer-a",
+        },
+    )
+
+    peer_payloads = [
+        payload
+        for payload in _sent_ws_payloads(peer)
+        if payload["event"] == "user_message"
+    ]
+    assert len(peer_payloads) == 2
+    assert peer_payloads[0] == {
+        "event": "user_message",
+        "chat_id": "shared-chat",
+        "text": "hello from A",
+        "starts_turn": True,
+        "turn_id": "turn-a",
+        "active_turn_id": "turn-a",
+        "started_at": pytest.approx(wth.websocket_turn_wall_started_at("shared-chat")),
+    }
+    assert peer_payloads[1] == {
+        "event": "user_message",
+        "chat_id": "shared-chat",
+        "text": "one more detail",
+        "starts_turn": False,
+        "turn_id": "steer-a",
+        "active_turn_id": "turn-a",
+        "started_at": pytest.approx(wth.websocket_turn_wall_started_at("shared-chat")),
+    }
+    origin_payloads = _sent_ws_payloads(origin)
+    assert [
+        (
+            payload["event"],
+            payload["turn_id"],
+            payload["starts_turn"],
+            payload["active_turn_id"],
+        )
+        for payload in origin_payloads
+        if payload["event"] == "message_accepted"
+    ] == [
+        ("message_accepted", "turn-a", True, "turn-a"),
+        ("message_accepted", "steer-a", False, "turn-a"),
+    ]
+    outsider.send.assert_not_awaited()
+    assert bus.publish_inbound.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -4294,6 +4374,7 @@ async def test_side_channel_command_does_not_register_queued_turn(
         "event": "message_accepted",
         "chat_id": "chat-status",
         "turn_id": "turn-status",
+        "starts_turn": False,
     }
 
 

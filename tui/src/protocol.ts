@@ -36,6 +36,12 @@ export interface FileDiff {
   text?: string
 }
 
+export interface MediaAttachment {
+  kind: "image" | "video" | "file"
+  url: string
+  name?: string
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -44,7 +50,24 @@ export type InboundEvent =
       model_preset?: string | null
       usage?: TokenUsage
     }
-  | { event: "message_accepted"; chat_id: string; turn_id: string }
+  | {
+      event: "message_accepted"
+      chat_id: string
+      turn_id: string
+      starts_turn?: boolean
+      active_turn_id?: string
+      started_at?: number
+    }
+  | {
+      event: "user_message"
+      chat_id: string
+      text: string
+      turn_id?: string
+      active_turn_id?: string
+      starts_turn: boolean
+      started_at?: number
+      media_urls?: MediaAttachment[]
+    }
   | {
       event: "message"
       chat_id: string
@@ -119,6 +142,7 @@ export interface ClientOptions {
 export interface HistoryMessage {
   role: "user" | "assistant" | "activity"
   content: string
+  turnId?: string
   toolEvents?: ToolProgressEvent[]
   fileEdits?: FileEditEvent[]
   forkIndex?: number
@@ -213,6 +237,7 @@ const SLASH_COMMAND_LIFECYCLES = new Set([
 const CHAT_EVENTS = new Set([
   "attached",
   "message_accepted",
+  "user_message",
   "message",
   "file_edit",
   "delta",
@@ -283,6 +308,13 @@ function isTokenUsage(value: unknown): value is TokenUsage {
   ].every((key) => optional(value[key], "number"))
 }
 
+function isMediaAttachment(value: unknown): value is MediaAttachment {
+  return isRecord(value)
+    && (value.kind === "image" || value.kind === "video" || value.kind === "file")
+    && typeof value.url === "string"
+    && optional(value.name, "string")
+}
+
 function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (!isRecord(value)) return null
   const record = value
@@ -315,9 +347,26 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
       && typeof record.model_preset !== "string")
       || (record.usage !== undefined && !isTokenUsage(record.usage)))
   ) return null
-  if (["message", "delta", "reasoning_delta"].includes(name) && typeof record.text !== "string") {
+  if (
+    ["user_message", "message", "delta", "reasoning_delta"].includes(name)
+    && typeof record.text !== "string"
+  ) {
     return null
   }
+  if (
+    ["message_accepted", "user_message"].includes(name)
+    && (
+      (name === "user_message" && typeof record.starts_turn !== "boolean")
+      || !optional(record.starts_turn, "boolean")
+      || !optional(record.active_turn_id, "string")
+      || !optional(record.started_at, "number")
+    )
+  ) return null
+  if (
+    name === "user_message"
+    && record.media_urls !== undefined
+    && (!Array.isArray(record.media_urls) || !record.media_urls.every(isMediaAttachment))
+  ) return null
   if (
     name === "message"
     && record.tool_events !== undefined
@@ -411,7 +460,11 @@ export async function fetchHistory(
     }
     if (role === "user") {
       userIndex += 1
-      messages.push({ role: "user", content })
+      messages.push({
+        role: "user",
+        content,
+        ...(typeof message.turnId === "string" ? { turnId: message.turnId } : {}),
+      })
     } else {
       messages.push({ role: "assistant", content, forkIndex: userIndex })
     }

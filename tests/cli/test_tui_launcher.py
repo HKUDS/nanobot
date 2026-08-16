@@ -33,13 +33,17 @@ def test_authenticated_ws_url_preserves_existing_query(monkeypatch: pytest.Monke
 @pytest.mark.parametrize(
     ("session_id", "expected"),
     [
-        ("cli:direct", "tui-direct"),
         ("websocket:abc", "abc"),
         ("abc", "abc"),
     ],
 )
 def test_websocket_chat_id(session_id: str, expected: str | None) -> None:
     assert _websocket_chat_id(session_id) == expected
+
+
+def test_native_tui_rejects_a_session_owned_by_another_channel() -> None:
+    with pytest.raises(TuiUnavailableError, match="only WebSocket sessions"):
+        _websocket_chat_id("telegram:123")
 
 
 def test_tui_chat_state_is_optional_and_validated(tmp_path: Path) -> None:
@@ -60,8 +64,10 @@ def test_default_tui_resumes_but_explicit_session_wins(tmp_path: Path) -> None:
     path.write_text('{"chat_id": "saved-chat"}', encoding="utf-8")
 
     assert _initial_tui_chat_id(None, path) == "saved-chat"
-    assert _initial_tui_chat_id("cli:direct", path) == "tui-direct"
     assert _initial_tui_chat_id("websocket:chosen", path) == "chosen"
+
+    path.unlink()
+    assert _initial_tui_chat_id(None, path) == "tui-direct"
 
 
 def test_launcher_passes_the_canonical_model_preset_to_the_tui(
@@ -71,7 +77,6 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     config = Config()
     config.model_presets["Deep Research"] = ModelPresetConfig(model="openai/gpt-5.6")
     config.agents.defaults.model_preset = "Deep Research"
-    closed: list[bool] = []
     captured: dict[str, str] = {}
 
     monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
@@ -79,7 +84,6 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
         "nanobot.cli.tui_launcher._ensure_gateway",
         lambda *args, **kwargs: SimpleNamespace(
             base_url="http://127.0.0.1:8765",
-            close=lambda: closed.append(True),
         ),
     )
     monkeypatch.setattr(
@@ -110,7 +114,6 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert result == 0
     assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
     assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
-    assert closed == [True]
 
 
 def test_explicit_tui_binary_must_exist(
@@ -401,13 +404,10 @@ def test_gateway_reuses_the_matching_managed_instance(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config.agents.defaults.workspace = str(workspace)
-    runtime: object | None = None
 
     class FakeRuntime:
         def __init__(self, *, paths: object) -> None:
-            nonlocal runtime
             self.paths = paths
-            runtime = self
 
         def status(self) -> SimpleNamespace:
             return SimpleNamespace(running=True, port=config.gateway.port)
@@ -418,12 +418,55 @@ def test_gateway_reuses_the_matching_managed_instance(
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
     monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: True)
 
-    lease = _ensure_gateway(
+    gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
         workspace_override=str(workspace),
     )
 
-    assert lease.runtime is runtime
-    assert lease.owned is False
-    lease.close()
+    assert gateway.base_url == "http://127.0.0.1:8765"
+
+
+def test_gateway_started_for_tui_remains_shared_after_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    started = False
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            self.paths = paths
+
+        def status(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                running=started,
+                port=config.gateway.port if started else None,
+            )
+
+        def start_background(self, _options: object) -> SimpleNamespace:
+            nonlocal started
+            started = True
+            return SimpleNamespace(
+                ok=True,
+                message="gateway_started",
+                status=SimpleNamespace(log_path=tmp_path / "gateway.log"),
+            )
+
+        def stop(self, *, timeout_s: int) -> None:
+            raise AssertionError(f"shared gateway stopped with timeout {timeout_s}")
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
+        lambda _url: started,
+    )
+
+    gateway = _ensure_gateway(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=None,
+    )
+
+    assert gateway.base_url == "http://127.0.0.1:8765"
+    assert started is True

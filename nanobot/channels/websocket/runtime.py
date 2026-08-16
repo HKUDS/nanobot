@@ -62,6 +62,7 @@ from nanobot.session.webui_turns import (
     websocket_turn_transcript_persistence_failed,
     websocket_turn_wall_started_at,
 )
+from nanobot.utils.helpers import safe_filename
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -594,6 +595,57 @@ class WebSocketChannel(BaseChannel):
         for connection in tuple(self._webui_connections):
             await self._send_event(connection, event, **fields)
 
+    async def _broadcast_user_message(
+        self,
+        origin: ServerConnection,
+        chat_id: str,
+        text: str,
+        *,
+        turn_id: str | None,
+        starts_turn: bool,
+        media_paths: list[str],
+        media_names: list[str | None],
+        cli_apps: list[dict[str, Any]],
+        mcp_presets: list[dict[str, Any]],
+        session_mentions: list[SessionMention],
+    ) -> None:
+        """Project one accepted user message to the other clients on the chat.
+
+        The origin already has an optimistic row and receives canonical turn
+        ownership in ``message_accepted``. Peers need the ingress projection.
+        """
+        body: dict[str, Any] = {
+            "event": "user_message",
+            "chat_id": chat_id,
+            "text": text,
+            "starts_turn": starts_turn,
+        }
+        if turn_id is not None:
+            body["turn_id"] = turn_id
+        media = self._media.augment_transcript_user_media(media_paths)
+        for attachment, name in zip(media, media_names, strict=False):
+            if name:
+                attachment["name"] = name
+        if media:
+            body["media_urls"] = media
+        if cli_apps:
+            body["cli_apps"] = cli_apps
+        if mcp_presets:
+            body["mcp_presets"] = mcp_presets
+        if session_mentions:
+            body["session_mentions"] = session_mentions
+        active_turn_id = websocket_turn_id(chat_id)
+        if active_turn_id is not None:
+            body["active_turn_id"] = active_turn_id
+        started_at = websocket_turn_wall_started_at(chat_id)
+        if active_turn_id is not None and started_at is not None:
+            body["started_at"] = started_at
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in tuple(self._subs.get(chat_id, ())):
+            if connection is origin:
+                continue
+            await self._safe_send_to(connection, raw, label=" user_message ")
+
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
@@ -1036,6 +1088,7 @@ class WebSocketChannel(BaseChannel):
 
             raw_media = envelope.get("media")
             media_paths: list[str] = []
+            media_names: list[str | None] = []
             if raw_media is not None:
                 if not isinstance(raw_media, list):
                     await self._send_event(
@@ -1056,6 +1109,12 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
+                for item in cast(list[Any], raw_media):
+                    attachment = cast(dict[str, Any], item) if isinstance(item, dict) else {}
+                    name = attachment.get("name")
+                    media_names.append(
+                        (safe_filename(name) or None) if isinstance(name, str) else None
+                    )
                 if temporary_policy is not None:
                     self._temporary_chats.register_media(connection, cid, media_paths)
 
@@ -1190,12 +1249,38 @@ class WebSocketChannel(BaseChannel):
             finally:
                 if not accepted and queued_owner is not None:
                     clear_websocket_turn_if_current(cid, queued_owner)
+            if is_webui:
+                await self._broadcast_user_message(
+                    connection,
+                    cid,
+                    content,
+                    turn_id=turn_id,
+                    starts_turn=queued_owner is not None,
+                    media_paths=media_paths,
+                    media_names=media_names,
+                    cli_apps=cli_apps,
+                    mcp_presets=mcp_presets,
+                    session_mentions=session_mentions,
+                )
             if is_webui and turn_id:
+                active_turn_id = websocket_turn_id(cid)
+                started_at = websocket_turn_wall_started_at(cid)
                 await self._send_event(
                     connection,
                     "message_accepted",
                     chat_id=cid,
                     turn_id=turn_id,
+                    starts_turn=queued_owner is not None,
+                    **(
+                        {"active_turn_id": active_turn_id}
+                        if active_turn_id is not None
+                        else {}
+                    ),
+                    **(
+                        {"started_at": started_at}
+                        if active_turn_id is not None and started_at is not None
+                        else {}
+                    ),
                 )
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")

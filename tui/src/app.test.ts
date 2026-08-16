@@ -167,7 +167,7 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual(["你好"])
   })
 
-  test("inserts a newline without sending and gives the composer breathing room", async () => {
+  test("inserts newlines with Shift+Enter and the universal Ctrl+J fallback", async () => {
     const sent: string[] = []
     setup = await createRenderer({
       width: 72,
@@ -184,11 +184,13 @@ describe("NanobotTui layout", () => {
     }
 
     await setup.mockInput.typeText("first")
-    setup.mockInput.pressKey("j", { ctrl: true })
+    setup.mockInput.pressEnter({ shift: true })
     await setup.mockInput.typeText("second")
+    setup.mockInput.pressKey("j", { ctrl: true })
+    await setup.mockInput.typeText("third")
     await setup.flush()
 
-    expect(ui.composer.plainText).toBe("first\nsecond")
+    expect(ui.composer.plainText).toBe("first\nsecond\nthird")
     expect(sent).toEqual([])
     expect(ui.composerFrame.height).toBeGreaterThanOrEqual(3)
   })
@@ -307,6 +309,80 @@ describe("NanobotTui layout", () => {
     expect(ui.queuePreview.root.visible).toBeFalse()
     app.accept({ event: "goal_status", chat_id: "chat", status: "idle", turn_id: "prior" })
     expect((app as unknown as { activeTurn: boolean }).activeTurn).toBeTrue()
+  })
+
+  test("projects user turns from another terminal without duplicating replayed history", async () => {
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+
+    const first = {
+      event: "user_message" as const,
+      chat_id: "chat",
+      text: "hello from terminal A",
+      turn_id: "remote-turn",
+      active_turn_id: "remote-turn",
+      starts_turn: true,
+      started_at: 1_700_000_000,
+      media_urls: [{
+        kind: "file" as const,
+        url: "/api/media/sig/report",
+        name: "report.pdf",
+      }],
+    }
+    app.accept(first)
+    app.accept(first)
+    app.accept({
+      event: "user_message",
+      chat_id: "chat",
+      text: "one more remote detail",
+      turn_id: "remote-steer",
+      active_turn_id: "remote-turn",
+      starts_turn: false,
+    })
+    await setup.flush()
+
+    const state = app as unknown as { activeTurn: boolean; activeTurnId: string | null }
+    const frame = setup.captureCharFrame()
+    expect(occurrences(frame, "hello from terminal A")).toBe(1)
+    expect(occurrences(frame, "Attachments: report.pdf")).toBe(1)
+    expect(occurrences(frame, "one more remote detail")).toBe(1)
+    expect(state.activeTurn).toBeTrue()
+    expect(state.activeTurnId).toBe("remote-turn")
+
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "remote-turn" })
+    expect(state.activeTurn).toBeFalse()
+  })
+
+  test("reconciles simultaneous submits to the gateway-owned turn", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      activeTurn: boolean
+      activeTurnId: string | null
+    }
+    ui.composer.setText("submitted from terminal B")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+    expect(ui.activeTurnId).toBe("turn")
+
+    app.accept({
+      event: "message_accepted",
+      chat_id: "chat",
+      turn_id: "turn",
+      active_turn_id: "terminal-a-turn",
+      starts_turn: false,
+      started_at: 1_700_000_000,
+    })
+
+    expect(ui.activeTurn).toBeTrue()
+    expect(ui.activeTurnId).toBe("terminal-a-turn")
   })
 
   test("recalls submitted prompts without stealing multiline cursor movement", async () => {

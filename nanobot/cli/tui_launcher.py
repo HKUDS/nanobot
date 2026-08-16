@@ -33,14 +33,8 @@ class TuiUnavailableError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class _GatewayLease:
-    runtime: Any
-    owned: bool
+class _GatewayHandle:
     base_url: str
-
-    def close(self) -> None:
-        if self.owned:
-            self.runtime.stop(timeout_s=20)
 
 
 def launch_tui(
@@ -51,47 +45,44 @@ def launch_tui(
     session_id: str | None,
     theme: str,
 ) -> int:
-    """Run the native TUI, owning a local gateway only when one is not running."""
+    """Run the native TUI against the shared local gateway."""
     command = _resolve_tui_command()
-    lease = _ensure_gateway(
+    gateway = _ensure_gateway(
         config,
         config_path=config_path,
         workspace_override=workspace_override,
     )
+    bootstrap = _fetch_bootstrap(
+        gateway.base_url,
+        secret=webui_bootstrap_secret(config),
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "NANOBOT_TUI_WS_URL": _authenticated_ws_url(bootstrap),
+            "NANOBOT_TUI_API_URL": gateway.base_url,
+            "NANOBOT_TUI_API_TOKEN": str(bootstrap.get("api_token") or ""),
+            "NANOBOT_TUI_MODEL": _model_display(config)[0],
+            "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
+            "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
+            "NANOBOT_TUI_VERSION": __version__,
+            "NANOBOT_TUI_ACCESS": (
+                "workspace access" if config.tools.restrict_to_workspace else "full access"
+            ),
+            "NANOBOT_TUI_THEME": theme,
+        }
+    )
+    state_path = config_path.parent / "tui" / "state.json"
+    env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
+    chat_id = _initial_tui_chat_id(session_id, state_path)
+    if chat_id:
+        env["NANOBOT_TUI_CHAT_ID"] = chat_id
+    else:
+        env.pop("NANOBOT_TUI_CHAT_ID", None)
     try:
-        bootstrap = _fetch_bootstrap(
-            lease.base_url,
-            secret=webui_bootstrap_secret(config),
-        )
-        env = os.environ.copy()
-        env.update(
-            {
-                "NANOBOT_TUI_WS_URL": _authenticated_ws_url(bootstrap),
-                "NANOBOT_TUI_API_URL": lease.base_url,
-                "NANOBOT_TUI_API_TOKEN": str(bootstrap.get("api_token") or ""),
-                "NANOBOT_TUI_MODEL": _model_display(config)[0],
-                "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
-                "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
-                "NANOBOT_TUI_VERSION": __version__,
-                "NANOBOT_TUI_ACCESS": (
-                    "workspace access" if config.tools.restrict_to_workspace else "full access"
-                ),
-                "NANOBOT_TUI_THEME": theme,
-            }
-        )
-        state_path = config_path.parent / "tui" / "state.json"
-        env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
-        chat_id = _initial_tui_chat_id(session_id, state_path)
-        if chat_id:
-            env["NANOBOT_TUI_CHAT_ID"] = chat_id
-        else:
-            env.pop("NANOBOT_TUI_CHAT_ID", None)
-        try:
-            return subprocess.run(command, env=env, check=False).returncode
-        except OSError as exc:
-            raise TuiUnavailableError(f"could not start the native TUI: {exc}") from exc
-    finally:
-        lease.close()
+        return subprocess.run(command, env=env, check=False).returncode
+    except OSError as exc:
+        raise TuiUnavailableError(f"could not start the native TUI: {exc}") from exc
 
 
 def _resolve_tui_command() -> list[str]:
@@ -236,7 +227,7 @@ def _ensure_gateway(
     *,
     config_path: Path,
     workspace_override: str | None,
-) -> _GatewayLease:
+) -> _GatewayHandle:
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
     base_url = _webui_browser_url(config).split("/#/", 1)[0].rstrip("/")
@@ -265,7 +256,7 @@ def _ensure_gateway(
                 "restart it or use `nanobot agent --classic`"
             )
         if endpoint_reachable:
-            return _GatewayLease(runtime=runtime, owned=False, base_url=base_url)
+            return _GatewayHandle(base_url=base_url)
     elif endpoint_reachable:
         raise TuiUnavailableError(
             "the configured gateway port belongs to a different nanobot instance; "
@@ -279,7 +270,7 @@ def _ensure_gateway(
             config_path=str(config_path),
         )
     )
-    owned = result.ok
+    started_here = result.ok
     if not result.ok and result.message != "gateway_already_running":
         raise TuiUnavailableError(
             f"could not start the local gateway ({result.message}); logs: {result.status.log_path}"
@@ -290,7 +281,7 @@ def _ensure_gateway(
         if _webui_endpoint_reachable(base_url):
             current = runtime.status()
             if current.running and current.port in {None, config.gateway.port}:
-                return _GatewayLease(runtime=runtime, owned=owned, base_url=base_url)
+                return _GatewayHandle(base_url=base_url)
             break
         if not runtime.status().running and not _gateway_health_ready(
             config.gateway.host,
@@ -299,7 +290,7 @@ def _ensure_gateway(
             break
         time.sleep(0.1)
 
-    if owned:
+    if started_here:
         runtime.stop(timeout_s=5)
     raise TuiUnavailableError(
         f"local gateway did not become ready; logs: {result.status.log_path}"
@@ -343,16 +334,19 @@ def _websocket_chat_id(session_id: str) -> str | None:
     """Map the CLI selector to the WebSocket namespace used by the native TUI."""
     if session_id.startswith("websocket:"):
         return session_id.split(":", 1)[1] or None
-    if session_id == "cli:direct":
-        return "tui-direct"
-    return session_id.split(":", 1)[-1] or None
+    if ":" in session_id:
+        raise TuiUnavailableError(
+            "the native TUI can open only WebSocket sessions; use --classic to resume "
+            f"{session_id!r}"
+        )
+    return session_id or None
 
 
 def _initial_tui_chat_id(session_id: str | None, state_path: Path) -> str | None:
     """Resume the default TUI, while keeping an explicit selector authoritative."""
     if session_id is not None:
         return _websocket_chat_id(session_id)
-    return _read_tui_chat_id(state_path) or _websocket_chat_id("cli:direct")
+    return _read_tui_chat_id(state_path) or "tui-direct"
 
 
 def _read_tui_chat_id(path: Path) -> str | None:

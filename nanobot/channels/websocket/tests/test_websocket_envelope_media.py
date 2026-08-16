@@ -129,7 +129,45 @@ async def test_webui_message_acceptance_echoes_turn_id() -> None:
         "event": "message_accepted",
         "chat_id": "abc123",
         "turn_id": "turn-accepted",
+        "starts_turn": True,
+        "active_turn_id": "turn-accepted",
+        "started_at": wth.websocket_turn_wall_started_at("abc123"),
     }
+
+
+@pytest.mark.asyncio
+async def test_webui_message_projects_attachments_to_other_clients(tmp_path: Path) -> None:
+    channel = _make_channel()
+    origin = AsyncMock()
+    peer = AsyncMock()
+    channel._attach(origin, "abc123")
+    channel._attach(peer, "abc123")
+    channel._webui_connections.add(origin)
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "please inspect @drawio",
+        "webui": True,
+        "turn_id": "turn-shared",
+        "media": [{"data_url": _tiny_png_data_url(), "name": "shot.png"}],
+        "cli_apps": [{"name": "DrawIO", "entry_point": "cli-anything-drawio"}],
+    }
+
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path):
+        await channel._dispatch_envelope(origin, "client-1", envelope)
+
+    event = json.loads(peer.send.await_args.args[0])
+    assert event["event"] == "user_message"
+    assert event["turn_id"] == "turn-shared"
+    assert event["text"] == "please inspect @drawio"
+    assert event["cli_apps"] == [{
+        "name": "drawio",
+        "entry_point": "cli-anything-drawio",
+    }]
+    assert event["media_urls"][0]["kind"] == "image"
+    assert event["media_urls"][0]["name"] == "shot.png"
+    assert event["media_urls"][0]["url"].startswith("/api/media/")
+    assert json.loads(origin.send.await_args.args[0])["event"] == "message_accepted"
 
 
 @pytest.mark.asyncio

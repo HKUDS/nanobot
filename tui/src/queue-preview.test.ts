@@ -17,7 +17,7 @@ describe("QueuePreview", () => {
       accent: "#EF8E30",
       muted: "#A1A1AA",
       faint: "#71717A",
-    })
+    }, "darwin")
     setup.renderer.root.add(preview.root)
 
     preview.update(["first\nline", "second", "third", "fourth"])
@@ -25,6 +25,7 @@ describe("QueuePreview", () => {
     const frame = setup.captureCharFrame()
 
     expect(frame).toContain("Queued next  4")
+    expect(frame).toContain("⌥↑ edit last")
     expect(frame).not.toContain("first line")
     expect(frame).toContain("↳ second")
     expect(frame).toContain("↳ fourth")
