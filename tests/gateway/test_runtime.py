@@ -187,6 +187,21 @@ def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypa
     ]
 
 
+def test_restart_does_not_start_a_gateway_that_is_not_running(tmp_path):
+    spawned: list[list[str]] = []
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Linux",
+        popen=lambda command, **_kwargs: spawned.append(command),
+    )
+
+    result = runtime.restart(GatewayStartOptions(port=18790))
+
+    assert result.ok is False
+    assert result.message == "gateway_not_running"
+    assert spawned == []
+
+
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     stopped: list[int] = []
@@ -222,7 +237,7 @@ def test_explicit_background_gateway_survives_the_last_client(tmp_path, monkeypa
 
     client.acquire()
     client.mark_ephemeral()
-    GatewayClientLease(runtime, kind="gateway-background").mark_persistent()
+    assert GatewayClientLease(runtime, kind="gateway-background").mark_persistent() is True
 
     assert client.release() is False
     assert stopped == []

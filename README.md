@@ -174,10 +174,10 @@ Any normal reply means the provider, model, workspace, and browser gateway are w
 **Keep nanobot running after you close the terminal**
 
 ```bash
-nanobot webui --background
+nanobot gateway --background
 ```
 
-This starts the same full gateway as `nanobot webui`, opens the browser, and leaves channels and automations running after the launcher exits. Complete first-time model setup with foreground `nanobot webui` before switching to background mode.
+This is the only command that promotes the shared gateway to persistent background mode. It leaves channels and automations running after every local TUI and WebUI launcher exits. Complete first-time model setup with `nanobot webui` before switching to background mode; open the same localhost WebUI again afterward.
 
 ```bash
 nanobot gateway status

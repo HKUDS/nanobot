@@ -167,14 +167,31 @@ def create_gateway_app(
                     loaded_config=cfg,
                 )
             )
+            promoted = False
             if result.ok or result.message == "gateway_already_running":
-                GatewayClientLease(runtime, kind="gateway-background").mark_persistent()
+                promoted = GatewayClientLease(
+                    runtime,
+                    kind="gateway-background",
+                ).mark_persistent()
             if result.ok:
                 console.print("[green]Gateway started in the background.[/green]")
                 print_status(result.status)
                 return
             if result.message == "gateway_already_running":
-                console.print("[yellow]Gateway is already running in the background.[/yellow]")
+                if promoted:
+                    console.print(
+                        "[green]Existing on-demand gateway promoted to persistent "
+                        "background mode.[/green]"
+                    )
+                    console.print(
+                        "[dim]It will keep running after all local clients exit; "
+                        "use `nanobot gateway stop` to stop it.[/dim]"
+                    )
+                else:
+                    console.print(
+                        "[yellow]Gateway is already running in persistent "
+                        "background mode.[/yellow]"
+                    )
                 print_status(result.status)
                 return
             console.print(f"[yellow]Gateway was not started: {result.message}[/yellow]")
@@ -267,10 +284,16 @@ def create_gateway_app(
             timeout_s=timeout,
         )
         if result.ok:
-            GatewayClientLease(runtime, kind="gateway-restart").mark_persistent()
             console.print("[green]Gateway restarted in the background.[/green]")
             print_status(result.status)
             return
+        if result.message == "gateway_not_running":
+            console.print("[yellow]Gateway is not running; there is nothing to restart.[/yellow]")
+            console.print(
+                "[dim]Start a persistent gateway with `nanobot gateway --background`.[/dim]"
+            )
+            print_status(result.status)
+            raise typer.Exit(1)
         console.print(f"[red]Gateway restart failed: {result.message}[/red]")
         print_status(result.status)
         raise typer.Exit(1)

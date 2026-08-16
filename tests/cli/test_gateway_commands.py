@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,9 @@ def test_gateway_background_starts_detached_runtime(tmp_path):
 
 def test_gateway_background_adopts_an_existing_on_demand_gateway(tmp_path):
     app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+    lease_state = fake_runtime.paths.state_path.with_name("gateway.clients.json")
+    lease_state.parent.mkdir(parents=True, exist_ok=True)
+    lease_state.write_text('{"auto_stop": true, "clients": {}}', encoding="utf-8")
 
     def already_running(_options: GatewayStartOptions) -> RuntimeResult:
         return RuntimeResult(False, "gateway_already_running", fake_runtime.status_value)
@@ -212,7 +216,23 @@ def test_gateway_background_adopts_an_existing_on_demand_gateway(tmp_path):
     result = runner.invoke(app, ["gateway", "--background"])
 
     assert result.exit_code == 0
-    assert "Gateway is already running in the background" in result.stdout
+    assert "promoted to persistent background mode" in result.stdout
+    assert "will keep running after all local clients exit" in result.stdout
+    assert not lease_state.exists()
+
+
+def test_gateway_background_reports_an_existing_persistent_gateway(tmp_path):
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+
+    def already_running(_options: GatewayStartOptions) -> RuntimeResult:
+        return RuntimeResult(False, "gateway_already_running", fake_runtime.status_value)
+
+    fake_runtime.start_background = already_running  # type: ignore[method-assign]
+
+    result = runner.invoke(app, ["gateway", "--background"])
+
+    assert result.exit_code == 0
+    assert "already running in persistent background mode" in result.stdout
 
 
 def test_gateway_rejects_conflicting_modes(tmp_path):
@@ -267,6 +287,9 @@ def test_gateway_restart_starts_background_runtime(tmp_path):
     config = Config()
     config.gateway.port = 18793
     app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config)
+    lease_state = fake_runtime.paths.state_path.with_name("gateway.clients.json")
+    lease_state.parent.mkdir(parents=True, exist_ok=True)
+    lease_state.write_text('{"auto_stop": true, "clients": {}}', encoding="utf-8")
 
     result = runner.invoke(app, ["gateway", "restart", "--timeout", "9", "--verbose"])
 
@@ -275,6 +298,25 @@ def test_gateway_restart_starts_background_runtime(tmp_path):
     assert fake_runtime.stop_timeout == 9
     assert fake_runtime.restarted_options == GatewayStartOptions(port=18793, verbose=True)
     assert prepare_calls == [(config, "warn")]
+    assert json.loads(lease_state.read_text(encoding="utf-8"))["auto_stop"] is True
+
+
+def test_gateway_restart_does_not_create_a_persistent_gateway(tmp_path):
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+
+    def not_running(
+        _options: GatewayStartOptions, *, timeout_s: int
+    ) -> RuntimeResult:
+        fake_runtime.stop_timeout = timeout_s
+        return RuntimeResult(False, "gateway_not_running", fake_runtime.status_value)
+
+    fake_runtime.restart = not_running  # type: ignore[method-assign]
+
+    result = runner.invoke(app, ["gateway", "restart"])
+
+    assert result.exit_code == 1
+    assert "there is nothing to restart" in result.stdout
+    assert "nanobot gateway --background" in result.stdout
 
 
 def test_gateway_install_service_uses_service_installer(tmp_path):

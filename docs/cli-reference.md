@@ -121,7 +121,7 @@ nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bo
 The command never deletes the external store and refuses to overwrite a different existing
 workspace file. Back up both the config directory and workspace before changing versions.
 
-Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. `nanobot gateway --background`, `nanobot gateway restart`, and `nanobot webui --background` make it persistent until an explicit `nanobot gateway stop`.
+Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. Only an explicit `nanobot gateway --background` promotes it to persistent mode. `nanobot gateway restart` preserves the current lifecycle mode, and `nanobot gateway stop` ends either mode.
 
 The default `--theme auto` mode probes the terminal's real foreground and background colors before first paint and follows supported live appearance changes. Use `--theme light` or `--theme dark` when a terminal or multiplexer does not report its colors reliably. The model preset and workspace access labels above the composer can be clicked to open their selectors; arrow keys, `Enter`, and `Esc` provide the same controls without a mouse. Access changes still pass through the gateway's local-trust and active-turn policy checks.
 
@@ -138,7 +138,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Command | Description |
 |---|---|
 | `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, and open `http://127.0.0.1:8765` |
-| `nanobot webui --background` | Start or reuse a background gateway, then open the WebUI |
+| `nanobot webui --background` | Deprecated; prints the equivalent explicit `nanobot gateway --background` command and exits |
 | `nanobot webui --dev` | Start the gateway and Vite together at `http://127.0.0.1:5173`, with live frontend updates |
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
 | `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
@@ -147,7 +147,9 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow and cannot be combined with `--background`.
+`--dev` is a foreground source-checkout workflow. Persistent gateway lifecycle is deliberately
+owned only by `nanobot gateway --background`; `nanobot webui --background` prints migration
+guidance instead of silently changing process ownership.
 It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured
 WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops
 only when no other interactive client still holds it.

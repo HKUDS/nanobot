@@ -102,6 +102,17 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
     def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
         return build_gateway_command(self.python_executable, options)
 
+    def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> ProcessResult:
+        """Restart an existing gateway without creating a new persistent instance."""
+        with self._lifecycle_lock():
+            status = self.status()
+            if not status.running:
+                return ProcessResult(False, "gateway_not_running", status)
+            stop_result = self._stop(timeout_s=timeout_s)
+            if not stop_result.ok:
+                return stop_result
+            return self._start_background(options)
+
 
 class GatewayClientLease:
     """Reference-count an on-demand gateway shared by local interactive clients."""
@@ -144,12 +155,14 @@ class GatewayClientLease:
             state["auto_stop"] = True
             self._write_state(state)
 
-    def mark_persistent(self) -> None:
-        """Keep an explicitly backgrounded gateway alive without client leases."""
+    def mark_persistent(self) -> bool:
+        """Keep an explicitly backgrounded gateway alive; return whether it was promoted."""
         with self.lock:
             state = self._live_state()
+            promoted = bool(state.get("auto_stop"))
             state["auto_stop"] = False
             self._write_or_clear(state)
+            return promoted
 
     def clear(self) -> None:
         """Forget leases after an explicit gateway stop."""

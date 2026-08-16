@@ -82,7 +82,7 @@ def webui(
     background: bool = typer.Option(
         False,
         "--background",
-        help="Keep the gateway running after this command exits",
+        help="Deprecated; use `nanobot gateway --background`",
     ),
     dev: bool = typer.Option(
         False,
@@ -107,10 +107,24 @@ def webui(
     )
 
     cli_terminal._ensure_interactive_tty_mode()
-    if dev and background:
-        console.print("[red]Error: --dev cannot be combined with --background.[/red]")
-        raise typer.Exit(1)
     config_path = _resolve_webui_config_path(config)
+    if background:
+        import shlex
+
+        command = ["nanobot", "gateway", "--background", "--config", str(config_path)]
+        if workspace:
+            command.extend(
+                ["--workspace", str(Path(workspace).expanduser().resolve(strict=False))]
+            )
+        console.print(
+            "[red]`nanobot webui --background` no longer owns gateway lifecycle.[/red]"
+        )
+        console.print("Start the persistent gateway explicitly, then open the WebUI:")
+        console.print("  [cyan]" + " ".join(shlex.quote(part) for part in command) + "[/cyan]")
+        console.print(
+            "  [cyan]nanobot webui --config " + shlex.quote(str(config_path)) + "[/cyan]"
+        )
+        raise typer.Exit(1)
     created_config = not config_path.exists()
     if created_config:
         console.print(f"[yellow]No config found at {config_path}.[/yellow]")
@@ -134,12 +148,6 @@ def webui(
     if settings_setup_error:
         console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
         console.print("Configure a provider and model in WebUI Settings → Models.")
-        if background:
-            console.print(
-                "[red]First-time WebUI setup must run in the foreground. "
-                "Run `nanobot webui` without --background.[/red]"
-            )
-            raise typer.Exit(1)
     elif provider_error:
         console.print(f"[dim]Provider check: {provider_error}[/dim]")
         setup_config = _run_quick_start_for_webui(
@@ -269,14 +277,6 @@ def webui(
             "Stop nanobot: "
             f"[cyan]{_gateway_instance_command('stop', config_path=config_path, workspace=workspace)}[/cyan]"
         )
-
-    if background:
-        ensure_shared_gateway()
-        GatewayClientLease(runtime, kind="webui-background").mark_persistent()
-        print_shared_gateway_controls()
-        if not no_open:
-            _open_webui_browser(webui_url)
-        return
 
     gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
     webui_ready = _webui_endpoint_reachable(webui_url)
