@@ -38,7 +38,12 @@ export interface FileDiff {
 
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string; model_preset?: string | null }
+  | {
+      event: "attached"
+      chat_id: string
+      model_preset?: string | null
+      usage?: TokenUsage
+    }
   | { event: "message_accepted"; chat_id: string; turn_id: string }
   | {
       event: "message"
@@ -61,7 +66,14 @@ export type InboundEvent =
     }
   | { event: "reasoning_delta"; chat_id: string; text: string; turn_id?: string }
   | { event: "reasoning_end"; chat_id: string; turn_id?: string }
-  | { event: "turn_end"; chat_id: string; latency_ms?: number; turn_id?: string }
+  | {
+      event: "turn_end"
+      chat_id: string
+      latency_ms?: number
+      turn_id?: string
+      usage?: TokenUsage
+      context_window_tokens?: number
+    }
   | {
       event: "goal_status"
       chat_id: string
@@ -77,13 +89,24 @@ export type InboundEvent =
       chat_id: string
       model_name: string
       model_preset?: string | null
+      context_window_tokens?: number
     }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; turn_id?: string }
 
 type OutboundEvent =
   | { type: "new_chat" }
+  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
-  | { type: "message"; chat_id: string; content: string; turn_id: string; webui: true }
+  | {
+      type: "message"
+      chat_id: string
+      content: string
+      turn_id: string
+      webui: true
+      cli_apps?: Array<{ name: string }>
+      mcp_presets?: Array<{ name: string }>
+      session_mentions?: SessionMention[]
+    }
 
 export interface ClientOptions {
   url: string
@@ -98,12 +121,24 @@ export interface HistoryMessage {
   content: string
   toolEvents?: ToolProgressEvent[]
   fileEdits?: FileEditEvent[]
+  forkIndex?: number
 }
 
 export interface HistorySnapshot {
   messages: HistoryMessage[]
   hasMoreBefore: boolean
   beforeCursor: string | null
+  userMessageOffset: number
+}
+
+export interface TokenUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  cached_tokens?: number
+  total_tokens?: number
+  provider_tokens?: number
+  estimated_tokens?: number
+  cost_usd?: number
 }
 
 export interface SessionContextSnapshot {
@@ -115,6 +150,28 @@ export interface SessionContextSnapshot {
   estimatedSessionTokens: number
   archivedSummary: string | null
   archivedSummaryAt: string | null
+  lastUsage: TokenUsage | null
+}
+
+export interface SessionMention {
+  name: string
+  session_key: string
+  title?: string
+}
+
+export interface MentionCandidate {
+  kind: "session" | "cli" | "mcp"
+  name: string
+  targetName?: string
+  displayName: string
+  description: string
+  session?: SessionMention
+}
+
+export interface MessageOptions {
+  cliApps?: Array<{ name: string }>
+  mcpPresets?: Array<{ name: string }>
+  sessionMentions?: SessionMention[]
 }
 
 export interface SlashCommand {
@@ -213,6 +270,19 @@ function isFileDiff(value: unknown): value is FileDiff {
     && optional(value.text, "string")
 }
 
+function isTokenUsage(value: unknown): value is TokenUsage {
+  if (!isRecord(value)) return false
+  return [
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "total_tokens",
+    "provider_tokens",
+    "estimated_tokens",
+    "cost_usd",
+  ].every((key) => optional(value[key], "number"))
+}
+
 function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (!isRecord(value)) return null
   const record = value
@@ -240,9 +310,10 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (typeof record.chat_id !== "string") return null
   if (
     name === "attached"
-    && record.model_preset !== undefined
-    && record.model_preset !== null
-    && typeof record.model_preset !== "string"
+    && ((record.model_preset !== undefined
+      && record.model_preset !== null
+      && typeof record.model_preset !== "string")
+      || (record.usage !== undefined && !isTokenUsage(record.usage)))
   ) return null
   if (["message", "delta", "reasoning_delta"].includes(name) && typeof record.text !== "string") {
     return null
@@ -261,7 +332,12 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
       || !optional(record.resuming, "boolean")
       || !optional(record.merge_next, "boolean"))
   ) return null
-  if (name === "turn_end" && !optional(record.latency_ms, "number")) return null
+  if (
+    name === "turn_end"
+    && (!optional(record.latency_ms, "number")
+      || !optional(record.context_window_tokens, "number")
+      || (record.usage !== undefined && !isTokenUsage(record.usage)))
+  ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && (!record.goal_state || typeof record.goal_state !== "object")) return null
   if (name === "session_updated" && !optional(record.scope, "string")) return null
@@ -270,7 +346,8 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
     && (typeof record.model_name !== "string"
       || (record.model_preset !== undefined
         && record.model_preset !== null
-        && typeof record.model_preset !== "string"))
+        && typeof record.model_preset !== "string")
+      || !optional(record.context_window_tokens, "number"))
   ) return null
   return value as InboundEvent
 }
@@ -282,7 +359,7 @@ export async function fetchHistory(
   beforeCursor?: string | null,
 ): Promise<HistorySnapshot> {
   if (!apiUrl || !apiToken) {
-    return { messages: [], hasMoreBefore: false, beforeCursor: null }
+    return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
   }
   const key = encodeURIComponent(`websocket:${chatId}`)
   const params = new URLSearchParams({ limit: "120", direction: "latest" })
@@ -291,14 +368,18 @@ export async function fetchHistory(
     headers: { Authorization: `Bearer ${apiToken}` },
   })
   if (response.status === 404) {
-    return { messages: [], hasMoreBefore: false, beforeCursor: null }
+    return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
   }
   if (!response.ok) throw new Error(`history request failed: HTTP ${response.status}`)
   const payload = (await response.json()) as {
     messages?: Array<Record<string, unknown>>
-    page?: { has_more_before?: boolean; before_cursor?: string }
+    page?: { has_more_before?: boolean; before_cursor?: string; user_message_offset?: number }
   }
-  const messages: HistoryMessage[] = (payload.messages || []).flatMap((message) => {
+  let userIndex = typeof payload.page?.user_message_offset === "number"
+    ? Math.max(0, payload.page.user_message_offset)
+    : 0
+  const messages: HistoryMessage[] = []
+  for (const message of payload.messages || []) {
     const role = message.role
     const content = message.content
     if (role === "tool" && message.kind === "trace") {
@@ -312,7 +393,13 @@ export async function fetchHistory(
         ? message.fileEdits.filter(isFileEdit)
         : undefined
       const activity = traces.join("\n") || (typeof content === "string" ? content : "")
-      return [{ role: "activity", content: activity, toolEvents, fileEdits }]
+      messages.push({
+        role: "activity",
+        content: activity,
+        ...(toolEvents?.length ? { toolEvents } : {}),
+        ...(fileEdits?.length ? { fileEdits } : {}),
+      })
+      continue
     }
     if (
       (role !== "user" && role !== "assistant")
@@ -320,16 +407,24 @@ export async function fetchHistory(
       || typeof content !== "string"
       || !content.trim()
     ) {
-      return []
+      continue
     }
-    return [{ role: role as HistoryMessage["role"], content }]
-  })
+    if (role === "user") {
+      userIndex += 1
+      messages.push({ role: "user", content })
+    } else {
+      messages.push({ role: "assistant", content, forkIndex: userIndex })
+    }
+  }
   return {
     messages,
     hasMoreBefore: payload.page?.has_more_before === true,
     beforeCursor: typeof payload.page?.before_cursor === "string"
       ? payload.page.before_cursor
       : null,
+    userMessageOffset: typeof payload.page?.user_message_offset === "number"
+      ? Math.max(0, payload.page.user_message_offset)
+      : 0,
   }
 }
 
@@ -358,6 +453,7 @@ export async function fetchSessionContext(
     archivedSummaryAt: typeof value.archived_summary_at === "string"
       ? value.archived_summary_at
       : null,
+    lastUsage: isTokenUsage(value.last_usage) ? value.last_usage : null,
   }
 }
 
@@ -438,6 +534,92 @@ export async function fetchSessions(
   })
 }
 
+function sessionMentionName(session: SessionSummary): string {
+  const label = (session.title || session.preview || "session")
+    .normalize("NFKC")
+    .replace(/\s+/gu, "-")
+    .replace(/[^\p{L}\p{N}_-]+/gu, "")
+    .replace(/-+/gu, "-")
+    .replace(/^-|-$/gu, "")
+  return Array.from(label || "session").slice(0, 40).join("")
+}
+
+/** Installed capabilities and saved chats share one mention namespace. */
+export async function fetchMentionCandidates(
+  apiUrl: string,
+  apiToken: string,
+): Promise<MentionCandidate[]> {
+  if (!apiUrl || !apiToken) return []
+  const headers = { Authorization: `Bearer ${apiToken}` }
+  const [sessions, appsResponse, mcpResponse] = await Promise.all([
+    fetchSessions(apiUrl, apiToken),
+    fetch(`${apiUrl}/api/settings/cli-apps?installed_only=1`, { headers }).catch(() => null),
+    fetch(`${apiUrl}/api/settings/mcp-presets`, { headers }).catch(() => null),
+  ])
+  const used = new Set<string>()
+  const uniqueName = (raw: string) => {
+    const base = raw || "session"
+    let name = base
+    let suffix = 2
+    while (used.has(name.toLocaleLowerCase())) name = `${base}-${suffix++}`
+    used.add(name.toLocaleLowerCase())
+    return name
+  }
+  const candidates: MentionCandidate[] = []
+  if (appsResponse?.ok) {
+    const payload = await appsResponse.json() as { apps?: unknown[] }
+    for (const value of payload.apps || []) {
+      if (!isRecord(value) || value.installed !== true || typeof value.name !== "string") continue
+      const name = uniqueName(value.name)
+      candidates.push({
+        kind: "cli",
+        name,
+        ...(name === value.name ? {} : { targetName: value.name }),
+        displayName: typeof value.display_name === "string" ? value.display_name : name,
+        description: typeof value.description === "string" ? value.description : "CLI app",
+      })
+    }
+  }
+  if (mcpResponse?.ok) {
+    const payload = await mcpResponse.json() as { presets?: unknown[] }
+    for (const value of payload.presets || []) {
+      if (
+        !isRecord(value)
+        || value.installed !== true
+        || value.configured !== true
+        || typeof value.name !== "string"
+      ) continue
+      const name = uniqueName(value.name)
+      candidates.push({
+        kind: "mcp",
+        name,
+        ...(name === value.name ? {} : { targetName: value.name }),
+        displayName: typeof value.display_name === "string" ? value.display_name : name,
+        description: typeof value.description === "string" ? value.description : "MCP server",
+      })
+    }
+  }
+  for (const session of sessions) {
+    const name = uniqueName(sessionMentionName(session))
+    candidates.push({
+      kind: "session",
+      name,
+      displayName: sessionLabelForMention(session),
+      description: session.preview || "Saved session",
+      session: {
+        name,
+        session_key: `websocket:${session.chatId}`,
+        title: session.title || undefined,
+      },
+    })
+  }
+  return candidates
+}
+
+function sessionLabelForMention(session: SessionSummary): string {
+  return (session.title || session.preview || "Untitled chat").replace(/\s+/gu, " ").trim()
+}
+
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
@@ -492,7 +674,7 @@ export class NanobotClient {
     socket?.close()
   }
 
-  send(content: string): string {
+  send(content: string, options: MessageOptions = {}): string {
     if (!this.chatId) throw new Error("chat is not ready")
     const turnId = crypto.randomUUID()
     this.write({
@@ -501,6 +683,11 @@ export class NanobotClient {
       content,
       turn_id: turnId,
       webui: true,
+      ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
+      ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
+      ...(options.sessionMentions?.length
+        ? { session_mentions: options.sessionMentions }
+        : {}),
     })
     return turnId
   }
@@ -512,6 +699,15 @@ export class NanobotClient {
 
   newChat(): void {
     this.write({ type: "new_chat" })
+  }
+
+  forkChat(sourceChatId: string, beforeUserIndex: number, title?: string): void {
+    this.write({
+      type: "fork_chat",
+      source_chat_id: sourceChatId,
+      before_user_index: beforeUserIndex,
+      ...(title?.trim() ? { title: title.trim() } : {}),
+    })
   }
 
   private handleMessage(raw: string): void {

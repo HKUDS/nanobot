@@ -21,6 +21,7 @@ import {
 import {
   NanobotClient,
   fetchHistory,
+  fetchMentionCandidates,
   fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
@@ -28,8 +29,11 @@ import {
   type FileEditEvent,
   type HistoryMessage,
   type InboundEvent,
+  type MentionCandidate,
+  type MessageOptions,
   type SlashCommand,
   type SessionSummary,
+  type TokenUsage,
 } from "./protocol"
 import {
   CommandMenu,
@@ -53,6 +57,15 @@ import {
 } from "./transcript"
 import { rememberChat } from "./session-state"
 import { ComposerDraft } from "./composer-draft"
+import { BranchMenu, branchPoints } from "./branch-menu"
+import {
+  MentionMenu,
+  insertMention,
+  mentionOptions,
+  mentionQuery,
+  type MentionQuery,
+} from "./mention-menu"
+import { PromptQueue, type QueuedPrompt } from "./prompt-queue"
 
 interface AppOptions {
   wsUrl: string
@@ -72,9 +85,10 @@ interface ChatClient {
   readonly activeChatId: string
   connect(): void
   close(): void
-  send(content: string): string
+  send(content: string, options?: MessageOptions): string
   attach(chatId: string): void
   newChat(): void
+  forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void
 }
 
 interface Palette {
@@ -155,6 +169,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     title: "Last turn diff",
     description: "Inspect file changes from the latest turn",
     action: "diff",
+  },
+  {
+    command: "/branch",
+    title: "Branch from reply",
+    description: "Continue from an earlier completed reply",
+    action: "branch",
   },
 ]
 
@@ -265,6 +285,22 @@ function formatElapsed(milliseconds: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`
 }
 
+function usageStatus(usage: TokenUsage | null): string {
+  if (!usage) return ""
+  const prompt = usage.prompt_tokens
+  const completion = usage.completion_tokens
+  const tokens = typeof prompt === "number" || typeof completion === "number"
+    ? `↑${formatTokenCount(prompt || 0)} ↓${formatTokenCount(completion || 0)}`
+    : typeof usage.total_tokens === "number" ? `${formatTokenCount(usage.total_tokens)} tok` : ""
+  const cached = typeof usage.cached_tokens === "number" && usage.cached_tokens > 0
+    ? `${formatTokenCount(usage.cached_tokens)} cached`
+    : ""
+  const cost = typeof usage.cost_usd === "number" && usage.cost_usd > 0
+    ? `$${usage.cost_usd < 0.01 ? usage.cost_usd.toFixed(4) : usage.cost_usd.toFixed(2)}`
+    : ""
+  return [tokens, cached, cost].filter(Boolean).join(" · ")
+}
+
 async function copyWithSystemClipboard(text: string): Promise<void> {
   const commands = process.platform === "darwin"
     ? [["pbcopy"]]
@@ -289,6 +325,8 @@ export class NanobotTui {
   private readonly transcript: Transcript
   private readonly commandMenu: CommandMenu
   private readonly sessionMenu: SessionMenu
+  private readonly mentionMenu: MentionMenu
+  private readonly branchMenu: BranchMenu
   private readonly contextPanel: ContextPanel
   private readonly diffViewer: DiffViewer
   private readonly client: ChatClient
@@ -301,10 +339,12 @@ export class NanobotTui {
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
   private readonly draft = new ComposerDraft()
+  private readonly promptQueue = new PromptQueue()
   private palette: Palette
   private activeThemeMode: ThemeMode
   private backgroundKnown: boolean
   private activeTurn = false
+  private activeTurnId: string | null = null
   private activeLabel = "Thinking"
   private activeStartedAt = 0
   private lastProgress = ""
@@ -333,6 +373,11 @@ export class NanobotTui {
   private sessionTitle = ""
   private sessionMetadataId = 0
   private contextTokens: number | null = null
+  private contextWindowTokens: number | null = null
+  private lastUsage: TokenUsage | null = null
+  private readyDetail = ""
+  private mentionCandidates: MentionCandidate[] = []
+  private activeMentionQuery: MentionQuery | null = null
   private transcriptNavigation: TranscriptNavigation = {
     awayFromBottom: false,
     unseenOutput: false,
@@ -369,6 +414,8 @@ export class NanobotTui {
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.commandMenu.setCommands([], LOCAL_COMMANDS)
     this.sessionMenu = new SessionMenu(renderer, commandMenuTheme(this.palette))
+    this.mentionMenu = new MentionMenu(renderer, commandMenuTheme(this.palette))
+    this.branchMenu = new BranchMenu(renderer, commandMenuTheme(this.palette))
     this.contextPanel = new ContextPanel(renderer, contextPanelTheme(this.palette))
     this.diffViewer = new DiffViewer(
       renderer,
@@ -455,7 +502,8 @@ export class NanobotTui {
         if (this.contextPanel.visible && this.composer.plainText) this.contextPanel.hide()
         this.syncComposerPlaceholder()
         if (this.sessionMenu.visible) this.syncSessionMenu()
-        else this.syncCommandMenu()
+        else if (this.branchMenu.visible) this.syncBranchMenu()
+        else this.syncComposerMenus()
         this.resizeComposer()
       },
       // IMEs may commit their final composed glyph after Enter. Matching the
@@ -497,6 +545,8 @@ export class NanobotTui {
     this.shell.add(this.transcript.root)
     this.shell.add(this.commandMenu.root)
     this.shell.add(this.sessionMenu.root)
+    this.shell.add(this.mentionMenu.root)
+    this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
     this.shell.add(this.title)
     this.shell.add(this.composerFrame)
@@ -547,6 +597,7 @@ export class NanobotTui {
     }
     this.client.connect()
     void this.loadCommands()
+    void this.loadMentions()
     this.renderer.start()
   }
 
@@ -579,7 +630,23 @@ export class NanobotTui {
       if (session) this.switchSession(session)
       return
     }
-    if (!visibleContent) return
+    if (this.branchMenu.visible) {
+      const point = this.branchMenu.choose()
+      if (point) this.createBranch(point.beforeUserIndex, point.preview)
+      return
+    }
+    if (this.mentionMenu.visible && this.activeMentionQuery) {
+      const candidate = this.mentionMenu.choose()
+      if (candidate) this.chooseMention(candidate, this.activeMentionQuery)
+      return
+    }
+    if (!visibleContent) {
+      if (this.activeTurn) {
+        const steering = this.promptQueue.takeSteering()
+        if (steering) this.sendPrompt(steering, true)
+      }
+      return
+    }
     const completion = this.commandMenu.completion(visibleContent)
     if (completion) {
       this.setComposer(completion)
@@ -592,6 +659,7 @@ export class NanobotTui {
       if (command.command.action === "sessions") void this.openSessions()
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "diff") this.openDiff()
+      else if (command.command.action === "branch") void this.openBranch()
       else this.startNewChat()
       return
     }
@@ -608,31 +676,53 @@ export class NanobotTui {
       this.quit()
       return
     }
+    const prompt = { content, options: mentionOptions(content, this.availableMentions()) }
     if (this.activeTurn) {
-      this.status.content = "A turn is already running · Ctrl+C to stop"
+      this.promptQueue.enqueue(prompt)
+      this.clearComposer()
+      this.commandMenu.hide()
+      this.mentionMenu.hide()
+      this.recordPrompt(content)
+      this.renderActiveStatus()
+      this.updateMeta()
       return
     }
+    this.sendPrompt(prompt)
+  }
+
+  private sendPrompt(prompt: QueuedPrompt, steering = false): boolean {
+    let turnId: string
     try {
-      this.client.send(content)
+      turnId = this.client.send(prompt.content, prompt.options)
     } catch (error) {
       this.status.content = error instanceof Error ? error.message : String(error)
-      return
+      return false
     }
     this.clearComposer()
     this.commandMenu.hide()
-    this.recordPrompt(content)
-    this.transcript.user(content)
+    this.mentionMenu.hide()
+    this.recordPrompt(prompt.content)
+    this.transcript.user(prompt.content)
+    if (steering) {
+      this.status.content = `Steering current turn${this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""}`
+      this.updateMeta()
+      return true
+    }
+    this.activeTurnId = turnId
+    this.readyDetail = ""
     this.finalMessage = ""
     this.turnHadAnswer = false
     this.lastProgress = ""
     this.activeLabel = "Thinking"
     this.currentFileEdits = []
     this.setActive(true)
+    return true
   }
 
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
       void rememberChat(this.options.statePath, event.chat_id)
+      if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
         this.applyModelPreset(event.model_preset)
         this.updateTitle()
@@ -641,7 +731,10 @@ export class NanobotTui {
       this.modelCommandTurns.clear()
       const restoring = this.attachedOnce
       this.attachedOnce = true
-      if (restoring) this.setActive(false)
+      if (restoring) {
+        this.activeTurnId = null
+        this.setActive(false)
+      }
       const queuesEvents = restoring || (!this.historyLoaded && Boolean(this.options.chatId))
       if (queuesEvents) {
         this.ready = false
@@ -716,6 +809,7 @@ export class NanobotTui {
         }
         return
       case "turn_end":
+        if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
         if (event.turn_id) {
           this.commandTurns.delete(event.turn_id)
           this.modelCommandTurns.delete(event.turn_id)
@@ -727,14 +821,24 @@ export class NanobotTui {
         if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
         this.finalMessage = ""
         this.turnHadAnswer = false
-        this.setActive(false)
-        if (typeof event.latency_ms === "number") {
-          this.status.content = this.readyStatus(`${(event.latency_ms / 1000).toFixed(1)}s`)
+        this.activeTurnId = null
+        if (event.usage) this.lastUsage = event.usage
+        if (typeof event.context_window_tokens === "number") {
+          this.contextWindowTokens = event.context_window_tokens
         }
+        this.updateTitle()
+        this.setActive(false)
+        this.readyDetail = typeof event.latency_ms === "number"
+          ? `${(event.latency_ms / 1000).toFixed(1)}s`
+          : ""
+        this.status.content = this.readyStatus()
         if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
+        this.sendNextFollowUp()
         return
       case "goal_status":
+        if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
         if (event.status === "running") {
+          if (event.turn_id) this.activeTurnId = event.turn_id
           this.activeLabel = "Working"
           this.setActive(true, typeof event.started_at === "number" ? event.started_at * 1000 : undefined)
         } else {
@@ -744,6 +848,9 @@ export class NanobotTui {
       case "goal_state":
         return
       case "turn_model_updated":
+        if (typeof event.context_window_tokens === "number") {
+          this.contextWindowTokens = event.context_window_tokens
+        }
         this.setTurnModel(event.model_name, event.model_preset)
         return
       case "runtime_model_updated":
@@ -765,6 +872,10 @@ export class NanobotTui {
           this.commandTurns.delete(event.turn_id)
           this.modelCommandTurns.delete(event.turn_id)
         }
+        if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) {
+          this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
+          return
+        }
         this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
         this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
         if (!commandLifecycle || commandLifecycle === "agent_turn") {
@@ -774,6 +885,7 @@ export class NanobotTui {
         }
         this.finalMessage = ""
         this.turnHadAnswer = false
+        this.restoreQueuedPrompts()
         this.setActive(false)
         return
     }
@@ -877,22 +989,39 @@ export class NanobotTui {
       ? ` · ${this.lastProgress.replace(/^\s*[·›✓×]\s*/u, "")}`
       : ""
     const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
+    const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
     this.status.content = shimmerStatus(
       this.activeLabel,
-      `  ${elapsed}${progress}${navigation}`,
+      `  ${elapsed}${progress}${queued}${navigation}`,
       this.shimmerFrame,
       this.palette,
     )
   }
 
-  private readyStatus(detail = ""): string {
+  private readyStatus(detail = this.readyDetail): string {
     if (this.transcriptNavigation.awayFromBottom) {
       return this.transcriptNavigation.unseenOutput
         ? "New output · Ctrl+End latest"
         : "History · Ctrl+End latest"
     }
-    if (detail) return `Ready · ${detail}`
+    const usage = usageStatus(this.lastUsage)
+    const suffix = [detail, usage].filter(Boolean).join(" · ")
+    if (suffix) return `Ready · ${suffix}`
     return this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
+  }
+
+  private sendNextFollowUp(): void {
+    if (!this.ready || this.activeTurn || this.quitting) return
+    const prompt = this.promptQueue.takeFollowUp()
+    if (!prompt) return
+    this.sendPrompt(prompt)
+  }
+
+  private restoreQueuedPrompts(): void {
+    const queued = this.promptQueue.restore()
+    if (!queued.length) return
+    const current = this.draft.expand(this.composer.plainText).trim()
+    this.setComposer([current, ...queued.map((prompt) => prompt.content)].filter(Boolean).join("\n\n"))
   }
 
   private handleTranscriptNavigation(state: TranscriptNavigation): void {
@@ -936,6 +1065,38 @@ export class NanobotTui {
       }
       if (key.name === "escape") {
         this.closeSessions()
+        key.preventDefault()
+        return
+      }
+    }
+    if (this.branchMenu.visible) {
+      if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
+        this.branchMenu.move(key.name === "up" ? -1 : 1)
+        key.preventDefault()
+        return
+      }
+      if (key.name === "escape") {
+        this.closeBranch()
+        key.preventDefault()
+        return
+      }
+    }
+    if (this.mentionMenu.visible) {
+      if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
+        this.mentionMenu.move(key.name === "up" ? -1 : 1)
+        key.preventDefault()
+        return
+      }
+      if (!key.ctrl && !key.meta && key.name === "tab" && this.activeMentionQuery) {
+        const candidate = this.mentionMenu.choose()
+        if (candidate) this.chooseMention(candidate, this.activeMentionQuery)
+        key.preventDefault()
+        return
+      }
+      if (key.name === "escape") {
+        this.mentionMenu.hide()
+        this.activeMentionQuery = null
+        this.updateMeta()
         key.preventDefault()
         return
       }
@@ -992,6 +1153,7 @@ export class NanobotTui {
         return
       }
       if (this.activeTurn) {
+        this.restoreQueuedPrompts()
         try {
           this.client.send("/stop")
           this.status.content = "Stopping…"
@@ -1061,6 +1223,8 @@ export class NanobotTui {
     this.transcript.setTheme(transcriptTheme(this.palette, this.backgroundKnown))
     this.commandMenu.setTheme(commandMenuTheme(this.palette))
     this.sessionMenu.setTheme(commandMenuTheme(this.palette))
+    this.mentionMenu.setTheme(commandMenuTheme(this.palette))
+    this.branchMenu.setTheme(commandMenuTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
     this.updateComposerAppearance()
@@ -1083,10 +1247,22 @@ export class NanobotTui {
   }
 
   private updateMeta(): void {
+    if (this.mentionMenu.visible) {
+      this.meta.content = this.renderer.width >= 64
+        ? "↑↓ choose · tab/enter insert · esc close"
+        : "enter insert · esc close"
+      return
+    }
     if (this.activeTurn) {
-      this.meta.content = this.renderer.width >= 72 && this.transcriptNavigation.awayFromBottom
-        ? "ctrl+end latest · ctrl+c stop"
-        : this.renderer.width >= 48 ? "ctrl+c stop" : ""
+      this.meta.content = this.renderer.width >= 96
+        ? "enter queue · enter again steer · ctrl+c stop"
+        : this.renderer.width >= 64 ? "enter queue · ctrl+c stop" : ""
+      return
+    }
+    if (this.branchMenu.visible) {
+      this.meta.content = this.renderer.width >= 64
+        ? "type to filter · ↑↓ choose · enter branch · esc close"
+        : "enter branch · esc close"
       return
     }
     if (this.commandMenu.visible) {
@@ -1154,7 +1330,11 @@ export class NanobotTui {
     const identity = this.sessionTitle.trim() || "nanobot"
     this.titleText.maxWidth = Math.max(8, Math.floor(this.renderer.width * 0.38))
     this.titleText.content = identity
-    const context = this.contextTokens === null ? "" : `  ·  ~${formatTokenCount(this.contextTokens)} ctx`
+    const context = this.contextTokens === null
+      ? ""
+      : `  ·  ~${formatTokenCount(this.contextTokens)}${this.contextWindowTokens
+        ? `/${formatTokenCount(this.contextWindowTokens)}`
+        : ""} ctx`
     const runtime = this.modelPreset !== "default"
       ? [this.modelPreset, this.modelName].filter(Boolean).join("  ·  ")
       : this.modelName
@@ -1186,7 +1366,9 @@ export class NanobotTui {
     // prevents stale placeholder text in differential/embedded terminals.
     const placeholder = this.composer.plainText
       ? null
-      : this.sessionMenu.visible ? "Search sessions" : COMPOSER_PLACEHOLDER
+      : this.sessionMenu.visible
+        ? "Search sessions"
+        : this.branchMenu.visible ? "Search branch points" : COMPOSER_PLACEHOLDER
     if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
   }
 
@@ -1196,9 +1378,40 @@ export class NanobotTui {
     this.updateMeta()
   }
 
+  private syncComposerMenus(): void {
+    this.activeMentionQuery = mentionQuery(this.composer.plainText, this.composer.cursorOffset)
+    const candidates = this.availableMentions()
+    if (this.activeMentionQuery && candidates.length) {
+      this.commandMenu.hide()
+      const limit = this.renderer.height >= 20 ? 7 : 4
+      if (this.mentionMenu.visible) this.mentionMenu.update(this.activeMentionQuery.query, limit)
+      else this.mentionMenu.show(candidates, this.activeMentionQuery.query, limit)
+      this.updateMeta()
+      return
+    }
+    this.mentionMenu.hide()
+    this.syncCommandMenu()
+  }
+
   private syncSessionMenu(): void {
     const limit = this.renderer.height >= 20 ? 8 : 4
     this.sessionMenu.update(this.composer.plainText, limit)
+    this.updateMeta()
+  }
+
+  private syncBranchMenu(): void {
+    const limit = this.renderer.height >= 20 ? 8 : 4
+    this.branchMenu.update(this.composer.plainText, limit)
+    this.updateMeta()
+  }
+
+  private chooseMention(candidate: MentionCandidate, query: MentionQuery): void {
+    const inserted = insertMention(this.composer.plainText, candidate, query)
+    this.composer.setText(inserted.value)
+    this.composer.cursorOffset = inserted.cursor
+    this.mentionMenu.hide()
+    this.activeMentionQuery = null
+    this.syncComposerPlaceholder()
     this.updateMeta()
   }
 
@@ -1239,12 +1452,102 @@ export class NanobotTui {
     this.syncCommandMenu()
   }
 
+  private async loadMentions(): Promise<void> {
+    try {
+      this.mentionCandidates = await fetchMentionCandidates(
+        this.options.apiUrl,
+        this.options.apiToken,
+      )
+      if (this.activeMentionQuery) this.syncComposerMenus()
+    } catch {
+      // Mentions are additive; plain text input remains fully functional.
+    }
+  }
+
+  private availableMentions(): MentionCandidate[] {
+    const currentKey = this.client.activeChatId
+      ? `websocket:${this.client.activeChatId}`
+      : ""
+    return this.mentionCandidates.filter((candidate) => (
+      candidate.session?.session_key !== currentKey
+    ))
+  }
+
+  private async openBranch(): Promise<void> {
+    if (this.activeTurn) {
+      this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    if (!this.ready) {
+      this.status.content = "Preparing chat…"
+      return
+    }
+    this.commandMenu.hide()
+    this.sessionMenu.hide()
+    this.contextPanel.hide()
+    this.clearComposer()
+    this.status.content = "Loading branch points…"
+    const chatId = this.client.activeChatId
+    try {
+      const history = await fetchHistory(
+        this.options.apiUrl,
+        this.options.apiToken,
+        chatId,
+      )
+      if (chatId !== this.client.activeChatId) return
+      const points = branchPoints(history.messages)
+      const limit = this.renderer.height >= 20 ? 8 : 4
+      this.branchMenu.open(points, limit)
+      this.syncComposerPlaceholder()
+      this.updateMeta()
+      this.status.content = points.length ? `${points.length} branch points` : "No completed replies"
+    } catch (error) {
+      this.status.content = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private createBranch(beforeUserIndex: number, preview: string): void {
+    if (!this.ready || this.activeTurn) return
+    this.branchMenu.hide()
+    this.clearComposer()
+    try {
+      if (!this.client.forkChat) throw new Error("branching is unavailable")
+      this.ready = false
+      this.promptQueue.clear()
+      this.sessionMetadataId += 1
+      this.sessionTitle = `Fork · ${preview.slice(0, 48)}`
+      this.contextTokens = null
+      this.lastUsage = null
+      this.readyDetail = ""
+      this.updateTitle()
+      this.status.content = "Creating branch…"
+      this.client.forkChat(
+        this.client.activeChatId,
+        beforeUserIndex,
+        this.sessionTitle,
+      )
+    } catch (error) {
+      this.ready = true
+      this.status.content = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  private closeBranch(): void {
+    this.branchMenu.hide()
+    this.clearComposer()
+    this.syncComposerPlaceholder()
+    if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
+    this.updateMeta()
+  }
+
   private async openSessions(): Promise<void> {
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
     }
     this.commandMenu.hide()
+    this.mentionMenu.hide()
+    this.branchMenu.hide()
     this.contextPanel.hide()
     this.clearComposer()
     this.sessionLoading = true
@@ -1293,10 +1596,13 @@ export class NanobotTui {
     this.closeSessions()
     try {
       this.ready = false
+      this.promptQueue.clear()
       this.sessionMetadataId += 1
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
       this.contextTokens = null
+      this.lastUsage = null
+      this.readyDetail = ""
       this.updateTitle()
       this.status.content = "Opening session…"
       this.client.attach(session.chatId)
@@ -1316,16 +1622,21 @@ export class NanobotTui {
     }
     this.commandMenu.hide()
     this.sessionMenu.hide()
+    this.mentionMenu.hide()
+    this.branchMenu.hide()
     this.contextPanel.hide()
     this.clearComposer()
     try {
       this.ready = false
+      this.promptQueue.clear()
       this.sessionMetadataId += 1
       this.sessionTitle = "New chat"
       this.sessionModelPreset = null
       this.modelName = this.defaultModelName
       this.modelPreset = this.defaultModelPreset
       this.contextTokens = null
+      this.lastUsage = null
+      this.readyDetail = ""
       this.updateTitle()
       this.status.content = "Starting a new chat…"
       this.client.newChat()
@@ -1361,6 +1672,7 @@ export class NanobotTui {
     this.recordPrompt(content)
 
     if (lifecycle === "agent_turn") {
+      this.activeTurnId = turnId
       this.finalMessage = ""
       this.turnHadAnswer = false
       this.lastProgress = ""
@@ -1368,6 +1680,7 @@ export class NanobotTui {
       this.currentFileEdits = []
       this.setActive(true)
     } else if (lifecycle === "finalize_active_turn") {
+      this.activeTurnId = null
       this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
       this.transcript.finishActivity()
       this.finalMessage = ""
@@ -1375,6 +1688,7 @@ export class NanobotTui {
       this.setActive(false)
       this.status.content = "Resetting chat…"
     } else if (lifecycle === "stop_active_turn") {
+      this.activeTurnId = null
       this.setActive(false)
       this.status.content = "Stopping…"
     } else if (!this.activeTurn) {
@@ -1414,6 +1728,8 @@ export class NanobotTui {
   private async openContext(): Promise<void> {
     this.commandMenu.hide()
     this.sessionMenu.hide()
+    this.mentionMenu.hide()
+    this.branchMenu.hide()
     this.clearComposer()
     this.status.content = "Reading agent context…"
     try {
@@ -1427,6 +1743,7 @@ export class NanobotTui {
         return
       }
       this.contextTokens = context.estimatedSessionTokens
+      this.lastUsage = context.lastUsage
       this.updateTitle()
       this.contextPanel.show(context)
       this.status.content = "Context snapshot"
@@ -1462,9 +1779,11 @@ export class NanobotTui {
         this.options.apiToken,
         chatId,
       )
-      if (!context || chatId !== this.client.activeChatId || this.contextTokens === null) return
+      if (!context || chatId !== this.client.activeChatId) return
       this.contextTokens = context.estimatedSessionTokens
+      this.lastUsage = context.lastUsage || this.lastUsage
       this.updateTitle()
+      if (!this.activeTurn) this.status.content = this.readyStatus()
     } catch {
       // Keep the last known estimate; it is intentionally informational.
     }
@@ -1473,6 +1792,8 @@ export class NanobotTui {
   private openDiff(): void {
     this.commandMenu.hide()
     this.sessionMenu.hide()
+    this.mentionMenu.hide()
+    this.branchMenu.hide()
     this.contextPanel.hide()
     this.clearComposer()
     this.composer.blur()

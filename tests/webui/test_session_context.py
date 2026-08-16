@@ -40,6 +40,7 @@ def test_session_context_separates_archive_progress_from_replay() -> None:
         "estimated_session_tokens": replay_tokens + summary_tokens,
         "archived_summary": "The archived conversation settled the old question.",
         "archived_summary_at": "2026-08-13T10:00:00Z",
+        "last_usage": None,
     }
 
 
@@ -54,3 +55,22 @@ def test_session_context_tolerates_untrusted_summary_metadata() -> None:
 
     assert payload["archived_summary"] is None
     assert payload["archived_summary_at"] is None
+
+
+def test_session_context_sanitizes_usage_metadata() -> None:
+    session = Session(
+        key="websocket:context",
+        metadata={
+            "_last_usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 8,
+                "negative": -1,
+                "boolean": True,
+                "text": "invalid",
+            }
+        },
+    )
+
+    payload = session_context_payload(session)
+
+    assert payload["last_usage"] == {"prompt_tokens": 120, "completion_tokens": 8}

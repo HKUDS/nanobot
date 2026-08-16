@@ -58,6 +58,8 @@ class StreamedResponseEvent(OutboundEvent):
 class TurnEndEvent(OutboundEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
+    usage: dict[str, int] | None = None
+    context_window_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ class TurnModelUpdatedEvent(OutboundEvent):
 
     model: str
     model_preset: str | None = None
+    context_window_tokens: int | None = None
 
 
 def outbound_message_for_event(
@@ -172,6 +175,12 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
         return TurnEndEvent(
             latency_ms=_metadata_int(meta, "latency_ms"),
             goal_state=cast(dict[str, Any], goal_state) if isinstance(goal_state, dict) else None,
+            usage=(
+                cast(dict[str, int], meta.get("usage"))
+                if isinstance(meta.get("usage"), dict)
+                else None
+            ),
+            context_window_tokens=_metadata_int(meta, "context_window_tokens"),
         )
     if meta.get("_session_updated"):
         return SessionUpdatedEvent(scope=_metadata_str(meta, "_session_update_scope"))

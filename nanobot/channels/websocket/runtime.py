@@ -434,18 +434,34 @@ class WebSocketChannel(BaseChannel):
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
 
-    def _attached_model_fields(self, chat_id: str) -> dict[str, str | None]:
-        """Expose the session's canonical preset on the attach handshake."""
+    def _attached_model_fields(self, chat_id: str) -> dict[str, Any]:
+        """Expose small session runtime facts on the attach handshake."""
         sessions = self.gateway.session_manager
         if sessions is None:
             return {}
         snapshot = sessions.read_session_metadata(f"websocket:{chat_id}")
-        metadata = snapshot.get("metadata") if isinstance(snapshot, dict) else None
+        raw_metadata = snapshot.get("metadata") if snapshot is not None else None
+        metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
+        fields: dict[str, Any] = {}
         try:
-            return {"model_preset": model_preset_from_metadata(metadata)}
+            fields["model_preset"] = model_preset_from_metadata(metadata)
         except ValueError:
             self.logger.warning("ignoring invalid model preset metadata for chat_id={}", chat_id)
-            return {"model_preset": None}
+            fields["model_preset"] = None
+        if isinstance(metadata, dict):
+            usage = metadata.get("_last_usage")
+            if isinstance(usage, dict):
+                sanitized_usage: dict[str, int | float] = {}
+                for key, value in cast(dict[object, object], usage).items():
+                    if (
+                        isinstance(key, str)
+                        and isinstance(value, (int, float))
+                        and not isinstance(value, bool)
+                        and value >= 0
+                    ):
+                        sanitized_usage[key] = value
+                fields["usage"] = sanitized_usage
+        return fields
 
     def _detach(self, connection: ServerConnection, chat_id: str) -> None:
         chats = self._conn_chats.get(connection)
@@ -1564,6 +1580,7 @@ class WebSocketChannel(BaseChannel):
                     msg.chat_id,
                     model_name=event.model,
                     model_preset=event.model_preset,
+                    context_window_tokens=event.context_window_tokens,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -1608,6 +1625,8 @@ class WebSocketChannel(BaseChannel):
                 msg.chat_id,
                 latency_ms=event.latency_ms,
                 goal_state=event.goal_state,
+                usage=event.usage,
+                context_window_tokens=event.context_window_tokens,
                 metadata=msg.metadata,
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
@@ -1822,16 +1841,25 @@ class WebSocketChannel(BaseChannel):
         latency_ms: int | None = None,
         *,
         goal_state: dict[str, Any] | None = None,
+        usage: dict[str, int] | None = None,
+        context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
     ) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
         body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
+        turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
+        if isinstance(turn_id, str) and turn_id:
+            body["turn_id"] = turn_id
         if latency_ms is not None:
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
+        if usage:
+            body["usage"] = usage
+        if context_window_tokens is not None:
+            body["context_window_tokens"] = int(context_window_tokens)
         canonical_webui_turn = (metadata or {}).get("webui") is True
         prior_persistence_failure = (
             canonical_webui_turn
@@ -1932,6 +1960,7 @@ class WebSocketChannel(BaseChannel):
         *,
         model_name: Any,
         model_preset: Any = None,
+        context_window_tokens: Any = None,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1948,6 +1977,8 @@ class WebSocketChannel(BaseChannel):
         }
         if isinstance(model_preset, str) and model_preset.strip():
             body["model_preset"] = model_preset.strip()
+        if isinstance(context_window_tokens, int) and context_window_tokens > 0:
+            body["context_window_tokens"] = context_window_tokens
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")

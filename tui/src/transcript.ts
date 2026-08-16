@@ -12,6 +12,7 @@ import {
 
 import type { FileEditEvent, HistoryMessage, ToolProgressEvent } from "./protocol"
 import { hideScrollbars } from "./scrollbox"
+import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
 export interface TranscriptTheme {
   text: string
@@ -40,6 +41,7 @@ interface Activity {
   lines: string[]
   keys: Map<string, number>
   expanded: boolean
+  events: Map<string, ToolProgressEvent>
 }
 
 const ACTIVITY_PREVIEW_LINES = 6
@@ -182,8 +184,8 @@ export class Transcript {
           ? message.fileEdits.map((edit) => ({
               call_id: `file:${edit.call_id || edit.path || "unknown"}`,
               phase: edit.status === "error" ? "error" : edit.phase,
-              name: edit.path ? `${edit.tool || "edit"} ${edit.path}` : "edit file",
-              arguments: edit.error || formatDiffStat(edit),
+              name: edit.tool || "edit_file",
+              arguments: { path: edit.path, stat: edit.error || formatDiffStat(edit) },
             }))
           : message.toolEvents || []
         this.updateActivity(activity, message.content, events)
@@ -260,8 +262,8 @@ export class Transcript {
     return this.progress("", edits.map((edit) => ({
       call_id: `file:${edit.call_id || edit.path || "unknown"}`,
       phase: edit.status === "error" ? "error" : edit.phase,
-      name: edit.path ? `${edit.tool || "edit"} ${edit.path}` : "edit file",
-      arguments: edit.error || formatDiffStat(edit),
+      name: edit.tool || "edit_file",
+      arguments: { path: edit.path, stat: edit.error || formatDiffStat(edit) },
     })))
   }
 
@@ -360,7 +362,13 @@ export class Transcript {
     this.root.add(row, index)
     this.styledText.push({ renderable: text, tone: "muted" })
     this.wrote = true
-    const activity = { text, lines: [], keys: new Map(), expanded: false }
+    const activity = {
+      text,
+      lines: [],
+      keys: new Map<string, number>(),
+      expanded: false,
+      events: new Map<string, ToolProgressEvent>(),
+    }
     this.activities.add(activity)
     return activity
   }
@@ -370,11 +378,17 @@ export class Transcript {
     content: string,
     events: ToolProgressEvent[] = [],
   ): string {
+    const projected = events.map((event) => {
+      const key = event.call_id ? `tool:${event.call_id}` : ""
+      const merged = key ? mergeToolEvent(activity.events.get(key), event) : event
+      if (key) activity.events.set(key, merged)
+      return { key, line: renderToolEvent(merged) }
+    })
     const lines = events.length > 0
-      ? events.map(formatToolEvent).filter(Boolean)
+      ? projected.map(({ line }) => line).filter(Boolean)
       : content.split("\n").map(cleanProgress).filter(Boolean)
     for (const [index, line] of lines.entries()) {
-      const key = events[index]?.call_id ? `tool:${events[index]?.call_id}` : undefined
+      const key = projected[index]?.key || undefined
       const existing = key ? activity.keys.get(key) : undefined
       if (existing !== undefined) {
         activity.lines[existing] = line
@@ -477,24 +491,6 @@ export class Transcript {
 function cleanProgress(value: string): string {
   const text = value.trim().replace(/^\*\*(.*?)\*\*$/u, "$1").replace(/\s+/gu, " ")
   return text ? `  · ${text}` : ""
-}
-
-function formatToolEvent(event: ToolProgressEvent): string {
-  const phase = event.phase || "start"
-  const marker = phase === "error" ? "×" : phase === "end" ? "✓" : "›"
-  const name = event.name?.trim() || "tool"
-  const detail = phase === "error"
-    ? compactValue(event.error)
-    : phase === "start"
-      ? compactValue(event.arguments)
-      : ""
-  return `  ${marker} ${name}${detail ? ` ${detail}` : ""}`
-}
-
-function compactValue(value: unknown): string {
-  if (value == null || value === "") return ""
-  const text = typeof value === "string" ? value : JSON.stringify(value)
-  return text.length > 72 ? `${text.slice(0, 69)}…` : text
 }
 
 function formatDiffStat(edit: FileEditEvent): string {

@@ -99,6 +99,7 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     bus.subscribe(seen.append)
     publisher.record_turn_runtime("cli:direct", "runtime")
     publisher.record_turn_latency("cli:direct", 123)
+    publisher.record_turn_usage("cli:direct", {"prompt_tokens": 40, "completion_tokens": 2})
 
     await publisher.turn_completed(
         channel="cli",
@@ -119,9 +120,11 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.context.metadata == {"source": "test"}
     assert first.latency_ms == 123
     assert first.runtime == "runtime"
+    assert first.usage == {"prompt_tokens": 40, "completion_tokens": 2}
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None
+    assert second.usage == {}
 
 
 @pytest.mark.asyncio

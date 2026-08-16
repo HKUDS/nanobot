@@ -20,11 +20,20 @@ composer; nanobot sends the original text unchanged.
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 
+Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
+same gateway metadata used by the WebUI. While nanobot is working, `Enter` queues a follow-up;
+press `Enter` again on an empty composer to steer the current turn with the newest queued prompt.
+Unsent prompts return to the composer if the turn stops or fails.
+
 Use `/sessions` to search and switch persisted conversations without leaving the terminal.
 `/new-chat` preserves the current conversation and starts another one; nanobot's existing `/new`
 command keeps its cross-channel behavior and resets the current chat. The next launch returns to
 the last session unless `--session` selects another one. When earlier transcript pages exist,
 press `PageUp` at the top to load them in place.
+
+`/branch` creates a new saved conversation from a completed reply without changing the source
+session. The picker uses durable history indices, so paginated transcripts branch at the selected
+turn rather than the currently visible row.
 
 `/context` explains the session-owned material available for the next agent turn: the compacted
 summary, replayable raw suffix, and an estimated token count. It deliberately does not expose
@@ -34,3 +43,5 @@ memory, and skills are assembled separately by the Python runtime.
 `/diff` opens the latest turn's file changes in a full-screen unified diff. Use `Left`/`Right`
 to switch edits, `PageUp`/`PageDown` or `Home`/`End` to navigate, and `Esc` to return to chat.
 The gateway remains the source of the patch; the TUI never rereads workspace files to rebuild it.
+The footer reports provider token/cache usage when available, and tool activity uses compact,
+tool-specific summaries while retaining the full event history behind `Ctrl+O`.

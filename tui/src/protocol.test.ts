@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   NanobotClient,
   fetchHistory,
+  fetchMentionCandidates,
   fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
@@ -77,17 +78,31 @@ describe("gateway protocol", () => {
           model_preset: "Deep Research",
         }),
       })
-      client.send("hello")
+      client.send("hello", {
+        cliApps: [{ name: "github" }],
+        sessionMentions: [{ name: "plan", session_key: "websocket:plan" }],
+      })
       client.attach("other-chat")
       client.newChat()
+      client.forkChat("terminal", 3, "Alternative")
 
       const outbound = socket.sent.map((value) => JSON.parse(value) as Record<string, unknown>)
       expect(outbound[0]).toEqual({ type: "attach", chat_id: "terminal" })
       expect(outbound[1]?.type).toBe("message")
       expect(outbound[1]?.chat_id).toBe("terminal")
       expect(outbound[1]?.content).toBe("hello")
+      expect(outbound[1]?.cli_apps).toEqual([{ name: "github" }])
+      expect(outbound[1]?.session_mentions).toEqual([
+        { name: "plan", session_key: "websocket:plan" },
+      ])
       expect(outbound[2]).toEqual({ type: "attach", chat_id: "other-chat" })
       expect(outbound[3]).toEqual({ type: "new_chat" })
+      expect(outbound[4]).toEqual({
+        type: "fork_chat",
+        source_chat_id: "terminal",
+        before_user_index: 3,
+        title: "Alternative",
+      })
       expect(events.map((event) => event.event)).toEqual(["ready", "attached"])
       expect(events[1]).toEqual({
         event: "attached",
@@ -268,7 +283,7 @@ describe("gateway protocol", () => {
             toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
           },
           { role: "assistant", kind: "reasoning", content: "private thought" },
-          { role: "assistant", content: "hi" },
+          { role: "assistant", content: "hi", forkIndex: 1 },
         ],
         page: { has_more_before: true, before_cursor: "older-1" },
       })))
@@ -284,10 +299,11 @@ describe("gateway protocol", () => {
             content: "read_file",
             toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
           },
-          { role: "assistant", content: "hi" },
+          { role: "assistant", content: "hi", forkIndex: 1 },
         ],
         hasMoreBefore: true,
         beforeCursor: "older-1",
+        userMessageOffset: 0,
       })
       expect(requested).toContain("before=newer-page")
     } finally {
@@ -318,6 +334,7 @@ describe("gateway protocol", () => {
         estimatedSessionTokens: 2176,
         archivedSummary: "Older work was compacted.",
         archivedSummaryAt: "2026-08-13T10:00:00Z",
+        lastUsage: null,
       })
     } finally {
       globalThis.fetch = original
@@ -417,6 +434,63 @@ describe("gateway protocol", () => {
         pinned: true,
         archived: false,
       }])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("combines installed tools and saved sessions in one mention namespace", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes("cli-apps")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          apps: [{ name: "github", display_name: "GitHub", description: "Repository tools", installed: true }],
+        })))
+      }
+      if (url.includes("mcp-presets")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          presets: [{
+            name: "linear",
+            display_name: "Linear",
+            description: "Issue tracker",
+            installed: true,
+            configured: true,
+          }],
+        })))
+      }
+      if (url.includes("sidebar-state")) return Promise.resolve(new Response("{}"))
+      return Promise.resolve(new Response(JSON.stringify({
+        sessions: [{ key: "websocket:plan", title: "Release plan", preview: "Ship it" }],
+      })))
+    }) as typeof fetch
+
+    try {
+      expect(await fetchMentionCandidates("http://nanobot.test", "secret")).toEqual([
+        {
+          kind: "cli",
+          name: "github",
+          displayName: "GitHub",
+          description: "Repository tools",
+        },
+        {
+          kind: "mcp",
+          name: "linear",
+          displayName: "Linear",
+          description: "Issue tracker",
+        },
+        {
+          kind: "session",
+          name: "Release-plan",
+          displayName: "Release plan",
+          description: "Ship it",
+          session: {
+            name: "Release-plan",
+            session_key: "websocket:plan",
+            title: "Release plan",
+          },
+        },
+      ])
     } finally {
       globalThis.fetch = original
     }

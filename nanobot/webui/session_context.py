@@ -36,6 +36,18 @@ def session_context_payload(session: Session) -> dict[str, Any]:
     summary_tokens = (
         estimate_message_tokens({"role": "system", "content": summary}) if summary else 0
     )
+    raw_usage = session.metadata.get("_last_usage")
+    last_usage = (
+        {
+            key: value
+            for key, value in cast(dict[object, object], raw_usage).items()
+            if isinstance(key, str)
+            and type(value) is int
+            and value >= 0
+        }
+        if isinstance(raw_usage, dict)
+        else None
+    )
 
     return {
         "schema_version": 1,
@@ -48,4 +60,5 @@ def session_context_payload(session: Session) -> dict[str, Any]:
         "estimated_session_tokens": replay_tokens + summary_tokens,
         "archived_summary": summary_preview or None,
         "archived_summary_at": summary_at,
+        "last_usage": last_usage,
     }

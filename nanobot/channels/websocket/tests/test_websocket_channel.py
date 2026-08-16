@@ -1926,6 +1926,7 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
             event=TurnModelUpdatedEvent(
                 model="deepseek/deepseek-chat",
                 model_preset="Deep Research",
+                context_window_tokens=128_000,
             ),
         )
     )
@@ -1936,8 +1937,35 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "chat_id": "chat-1",
         "model_name": "deepseek/deepseek-chat",
         "model_preset": "Deep Research",
+        "context_window_tokens": 128_000,
     }
     chat_two.send.assert_not_awaited()
+
+
+def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
+    manager = MagicMock()
+    manager.read_session_metadata.return_value = {
+        "metadata": {
+            SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
+            "_last_usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 8,
+                "negative": -1,
+                "boolean": True,
+            },
+        }
+    }
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=manager),
+    )
+
+    assert channel._attached_model_fields("chat-1") == {
+        "model_preset": "Deep Research",
+        "usage": {"prompt_tokens": 120, "completion_tokens": 8},
+    }
 
 
 @pytest.mark.asyncio
@@ -2938,11 +2966,21 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         channel="websocket",
         chat_id="chat-1",
         content="",
-        event=TurnEndEvent(latency_ms=1500),
+        event=TurnEndEvent(
+            latency_ms=1500,
+            usage={"prompt_tokens": 80, "completion_tokens": 20, "cached_tokens": 40},
+            context_window_tokens=128_000,
+        ),
     ))
 
     assert _sent_ws_payloads(mock_ws) == [
-        {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500},
+        {
+            "event": "turn_end",
+            "chat_id": "chat-1",
+            "latency_ms": 1500,
+            "usage": {"prompt_tokens": 80, "completion_tokens": 20, "cached_tokens": 40},
+            "context_window_tokens": 128_000,
+        },
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
     ]
 
@@ -4787,6 +4825,7 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
     session = Session(
         key="websocket:context-route",
         messages=[{"role": "user", "content": "hello"}],
+        metadata={"_last_usage": {"prompt_tokens": 12, "completion_tokens": 3}},
     )
     manager = MagicMock()
     manager.read_session_snapshot.return_value = session
@@ -4801,7 +4840,9 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
     response = await gateway.http._handle_session_context_get(request, encoded)
 
     assert response.status_code == 200
-    assert json.loads(response.body.decode())["replay_messages"] == 1
+    body = json.loads(response.body.decode())
+    assert body["replay_messages"] == 1
+    assert body["last_usage"] == {"prompt_tokens": 12, "completion_tokens": 3}
     manager.read_session_snapshot.assert_called_once_with(session.key)
 
 

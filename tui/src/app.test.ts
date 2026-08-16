@@ -7,7 +7,7 @@ import {
 } from "@opentui/core/testing"
 
 import { NanobotTui, type AppOptions } from "./app"
-import type { SlashCommand } from "./protocol"
+import type { MessageOptions, SlashCommand } from "./protocol"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -55,13 +55,20 @@ async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<voi
   if (!predicate()) throw new Error(`condition was not met within ${timeout}ms`)
 }
 
-function client(sent: string[] = [], attached: string[] = [], newChats: string[] = []) {
+function client(
+  sent: string[] = [],
+  attached: string[] = [],
+  newChats: string[] = [],
+  sentOptions: MessageOptions[] = [],
+  forks: Array<{ source: string; before: number; title?: string }> = [],
+) {
   return {
     activeChatId: "chat",
     connect() {},
     close() {},
-    send(content: string) {
+    send(content: string, options: MessageOptions = {}) {
       sent.push(content)
+      sentOptions.push(options)
       return "turn"
     },
     attach(chatId: string) {
@@ -69,6 +76,9 @@ function client(sent: string[] = [], attached: string[] = [], newChats: string[]
     },
     newChat() {
       newChats.push("new")
+    },
+    forkChat(source: string, before: number, title?: string) {
+      forks.push({ source, before, ...(title ? { title } : {}) })
     },
   }
 }
@@ -135,8 +145,8 @@ describe("NanobotTui layout", () => {
 
     expect(occurrences(frame, "First **answer**.")).toBe(1)
     expect(occurrences(frame, "Second answer.")).toBe(1)
-    expect(frame).toContain("✓ read_file")
-    expect(frame).not.toContain("› read_file")
+    expect(frame).toContain("✓ Read  config.json")
+    expect(frame).not.toContain("› Read")
     expect(frame).not.toContain("private chain of thought")
     expect(frame).toContain("Ready · 1.2s")
   })
@@ -202,6 +212,68 @@ describe("NanobotTui layout", () => {
     await waitUntil(() => sent.length === 1)
     expect(sent).toEqual([pasted])
     expect(ui.composer.plainText).toBe("")
+  })
+
+  test("queues follow-ups and promotes the armed prompt to steering", async () => {
+    const sent: string[] = []
+    const sentOptions: MessageOptions[] = []
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(sent, [], [], sentOptions),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      ready: boolean
+      composer: TextareaRenderable
+      mentionCandidates: Array<Record<string, unknown>>
+    }
+    await waitUntil(() => ui.ready)
+    ui.mentionCandidates = [{
+      kind: "cli",
+      name: "github",
+      displayName: "GitHub",
+      description: "CLI",
+    }]
+
+    ui.composer.setText("first")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+
+    ui.composer.setText("ask @github next")
+    ui.composer.submit()
+    await waitUntil(() => ui.composer.plainText === "")
+    expect(sent).toEqual(["first"])
+
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 2)
+    expect(sentOptions[1]).toEqual({
+      cliApps: [{ name: "github" }],
+      mcpPresets: [],
+      sessionMentions: [],
+    })
+
+    ui.composer.setText("after this turn")
+    ui.composer.submit()
+    await waitUntil(() => ui.composer.plainText === "")
+    app.accept({
+      event: "error",
+      chat_id: "chat",
+      turn_id: "failed-steering",
+      reason: "steering rejected",
+    })
+    expect((app as unknown as { activeTurn: boolean }).activeTurn).toBeTrue()
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => ui.ready)
+    app.accept({ event: "goal_status", chat_id: "chat", status: "running", turn_id: "turn" })
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
+    await waitUntil(() => sent.length === 3)
+    expect(sent[2]).toBe("after this turn")
+    app.accept({ event: "goal_status", chat_id: "chat", status: "idle", turn_id: "prior" })
+    expect((app as unknown as { activeTurn: boolean }).activeTurn).toBeTrue()
   })
 
   test("recalls submitted prompts without stealing multiline cursor movement", async () => {
@@ -991,11 +1063,18 @@ describe("NanobotTui layout", () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
-    app.accept({ event: "turn_end", chat_id: "chat", latency_ms: 1700 })
+    app.accept({
+      event: "turn_end",
+      chat_id: "chat",
+      latency_ms: 1700,
+      usage: { prompt_tokens: 1200, completion_tokens: 80, cached_tokens: 900 },
+      context_window_tokens: 128_000,
+    })
     await setup.flush()
 
     const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
     expect(footer).toContain("Ready · 1.7s")
+    expect(footer).toContain("↑1.2k ↓80")
     expect(footer).toContain("enter send")
     expect(footer).not.toContain("1.7senter")
 
@@ -1205,7 +1284,7 @@ describe("NanobotTui layout", () => {
 
     expect(frame).toMatch(/Working\s+0s/u)
     expect(frame).not.toMatch(/[◐◓◑◒⠋⠙⠹⠸]/u)
-    expect(frame).toContain("› exec")
+    expect(frame).toContain("› Command  pwd")
     app.accept({ event: "turn_end", chat_id: "chat" })
   })
 
