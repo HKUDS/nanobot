@@ -71,6 +71,7 @@ import { QueuePreview, type QueuePreviewTheme } from "./queue-preview"
 import { RuntimeControls } from "./runtime-controls"
 import {
   contextualFooterHints,
+  footerTelemetry,
   type FooterMode,
   type FooterHintTheme,
 } from "./footer-hints"
@@ -318,22 +319,6 @@ function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))
   if (seconds < 60) return `${seconds}s`
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`
-}
-
-function usageStatus(usage: TokenUsage | null): string {
-  if (!usage) return ""
-  const prompt = usage.prompt_tokens
-  const completion = usage.completion_tokens
-  const tokens = typeof prompt === "number" || typeof completion === "number"
-    ? `↑${formatTokenCount(prompt || 0)} ↓${formatTokenCount(completion || 0)}`
-    : typeof usage.total_tokens === "number" ? `${formatTokenCount(usage.total_tokens)} tok` : ""
-  const cached = typeof usage.cached_tokens === "number" && usage.cached_tokens > 0
-    ? `${formatTokenCount(usage.cached_tokens)} cached`
-    : ""
-  const cost = typeof usage.cost_usd === "number" && usage.cost_usd > 0
-    ? `$${usage.cost_usd < 0.01 ? usage.cost_usd.toFixed(4) : usage.cost_usd.toFixed(2)}`
-    : ""
-  return [tokens, cached, cost].filter(Boolean).join(" · ")
 }
 
 async function copyWithSystemClipboard(text: string): Promise<void> {
@@ -942,6 +927,9 @@ export class NanobotTui {
         }
         this.updateTitle()
         this.setActive(false)
+        // A synthetic/rehydrated turn may already be idle, in which case
+        // setActive(false) intentionally does not repaint the footer.
+        this.updateMeta()
         this.readyDetail = typeof event.latency_ms === "number"
           ? `${(event.latency_ms / 1000).toFixed(1)}s`
           : ""
@@ -1120,9 +1108,7 @@ export class NanobotTui {
         ? "New output · Ctrl+End latest"
         : "History · Ctrl+End latest"
     }
-    const usage = usageStatus(this.lastUsage)
-    const suffix = [detail, usage].filter(Boolean).join(" · ")
-    if (suffix) return `Ready · ${suffix}`
+    if (detail) return `Ready · ${detail}`
     return this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
   }
 
@@ -1429,6 +1415,14 @@ export class NanobotTui {
       : this.contextPanel.visible ? "context"
       : this.transcriptNavigation.awayFromBottom ? "history"
       : "ready"
+    if (mode === "ready") {
+      this.meta.content = footerTelemetry(
+        this.lastUsage,
+        this.renderer.width,
+        footerHintTheme(this.palette),
+      )
+      return
+    }
     this.meta.content = contextualFooterHints(
       mode,
       this.renderer.width,
@@ -1955,6 +1949,7 @@ export class NanobotTui {
       this.lastUsage = context.lastUsage || this.lastUsage
       this.updateTitle()
       if (!this.activeTurn) this.status.content = this.readyStatus()
+      this.updateMeta()
     } catch {
       // Keep the last known estimate; it is intentionally informational.
     }

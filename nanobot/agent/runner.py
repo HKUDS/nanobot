@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import time
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -932,6 +933,27 @@ class AgentRunner:
 
         progress_state: dict[str, bool] | None = None
         active_hosted_tools: dict[str, dict[str, Any]] = {}
+        request_started_at = 0.0
+        first_output_at: float | None = None
+        generation_started_at: float | None = None
+        generation_elapsed_s = 0.0
+
+        def _generation_delta(delta: str) -> None:
+            nonlocal first_output_at, generation_started_at
+            if not delta:
+                return
+            now = time.perf_counter()
+            if first_output_at is None:
+                first_output_at = now
+            if generation_started_at is None:
+                generation_started_at = now
+
+        def _pause_generation() -> None:
+            nonlocal generation_elapsed_s, generation_started_at
+            if generation_started_at is None:
+                return
+            generation_elapsed_s += max(0.0, time.perf_counter() - generation_started_at)
+            generation_started_at = None
 
         async def _provider_tool_event(event: dict[str, Any]) -> None:
             if event.get("kind") != "hosted_tool":
@@ -950,6 +972,7 @@ class AgentRunner:
             thinking_buf = ""
 
             async def _stream(delta: str) -> None:
+                _generation_delta(delta)
                 if delta:
                     context.streamed_content = True
                 await hook.on_stream(context, delta)
@@ -958,6 +981,7 @@ class AgentRunner:
                 nonlocal thinking_buf
                 if not delta:
                     return
+                _generation_delta(delta)
                 prev_clean = strip_reasoning_tags(thinking_buf)
                 thinking_buf += delta
                 new_clean = strip_reasoning_tags(thinking_buf)
@@ -967,6 +991,7 @@ class AgentRunner:
                     await hook.emit_reasoning(incremental)
 
             async def _stream_recover() -> None:
+                _pause_generation()
                 await hook.on_stream_end(context, resuming=True)
 
             coro = spec.runtime.provider.chat_stream_with_retry(
@@ -986,6 +1011,7 @@ class AgentRunner:
                 nonlocal stream_buf
                 if not delta:
                     return
+                _generation_delta(delta)
                 prev_clean = strip_think(stream_buf)
                 stream_buf += delta
                 new_clean = strip_think(stream_buf)
@@ -1027,6 +1053,7 @@ class AgentRunner:
             if is_streaming_request and timeout_s is not None
             else timeout_s
         )
+        request_started_at = time.perf_counter()
         try:
             response = (
                 await coro if outer_timeout_s is None
@@ -1045,6 +1072,11 @@ class AgentRunner:
                     finish_reason="error",
                     error_kind="timeout",
                 )
+        _pause_generation()
+        if first_output_at is not None:
+            response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
+        if generation_elapsed_s > 0:
+            response.generation_ms = max(1, round(generation_elapsed_s * 1000))
         # chat_stream_with_retry may recover internally, so only fail unfinished
         # hosted calls after the provider returns its final error response.
         if response.finish_reason == "error":
@@ -1288,10 +1320,18 @@ class AgentRunner:
         if total > 0:
             usage["total_tokens"] = total
             usage.setdefault("provider_tokens", total)
-            return usage
-        if response.finish_reason == "error":
+        elif response.finish_reason == "error":
             return {}
-        return self._estimate_response_usage(spec, messages, response)
+        else:
+            usage = self._estimate_response_usage(spec, messages, response)
+        completion = usage.get("completion_tokens", 0)
+        if response.generation_ms is not None and completion > 0:
+            usage["generation_ms"] = response.generation_ms
+            usage["measured_completion_tokens"] = completion
+        if response.ttft_ms is not None:
+            usage["ttft_ms"] = response.ttft_ms
+            usage["timed_requests"] = 1
+        return usage
 
     def _estimate_response_usage(
         self,

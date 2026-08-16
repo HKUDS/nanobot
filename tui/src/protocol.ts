@@ -181,6 +181,10 @@ export interface TokenUsage {
   provider_tokens?: number
   estimated_tokens?: number
   cost_usd?: number
+  generation_ms?: number
+  measured_completion_tokens?: number
+  ttft_ms?: number
+  timed_requests?: number
 }
 
 export interface SessionContextSnapshot {
@@ -325,6 +329,10 @@ function isTokenUsage(value: unknown): value is TokenUsage {
     "provider_tokens",
     "estimated_tokens",
     "cost_usd",
+    "generation_ms",
+    "measured_completion_tokens",
+    "ttft_ms",
+    "timed_requests",
   ].every((key) => optional(value[key], "number"))
 }
 

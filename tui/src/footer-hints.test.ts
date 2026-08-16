@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { contextualFooterHints, footerHints } from "./footer-hints"
+import { contextualFooterHints, footerHints, footerTelemetry } from "./footer-hints"
 
 const theme = {
   accent: "#EF8E30",
@@ -21,30 +21,39 @@ describe("footerHints", () => {
     expect(result.chunks[3]?.fg?.toInts().slice(0, 3)).toEqual([248, 113, 113])
   })
 
-  test("adapts the active-turn vocabulary to available width", () => {
-    const wide = contextualFooterHints("active", 100, theme, "linux")
-    const compact = contextualFooterHints("active", 72, theme, "linux")
+  test("keeps passive composer modes free of permanent instructions", () => {
+    const ready = contextualFooterHints("ready", 100, theme, "linux")
+    const active = contextualFooterHints("active", 100, theme, "darwin")
 
-    expect(wide.chunks.map(({ text }) => text).join(""))
-      .toBe("enter steer · tab queue · alt+↑ edit · ctrl+c stop")
-    expect(compact.chunks.map(({ text }) => text).join(""))
-      .toBe("enter steer · tab queue · ctrl+c stop")
+    expect(ready.chunks).toHaveLength(0)
+    expect(active.chunks).toHaveLength(0)
   })
 
-  test("uses the native Option symbol on macOS", () => {
-    const result = contextualFooterHints("active", 100, theme, "darwin")
+  test("shows measured throughput, cache ratio, token counts, and TTFT", () => {
+    const result = footerTelemetry({
+      prompt_tokens: 1200,
+      completion_tokens: 80,
+      cached_tokens: 900,
+      generation_ms: 1600,
+      measured_completion_tokens: 80,
+      ttft_ms: 500,
+      timed_requests: 2,
+    }, 120, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("enter steer · tab queue · ⌥↑ edit · ctrl+c stop")
+      .toBe("50 tok/s · cache 75% · ↑1.2k ↓80 · TTFT 250ms")
+    expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
   })
 
-  test("advertises Shift+Enter when the terminal can distinguish it", () => {
-    const enhanced = contextualFooterHints("ready", 80, theme, "darwin", true)
-    const legacy = contextualFooterHints("ready", 80, theme, "darwin", false)
+  test("degrades telemetry instead of guessing missing provider metrics", () => {
+    const compact = footerTelemetry({
+      prompt_tokens: 1000,
+      completion_tokens: 20,
+      cached_tokens: 0,
+    }, 60, theme)
+    const unsupported = footerTelemetry({ prompt_tokens: 1000, completion_tokens: 20 }, 60, theme)
 
-    expect(enhanced.chunks.map(({ text }) => text).join(""))
-      .toBe("enter send · shift+enter newline · ctrl+c stop")
-    expect(legacy.chunks.map(({ text }) => text).join(""))
-      .toBe("enter send · ctrl+j newline · ctrl+c stop")
+    expect(compact.chunks.map(({ text }) => text).join("")).toBe("cache 0%")
+    expect(unsupported.chunks).toHaveLength(0)
   })
 })

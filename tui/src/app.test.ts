@@ -1335,7 +1335,7 @@ describe("NanobotTui layout", () => {
     expect(assistantMarker?.renderable.fg.toInts().slice(0, 3)).toEqual([161, 161, 170])
   })
 
-  test("keeps footer status and shortcuts visually separated", async () => {
+  test("uses the idle footer for model telemetry instead of permanent shortcuts", async () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
@@ -1343,23 +1343,32 @@ describe("NanobotTui layout", () => {
       event: "turn_end",
       chat_id: "chat",
       latency_ms: 1700,
-      usage: { prompt_tokens: 1200, completion_tokens: 80, cached_tokens: 900 },
+      usage: {
+        prompt_tokens: 1200,
+        completion_tokens: 80,
+        cached_tokens: 900,
+        generation_ms: 1600,
+        measured_completion_tokens: 80,
+        ttft_ms: 240,
+        timed_requests: 1,
+      },
       context_window_tokens: 128_000,
     })
     await setup.flush()
 
     const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
     expect(footer).toContain("Ready · 1.7s")
+    expect(footer).toContain("50 tok/s")
+    expect(footer).toContain("cache 75%")
     expect(footer).toContain("↑1.2k ↓80")
-    expect(footer).toContain("enter send")
-    expect(footer).not.toContain("1.7senter")
+    expect(footer).not.toContain("enter send")
 
     app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden" })
     await Bun.sleep(130)
     await setup.renderOnce()
     const activeFooter = setup.captureCharFrame().split("\n").find((line) => line.includes("Thinking")) || ""
-    expect(activeFooter).toContain("ctrl+c stop")
-    expect(activeFooter).not.toContain("enter send")
+    expect(activeFooter).not.toContain("ctrl+c stop")
+    expect(activeFooter).not.toContain("enter steer")
     app.accept({ event: "turn_end", chat_id: "chat" })
   })
 
