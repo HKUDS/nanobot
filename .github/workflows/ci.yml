@@ -96,10 +96,11 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Keep each test file in one worker while using both hosted-runner cores.
-            # Keep test names visible until a Windows-only control-event
-            # interruption can be attributed to its active worker/file.
-            pytest_args: "-n 2 --dist loadfile -vv"
+            # Real PowerShell/process-tree tests share the hosted runner's
+            # Windows console. Separate xdist workers can therefore deliver a
+            # control event across worker boundaries; run this compatibility
+            # matrix serially, as nanobot itself does in one client process.
+            pytest_args: "--full-trace"
 
     steps:
       - uses: actions/checkout@v4
