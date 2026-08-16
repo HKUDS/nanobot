@@ -479,6 +479,14 @@ export class NanobotTui {
       paddingRight: 1,
       flexDirection: "column",
       backgroundColor: RGBA.defaultBackground(),
+      onMouseDown: (event) => {
+        // Selection belongs to transcript/input content, never to empty chrome.
+        // Clearing it here prevents default-background cells from lingering as
+        // opaque blocks in terminals with differential repainting.
+        if (event.button === 0 && event.target && !event.target.selectable) {
+          this.renderer.clearSelection()
+        }
+      },
     })
     this.title = new BoxRenderable(renderer, {
       id: "nanobot-tui-title",
@@ -496,6 +504,7 @@ export class NanobotTui {
       flexShrink: 0,
       truncate: true,
       fg: this.palette.muted,
+      selectable: false,
     })
     this.runtimeControls = new RuntimeControls(
       renderer,
@@ -553,6 +562,9 @@ export class NanobotTui {
       backgroundColor: composerSurface,
       focusedBackgroundColor: composerSurface,
       cursorColor: this.palette.accent,
+      // A steady line cursor avoids the block-cell trails produced by some
+      // terminals when a retained full-screen UI redraws around the composer.
+      cursorStyle: { style: "line", blinking: false },
       showCursor: true,
       keyBindings: [
         { name: "return", shift: true, action: "newline" },
@@ -586,6 +598,7 @@ export class NanobotTui {
       minWidth: 0,
       flexGrow: 1,
       flexShrink: 1,
+      selectable: false,
     })
     this.meta = new TextRenderable(renderer, {
       id: "nanobot-tui-meta",
@@ -594,6 +607,7 @@ export class NanobotTui {
       height: 1,
       width: "auto",
       flexShrink: 1,
+      selectable: false,
     })
 
     const statusRow = new BoxRenderable(renderer, {

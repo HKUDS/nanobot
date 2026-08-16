@@ -81,6 +81,7 @@ export class RuntimeControls {
       height: 1,
       flexShrink: 0,
       fg: theme.faint,
+      selectable: false,
     })
     this.render()
   }
@@ -159,6 +160,7 @@ export class RuntimeControls {
       height: 1,
       flexShrink: id === "model" ? 1 : 0,
       fg: this.theme.muted,
+      selectable: false,
       onMouseOver: () => { text.fg = this.theme.accent },
       onMouseOut: () => this.renderColors(),
       onMouseDown: (event) => {

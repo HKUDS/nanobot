@@ -119,6 +119,7 @@ export class PickerMenu<T> {
         width: "100%",
         height: 1,
         fg: this.theme.muted,
+        selectable: false,
       }))
       return
     }
@@ -131,6 +132,7 @@ export class PickerMenu<T> {
         height: 1,
         wrapMode: "none",
         fg: selected ? this.theme.text : this.theme.muted,
+        selectable: false,
         ...(selected && this.theme.selectedBackground
           ? { backgroundColor: RGBA.fromHex(this.theme.selectedBackground) }
           : {}),

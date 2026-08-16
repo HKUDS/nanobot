@@ -646,13 +646,28 @@ describe("NanobotTui layout", () => {
       runtimeControls: {
         modelText: TextRenderable
         accessText: TextRenderable
+        contextText: TextRenderable
         visible: boolean
         menuRoot: { getChildren(): unknown[] }
       }
+      titleText: TextRenderable
+      status: TextRenderable
+      meta: TextRenderable
     }
 
     try {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.renderOnce()
+      expect(setup.renderer.getCursorState()).toMatchObject({
+        style: "line",
+        blinking: false,
+      })
+      expect(ui.runtimeControls.modelText.selectable).toBe(false)
+      expect(ui.runtimeControls.accessText.selectable).toBe(false)
+      expect(ui.runtimeControls.contextText.selectable).toBe(false)
+      expect(ui.titleText.selectable).toBe(false)
+      expect(ui.status.selectable).toBe(false)
+      expect(ui.meta.selectable).toBe(false)
       app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
       await setup.flush()
       await setup.mockMouse.click(
@@ -662,6 +677,7 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => ui.runtimeControls.visible)
       await setup.flush()
       const modelRows = ui.runtimeControls.menuRoot.getChildren() as TextRenderable[]
+      expect(modelRows.every((row) => !row.selectable)).toBe(true)
       const fast = modelRows.find((row) => row.plainText.includes("fast"))
       if (!fast) throw new Error("fast model row was not rendered")
       await setup.mockMouse.click(fast.x + 2, fast.y)
@@ -1428,6 +1444,24 @@ describe("NanobotTui layout", () => {
     await setup.flush()
 
     expect(copied).toBe("selected answer")
+    expect(setup.renderer.getSelection()).toBeNull()
+  })
+
+  test("clears transcript selection when clicking non-content chrome", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const status = (app as unknown as { status: TextRenderable }).status
+    app.accept({ event: "delta", chat_id: "chat", text: "selectable answer" })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    await setup.flush()
+
+    const rows = setup.captureCharFrame().split("\n")
+    const y = rows.findIndex((row) => row.includes("selectable answer"))
+    const x = rows[y]?.indexOf("selectable answer") ?? -1
+    await setup.mockMouse.drag(x, y, x + "selectable answer".length, y)
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBe("selectable answer")
+
+    await setup.mockMouse.click(status.x, status.y)
     expect(setup.renderer.getSelection()).toBeNull()
   })
 
