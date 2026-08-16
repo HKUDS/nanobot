@@ -21,6 +21,7 @@ ALLOWED_FRONTMATTER_KEYS = {
     "always",
     "license",
     "allowed-tools",
+    "disable-model-invocation",
 }
 ALLOWED_RESOURCE_DIRS = {"scripts", "references", "assets"}
 PLACEHOLDER_MARKERS = ("[todo", "todo:")
@@ -186,6 +187,14 @@ def validate_skill(skill_path: str | Path) -> tuple[bool, str]:
     always = frontmatter.get("always")
     if always is not None and not isinstance(always, bool):
         return False, f"'always' must be a boolean, got {type(always).__name__}"
+
+    disable_model_invocation = frontmatter.get("disable-model-invocation")
+    if disable_model_invocation is not None and not isinstance(disable_model_invocation, bool):
+        return (
+            False,
+            "'disable-model-invocation' must be a boolean, "
+            f"got {type(disable_model_invocation).__name__}",
+        )
 
     for child in skill_path.iterdir():
         if child.name == "SKILL.md":

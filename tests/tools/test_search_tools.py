@@ -795,3 +795,29 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
 
     assert "alpha" not in prompt
     assert "beta" in prompt
+
+
+def test_subagent_prompt_omits_manual_only_skills(tmp_path: Path) -> None:
+    bus = MessageBus()
+    skill_dir = tmp_path / "skills" / "deploy"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: deploy\n"
+        "description: Deploy the current project.\n"
+        "disable-model-invocation: true\n"
+        "---\n\n"
+        "# Deploy\n\nRun the private deployment workflow.\n",
+        encoding="utf-8",
+    )
+
+    mgr = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=4096,
+    )
+
+    prompt = mgr._build_subagent_prompt()
+
+    assert "Deploy the current project." not in prompt
+    assert "private deployment workflow" not in prompt
