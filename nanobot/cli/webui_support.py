@@ -443,6 +443,7 @@ def _attach_to_background_gateway(
     runtime: "GatewayRuntime",
     *,
     poll_hook: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Keep a WebUI launcher attached without taking ownership of the gateway."""
     _print_webui_foreground_lifecycle(attached=True)
@@ -450,7 +451,7 @@ def _attach_to_background_gateway(
         while runtime.status().running:
             if poll_hook is not None:
                 poll_hook()
-            time.sleep(0.5)
+            sleep(0.5)
     except KeyboardInterrupt:
         console.print("\n[yellow]WebUI launcher detached.[/yellow]")
         return

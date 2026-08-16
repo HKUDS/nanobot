@@ -2565,7 +2565,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     assert seen["open_kwargs"] == {"wait": False}
 
 
-def test_attach_to_background_gateway_detaches_on_ctrl_c(monkeypatch, capsys) -> None:
+def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys) -> None:
     stopped = False
 
     class _FakeRuntime:
@@ -2580,9 +2580,7 @@ def test_attach_to_background_gateway_detaches_on_ctrl_c(monkeypatch, capsys) ->
     def _interrupt(_seconds: float) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("nanobot.cli.webui_support.time.sleep", _interrupt)
-
-    cli_webui_support._attach_to_background_gateway(_FakeRuntime())
+    cli_webui_support._attach_to_background_gateway(_FakeRuntime(), sleep=_interrupt)
 
     assert stopped is False
     output = capsys.readouterr().out
