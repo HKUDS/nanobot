@@ -507,7 +507,9 @@ export class NanobotTui {
         modelPreset: this.modelPreset,
         workspace: options.workspace,
         access: options.access,
-        available: () => ({ ready: this.ready, active: this.activeTurn }),
+        // Runtime settings are session state. Changing them during a turn is
+        // safe and takes effect when the next provider call starts.
+        available: () => this.ready,
         beforeOpen: () => this.closeTransientMenus(),
         refreshScope: () => this.refreshSessionMetadata(this.client.activeChatId),
         onModel: (preset) => this.sendGatewayCommand(`/model ${preset}`, "side_channel", true),

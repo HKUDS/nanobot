@@ -49,6 +49,12 @@ export class PickerMenu<T> {
       paddingRight: 1,
       backgroundColor: RGBA.defaultBackground(),
       visible: false,
+      onMouseDown: (event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        event.stopPropagation()
+        this.renderer.clearSelection()
+      },
     })
   }
 
@@ -138,6 +144,7 @@ export class PickerMenu<T> {
           if (event.button !== 0) return
           event.preventDefault()
           event.stopPropagation()
+          this.renderer.clearSelection()
           this.selected = index
           this.options.onSelect?.(item)
         },

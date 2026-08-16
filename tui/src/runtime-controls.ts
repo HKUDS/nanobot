@@ -27,7 +27,7 @@ interface RuntimeControlsOptions {
   modelPreset: string
   workspace: string
   access: string
-  available: () => { ready: boolean; active: boolean }
+  available: () => boolean
   beforeOpen: () => void
   refreshScope: () => Promise<void>
   onModel: (name: string) => void
@@ -165,6 +165,7 @@ export class RuntimeControls {
         if (event.button !== 0) return
         event.preventDefault()
         event.stopPropagation()
+        this.renderer.clearSelection()
         open()
       },
     })
@@ -199,7 +200,7 @@ export class RuntimeControls {
   }
 
   private async openModel(): Promise<void> {
-    if (!this.canOpen("Model")) return
+    if (!this.canOpen()) return
     try {
       await this.load(true)
     } catch (error) {
@@ -222,7 +223,7 @@ export class RuntimeControls {
   }
 
   private async openAccess(): Promise<void> {
-    if (!this.canOpen("Access")) return
+    if (!this.canOpen()) return
     try {
       await Promise.all([this.load(true), this.options.refreshScope()])
     } catch (error) {
@@ -250,12 +251,9 @@ export class RuntimeControls {
     this.opened()
   }
 
-  private canOpen(label: string): boolean {
-    const state = this.options.available()
-    if (state.ready && !state.active) return true
-    this.options.onStatus(state.active
-      ? `${label} can be changed between turns`
-      : "Preparing chat…")
+  private canOpen(): boolean {
+    if (this.options.available()) return true
+    this.options.onStatus("Preparing chat…")
     return false
   }
 

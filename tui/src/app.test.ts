@@ -653,6 +653,7 @@ describe("NanobotTui layout", () => {
 
     try {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
       await setup.flush()
       await setup.mockMouse.click(
         ui.runtimeControls.modelText.x + 2,
@@ -682,6 +683,8 @@ describe("NanobotTui layout", () => {
         access_mode: "full",
         restrict_to_workspace: false,
       }])
+      expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(true)
+      app.accept({ event: "goal_status", chat_id: "chat", status: "idle" })
     } finally {
       globalThis.fetch = original
     }
