@@ -2523,9 +2523,15 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
         def __init__(self, **kwargs) -> None:
             seen["runtime_kwargs"] = kwargs
             self.paths = kwargs["paths"]
+            self.status_calls = 0
 
         def status(self):
-            return SimpleNamespace(running=True)
+            self.status_calls += 1
+            # The command checks during config refresh and once more before
+            # delegating to the attach helper.
+            # If that helper is not patched as intended, make its polling loop
+            # terminate instead of hanging the Windows test worker forever.
+            return SimpleNamespace(running=self.status_calls <= 2)
 
         def start_background(self, options):
             return SimpleNamespace(

@@ -276,6 +276,8 @@ def test_restart_does_not_detach_a_foreground_gateway(tmp_path, monkeypatch):
 
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
     stopped: list[int] = []
 
     def stop(*, timeout_s: int):
@@ -327,6 +329,8 @@ def test_on_demand_lifetime_is_recorded_before_the_gateway_spawns(tmp_path, monk
 
 def test_explicit_background_gateway_survives_the_last_client(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
     stopped: list[int] = []
     monkeypatch.setattr(
         runtime,
@@ -346,6 +350,8 @@ def test_explicit_background_gateway_survives_the_last_client(tmp_path, monkeypa
 
 def test_failed_last_client_shutdown_remains_retryable(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
     monkeypatch.setattr(
         runtime,
         "stop",
@@ -466,7 +472,7 @@ def test_posix_process_identity_includes_start_time_and_accepts_legacy_state(
     monkeypatch,
 ):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
-    monkeypatch.setattr("nanobot.process_runtime.os.getpgid", lambda _pid: 42)
+    monkeypatch.setattr("nanobot.process_runtime.os.getpgid", lambda _pid: 42, raising=False)
     monkeypatch.setattr(runtime, "_posix_process_started_at", lambda _pid: "987654")
 
     assert runtime.process_identity(12345) == "42:987654"
