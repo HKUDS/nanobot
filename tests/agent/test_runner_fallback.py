@@ -423,6 +423,19 @@ class TestFallbackWhenPrimaryRaises:
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
 
+    @pytest.mark.asyncio
+    async def test_authentication_exception_message_is_classified(self) -> None:
+        primary = _RaisingProvider("primary")
+
+        response, exception = await FallbackProvider._call_provider(
+            lambda provider, kwargs: provider.chat(**kwargs),
+            primary,
+            {},
+        )
+
+        assert exception is primary._exc
+        assert response.error_kind == "authentication"
+
     @pytest.mark.parametrize(
         "exc",
         [
