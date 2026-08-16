@@ -387,18 +387,26 @@ def _run_gateway(
             raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
 
-    # Self-heal the gateway state file with the current PID after any restart.
+    # Use the same runtime identity for foreground and managed gateway processes.
     from nanobot.config.loader import get_config_path
-    from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths
+    from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
     config_path = str(get_config_path().resolve(strict=False))
-    GatewayRuntime.refresh_state_pid(
+    gateway_workspace = (
+        str(config.workspace_path)
+        if not is_default_workspace(config.workspace_path)
+        else None
+    )
+    gateway_runtime = GatewayRuntime(
         paths=GatewayRuntimePaths.for_instance(
-            workspace=str(config.workspace_path)
-            if not is_default_workspace(config.workspace_path)
-            else None,
+            workspace=gateway_workspace,
             config_path=config_path,
         )
+    )
+    gateway_start_options = GatewayStartOptions(
+        port=port,
+        workspace=gateway_workspace,
+        config_path=config_path,
     )
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -946,4 +954,8 @@ def _run_gateway(
             finally:
                 restore_shutdown_handlers()
 
-    asyncio.run(run())
+    gateway_runtime.claim_current_process(gateway_start_options)
+    try:
+        asyncio.run(run())
+    finally:
+        gateway_runtime.release_current_process()

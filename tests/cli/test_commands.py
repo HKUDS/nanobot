@@ -2658,6 +2658,10 @@ def test_webui_foreground_reports_an_existing_gateway_without_leaking_secret(
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "nanobot.cli.webui_support._gateway_health_ready",
+        lambda *_args, **_kwargs: True,
+    )
     monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: False)
 
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])

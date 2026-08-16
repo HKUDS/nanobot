@@ -11,6 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -101,6 +102,33 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
 
     def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
         return build_gateway_command(self.python_executable, options)
+
+    def claim_current_process(self, options: ProcessStartOptions) -> None:
+        """Publish the running foreground gateway for local client discovery."""
+        with self._lifecycle_lock():
+            state = self._read_state() or {}
+            pid = os.getpid()
+            state.update(
+                {
+                    "pid": pid,
+                    "identity": self._process_identity(pid),
+                    "started_at": datetime.now(UTC).isoformat(),
+                    "platform": self.platform_name,
+                    "port": options.port,
+                    "workspace": options.workspace,
+                    "config_path": options.config_path,
+                    "command": self._build_child_command(options),
+                    "log_path": str(self.paths.log_path),
+                }
+            )
+            self._write_state(state)
+
+    def release_current_process(self) -> None:
+        """Remove this foreground gateway's state without touching a replacement."""
+        with self._lifecycle_lock():
+            state = self._read_state()
+            if state and self._record_matches_process(state, os.getpid()):
+                self._clear_state()
 
     def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> ProcessResult:
         """Restart an existing gateway without creating a new persistent instance."""

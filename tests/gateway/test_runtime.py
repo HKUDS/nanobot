@@ -104,6 +104,48 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     assert state["port"] == 18790
 
 
+def test_foreground_gateway_claim_is_discoverable_and_released(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Darwin",
+        python_executable="/python",
+    )
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 54321)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    options = GatewayStartOptions(
+        port=18790,
+        workspace="/tmp/workspace",
+        config_path="/tmp/config.json",
+    )
+
+    runtime.claim_current_process(options)
+
+    status = runtime.status()
+    assert status.running is True
+    assert status.pid == os.getpid()
+    assert status.port == 18790
+    assert status.command == tuple(runtime._build_child_command(options))
+
+    runtime.release_current_process()
+
+    assert runtime.status().running is False
+    assert not runtime.paths.state_path.exists()
+
+
+def test_foreground_gateway_release_preserves_a_replacement_state(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    runtime.claim_current_process(GatewayStartOptions(port=18790))
+    replacement = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
+    replacement["pid"] = os.getpid() + 1
+    replacement["identity"] = replacement["pid"]
+    runtime.paths.state_path.write_text(json.dumps(replacement), encoding="utf-8")
+
+    runtime.release_current_process()
+
+    assert runtime.paths.state_path.exists()
+
+
 def test_stop_reaps_an_owned_child_without_consuming_the_shutdown_timeout(
     tmp_path,
     monkeypatch,
