@@ -96,9 +96,9 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests are run serially below. Keep
-            # them out of xdist so workers never share a Windows console.
-            pytest_args: "-n 2 --dist loadfile -vv --full-trace --ignore=tests/tools/test_exec_platform.py"
+            # Process lifecycle tests run serially below. Keep them out of
+            # xdist so workers never share Windows console or process state.
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/gateway/test_runtime.py --ignore=tests/tools/test_exec_platform.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -148,10 +148,11 @@ jobs:
           ${{ matrix.pytest_args }}
           --durations=25 --durations-min=1.0
 
-      - name: Run Windows process compatibility tests
-        if: always() && runner.os == 'Windows'
+      - name: Run Windows lifecycle compatibility tests
+        if: runner.os == 'Windows'
         run: >-
           uv run --no-sync python -m pytest
+          tests/gateway/test_runtime.py
           tests/tools/test_exec_platform.py
           --durations=25 --durations-min=1.0
 
