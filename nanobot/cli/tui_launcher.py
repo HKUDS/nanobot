@@ -279,16 +279,13 @@ def _ensure_gateway(
                 "stop that instance or use `nanobot agent --classic`"
             )
 
-        result = runtime.start_background(
+        result = lease.ensure_on_demand_gateway(
             GatewayStartOptions(
                 port=config.gateway.port,
                 workspace=workspace_override_path,
                 config_path=str(config_path),
             )
         )
-        started_here = result.ok
-        if started_here:
-            lease.mark_ephemeral()
         if not result.ok and result.message != "gateway_already_running":
             raise TuiUnavailableError(
                 f"could not start the local gateway ({result.message}); "
@@ -309,8 +306,6 @@ def _ensure_gateway(
                 break
             time.sleep(0.1)
 
-        if started_here:
-            runtime.stop(timeout_s=5)
         raise TuiUnavailableError(
             f"local gateway did not become ready; logs: {result.status.log_path}"
         )

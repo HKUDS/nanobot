@@ -36,6 +36,9 @@ class FakeRuntime:
             started_at="2026-06-22T00:00:00Z",
             port=18790,
             reason="running",
+            launch_mode="background",
+            lifetime="explicit",
+            clients=0,
         )
         self.started_options: GatewayStartOptions | None = None
         self.restarted_options: GatewayStartOptions | None = None
@@ -246,6 +249,29 @@ def test_gateway_background_reports_an_existing_persistent_gateway(tmp_path):
     assert "already running in persistent background mode" in result.stdout
 
 
+def test_gateway_background_does_not_claim_a_foreground_gateway(tmp_path):
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+    fake_runtime.status_value = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=fake_runtime.paths.state_path,
+        log_path=fake_runtime.paths.log_path,
+        launch_mode="foreground",
+    )
+
+    def already_running(_options: GatewayStartOptions) -> RuntimeResult:
+        return RuntimeResult(False, "gateway_already_running", fake_runtime.status_value)
+
+    fake_runtime.start_background = already_running  # type: ignore[method-assign]
+
+    result = runner.invoke(app, ["gateway", "--background"])
+
+    assert result.exit_code == 1
+    assert "cannot be" in result.stdout
+    assert "detached in place" in result.stdout
+    assert "Stop it in its current terminal" in result.stdout
+
+
 def test_gateway_rejects_conflicting_modes(tmp_path):
     app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
 
@@ -263,6 +289,9 @@ def test_gateway_status_uses_runtime(tmp_path):
     assert result.exit_code == 0
     assert "Running: yes" in result.stdout
     assert "PID: 12345" in result.stdout
+    assert "Launch Mode: background" in result.stdout
+    assert "Lifetime: explicit" in result.stdout
+    assert "Clients: 0" in result.stdout
 
 
 def test_gateway_logs_can_read_without_following(tmp_path):
@@ -328,6 +357,33 @@ def test_gateway_restart_does_not_create_a_persistent_gateway(tmp_path):
     assert result.exit_code == 1
     assert "there is nothing to restart" in result.stdout
     assert "nanobot gateway --background" in result.stdout
+
+
+def test_gateway_restart_explains_foreground_lifecycle(tmp_path):
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+
+    def foreground_restart(
+        _options: GatewayStartOptions, *, timeout_s: int
+    ) -> RuntimeResult:
+        fake_runtime.stop_timeout = timeout_s
+        return RuntimeResult(
+            False,
+            "gateway_foreground_restart_required",
+            GatewayStatus(
+                running=True,
+                pid=12345,
+                state_path=fake_runtime.paths.state_path,
+                log_path=fake_runtime.paths.log_path,
+                launch_mode="foreground",
+            ),
+        )
+
+    fake_runtime.restart = foreground_restart  # type: ignore[method-assign]
+
+    result = runner.invoke(app, ["gateway", "restart"])
+
+    assert result.exit_code == 1
+    assert "attached to a foreground terminal" in result.stdout
 
 
 def test_gateway_install_service_uses_service_installer(tmp_path):

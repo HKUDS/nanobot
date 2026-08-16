@@ -128,6 +128,10 @@ def create_gateway_app(
             console.print(f"Port: {status.port}")
         if status.started_at is not None:
             console.print(f"Started At: {status.started_at}")
+        if status.running:
+            console.print(f"Launch Mode: {status.launch_mode}")
+            console.print(f"Lifetime: {status.lifetime}")
+            console.print(f"Clients: {status.clients}")
         console.print(f"State: {status.state_path}")
         console.print(f"Logs: {status.log_path}")
 
@@ -176,6 +180,35 @@ def create_gateway_app(
                     loaded_config=cfg,
                 )
             )
+            if (
+                result.message == "gateway_already_running"
+                and result.status.launch_mode == "foreground"
+            ):
+                console.print(
+                    "[yellow]Gateway is already running in the foreground; "
+                    "an attached process cannot be detached in place.[/yellow]"
+                )
+                console.print(
+                    "[dim]Stop it in its current terminal, then run "
+                    "`nanobot gateway --background`.[/dim]"
+                )
+                print_status(result.status)
+                raise typer.Exit(1)
+            if (
+                result.message == "gateway_already_running"
+                and result.status.launch_mode == "unknown"
+                and result.status.lifetime == "explicit"
+            ):
+                console.print(
+                    "[yellow]Gateway is already running, but this older process did "
+                    "not record whether it is attached or detached.[/yellow]"
+                )
+                console.print(
+                    "[dim]Stop it first, then rerun `nanobot gateway --background` "
+                    "to establish an unambiguous lifecycle.[/dim]"
+                )
+                print_status(result.status)
+                raise typer.Exit(1)
             promoted = False
             if result.ok or result.message == "gateway_already_running":
                 promoted = GatewayClientLease(
@@ -184,7 +217,7 @@ def create_gateway_app(
                 ).mark_persistent()
             if result.ok:
                 console.print("[green]Gateway started in the background.[/green]")
-                print_status(result.status)
+                print_status(runtime.status())
                 return
             if result.message == "gateway_already_running":
                 if promoted:
@@ -201,7 +234,7 @@ def create_gateway_app(
                         "[yellow]Gateway is already running in persistent "
                         "background mode.[/yellow]"
                     )
-                print_status(result.status)
+                print_status(runtime.status())
                 return
             console.print(f"[yellow]Gateway was not started: {result.message}[/yellow]")
             print_status(result.status)
@@ -300,6 +333,17 @@ def create_gateway_app(
             console.print("[yellow]Gateway is not running; there is nothing to restart.[/yellow]")
             console.print(
                 "[dim]Start a persistent gateway with `nanobot gateway --background`.[/dim]"
+            )
+            print_status(result.status)
+            raise typer.Exit(1)
+        if result.message == "gateway_foreground_restart_required":
+            console.print(
+                "[yellow]Gateway is attached to a foreground terminal and cannot "
+                "be restarted as a background process.[/yellow]"
+            )
+            console.print(
+                "[dim]Restart it in that terminal, or stop it and run "
+                "`nanobot gateway --background`.[/dim]"
             )
             print_status(result.status)
             raise typer.Exit(1)

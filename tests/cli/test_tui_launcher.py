@@ -485,6 +485,12 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
                 status=SimpleNamespace(log_path=tmp_path / "gateway.log"),
             )
 
+        def start_on_demand(self, options: object) -> SimpleNamespace:
+            from nanobot.gateway import GatewayClientLease
+
+            GatewayClientLease(self, kind="test-tui").mark_ephemeral()
+            return self.start_background(options)
+
         def stop(self, *, timeout_s: int) -> SimpleNamespace:
             nonlocal stopped
             assert timeout_s == 20

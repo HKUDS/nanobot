@@ -255,6 +255,14 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         except KeyboardInterrupt:
             return 130
 
+    def process_identity(self, pid: int) -> str | int | None:
+        """Return an identity that changes when an operating-system PID is reused."""
+        return self._process_identity(pid)
+
+    def process_is_running(self, pid: int) -> bool:
+        """Return whether the recorded operating-system process is still live."""
+        return self._is_pid_running(pid)
+
     def _message(self, event: str) -> str:
         return f"{self.service_name}_{event}"
 
@@ -364,9 +372,36 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         if self.platform_name == "Windows":
             return _windows_process_identity(pid)
         try:
-            return os.getpgid(pid)
+            process_group = os.getpgid(pid)
         except OSError:
             return None
+        started_at = self._posix_process_started_at(pid)
+        return f"{process_group}:{started_at}" if started_at else process_group
+
+    def _posix_process_started_at(self, pid: int) -> str | None:
+        if self.platform_name == "Linux":
+            try:
+                stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            except OSError:
+                return None
+            closing_paren = stat.rfind(")")
+            fields = stat[closing_paren + 2 :].split() if closing_paren >= 0 else []
+            # /proc/<pid>/stat fields after comm begin at field 3; starttime is field 22.
+            return fields[19] if len(fields) > 19 else None
+        if self.platform_name == "Darwin":
+            try:
+                result = self._subprocess_run(
+                    ["ps", "-o", "lstart=", "-p", str(pid)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return None
+            started_at = getattr(result, "stdout", "").strip()
+            return started_at or None
+        return None
 
     def _record_matches_process(self, state: dict[str, Any] | None, pid: int) -> bool:
         if not state:
@@ -374,7 +409,13 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         recorded = state.get("identity")
         if recorded is None:
             return True
-        return recorded == self._process_identity(pid)
+        current = self._process_identity(pid)
+        if recorded == current:
+            return True
+        # Older POSIX state files stored only the process group id.
+        return isinstance(recorded, int) and isinstance(current, str) and current.startswith(
+            f"{recorded}:"
+        )
 
     def _read_state(self) -> dict[str, Any] | None:
         try:

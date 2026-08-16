@@ -121,7 +121,7 @@ nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bo
 The command never deletes the external store and refuses to overwrite a different existing
 workspace file. Back up both the config directory and workspace before changing versions.
 
-Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. Only an explicit `nanobot gateway --background` promotes it to persistent mode. `nanobot gateway restart` preserves the current lifecycle mode, and `nanobot gateway stop` ends either mode.
+Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. Only an explicit `nanobot gateway --background` promotes it to persistent mode. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 
 The default `--theme auto` mode probes the terminal's real foreground and background colors before first paint and follows supported live appearance changes. Use `--theme light` or `--theme dark` when a terminal or multiplexer does not report its colors reliably. The model preset and workspace access labels above the composer can be clicked to open their selectors; arrow keys, `Enter`, and `Esc` provide the same controls without a mouse. Access changes still pass through the gateway's local-trust and active-turn policy checks.
 
@@ -166,7 +166,7 @@ only when no other interactive client still holds it.
 | `nanobot gateway --workspace <path>` | Override workspace |
 | `nanobot gateway --config <path>` | Use a specific config file |
 | `nanobot gateway --background` | Start the gateway as a background process |
-| `nanobot gateway status` | Show the recorded background gateway PID, state file, and log file |
+| `nanobot gateway status` | Show PID, foreground/background launch mode, explicit/on-demand lifetime, live client count, state, and logs |
 | `nanobot gateway logs --no-follow` | Print recent background gateway logs and exit |
 | `nanobot gateway logs` | Follow background gateway logs |
 | `nanobot gateway restart` | Restart the recorded background gateway with the current config |

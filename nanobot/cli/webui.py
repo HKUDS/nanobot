@@ -234,16 +234,13 @@ def webui(
         config_path=config_arg,
     )
 
-    def ensure_shared_gateway(*, client_lease: GatewayClientLease | None = None) -> None:
+    def ensure_shared_gateway(*, client_lease: GatewayClientLease) -> None:
         """Start or refresh the one managed gateway shared by local clients."""
         _prepare_webui_bundle_for_gateway(
             runtime_config,
             mode="skip" if dev else webui_bundle_mode,
         )
-        result = runtime.start_background(start_options)
-        started_fresh = result.ok
-        if started_fresh and client_lease is not None:
-            client_lease.mark_ephemeral()
+        result = client_lease.ensure_on_demand_gateway(start_options)
         restarted = False
         restart_attempted = False
         if not result.ok and result.message == "gateway_already_running" and changed_webui:

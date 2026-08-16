@@ -1977,6 +1977,12 @@ def _patch_webui_managed_gateway(
             )
             return RuntimeResult(True, "gateway_started_background", status)
 
+        def start_on_demand(self, options):
+            from nanobot.gateway import GatewayClientLease
+
+            GatewayClientLease(self, kind="test-webui").mark_ephemeral()
+            return self.start_background(options)
+
         def status(self):
             return SimpleNamespace(running=self.running)
 
@@ -2527,6 +2533,8 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
                 message="gateway_already_running",
                 status=SimpleNamespace(log_path=self.paths.log_path),
             )
+
+        start_on_demand = start_background
 
         def restart(self, options, *, timeout_s: int):
             seen["restart_options"] = options

@@ -389,7 +389,13 @@ def _run_gateway(
 
     # Use the same runtime identity for foreground and managed gateway processes.
     from nanobot.config.loader import get_config_path
-    from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+    from nanobot.gateway.runtime import (
+        GatewayClientLease,
+        GatewayRuntime,
+        GatewayRuntimePaths,
+        GatewayStartOptions,
+        monitor_gateway_clients,
+    )
 
     config_path = str(get_config_path().resolve(strict=False))
     gateway_workspace = (
@@ -872,6 +878,14 @@ def _run_gateway(
                 finally:
                     await mcp_provider.aclose()
 
+            async def _monitor_local_clients() -> None:
+                orphaned = await monitor_gateway_clients(
+                    GatewayClientLease(gateway_runtime, kind="gateway-monitor"),
+                    shutdown_event,
+                )
+                if orphaned:
+                    logger.info("Last local client disappeared; stopping on-demand gateway")
+
             tasks = [
                 asyncio.create_task(
                     watch_config_file(
@@ -889,6 +903,10 @@ def _run_gateway(
                         is_channel_enabled=lambda name: channels.get_channel(name) is not None,
                     ),
                     name="nanobot-local-triggers",
+                ),
+                asyncio.create_task(
+                    _monitor_local_clients(),
+                    name="nanobot-gateway-client-monitor",
                 ),
             ]
             if health_server_enabled:
