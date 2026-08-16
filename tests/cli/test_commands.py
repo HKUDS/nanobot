@@ -2584,9 +2584,10 @@ def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys) -> None:
 
     assert stopped is False
     output = capsys.readouterr().out
-    assert "Closing the browser does not stop channels or automations" in output
-    assert "gateway stops only when the last local client exits" in output
-    assert "WebUI launcher detached" in output
+    rendered = " ".join(output.split())
+    assert "Closing the browser does not stop channels or automations" in rendered
+    assert "gateway stops only when the last local client exits" in rendered
+    assert "WebUI launcher detached" in rendered
 
 
 def test_attach_to_background_gateway_checks_owned_sidecar() -> None:
