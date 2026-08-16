@@ -384,16 +384,26 @@ def _print_foreground_port_conflict(
     gateway_host: str,
     gateway_port: int,
 ) -> None:
-    console.print(
-        "[red]Error: nanobot cannot start because one of its local ports is already in use.[/red]"
-    )
-    console.print(f"  WebUI: [cyan]{webui_url}[/cyan]")
+    gateway_running = _gateway_health_ready(gateway_host, gateway_port)
+    if gateway_running:
+        console.print(
+            "[yellow]A nanobot gateway is already running for this local instance.[/yellow]"
+        )
+    else:
+        console.print(
+            "[red]Error: nanobot cannot start because one of its local ports "
+            "is already in use.[/red]"
+        )
+    console.print(f"  WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
     console.print(
         f"  Gateway health: "
         f"[cyan]http://{_host_for_local_browser(gateway_host)}:{gateway_port}/health[/cyan]"
     )
     console.print()
-    console.print("If this is an existing nanobot instance, use it or stop it first:")
+    if gateway_running:
+        console.print("Use the existing instance, or stop it first:")
+    else:
+        console.print("If this is an existing nanobot instance, use it or stop it first:")
     console.print("  [cyan]nanobot gateway status[/cyan]")
     console.print("  [cyan]nanobot gateway stop[/cyan]")
     console.print(

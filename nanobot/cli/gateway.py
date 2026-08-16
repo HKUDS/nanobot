@@ -36,6 +36,15 @@ GatewayServiceFactory = Callable[[], Any]
 WebUIBundlePreparer = Callable[[Config, BuildMode], None]
 
 
+def _resolved_config_selector(config: str | None) -> Path:
+    """Return the one canonical config identity used by every local client."""
+    if config:
+        return Path(config).expanduser().resolve(strict=False)
+    from nanobot.config.loader import get_config_path
+
+    return get_config_path().resolve(strict=False)
+
+
 def create_gateway_app(
     *,
     console: Console,
@@ -73,12 +82,12 @@ def create_gateway_app(
     def runtime_for_instance(*, workspace: str | None = None, config: str | None = None):
         if runtime_factory is not None:
             return runtime_factory(workspace=workspace, config=config)
-        config_path = str(Path(config).expanduser().resolve(strict=False)) if config else None
+        resolved_config = _resolved_config_selector(config)
+        config_path = str(resolved_config)
         workspace_path = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        data_dir = Path(config_path).parent if config_path else None
         return GatewayRuntime(
             paths=GatewayRuntimePaths.for_instance(
-                data_dir=data_dir,
+                data_dir=resolved_config.parent,
                 workspace=workspace_path,
                 config_path=config_path,
             )
@@ -101,7 +110,7 @@ def create_gateway_app(
         loaded_config: Config | None = None,
     ) -> GatewayStartOptions:
         cfg = loaded_config or load_runtime_config(config, workspace)
-        resolved_config = str(Path(config).expanduser().resolve()) if config else None
+        resolved_config = str(_resolved_config_selector(config)) if config else None
         resolved_workspace = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
         return GatewayStartOptions(
             port=port if port is not None else cfg.gateway.port,

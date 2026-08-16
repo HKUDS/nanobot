@@ -6,12 +6,23 @@ import typer
 from rich.console import Console
 from typer.testing import CliRunner
 
-from nanobot.cli.gateway import create_gateway_app
+from nanobot.cli.gateway import _resolved_config_selector, create_gateway_app
 from nanobot.config.schema import Config
 from nanobot.gateway import GatewayRuntimePaths, GatewayStartOptions, GatewayStatus, RuntimeResult
 from nanobot.gateway.service import GatewayServiceOptions, GatewayServiceResult
 
 runner = CliRunner()
+
+
+def test_default_config_has_the_same_gateway_identity_when_explicit(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    assert _resolved_config_selector(None) == config_path
+    assert _resolved_config_selector(str(config_path)) == config_path
 
 
 class FakeRuntime:

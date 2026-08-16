@@ -2504,6 +2504,10 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "nanobot.cli.webui_support._gateway_health_ready",
+        lambda *_args, **_kwargs: True,
+    )
     monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         "nanobot.cli.webui._open_webui_browser",
@@ -2628,6 +2632,10 @@ def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Pat
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "nanobot.cli.webui_support._gateway_health_ready",
+        lambda *_args, **_kwargs: False,
+    )
     monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
     monkeypatch.setattr("nanobot.cli.webui._tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
@@ -2636,6 +2644,28 @@ def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Pat
     assert "nanobot cannot start because one of its local ports is already in use" in result.stdout
     assert "--port" in result.stdout
     assert "--gateway-port" in result.stdout
+
+
+def test_webui_foreground_reports_an_existing_gateway_without_leaking_secret(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        '{"channels":{"websocket":{"tokenIssueSecret":"do-not-leak"}}}',
+        encoding="utf-8",
+    )
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: False)
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+
+    assert result.exit_code == 1
+    assert "gateway is already running for this local instance" in result.stdout
+    assert "bootstrapSecret=<redacted>" in result.stdout
+    assert "do-not-leak" not in result.stdout
 
 
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
