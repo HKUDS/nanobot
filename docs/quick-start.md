@@ -79,7 +79,7 @@ Most other providers can say `not set`. This command validates local setup but d
 
 ## 4. Get the First Reply
 
-If the installer-started WebUI is no longer running, run `nanobot webui` again. Leave that terminal open; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it.
+If the installer-started WebUI is no longer running, run `nanobot webui` again. Leave that launcher open; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it.
 
 Send:
 
@@ -89,7 +89,7 @@ Hello!
 
 Any normal assistant answer is success. It proves that nanobot can load the config, reach the selected model, use the workspace, and serve the browser UI.
 
-Leave the terminal open while using the WebUI. If you prefer a managed background process, stop the foreground process with `Ctrl+C`, then run:
+Interactive WebUI and TUI launchers share one on-demand gateway. Closing one launcher leaves it running for the others; closing the last launcher stops it. If you prefer a persistent background process, press `Ctrl+C`, then run:
 
 ```bash
 nanobot gateway --background

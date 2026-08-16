@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from nanobot import __version__
 from nanobot.cli.runtime_config import _model_display
@@ -24,8 +24,11 @@ from nanobot.cli.webui_support import (
     _webui_endpoint_reachable,
     webui_bootstrap_secret,
 )
-from nanobot.config.paths import get_data_dir, is_default_workspace
+from nanobot.config.paths import get_data_dir
 from nanobot.config.schema import Config
+
+if TYPE_CHECKING:
+    from nanobot.gateway import GatewayClientLease
 
 
 class TuiUnavailableError(RuntimeError):
@@ -39,6 +42,7 @@ class TuiSessionError(ValueError):
 @dataclass(frozen=True)
 class _GatewayHandle:
     base_url: str
+    lease: GatewayClientLease | None = None
 
 
 def launch_tui(
@@ -58,35 +62,39 @@ def launch_tui(
         config_path=config_path,
         workspace_override=workspace_override,
     )
-    bootstrap = _fetch_bootstrap(
-        gateway.base_url,
-        secret=webui_bootstrap_secret(config),
-    )
-    env = os.environ.copy()
-    env.update(
-        {
-            "NANOBOT_TUI_WS_URL": _authenticated_ws_url(bootstrap),
-            "NANOBOT_TUI_API_URL": gateway.base_url,
-            "NANOBOT_TUI_API_TOKEN": str(bootstrap.get("api_token") or ""),
-            "NANOBOT_TUI_MODEL": _model_display(config)[0],
-            "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
-            "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
-            "NANOBOT_TUI_VERSION": __version__,
-            "NANOBOT_TUI_ACCESS": (
-                "workspace access" if config.tools.restrict_to_workspace else "full access"
-            ),
-            "NANOBOT_TUI_THEME": theme,
-        }
-    )
-    env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
-    if chat_id:
-        env["NANOBOT_TUI_CHAT_ID"] = chat_id
-    else:
-        env.pop("NANOBOT_TUI_CHAT_ID", None)
     try:
+        bootstrap = _fetch_bootstrap(
+            gateway.base_url,
+            secret=webui_bootstrap_secret(config),
+        )
+        env = os.environ.copy()
+        env.update(
+            {
+                "NANOBOT_TUI_WS_URL": _authenticated_ws_url(bootstrap),
+                "NANOBOT_TUI_API_URL": gateway.base_url,
+                "NANOBOT_TUI_API_TOKEN": str(bootstrap.get("api_token") or ""),
+                "NANOBOT_TUI_MODEL": _model_display(config)[0],
+                "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
+                "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
+                "NANOBOT_TUI_VERSION": __version__,
+                "NANOBOT_TUI_ACCESS": (
+                    "workspace access" if config.tools.restrict_to_workspace else "full access"
+                ),
+                "NANOBOT_TUI_THEME": theme,
+            }
+        )
+        env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
+        if chat_id:
+            env["NANOBOT_TUI_CHAT_ID"] = chat_id
+        else:
+            env.pop("NANOBOT_TUI_CHAT_ID", None)
         return subprocess.run(command, env=env, check=False).returncode
     except OSError as exc:
         raise TuiUnavailableError(f"could not start the native TUI: {exc}") from exc
+    finally:
+        lease = getattr(gateway, "lease", None)
+        if lease is not None:
+            lease.release()
 
 
 def _resolve_tui_command() -> list[str]:
@@ -232,7 +240,12 @@ def _ensure_gateway(
     config_path: Path,
     workspace_override: str | None,
 ) -> _GatewayHandle:
-    from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+    from nanobot.gateway import (
+        GatewayClientLease,
+        GatewayRuntime,
+        GatewayRuntimePaths,
+        GatewayStartOptions,
+    )
 
     base_url = _webui_browser_url(config).split("/#/", 1)[0].rstrip("/")
     workspace_override_path = (
@@ -240,65 +253,70 @@ def _ensure_gateway(
         if workspace_override
         else None
     )
-    effective_workspace = config.workspace_path.resolve(strict=False)
-    runtime_workspace = (
-        None if is_default_workspace(effective_workspace) else str(effective_workspace)
-    )
     runtime = GatewayRuntime(
         paths=GatewayRuntimePaths.for_instance(
             data_dir=config_path.parent,
-            workspace=runtime_workspace,
-            config_path=str(config_path),
-        )
-    )
-    status = runtime.status()
-    endpoint_reachable = _webui_endpoint_reachable(base_url)
-    if status.running:
-        if status.port not in {None, config.gateway.port}:
-            raise TuiUnavailableError(
-                "the matching gateway instance is running on a different port; "
-                "restart it or use `nanobot agent --classic`"
-            )
-        if endpoint_reachable:
-            return _GatewayHandle(base_url=base_url)
-    elif endpoint_reachable:
-        raise TuiUnavailableError(
-            "the configured gateway port belongs to a different nanobot instance; "
-            "stop that instance or use `nanobot agent --classic`"
-        )
-
-    result = runtime.start_background(
-        GatewayStartOptions(
-            port=config.gateway.port,
             workspace=workspace_override_path,
             config_path=str(config_path),
         )
     )
-    started_here = result.ok
-    if not result.ok and result.message != "gateway_already_running":
-        raise TuiUnavailableError(
-            f"could not start the local gateway ({result.message}); logs: {result.status.log_path}"
+    lease = GatewayClientLease(runtime, kind="tui")
+    lease.acquire()
+    try:
+        status = runtime.status()
+        endpoint_reachable = _webui_endpoint_reachable(base_url)
+        if status.running:
+            if status.port not in {None, config.gateway.port}:
+                raise TuiUnavailableError(
+                    "the matching gateway instance is running on a different port; "
+                    "restart it or use `nanobot agent --classic`"
+                )
+            if endpoint_reachable:
+                return _GatewayHandle(base_url=base_url, lease=lease)
+        elif endpoint_reachable:
+            raise TuiUnavailableError(
+                "the configured gateway port belongs to a different nanobot instance; "
+                "stop that instance or use `nanobot agent --classic`"
+            )
+
+        result = runtime.start_background(
+            GatewayStartOptions(
+                port=config.gateway.port,
+                workspace=workspace_override_path,
+                config_path=str(config_path),
+            )
         )
+        started_here = result.ok
+        if started_here:
+            lease.mark_ephemeral()
+        if not result.ok and result.message != "gateway_already_running":
+            raise TuiUnavailableError(
+                f"could not start the local gateway ({result.message}); "
+                f"logs: {result.status.log_path}"
+            )
 
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        if _webui_endpoint_reachable(base_url):
-            current = runtime.status()
-            if current.running and current.port in {None, config.gateway.port}:
-                return _GatewayHandle(base_url=base_url)
-            break
-        if not runtime.status().running and not _gateway_health_ready(
-            config.gateway.host,
-            config.gateway.port,
-        ):
-            break
-        time.sleep(0.1)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if _webui_endpoint_reachable(base_url):
+                current = runtime.status()
+                if current.running and current.port in {None, config.gateway.port}:
+                    return _GatewayHandle(base_url=base_url, lease=lease)
+                break
+            if not runtime.status().running and not _gateway_health_ready(
+                config.gateway.host,
+                config.gateway.port,
+            ):
+                break
+            time.sleep(0.1)
 
-    if started_here:
-        runtime.stop(timeout_s=5)
-    raise TuiUnavailableError(
-        f"local gateway did not become ready; logs: {result.status.log_path}"
-    )
+        if started_here:
+            runtime.stop(timeout_s=5)
+        raise TuiUnavailableError(
+            f"local gateway did not become ready; logs: {result.status.log_path}"
+        )
+    except BaseException:
+        lease.release(timeout_s=5)
+        raise
 
 
 def _fetch_bootstrap(base_url: str, *, secret: str) -> dict[str, Any]:

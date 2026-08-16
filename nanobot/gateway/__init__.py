@@ -1,6 +1,7 @@
 """Lightweight background runtime for the nanobot gateway."""
 
 from nanobot.gateway.runtime import (
+    GatewayClientLease,
     GatewayRuntime,
     GatewayRuntimePaths,
     GatewayStartOptions,
@@ -10,6 +11,7 @@ from nanobot.gateway.runtime import (
 )
 
 __all__ = [
+    "GatewayClientLease",
     "GatewayRuntime",
     "GatewayRuntimePaths",
     "GatewayStartOptions",

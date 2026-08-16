@@ -420,11 +420,13 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     """Explain how the browser and gateway lifecycles differ."""
     console.print()
     if attached:
-        console.print("[green]nanobot is attached to the existing gateway.[/green]")
+        console.print("[green]WebUI is attached to the shared gateway.[/green]")
     else:
-        console.print("[green]nanobot is running in this terminal.[/green]")
+        console.print("[green]WebUI is attached to the shared gateway.[/green]")
     console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
-    console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
+    console.print(
+        "[dim]Press Ctrl+C to detach; the gateway stops only when the last local client exits.[/dim]"
+    )
 
 
 def _attach_to_background_gateway(
@@ -432,7 +434,7 @@ def _attach_to_background_gateway(
     *,
     poll_hook: Callable[[], None] | None = None,
 ) -> None:
-    """Keep a foreground WebUI command attached to a managed gateway."""
+    """Keep a WebUI launcher attached without taking ownership of the gateway."""
     _print_webui_foreground_lifecycle(attached=True)
     try:
         while runtime.status().running:
@@ -440,13 +442,8 @@ def _attach_to_background_gateway(
                 poll_hook()
             time.sleep(0.5)
     except KeyboardInterrupt:
-        console.print("\n[yellow]Stopping nanobot...[/yellow]")
-        result = runtime.stop()
-        if result.ok or result.message == "gateway_not_running":
-            console.print("[green]Gateway stopped.[/green]")
-            return
-        console.print(f"[red]Gateway could not be stopped: {result.message}[/red]")
-        raise typer.Exit(1)
+        console.print("\n[yellow]WebUI launcher detached.[/yellow]")
+        return
 
     console.print("[yellow]Gateway stopped.[/yellow]")
 

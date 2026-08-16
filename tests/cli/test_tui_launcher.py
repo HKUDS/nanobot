@@ -79,12 +79,18 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     config.model_presets["Deep Research"] = ModelPresetConfig(model="openai/gpt-5.6")
     config.agents.defaults.model_preset = "Deep Research"
     captured: dict[str, str] = {}
+    released: list[bool] = []
+
+    class FakeLease:
+        def release(self) -> None:
+            released.append(True)
 
     monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._ensure_gateway",
         lambda *args, **kwargs: SimpleNamespace(
             base_url="http://127.0.0.1:8765",
+            lease=FakeLease(),
         ),
     )
     monkeypatch.setattr(
@@ -116,6 +122,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
     assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
     assert "NANOBOT_TUI_CHAT_ID" not in captured
+    assert released == [True]
 
 
 def test_explicit_tui_binary_must_exist(
@@ -451,12 +458,13 @@ def test_gateway_reuses_the_matching_managed_instance(
     assert gateway.base_url == "http://127.0.0.1:8765"
 
 
-def test_gateway_started_for_tui_remains_shared_after_launch(
+def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     config = Config()
     started = False
+    stopped = False
 
     class FakeRuntime:
         def __init__(self, *, paths: object) -> None:
@@ -477,8 +485,11 @@ def test_gateway_started_for_tui_remains_shared_after_launch(
                 status=SimpleNamespace(log_path=tmp_path / "gateway.log"),
             )
 
-        def stop(self, *, timeout_s: int) -> None:
-            raise AssertionError(f"shared gateway stopped with timeout {timeout_s}")
+        def stop(self, *, timeout_s: int) -> SimpleNamespace:
+            nonlocal stopped
+            assert timeout_s == 20
+            stopped = True
+            return SimpleNamespace(ok=True, message="gateway_stopped")
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
     monkeypatch.setattr(
@@ -494,3 +505,6 @@ def test_gateway_started_for_tui_remains_shared_after_launch(
 
     assert gateway.base_url == "http://127.0.0.1:8765"
     assert started is True
+    assert gateway.lease is not None
+    assert gateway.lease.release() is True
+    assert stopped is True

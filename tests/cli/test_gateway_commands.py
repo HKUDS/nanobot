@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from nanobot.cli.gateway import create_gateway_app
 from nanobot.config.schema import Config
-from nanobot.gateway import GatewayStartOptions, GatewayStatus, RuntimeResult
+from nanobot.gateway import GatewayRuntimePaths, GatewayStartOptions, GatewayStatus, RuntimeResult
 from nanobot.gateway.service import GatewayServiceOptions, GatewayServiceResult
 
 runner = CliRunner()
@@ -15,6 +15,7 @@ runner = CliRunner()
 
 class FakeRuntime:
     def __init__(self, tmp_path: Path):
+        self.paths = GatewayRuntimePaths.for_instance(data_dir=tmp_path)
         self.status_value = GatewayStatus(
             running=True,
             pid=12345,
@@ -200,6 +201,20 @@ def test_gateway_background_starts_detached_runtime(tmp_path):
     assert prepare_calls == [(config, "warn")]
 
 
+def test_gateway_background_adopts_an_existing_on_demand_gateway(tmp_path):
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+
+    def already_running(_options: GatewayStartOptions) -> RuntimeResult:
+        return RuntimeResult(False, "gateway_already_running", fake_runtime.status_value)
+
+    fake_runtime.start_background = already_running  # type: ignore[method-assign]
+
+    result = runner.invoke(app, ["gateway", "--background"])
+
+    assert result.exit_code == 0
+    assert "Gateway is already running in the background" in result.stdout
+
+
 def test_gateway_rejects_conflicting_modes(tmp_path):
     app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
 
@@ -230,6 +245,9 @@ def test_gateway_logs_can_read_without_following(tmp_path):
 
 def test_gateway_stop_treats_not_running_as_clean(tmp_path):
     app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+    lease_state = fake_runtime.paths.state_path.with_name("gateway.clients.json")
+    lease_state.parent.mkdir(parents=True, exist_ok=True)
+    lease_state.write_text('{"auto_stop": true, "clients": {}}', encoding="utf-8")
 
     def fake_stop(*, timeout_s: int) -> RuntimeResult:
         fake_runtime.stop_timeout = timeout_s
@@ -242,6 +260,7 @@ def test_gateway_stop_treats_not_running_as_clean(tmp_path):
     assert result.exit_code == 0
     assert "gateway_not_running" in result.stdout
     assert fake_runtime.stop_timeout == 3
+    assert not lease_state.exists()
 
 
 def test_gateway_restart_starts_background_runtime(tmp_path):

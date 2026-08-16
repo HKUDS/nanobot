@@ -207,7 +207,7 @@ def test_webui_restores_tty_before_loading_config(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(cli_webui, "_gateway_health_ready", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(cli_webui, "_webui_endpoint_reachable", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(cli_webui, "_tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(cli_webui, "_run_gateway", lambda *_args, **_kwargs: None)
+    _patch_webui_managed_gateway(monkeypatch)
 
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
 
@@ -1949,6 +1949,54 @@ def _patch_gateway_ports_free(monkeypatch) -> None:
     )
 
 
+def _patch_webui_managed_gateway(
+    monkeypatch,
+    seen: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Run WebUI CLI tests against a managed gateway without spawning a process."""
+    from nanobot.gateway import GatewayStatus, RuntimeResult
+
+    captured = seen if seen is not None else {}
+
+    class _FakeRuntime:
+        def __init__(self, **kwargs) -> None:
+            captured["runtime_kwargs"] = kwargs
+            self.paths = kwargs["paths"]
+            self.running = False
+
+        def start_background(self, options):
+            captured["start_options"] = options
+            self.running = True
+            status = GatewayStatus(
+                running=True,
+                pid=123,
+                state_path=Path("gateway.json"),
+                log_path=Path("gateway.log"),
+                port=options.port,
+                reason="running",
+            )
+            return RuntimeResult(True, "gateway_started_background", status)
+
+        def status(self):
+            return SimpleNamespace(running=self.running)
+
+        def stop(self, *, timeout_s: int):
+            captured["stop_timeout"] = timeout_s
+            self.running = False
+            return RuntimeResult(True, "gateway_stopped", self.status())
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.webui._prepare_webui_bundle_for_gateway",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.webui._attach_to_background_gateway",
+        lambda runtime, **_kwargs: captured.__setitem__("attached_runtime", runtime),
+    )
+    return captured
+
+
 def _patch_cli_command_runtime(
     monkeypatch,
     config: Config,
@@ -2125,11 +2173,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
         lambda path: seen.__setitem__("templates", path),
     )
 
-    def _fake_run_gateway(config: Config, **kwargs) -> None:
-        seen["gateway_config"] = config
-        seen["gateway_kwargs"] = kwargs
-
-    monkeypatch.setattr("nanobot.cli.webui._run_gateway", _fake_run_gateway)
+    _patch_webui_managed_gateway(monkeypatch, seen)
 
     result = runner.invoke(
         app,
@@ -2159,18 +2203,15 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert len(websocket["tokenIssueSecret"]) >= 32
     assert data["agents"]["defaults"]["workspace"] == str(workspace)
     assert seen["templates"] == workspace
-    assert seen["gateway_kwargs"] == {
-        "port": 18888,
-        "open_browser_url": None,
-        "webui_bundle_mode": "auto",
-        "unconfigured_provider_error": None,
-    }
+    options = seen["start_options"]
+    assert options.port == 18888
+    assert options.config_path == str(config_file.resolve(strict=False))
+    assert options.workspace == str(workspace.resolve(strict=False))
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
     assert "bootstrap secret was generated" in compact_output
     assert "channels.websocket.tokenIssueSecret" in compact_output
     assert "rerun without --no-open" in compact_output
-    assert "nanobot is running in this terminal" in compact_output
-    assert "Press Ctrl+C here to stop nanobot" in compact_output
+    assert "Last local client exited; the on-demand gateway was stopped" in compact_output
 
 
 def test_webui_dev_rejects_background_before_creating_config(tmp_path: Path) -> None:
@@ -2208,12 +2249,20 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
         finally:
             seen["dev_running"] = False
 
-    def fake_run_gateway(_config: Config, **kwargs) -> None:
-        assert seen["dev_running"] is True
-        seen["gateway_kwargs"] = kwargs
-
     monkeypatch.setattr("nanobot.cli.webui.run_webui_dev_server", fake_dev_server)
-    monkeypatch.setattr("nanobot.cli.webui._run_gateway", fake_run_gateway)
+    _patch_webui_managed_gateway(monkeypatch, seen)
+    monkeypatch.setattr(
+        "nanobot.cli.webui._attach_to_background_gateway",
+        lambda runtime, **kwargs: seen.update(
+            attached_runtime=runtime,
+            attach_kwargs=kwargs,
+            attached_while_dev_running=seen["dev_running"],
+        ),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.webui._open_webui_browser",
+        lambda url: seen.__setitem__("opened_url", url),
+    )
 
     result = runner.invoke(
         app,
@@ -2237,17 +2286,10 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     browser_url = dev_kwargs["browser_url"]
     assert isinstance(browser_url, str)
     assert browser_url.startswith("http://127.0.0.1:5173/#/?bootstrapSecret=")
-    gateway_kwargs = seen["gateway_kwargs"]
-    assert isinstance(gateway_kwargs, dict)
-    assert gateway_kwargs == {
-        "port": 18888,
-        "open_browser_url": browser_url,
-        "open_browser_ready_url": "http://127.0.0.1:8899/webui/bootstrap",
-        "webui_static_dist": False,
-        "webui_bundle_mode": "skip",
-        "unconfigured_provider_error": None,
-        "webui_dev_server": seen["dev_server"],
-    }
+    assert seen["start_options"].port == 18888
+    assert seen["attached_while_dev_running"] is True
+    assert seen["attach_kwargs"] == {"poll_hook": seen["dev_server"].ensure_running}
+    assert seen["opened_url"] == browser_url
     assert seen["dev_running"] is False
     assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
         r"\s+", " ", _strip_ansi(result.stdout)
@@ -2352,16 +2394,13 @@ def test_webui_yes_starts_first_run_without_provider_setup(monkeypatch, tmp_path
     )
     _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr(
-        "nanobot.cli.webui._run_gateway",
-        lambda config, **kwargs: seen.update(config=config, **kwargs),
-    )
+    _patch_webui_managed_gateway(monkeypatch, seen)
 
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
 
     assert result.exit_code == 0
     assert config_file.exists()
-    assert seen["unconfigured_provider_error"] == "No API key configured for provider 'custom'."
+    assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
     assert "Configure a provider and model in WebUI Settings → Models." in result.stdout
 
 
@@ -2390,11 +2429,6 @@ def test_webui_missing_runtime_env_fails_before_starting_gateway(
         }),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "nanobot.cli.webui._run_gateway",
-        lambda *_args, **_kwargs: pytest.fail("gateway must not start with unresolved config"),
-    )
-
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
 
     assert result.exit_code == 1
@@ -2454,6 +2488,7 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
             seen["runtime_kwargs"] = kwargs
+            self.paths = kwargs["paths"]
 
         def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
             seen["start_options"] = options
@@ -2550,6 +2585,7 @@ def test_webui_background_restarts_when_config_changes_and_gateway_is_running(
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
             seen["runtime_kwargs"] = kwargs
+            self.paths = kwargs["paths"]
 
         def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
             seen["start_options"] = options
@@ -2610,17 +2646,29 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
         "nanobot.cli.webui._open_webui_browser",
         lambda url, **kwargs: seen.update({"opened_url": url, "open_kwargs": kwargs}),
     )
-    monkeypatch.setattr(
-        "nanobot.cli.webui._run_gateway",
-        lambda *_args, **_kwargs: pytest.fail("existing gateway should be reused"),
-    )
-
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
             seen["runtime_kwargs"] = kwargs
+            self.paths = kwargs["paths"]
 
         def status(self):
             return SimpleNamespace(running=True)
+
+        def start_background(self, options):
+            return SimpleNamespace(
+                ok=False,
+                message="gateway_already_running",
+                status=SimpleNamespace(log_path=self.paths.log_path),
+            )
+
+        def restart(self, options, *, timeout_s: int):
+            seen["restart_options"] = options
+            seen["restart_timeout"] = timeout_s
+            return SimpleNamespace(
+                ok=True,
+                message="gateway_started_background",
+                status=SimpleNamespace(log_path=self.paths.log_path),
+            )
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
     monkeypatch.setattr(
@@ -2642,7 +2690,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     assert seen["open_kwargs"] == {"wait": False}
 
 
-def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> None:
+def test_attach_to_background_gateway_detaches_on_ctrl_c(monkeypatch, capsys) -> None:
     stopped = False
 
     class _FakeRuntime:
@@ -2661,11 +2709,11 @@ def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> No
 
     cli_webui_support._attach_to_background_gateway(_FakeRuntime())
 
-    assert stopped is True
+    assert stopped is False
     output = capsys.readouterr().out
     assert "Closing the browser does not stop channels or automations" in output
-    assert "Press Ctrl+C here to stop nanobot" in output
-    assert "Gateway stopped" in output
+    assert "gateway stops only when the last local client exits" in output
+    assert "WebUI launcher detached" in output
 
 
 def test_attach_to_background_gateway_checks_owned_sidecar() -> None:
@@ -2697,8 +2745,8 @@ def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path
     )
 
     class _FakeRuntime:
-        def __init__(self, **_kwargs) -> None:
-            pass
+        def __init__(self, **kwargs) -> None:
+            self.paths = kwargs["paths"]
 
         def status(self):
             return SimpleNamespace(running=False)
@@ -2719,11 +2767,6 @@ def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: False)
     monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
     monkeypatch.setattr("nanobot.cli.webui._tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(
-        "nanobot.cli.webui._run_gateway",
-        lambda *_args, **_kwargs: pytest.fail("gateway should not start on occupied ports"),
-    )
-
     result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
 
     assert result.exit_code == 1

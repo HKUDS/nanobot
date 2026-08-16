@@ -1,13 +1,21 @@
 import json
+import os
 import signal
 import subprocess
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions, GatewayStatus
+from nanobot.gateway import (
+    GatewayClientLease,
+    GatewayRuntime,
+    GatewayRuntimePaths,
+    GatewayStartOptions,
+    GatewayStatus,
+)
 
 
 class FakeProcess:
@@ -177,6 +185,64 @@ def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypa
         (False, "gateway_already_running"),
         (True, "gateway_started_background"),
     ]
+
+
+def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    stopped: list[int] = []
+
+    def stop(*, timeout_s: int):
+        stopped.append(timeout_s)
+        return SimpleNamespace(ok=True, message="gateway_stopped")
+
+    monkeypatch.setattr(runtime, "stop", stop)
+    tui = GatewayClientLease(runtime, kind="tui", pid=os.getpid(), token="tui")
+    webui = GatewayClientLease(runtime, kind="webui", pid=os.getpid(), token="webui")
+
+    tui.acquire()
+    tui.mark_ephemeral()
+    webui.acquire()
+
+    assert tui.release() is False
+    assert stopped == []
+    assert webui.release() is True
+    assert stopped == [20]
+    assert not webui.state_path.exists()
+
+
+def test_explicit_background_gateway_survives_the_last_client(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    stopped: list[int] = []
+    monkeypatch.setattr(
+        runtime,
+        "stop",
+        lambda *, timeout_s: stopped.append(timeout_s),
+    )
+    client = GatewayClientLease(runtime, kind="webui", pid=os.getpid())
+
+    client.acquire()
+    client.mark_ephemeral()
+    GatewayClientLease(runtime, kind="gateway-background").mark_persistent()
+
+    assert client.release() is False
+    assert stopped == []
+    assert not client.state_path.exists()
+
+
+def test_failed_last_client_shutdown_remains_retryable(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(
+        runtime,
+        "stop",
+        lambda *, timeout_s: SimpleNamespace(ok=False, message="gateway_stop_timeout"),
+    )
+    client = GatewayClientLease(runtime, kind="tui", pid=os.getpid())
+    client.acquire()
+    client.mark_ephemeral()
+
+    assert client.release() is False
+    state = json.loads(client.state_path.read_text(encoding="utf-8"))
+    assert state == {"auto_stop": True, "clients": {}}
 
 
 def test_start_background_uses_windows_process_group_flags(tmp_path, monkeypatch):

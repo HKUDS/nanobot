@@ -14,6 +14,7 @@ from rich.console import Console
 
 from nanobot.config.schema import Config
 from nanobot.gateway import (
+    GatewayClientLease,
     GatewayRuntime,
     GatewayRuntimePaths,
     GatewayStartOptions,
@@ -166,8 +167,14 @@ def create_gateway_app(
                     loaded_config=cfg,
                 )
             )
+            if result.ok or result.message == "gateway_already_running":
+                GatewayClientLease(runtime, kind="gateway-background").mark_persistent()
             if result.ok:
                 console.print("[green]Gateway started in the background.[/green]")
+                print_status(result.status)
+                return
+            if result.message == "gateway_already_running":
+                console.print("[yellow]Gateway is already running in the background.[/yellow]")
                 print_status(result.status)
                 return
             console.print(f"[yellow]Gateway was not started: {result.message}[/yellow]")
@@ -222,7 +229,10 @@ def create_gateway_app(
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
         """Stop the background gateway."""
-        result = runtime_for_instance(workspace=workspace, config=config).stop(timeout_s=timeout)
+        runtime = runtime_for_instance(workspace=workspace, config=config)
+        result = runtime.stop(timeout_s=timeout)
+        if result.ok or result.message == "gateway_not_running":
+            GatewayClientLease(runtime, kind="gateway-stop").clear()
         if result.ok:
             console.print("[green]Gateway stopped.[/green]")
         else:
@@ -257,6 +267,7 @@ def create_gateway_app(
             timeout_s=timeout,
         )
         if result.ok:
+            GatewayClientLease(runtime, kind="gateway-restart").mark_persistent()
             console.print("[green]Gateway restarted in the background.[/green]")
             print_status(result.status)
             return
