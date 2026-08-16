@@ -943,8 +943,14 @@ class Consolidator:
         session: Session,
         *,
         runtime: LLMRuntime,
+        known_usage: int | None = None,
     ) -> tuple[int, str]:
-        """Estimate prompt size from the full replayable session history."""
+        """Estimate prompt size from the full replayable session history.
+
+        *known_usage* is the API's last ``usage.prompt_tokens``; when higher
+        than the local estimate it is used as a floor (local tokenizers
+        undercount modern models, see #5402).
+        """
         history = self._full_replay_history(session)
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         # Include archived summary in estimation so the budget accounts for it.
@@ -969,6 +975,7 @@ class Consolidator:
             runtime.model,
             probe_messages,
             self._get_tool_definitions(),
+            known_usage=known_usage,
         )
 
     def _input_token_budget(self, runtime: LLMRuntime) -> int:
@@ -1047,6 +1054,7 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
         replay_max_messages: int | None = None,
+        known_usage: int | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
@@ -1075,6 +1083,7 @@ class Consolidator:
             estimated, source = self.estimate_session_prompt_tokens(
                 session,
                 runtime=runtime,
+                known_usage=known_usage,
             )
             if estimated <= 0:
                 self._persist_last_summary(session, last_summary)
@@ -1139,6 +1148,8 @@ class Consolidator:
                     # the next invocation can retry a fresh chunk.
                     break
 
+                # Re-estimate without the usage floor: the session was just
+                # shrunk, so the stale count must not block converging.
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
                     runtime=runtime,

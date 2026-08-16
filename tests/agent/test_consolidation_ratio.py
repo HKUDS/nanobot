@@ -79,7 +79,7 @@ async def test_consolidation_ratio_controls_target(
 
     runtime = loop.llm_runtime()
 
-    def mock_estimate(_session, *, runtime):
+    def mock_estimate(_session, *, runtime, known_usage=None):
         return (remaining_estimates.pop(0), "test")
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]

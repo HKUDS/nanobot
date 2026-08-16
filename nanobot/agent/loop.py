@@ -1811,10 +1811,14 @@ class AgentLoop:
             runtime.context_window_tokens
         )
         if not ctx.ephemeral:
+            # OpenAI-style usage.prompt_tokens is the authoritative count for
+            # providers that report it (OpenAI/OpenRouter); it guards against
+            # local estimation undercounting the live conversation.
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 runtime=runtime,
                 replay_max_messages=replay_max_messages,
+                known_usage=self._last_usage.get("prompt_tokens") or None,
             )
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
