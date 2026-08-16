@@ -569,6 +569,7 @@ class TestEphemeralHooks:
         from nanobot.agent.hook import AgentHook
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -576,7 +577,7 @@ class TestEphemeralHooks:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=MagicMock(
+            return_value=LLMResponse(
                 content="done", finish_reason="stop", tool_calls=[], usage={},
             )
         )
