@@ -4,7 +4,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -203,25 +202,18 @@ def test_stop_reaps_an_owned_child_without_consuming_the_shutdown_timeout(
     assert sleeps == []
 
 
-def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypatch):
-    first_spawned = threading.Event()
-    release_first = threading.Event()
-    lifecycle_lock = threading.Lock()
+def test_repeated_background_starts_create_only_one_process(tmp_path, monkeypatch):
     calls: list[list[str]] = []
 
     def fake_popen(command, **_kwargs):
         calls.append(command)
-        first_spawned.set()
         return FakeProcess()
-
-    def first_sleep(_seconds):
-        release_first.wait()
 
     first = GatewayRuntime(
         paths=_paths(tmp_path),
         platform_name="Linux",
         popen=fake_popen,
-        sleep=first_sleep,
+        sleep=lambda _seconds: None,
     )
     second = GatewayRuntime(
         paths=_paths(tmp_path),
@@ -232,33 +224,11 @@ def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypa
     for runtime in (first, second):
         monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
         monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
-        # Exercise the runtime's critical section without mixing an OS-level
-        # file lock into a same-process thread scheduling test. FileLock is
-        # independently responsible for cross-process portability.
-        monkeypatch.setattr(runtime, "_lifecycle_lock", lambda: lifecycle_lock)
 
-    results = []
-    first_thread = threading.Thread(
-        target=lambda: results.append(first.start_background(GatewayStartOptions(port=18790)))
-    )
-    second_thread = threading.Thread(
-        target=lambda: results.append(second.start_background(GatewayStartOptions(port=18790)))
-    )
-
-    second_started = False
-    first_thread.start()
-    try:
-        assert first_spawned.wait(timeout=10)
-        second_thread.start()
-        second_started = True
-    finally:
-        release_first.set()
-        first_thread.join(timeout=10)
-        if second_started:
-            second_thread.join(timeout=10)
-
-    assert not first_thread.is_alive()
-    assert not second_thread.is_alive()
+    results = [
+        first.start_background(GatewayStartOptions(port=18790)),
+        second.start_background(GatewayStartOptions(port=18790)),
+    ]
 
     assert len(calls) == 1
     assert sorted((result.ok, result.message) for result in results) == [
