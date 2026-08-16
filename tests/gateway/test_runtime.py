@@ -206,6 +206,7 @@ def test_stop_reaps_an_owned_child_without_consuming_the_shutdown_timeout(
 def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypatch):
     first_spawned = threading.Event()
     release_first = threading.Event()
+    lifecycle_lock = threading.Lock()
     calls: list[list[str]] = []
 
     def fake_popen(command, **_kwargs):
@@ -231,6 +232,10 @@ def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypa
     for runtime in (first, second):
         monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
         monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
+        # Exercise the runtime's critical section without mixing an OS-level
+        # file lock into a same-process thread scheduling test. FileLock is
+        # independently responsible for cross-process portability.
+        monkeypatch.setattr(runtime, "_lifecycle_lock", lambda: lifecycle_lock)
 
     results = []
     first_thread = threading.Thread(
