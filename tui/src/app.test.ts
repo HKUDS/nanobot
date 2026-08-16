@@ -1132,6 +1132,44 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("reflows markdown tables without clipping columns or cell content", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({
+      event: "delta",
+      chat_id: "chat",
+      text: [
+        "| Who | Content | Engagement |",
+        "| --- | --- | --- |",
+        "| @owner | A longer explanation that keeps context readable | 13 likes / 6 RT |",
+        "| @reader | Short follow-up | Low interaction |",
+      ].join("\n"),
+    })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+
+    for (const width of [96, 54, 96]) {
+      setup.resize(width, 24)
+      await setup.flush()
+      const rendered = setup.captureCharFrame().replace(/\s+/gu, " ")
+
+      expect(rendered).toContain("Who")
+      expect(rendered).toContain("Content")
+      expect(rendered).toContain("Engagement")
+      expect(rendered).toContain("@owner")
+      expect(rendered).toContain("longer explanation")
+      expect(rendered).toContain("keeps context")
+      expect(rendered).toContain("readable")
+      expect(rendered).toContain("13 likes / 6")
+      expect(rendered).toContain("RT")
+      expect(rendered).toContain("Low interaction")
+      expect((app as unknown as {
+        transcript: { root: HiddenScrollBox }
+      }).transcript.root.horizontalScrollBar.visible).toBeFalse()
+    }
+  })
+
   test("rethemes the complete retained interface when the terminal appearance changes", async () => {
     setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
     const app = mount(setup)

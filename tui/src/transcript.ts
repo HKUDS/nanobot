@@ -469,9 +469,16 @@ export class Transcript {
       width: "auto",
       minWidth: 0,
       flexGrow: 1,
+      flexShrink: 1,
       syntaxStyle: this.theme.syntax,
       streaming,
       internalBlockMode: "top-level",
+      tableOptions: {
+        style: "columns",
+        widthMode: "full",
+        columnFitter: "balanced",
+        wrapMode: "word",
+      },
       treeSitterClient: this.treeSitterClient,
     })
     this.markdown.add(markdown)
