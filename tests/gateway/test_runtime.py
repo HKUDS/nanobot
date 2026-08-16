@@ -564,7 +564,7 @@ def test_stop_succeeds_when_process_exits_at_timeout_boundary(tmp_path, monkeypa
     assert result.status.running is False
 
 
-def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monkeypatch):
+def test_terminate_windows_targets_only_the_recorded_process_tree(tmp_path, monkeypatch):
     taskkill_calls: list[dict] = []
     wait_timeouts: list[int | float] = []
 
@@ -578,12 +578,10 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
         sleep=lambda _seconds: None,
     )
 
-    monkeypatch.setattr(signal, "CTRL_BREAK_EVENT", 1, raising=False)
-
-    def fake_kill(_pid, _signal):
-        raise OSError(87, "The parameter is incorrect")
-
-    monkeypatch.setattr("nanobot.process_runtime.os.kill", fake_kill)
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.kill",
+        lambda *_args: pytest.fail("Windows termination must not broadcast a console event"),
+    )
 
     def fake_wait_for_exit(_pid, _timeout_s):
         wait_timeouts.append(_timeout_s)
@@ -593,7 +591,7 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
     monkeypatch.setattr(runtime, "_wait_for_exit", fake_wait_for_exit)
 
     assert runtime._terminate_windows(12345, timeout_s=20) is True
-    assert wait_timeouts == [2]
+    assert wait_timeouts == [20]
     assert taskkill_calls == [
         {
             "command": ["taskkill", "/PID", "12345", "/T"],

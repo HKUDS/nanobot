@@ -308,26 +308,18 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         return self._wait_for_exit(pid, 2)
 
     def _terminate_windows(self, pid: int, *, timeout_s: int) -> bool:
-        ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
-        if ctrl_break is not None:
-            ctrl_break_sent = False
-            try:
-                os.kill(pid, ctrl_break)
-            except ProcessLookupError:
-                return True
-            except OSError:
-                pass
-            else:
-                ctrl_break_sent = True
-            if ctrl_break_sent and self._wait_for_exit(pid, timeout_s):
-                return True
+        # ``os.kill(pid, CTRL_BREAK_EVENT)`` delegates to
+        # GenerateConsoleCtrlEvent.  That API targets a console process group,
+        # not an individual process, and can interrupt the caller when a
+        # detached/no-window child has no addressable console group.  Keep
+        # termination scoped to the recorded PID tree instead.
         self._subprocess_run(
             ["taskkill", "/PID", str(pid), "/T"],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if self._wait_for_exit(pid, 2):
+        if self._wait_for_exit(pid, timeout_s):
             return True
         self._subprocess_run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
