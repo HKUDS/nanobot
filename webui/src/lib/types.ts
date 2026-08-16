@@ -279,8 +279,10 @@ export interface AgentUIBlob {
 /** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
 export interface GoalStateWsPayload {
   active: boolean;
+  status?: "active" | "blocked";
   ui_summary?: string;
   objective?: string;
+  recap?: string;
 }
 
 export interface ToolProgressEvent {

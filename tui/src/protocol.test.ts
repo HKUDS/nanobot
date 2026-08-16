@@ -244,18 +244,33 @@ describe("gateway protocol", () => {
         data: JSON.stringify({ event: "attached", chat_id: "one", model_preset: 42 }),
       })
       socket.emit("message", {
+        data: JSON.stringify({ event: "turn_end", chat_id: "one", goal_state: [] }),
+      })
+      socket.emit("message", {
         data: JSON.stringify({ event: "session_updated", chat_id: "one", scope: "metadata" }),
+      })
+      socket.emit("message", {
+        data: JSON.stringify({
+          event: "turn_end",
+          chat_id: "one",
+          goal_state: { active: false, status: "blocked", ui_summary: "Approval required" },
+        }),
       })
       socket.emit("message", { data: JSON.stringify({ event: "future_gateway_event" }) })
       socket.emit("message", { data: JSON.stringify({ event: "error", detail: "global failure" }) })
       expect(statuses).toContain("error:gateway sent an invalid event")
-      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(8)
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(9)
       expect(events).toContainEqual({
         event: "session_updated",
         chat_id: "one",
         scope: "metadata",
       })
       expect(events).toContainEqual({ event: "error", detail: "global failure" })
+      expect(events).toContainEqual({
+        event: "turn_end",
+        chat_id: "one",
+        goal_state: { active: false, status: "blocked", ui_summary: "Approval required" },
+      })
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
     }

@@ -539,8 +539,8 @@ class WebSocketChannel(BaseChannel):
         self._webui_connections.discard(connection)
         self._discard_webui_request_lock_if_idle(connection)
 
-    async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
-        """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
+    async def _maybe_push_persisted_goal_state(self, chat_id: str) -> None:
+        """Replay actionable goal state after *chat_id* is subscribed.
 
         Goal metadata lives on the session JSONL and survives gateway restarts, but
         connected clients normally see it via ``goal_state`` / ``turn_end`` frames.
@@ -554,7 +554,7 @@ class WebSocketChannel(BaseChannel):
         if not isinstance(meta, dict):
             meta = {}
         blob = goal_state_ws_blob(cast(dict[str, Any], meta))
-        if not blob.get("active"):
+        if not blob.get("active") and blob.get("status") != "blocked":
             return
         await self.send_goal_state(chat_id, blob)
 
@@ -572,7 +572,7 @@ class WebSocketChannel(BaseChannel):
 
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
         """Replay persisted or actively running per-chat state after subscribe."""
-        await self._maybe_push_active_goal_state(chat_id)
+        await self._maybe_push_persisted_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
 
     async def _send_event(

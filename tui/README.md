@@ -9,9 +9,15 @@ bun run --cwd tui test
 bun run --cwd tui build
 ```
 
-`nanobot agent` launches this client, attaches to the shared local gateway or starts it in the background, and passes an authenticated local endpoint through environment variables. Exiting one client leaves that gateway available to other terminals and the WebUI; stop it explicitly with `nanobot gateway stop`. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified sidecar. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is only selected with `nanobot agent --classic`.
+`nanobot agent` launches this client, leases the shared local gateway or starts it on demand, and passes an authenticated local endpoint through environment variables. Other terminals and the WebUI keep that gateway alive; the final interactive launcher to exit releases the on-demand process. Only `nanobot gateway --background` makes it persistent without clients. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified sidecar. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is only selected with `nanobot agent --classic`.
 
-The renderer uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
+Standalone terminals use OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
+
+## Herdr host mode
+
+When Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`, nanobot becomes a quiet hosted client. It uses OpenTUI's main-screen mode instead of hiding the whole run in a temporary alternate screen, removes the launch card and persistent session/model chrome, and keeps only the transcript, last user task, current progress, and composer. Herdr remains responsible for workspace, tab, pane, and attention navigation; hosted command discovery therefore omits the duplicate session/new-chat/branch controls.
+
+The TUI reports its WebSocket session ID, model, Git branch, workspace, last task, and current action through Herdr's supported pane CLI. Sending work reports `working`; a persisted explicit nanobot goal block reports `blocked`; a completed turn reports `idle`; exit releases lifecycle authority. The gateway session remains the durable transcript and resume path. Standalone terminals keep the richer full-screen navigation described below.
 
 The model preset and workspace access labels above the composer are live controls. Click either
 label, then click a choice; arrow keys, `Enter`, and `Esc` provide the same flow without a mouse.

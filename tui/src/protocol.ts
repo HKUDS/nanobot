@@ -108,6 +108,7 @@ export type InboundEvent =
       turn_id?: string
       usage?: TokenUsage
       context_window_tokens?: number
+      goal_state?: Record<string, unknown>
     }
   | {
       event: "goal_status"
@@ -421,10 +422,11 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
     name === "turn_end"
     && (!optional(record.latency_ms, "number")
       || !optional(record.context_window_tokens, "number")
-      || (record.usage !== undefined && !isTokenUsage(record.usage)))
+      || (record.usage !== undefined && !isTokenUsage(record.usage))
+      || (record.goal_state !== undefined && !isRecord(record.goal_state)))
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
-  if (name === "goal_state" && (!record.goal_state || typeof record.goal_state !== "object")) return null
+  if (name === "goal_state" && !isRecord(record.goal_state)) return null
   if (
     name === "session_updated"
     && (!optional(record.scope, "string")

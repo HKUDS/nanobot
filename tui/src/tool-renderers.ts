@@ -21,14 +21,24 @@ export function renderToolEvent(event: ToolProgressEvent): string {
   const args = record(event.arguments)
   const result = record(event.result)
   const detail = phase === "error" ? compact(event.error) : toolDetail(name, args, result)
-  return `  ${marker} ${toolLabel(name)}${detail ? `  ${detail}` : ""}`
+  return `  ${marker} ${toolLabel(name, phase, args)}${detail ? `  ${detail}` : ""}`
 }
 
-function toolLabel(name: string): string {
-  if (/^(?:exec|exec_command|shell|run_command)$/u.test(name)) return "Command"
+function toolLabel(
+  name: string,
+  phase: string,
+  args: Record<string, unknown>,
+): string {
+  if (/^(?:exec|exec_command|shell|run_command)$/u.test(name)) {
+    const command = compact(args.command ?? args.cmd)
+    if (/(?:^|\s)(?:pytest|ruff|pyright|basedpyright|cargo\s+test|go\s+test|(?:bun|npm|pnpm|yarn)(?:\s+run)?\s+test)(?:\s|$)/iu.test(command)) {
+      return "Testing"
+    }
+    return phase === "end" ? "Ran" : phase === "error" ? "Command failed" : "Running"
+  }
   if (/^(?:read_file|read)$/u.test(name)) return "Read"
-  if (/^(?:write_file|write)$/u.test(name)) return "Write"
-  if (/^(?:edit_file|apply_patch|edit)$/u.test(name)) return "Edit"
+  if (/^(?:write_file|write)$/u.test(name)) return phase === "end" ? "Edited" : "Editing"
+  if (/^(?:edit_file|apply_patch|edit)$/u.test(name)) return phase === "end" ? "Edited" : "Editing"
   if (name === "web_search") return "Search web"
   if (name === "web_fetch") return "Fetch"
   return name

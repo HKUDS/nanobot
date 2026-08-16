@@ -8,6 +8,7 @@ import {
 
 import { NanobotTui, type AppOptions } from "./app"
 import type { MessageOptions, SlashCommand, WorkspaceScopePayload } from "./protocol"
+import type { HostAgentState, HostMetadata, TuiHost } from "./host"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -1588,7 +1589,7 @@ describe("NanobotTui layout", () => {
 
     expect(frame).toMatch(/Working\s+0s/u)
     expect(frame).not.toMatch(/[◐◓◑◒⠋⠙⠹⠸]/u)
-    expect(frame).toContain("› Command  pwd")
+    expect(frame).toContain("› Running  pwd")
     app.accept({ event: "turn_end", chat_id: "chat" })
   })
 
@@ -1878,6 +1879,90 @@ describe("NanobotTui layout", () => {
 
     expect(closed).toBe(true)
     expect(setup.renderer.isDestroyed).toBe(true)
+  })
+})
+
+describe("NanobotTui in a Herdr pane", () => {
+  test("stays quiet while reporting task, session, lifecycle, and metadata", async () => {
+    const setup = await createTestRenderer({ width: 80, height: 22, screenMode: "main-screen" })
+    const states: Array<{ state: HostAgentState; message?: string }> = []
+    const metadata: HostMetadata[] = []
+    const sessions: string[] = []
+    let released = false
+    const host: TuiHost = {
+      hosted: true,
+      reportState(state, message) { states.push({ state, ...(message ? { message } : {}) }) },
+      reportSession(sessionId) { sessions.push(sessionId) },
+      reportMetadata(value) { metadata.push(value) },
+      release() { released = true },
+    }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, branch: "feat/herdr" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      host,
+    )
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({
+      event: "user_message",
+      chat_id: "chat",
+      text: "Ship the Herdr integration",
+      turn_id: "turn-1",
+      starts_turn: true,
+    })
+    app.accept({
+      event: "message",
+      chat_id: "chat",
+      text: "",
+      kind: "tool_hint",
+      tool_events: [{ phase: "end", call_id: "read", name: "read_file", arguments: { path: "app.ts" } }],
+    })
+    app.accept({
+      event: "turn_end",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      goal_state: {
+        active: false,
+        status: "blocked",
+        ui_summary: "Approval required",
+      },
+    })
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+
+    expect(sessions).toEqual(["chat"])
+    expect(frame).toContain("› Ship the Herdr integration")
+    expect(frame).not.toContain(">_  nanobot")
+    expect(frame).not.toContain("test/model")
+    expect(states.some(({ state }) => state === "working")).toBe(true)
+    expect(states.at(-1)).toEqual({ state: "blocked", message: "Approval required" })
+    expect(metadata.at(-1)).toMatchObject({
+      model: "default · test/model",
+      branch: "feat/herdr",
+      workspace: "/tmp/nanobot-workspace",
+      task: "Ship the Herdr integration",
+      action: "Approval required",
+    })
+
+    app.accept({
+      event: "user_message",
+      chat_id: "chat",
+      text: "Approved",
+      turn_id: "turn-2",
+      starts_turn: true,
+    })
+    app.accept({
+      event: "turn_end",
+      chat_id: "chat",
+      turn_id: "turn-2",
+      goal_state: { active: false },
+    })
+    expect(states.at(-1)?.state).toBe("idle")
+
+    app.stop()
+    expect(released).toBe(true)
   })
 })
 

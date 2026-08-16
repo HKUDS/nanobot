@@ -1,4 +1,5 @@
 import { NanobotTui, type AppOptions } from "./app"
+import { currentGitBranch } from "./host"
 
 function required(name: string): string {
   const value = process.env[name]?.trim()
@@ -12,6 +13,8 @@ function themePreference(): AppOptions["theme"] {
   throw new Error("NANOBOT_TUI_THEME must be auto, dark, or light")
 }
 
+const workspace = process.env.NANOBOT_TUI_WORKSPACE?.trim() || ""
+const hostWorkspace = process.cwd()
 const options: AppOptions = {
   wsUrl: required("NANOBOT_TUI_WS_URL"),
   apiUrl: process.env.NANOBOT_TUI_API_URL?.trim() || "",
@@ -19,7 +22,9 @@ const options: AppOptions = {
   chatId: process.env.NANOBOT_TUI_CHAT_ID?.trim() || undefined,
   model: process.env.NANOBOT_TUI_MODEL?.trim() || "unknown model",
   modelPreset: process.env.NANOBOT_TUI_MODEL_PRESET?.trim() || "default",
-  workspace: process.env.NANOBOT_TUI_WORKSPACE?.trim() || "",
+  workspace,
+  hostWorkspace,
+  branch: currentGitBranch(hostWorkspace),
   version: process.env.NANOBOT_TUI_VERSION?.trim() || "dev",
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
   theme: themePreference(),

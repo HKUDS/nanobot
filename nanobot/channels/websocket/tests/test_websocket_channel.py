@@ -3186,7 +3186,7 @@ async def test_maybe_push_active_goal_state_noop_without_session_manager() -> No
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    await channel._maybe_push_active_goal_state("chat-1")
+    await channel._maybe_push_persisted_goal_state("chat-1")
     mock_ws.send.assert_not_called()
 
 
@@ -3202,7 +3202,7 @@ async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    await channel._maybe_push_active_goal_state("chat-1")
+    await channel._maybe_push_persisted_goal_state("chat-1")
     mock_ws.send.assert_not_called()
 
 
@@ -3227,7 +3227,7 @@ async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() 
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    await channel._maybe_push_active_goal_state("chat-1")
+    await channel._maybe_push_persisted_goal_state("chat-1")
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
     assert body["event"] == "goal_state"
@@ -3235,6 +3235,39 @@ async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() 
     assert body["goal_state"]["active"] is True
     assert body["goal_state"]["objective"] == "finish docs"
     assert body["goal_state"]["ui_summary"] == "Docs"
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_goal_state_restores_blocked_attention_on_disk() -> None:
+    bus = MagicMock()
+    sm = MagicMock()
+    sm.read_session_file.return_value = {
+        "metadata": {
+            "goal_state": {
+                "status": "blocked",
+                "objective": "deploy safely",
+                "ui_summary": "Approval required",
+            },
+        },
+        "messages": [],
+    }
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sm),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel._maybe_push_persisted_goal_state("chat-1")
+
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body["goal_state"] == {
+        "active": False,
+        "status": "blocked",
+        "ui_summary": "Approval required",
+        "objective": "deploy safely",
+    }
 
 
 @pytest.mark.asyncio

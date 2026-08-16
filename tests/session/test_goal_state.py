@@ -100,8 +100,27 @@ def test_goal_state_ws_blob_active_shape():
     }
     assert goal_state_ws_blob(meta) == {
         "active": True,
+        "status": "active",
         "ui_summary": "feat",
         "objective": "Build feature.",
+    }
+
+
+def test_goal_state_ws_blob_preserves_blocked_state_for_host_attention():
+    meta = {
+        GOAL_STATE_KEY: {
+            "status": "blocked",
+            "objective": "Deploy safely.",
+            "ui_summary": "Approval required",
+            "recap": "Production access is required.",
+        },
+    }
+    assert goal_state_ws_blob(meta) == {
+        "active": False,
+        "status": "blocked",
+        "ui_summary": "Approval required",
+        "objective": "Deploy safely.",
+        "recap": "Production access is required.",
     }
 
 
