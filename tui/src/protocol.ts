@@ -214,6 +214,7 @@ export interface MessageOptions {
   cliApps?: Array<{ name: string }>
   mcpPresets?: Array<{ name: string }>
   sessionMentions?: SessionMention[]
+  userShell?: boolean
 }
 
 export interface SlashCommand {
@@ -799,6 +800,7 @@ export class NanobotClient {
       content,
       turn_id: turnId,
       webui: true,
+      ...(options.userShell ? { user_shell: true } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
       ...(options.sessionMentions?.length

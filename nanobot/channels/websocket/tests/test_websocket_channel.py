@@ -18,6 +18,7 @@ from websockets.frames import Close
 
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
     OutboundMessage,
@@ -812,6 +813,61 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
         "turn_seq": 1,
     }
     assert isinstance(lines[0].get("created_at_ms"), int)
+
+
+@pytest.mark.asyncio
+async def test_trusted_webui_shell_preserves_display_text_and_hides_dispatch_command(
+    bus: MagicMock,
+) -> None:
+    from nanobot.webui.transcript import read_transcript_lines
+
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    channel._webui_connections.add(conn)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "shell-chat",
+            "content": "!printf ok",
+            "webui": True,
+            "user_shell": True,
+            "turn_id": "shell-turn",
+        },
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.content == "/__shell printf ok"
+    assert msg.metadata[INBOUND_META_USER_SHELL] is True
+    assert msg.metadata["webui_turn_id"] == "shell-turn"
+    assert read_transcript_lines("websocket:shell-chat")[0]["text"] == "!printf ok"
+
+
+@pytest.mark.asyncio
+async def test_untrusted_websocket_cannot_enable_user_shell(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "plain-client",
+        {
+            "type": "message",
+            "chat_id": "plain-chat",
+            "content": "!printf nope",
+            "webui": True,
+            "user_shell": True,
+            "turn_id": "plain-turn",
+        },
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.content == "!printf nope"
+    assert INBOUND_META_USER_SHELL not in msg.metadata
 
 
 @pytest.mark.asyncio

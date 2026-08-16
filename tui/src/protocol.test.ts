@@ -96,6 +96,7 @@ describe("gateway protocol", () => {
       client.send("hello", {
         cliApps: [{ name: "github" }],
         sessionMentions: [{ name: "plan", session_key: "websocket:plan" }],
+        userShell: true,
       })
       client.attach("other-chat")
       client.newChat()
@@ -110,6 +111,7 @@ describe("gateway protocol", () => {
       expect(outbound[1]?.type).toBe("message")
       expect(outbound[1]?.chat_id).toBe("terminal")
       expect(outbound[1]?.content).toBe("hello")
+      expect(outbound[1]?.user_shell).toBe(true)
       expect(outbound[1]?.cli_apps).toEqual([{ name: "github" }])
       expect(outbound[1]?.session_mentions).toEqual([
         { name: "plan", session_key: "websocket:plan" },

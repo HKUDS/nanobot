@@ -176,6 +176,19 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             assert "Current model: `custom/smoke-model`" in answer["text"]
             await _recv_until(ws, "turn_end")
 
+            await ws.send(json.dumps({
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "!printf shell-ok",
+                "webui": True,
+                "user_shell": True,
+                "turn_id": "shell-turn",
+            }))
+            shell = await _recv_until(ws, "message")
+            assert "shell-ok" in shell["text"]
+            assert shell["turn_id"] == "shell-turn"
+            await _recv_until(ws, "turn_end")
+
         api_token = _wait_for_bootstrap(base_url, process, log_path)["api_token"]
         sessions = _get_json(f"{base_url}/api/sessions", token=api_token)
         key = f"websocket:{chat_id}"
@@ -189,5 +202,7 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         contents = [str(message.get("content") or "") for message in thread["messages"]]
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
+        assert "!printf shell-ok" in contents
+        assert any("shell-ok" in text for text in contents)
     finally:
         _stop_gateway(process)

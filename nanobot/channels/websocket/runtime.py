@@ -24,6 +24,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import (
+    INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     OutboundMessage,
 )
@@ -39,7 +40,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.command.builtin import builtin_command_starts_agent_turn
+from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.config.schema import Base
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -1172,6 +1173,18 @@ class WebSocketChannel(BaseChannel):
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
             trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
+            is_user_shell = (
+                trusted_webui
+                and envelope.get("user_shell") is True
+                and content.startswith("!")
+            )
+            if is_user_shell:
+                metadata[INBOUND_META_USER_SHELL] = True
+            dispatch_content = (
+                f"{USER_SHELL_COMMAND} {content[1:].lstrip()}"
+                if is_user_shell
+                else content
+            )
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -1197,7 +1210,7 @@ class WebSocketChannel(BaseChannel):
             self._workspaces.persist_scope(cid, scope)
             is_webui = metadata.get("webui") is True
             queued_owner = None
-            if is_webui and builtin_command_starts_agent_turn(content):
+            if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
                 queued_owner = register_queued_websocket_turn_if_idle(cid, turn_id)
                 if queued_owner is not None:
                     metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
@@ -1234,7 +1247,7 @@ class WebSocketChannel(BaseChannel):
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=cid,
-                    content=content,
+                    content=dispatch_content,
                     media=media_paths or None,
                     metadata=metadata,
                     is_dm=False,
@@ -1742,6 +1755,9 @@ class WebSocketChannel(BaseChannel):
             "chat_id": msg.chat_id,
             "text": wire_text,
         }
+        turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
+        if isinstance(turn_id, str) and turn_id:
+            payload["turn_id"] = turn_id
         if msg.media:
             payload["media"] = msg.media
             urls: list[dict[str, str]] = []

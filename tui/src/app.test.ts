@@ -454,6 +454,35 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual([])
   })
 
+  test("runs bang commands through the gateway without steering the agent", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const sentOptions: MessageOptions[] = []
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(sent, [], [], sentOptions),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; activeTurn: boolean }
+    await waitUntil(() => ui.ready)
+
+    app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
+    ui.composer.setText("!pwd")
+    ui.composer.submit()
+
+    await waitUntil(() => sent.length === 1)
+    expect(sent).toEqual(["!pwd"])
+    expect(sentOptions).toEqual([{ userShell: true }])
+    expect(ui.activeTurn).toBe(true)
+
+    app.accept({ event: "message", chat_id: "chat", text: "/tmp/project", turn_id: "turn" })
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("/tmp/project")
+    expect(ui.activeTurn).toBe(true)
+  })
+
   test("switches and creates gateway chats without replacing core slash commands", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch

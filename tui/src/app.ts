@@ -752,6 +752,10 @@ export class NanobotTui {
       if (lifecycle) this.sendGatewayCommand(visibleContent, lifecycle)
       return
     }
+    if (visibleContent.startsWith("!")) {
+      this.sendGatewayCommand(visibleContent, "side_channel", false, { userShell: true })
+      return
+    }
     if (!this.ready) {
       this.status.content = "Preparing chat…"
       return
@@ -1812,6 +1816,7 @@ export class NanobotTui {
     content: string,
     lifecycle: ResolvedSlashCommandLifecycle,
     silent = false,
+    options: MessageOptions = {},
   ): void {
     if (!this.ready) {
       this.status.content = "Preparing chat…"
@@ -1823,7 +1828,7 @@ export class NanobotTui {
     }
     let turnId: string
     try {
-      turnId = this.client.send(content)
+      turnId = this.client.send(content, options)
     } catch (error) {
       this.status.content = error instanceof Error ? error.message : String(error)
       return
