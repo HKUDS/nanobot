@@ -214,7 +214,7 @@ def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypa
         return FakeProcess()
 
     def first_sleep(_seconds):
-        assert release_first.wait(timeout=2)
+        release_first.wait()
 
     first = GatewayRuntime(
         paths=_paths(tmp_path),
@@ -240,12 +240,20 @@ def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypa
         target=lambda: results.append(second.start_background(GatewayStartOptions(port=18790)))
     )
 
+    second_started = False
     first_thread.start()
-    assert first_spawned.wait(timeout=2)
-    second_thread.start()
-    release_first.set()
-    first_thread.join(timeout=2)
-    second_thread.join(timeout=2)
+    try:
+        assert first_spawned.wait(timeout=10)
+        second_thread.start()
+        second_started = True
+    finally:
+        release_first.set()
+        first_thread.join(timeout=10)
+        if second_started:
+            second_thread.join(timeout=10)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
 
     assert len(calls) == 1
     assert sorted((result.ok, result.message) for result in results) == [
