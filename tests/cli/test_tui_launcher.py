@@ -8,6 +8,7 @@ import typer
 
 from nanobot.cli.agent import agent
 from nanobot.cli.tui_launcher import (
+    TuiSessionError,
     TuiUnavailableError,
     _authenticated_ws_url,
     _download_release_tui,
@@ -42,7 +43,7 @@ def test_websocket_chat_id(session_id: str, expected: str | None) -> None:
 
 
 def test_native_tui_rejects_a_session_owned_by_another_channel() -> None:
-    with pytest.raises(TuiUnavailableError, match="only WebSocket sessions"):
+    with pytest.raises(TuiSessionError, match="only WebSocket sessions"):
         _websocket_chat_id("telegram:123")
 
 
@@ -67,7 +68,7 @@ def test_default_tui_resumes_but_explicit_session_wins(tmp_path: Path) -> None:
     assert _initial_tui_chat_id("websocket:chosen", path) == "chosen"
 
     path.unlink()
-    assert _initial_tui_chat_id(None, path) == "tui-direct"
+    assert _initial_tui_chat_id(None, path) is None
 
 
 def test_launcher_passes_the_canonical_model_preset_to_the_tui(
@@ -114,6 +115,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert result == 0
     assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
     assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
+    assert "NANOBOT_TUI_CHAT_ID" not in captured
 
 
 def test_explicit_tui_binary_must_exist(
@@ -210,6 +212,28 @@ def test_interactive_agent_does_not_silently_fall_back(
         "[red]Native TUI unavailable: missing sidecar[/red]",
         "[dim]Use `nanobot agent --classic` only if you want the old prompt.[/dim]",
     ]
+
+
+def test_native_tui_rejects_a_classic_session_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: Config())
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdout", SimpleNamespace(isatty=lambda: True))
+
+    with pytest.raises(typer.BadParameter, match="only WebSocket sessions"):
+        agent(
+            message=None,
+            session_id="cli:direct",
+            workspace=None,
+            config=None,
+            markdown=True,
+            logs=False,
+            classic=False,
+            theme="auto",
+        )
 
 
 def test_default_agent_does_not_fall_back_outside_a_terminal(

@@ -73,7 +73,7 @@ def agent(
         help="Terminal UI appearance: auto, dark, or light",
     ),
 ):
-    """Interact with the agent directly."""
+    """Chat in the terminal or send one message non-interactively."""
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import make_provider
@@ -85,7 +85,7 @@ def agent(
         raise typer.BadParameter("must be auto, dark, or light", param_hint="--theme")
     native_tui = message is None and not classic
     if native_tui:
-        from nanobot.cli.tui_launcher import TuiUnavailableError, launch_tui
+        from nanobot.cli.tui_launcher import TuiSessionError, TuiUnavailableError, launch_tui
         from nanobot.config.loader import get_config_path
 
         if not sys.stdin.isatty() or not sys.stdout.isatty():
@@ -106,6 +106,8 @@ def agent(
                 session_id=session_id,
                 theme=theme,
             )
+        except TuiSessionError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--session") from exc
         except TuiUnavailableError as exc:
             console.print(f"[red]Native TUI unavailable: {exc}[/red]")
             console.print("[dim]Use `nanobot agent --classic` only if you want the old prompt.[/dim]")
@@ -205,7 +207,7 @@ def agent(
 
         return _cli_progress
 
-    if message:
+    if message is not None:
         # Single message mode — direct call, no bus needed
         async def run_once() -> None:
             try:

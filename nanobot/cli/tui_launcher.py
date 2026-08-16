@@ -32,6 +32,10 @@ class TuiUnavailableError(RuntimeError):
     """Raised when the native TypeScript TUI cannot run on this installation."""
 
 
+class TuiSessionError(ValueError):
+    """Raised when a session selector cannot be opened by the native TUI."""
+
+
 @dataclass(frozen=True)
 class _GatewayHandle:
     base_url: str
@@ -46,6 +50,8 @@ def launch_tui(
     theme: str,
 ) -> int:
     """Run the native TUI against the shared local gateway."""
+    state_path = config_path.parent / "tui" / "state.json"
+    chat_id = _initial_tui_chat_id(session_id, state_path)
     command = _resolve_tui_command()
     gateway = _ensure_gateway(
         config,
@@ -72,9 +78,7 @@ def launch_tui(
             "NANOBOT_TUI_THEME": theme,
         }
     )
-    state_path = config_path.parent / "tui" / "state.json"
     env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
-    chat_id = _initial_tui_chat_id(session_id, state_path)
     if chat_id:
         env["NANOBOT_TUI_CHAT_ID"] = chat_id
     else:
@@ -335,7 +339,7 @@ def _websocket_chat_id(session_id: str) -> str | None:
     if session_id.startswith("websocket:"):
         return session_id.split(":", 1)[1] or None
     if ":" in session_id:
-        raise TuiUnavailableError(
+        raise TuiSessionError(
             "the native TUI can open only WebSocket sessions; use --classic to resume "
             f"{session_id!r}"
         )
@@ -343,10 +347,10 @@ def _websocket_chat_id(session_id: str) -> str | None:
 
 
 def _initial_tui_chat_id(session_id: str | None, state_path: Path) -> str | None:
-    """Resume the default TUI, while keeping an explicit selector authoritative."""
+    """Resume the last TUI chat, while keeping an explicit selector authoritative."""
     if session_id is not None:
         return _websocket_chat_id(session_id)
-    return _read_tui_chat_id(state_path) or "tui-direct"
+    return _read_tui_chat_id(state_path)
 
 
 def _read_tui_chat_id(path: Path) -> str | None:
