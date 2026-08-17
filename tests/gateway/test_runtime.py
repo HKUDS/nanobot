@@ -42,6 +42,7 @@ def _paths(tmp_path: Path) -> GatewayRuntimePaths:
 
 
 _FOREGROUND_CHILD = r"""
+import os
 import signal
 import sys
 import time
@@ -56,37 +57,56 @@ from nanobot.gateway import (
 
 root = Path(sys.argv[1])
 duration = float(sys.argv[2])
+marker = Path(sys.argv[3])
 runtime = GatewayRuntime(paths=GatewayRuntimePaths.for_instance(data_dir=root))
 
 def stop(*_args):
     raise SystemExit(0)
 
-signal.signal(signal.SIGTERM, stop)
 try:
+    if os.name != "nt":
+        signal.signal(signal.SIGTERM, stop)
     with runtime.foreground_instance(GatewayStartOptions(port=18790)):
-        print("claimed", flush=True)
+        marker.write_text("claimed", encoding="utf-8")
         time.sleep(duration)
 except GatewayAlreadyRunningError:
-    print("occupied", flush=True)
+    marker.write_text("occupied", encoding="utf-8")
     raise SystemExit(17)
+except BaseException as exc:
+    marker.write_text(f"error:{type(exc).__name__}:{exc}", encoding="utf-8")
+    raise
 """
 
 
-def _foreground_child(runtime_dir: Path, duration_s: float) -> subprocess.Popen[str]:
+def _foreground_child(
+    runtime_dir: Path,
+    duration_s: float,
+    marker: Path,
+) -> subprocess.Popen[str]:
     env = os.environ.copy()
     root = str(Path(__file__).resolve().parents[2])
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (root, env.get("PYTHONPATH"))))
     return subprocess.Popen(
-        [sys.executable, "-c", _FOREGROUND_CHILD, str(runtime_dir), str(duration_s)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        [
+            sys.executable,
+            "-c",
+            _FOREGROUND_CHILD,
+            str(runtime_dir),
+            str(duration_s),
+            str(marker),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         env=env,
         start_new_session=os.name != "nt",
     )
 
 
-def _wait_for_claim(runtime: GatewayRuntime, process: subprocess.Popen[str]) -> None:
+def _wait_for_claim(
+    runtime: GatewayRuntime,
+    process: subprocess.Popen[str],
+    marker: Path,
+) -> None:
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline and process.poll() is None:
         try:
@@ -97,8 +117,8 @@ def _wait_for_claim(runtime: GatewayRuntime, process: subprocess.Popen[str]) -> 
         if state.get("pid") == process.pid:
             return
         time.sleep(0.01)
-    stdout, stderr = process.communicate(timeout=3)
-    pytest.fail(f"gateway claim failed: stdout={stdout!r}, stderr={stderr!r}")
+    detail = marker.read_text(encoding="utf-8") if marker.exists() else "no marker"
+    pytest.fail(f"gateway claim failed: returncode={process.poll()}, {detail}")
 
 
 def test_paths_use_stable_instance_suffix_for_custom_selectors(tmp_path):
@@ -264,9 +284,10 @@ def test_foreground_gateway_clears_its_state_after_an_error(tmp_path, monkeypatc
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signal escalation regression")
 def test_stop_allows_a_foreground_gateway_to_release_before_timeout(tmp_path):
     runtime = GatewayRuntime(paths=_paths(tmp_path))
-    child = _foreground_child(tmp_path, 30)
+    marker = tmp_path / "foreground.marker"
+    child = _foreground_child(tmp_path, 30, marker)
     try:
-        _wait_for_claim(runtime, child)
+        _wait_for_claim(runtime, child, marker)
 
         result = runtime.stop(timeout_s=1)
         child.wait(timeout=3)
@@ -282,14 +303,15 @@ def test_stop_allows_a_foreground_gateway_to_release_before_timeout(tmp_path):
 
 def test_competing_foreground_claim_preserves_the_live_gateway(tmp_path):
     runtime = GatewayRuntime(paths=_paths(tmp_path))
-    first = _foreground_child(tmp_path, 30)
+    first_marker = tmp_path / "first.marker"
+    first = _foreground_child(tmp_path, 30, first_marker)
     try:
-        _wait_for_claim(runtime, first)
-        second = _foreground_child(tmp_path, 0)
+        _wait_for_claim(runtime, first, first_marker)
+        second_marker = tmp_path / "second.marker"
+        second = _foreground_child(tmp_path, 0, second_marker)
         try:
             second.wait(timeout=3)
-            assert second.stdout is not None
-            assert second.stdout.read().strip() == "occupied"
+            assert second_marker.read_text(encoding="utf-8") == "occupied"
             assert second.returncode == 17
         finally:
             if second.poll() is None:
