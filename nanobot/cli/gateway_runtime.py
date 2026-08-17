@@ -785,8 +785,10 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
         console.print("[yellow]○[/yellow] Dream: disabled")
-        cron.remove_system_job("dream")
+        # Advance the cursor first: it must happen unconditionally (issue
+        # #4242), even if the cron store turns out to be corrupt below.
         _advance_dream_cursor_if_behind(agent.context.memory)
+        cron.remove_system_job("dream")
 
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:

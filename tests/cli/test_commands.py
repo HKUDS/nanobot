@@ -3229,7 +3229,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         def register_system_job(self, _job) -> None:
             return None
 
-        def remove_system_job(self, _job_id: str) -> bool:
+        def remove_system_job(self, job_id: str) -> bool:
+            seen.setdefault("removed_system_jobs", []).append(job_id)
             return False
 
     class _FakeAgentLoop(_GatewayAgentContractStub):
@@ -3308,6 +3309,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     turn_delivery_factory = agent_kwargs["turn_delivery_factory"]
     assert isinstance(turn_delivery_factory, TurnDeliveryFactory)
     assert turn_delivery_factory.bus is bus
+    # Disabled system jobs must be retired on startup, not just unregistered.
+    assert seen["removed_system_jobs"] == ["dream", "heartbeat"]
     assert isinstance(turn_delivery_factory.route_policy, WebuiTurnRoutePolicy)
     assert turn_delivery_factory.route_policy.sessions is agent.sessions
 

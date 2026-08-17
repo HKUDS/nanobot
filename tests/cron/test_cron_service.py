@@ -818,6 +818,15 @@ def test_remove_system_job_retires_persisted_system_job(tmp_path) -> None:
     assert other.remove_job("dream") == "protected"
 
 
+def test_remove_system_job_without_store_file(tmp_path) -> None:
+    """Fresh install with the system job disabled: no jobs.json exists yet."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+
+    assert service.remove_system_job("heartbeat") is False
+    assert not store_path.exists()
+
+
 @pytest.mark.asyncio
 async def test_start_server_not_jobs(tmp_path):
     store_path = tmp_path / "cron" / "jobs.json"
