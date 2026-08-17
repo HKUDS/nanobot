@@ -5,7 +5,9 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,6 +17,7 @@ from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar, cast
 
@@ -270,6 +273,33 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         """Return an identity that changes when an operating-system PID is reused."""
         return self._process_identity(pid)
 
+    def process_identity_match(
+        self,
+        recorded: object,
+        pid: int,
+    ) -> Literal["match", "mismatch", "unknown"]:
+        """Compare a recorded identity with the current process safely."""
+        if recorded is None:
+            return "match"
+        current = self._process_identity(pid)
+        if current is None:
+            return "unknown"
+        if recorded == current:
+            return "match"
+        # Older POSIX state files stored only the process group id.
+        if (
+            isinstance(recorded, int)
+            and isinstance(current, str)
+            and (
+                current.startswith(f"{recorded}:")
+                or current.startswith(f"darwin:{recorded}:")
+            )
+        ):
+            return "match"
+        if self.platform_name == "Darwin":
+            return _darwin_identity_match(recorded, current)
+        return "mismatch"
+
     def process_is_running(self, pid: int) -> bool:
         """Return whether the recorded operating-system process is still live."""
         return self._is_pid_running(pid)
@@ -365,8 +395,18 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         # Process inspection must follow the host API even when tests inject a
         # target platform.  On Windows, falling through to POSIX calls is not
         # merely unsupported: ``os.kill(pid, 0)`` broadcasts CTRL_C_EVENT.
-        if _platform_name() == "Windows" or self.platform_name == "Windows":
+        host_platform = _platform_name()
+        if host_platform == "Windows" or self.platform_name == "Windows":
             return _windows_process_identity(pid)
+        if self.platform_name == "Darwin":
+            birth = _darwin_process_birth(pid)
+            if birth is None:
+                return None
+            process_group, started_at_seconds, started_at_microseconds = birth
+            return (
+                f"darwin:{process_group}:{started_at_seconds}:"
+                f"{started_at_microseconds}"
+            )
         try:
             process_group = os.getpgid(pid)
         except OSError:
@@ -384,19 +424,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             fields = stat[closing_paren + 2 :].split() if closing_paren >= 0 else []
             # /proc/<pid>/stat fields after comm begin at field 3; starttime is field 22.
             return fields[19] if len(fields) > 19 else None
-        if self.platform_name == "Darwin":
-            try:
-                result = self._subprocess_run(
-                    ["ps", "-o", "lstart=", "-p", str(pid)],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=1,
-                )
-            except (OSError, subprocess.SubprocessError):
-                return None
-            started_at = getattr(result, "stdout", "").strip()
-            return started_at or None
         return None
 
     def _record_matches_process(self, state: dict[str, Any] | None, pid: int) -> bool:
@@ -410,21 +437,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         if not state:
             return "mismatch"
         recorded = state.get("identity")
-        if recorded is None:
-            return "match"
-        current = self._process_identity(pid)
-        if current is None:
-            return "unknown"
-        if recorded == current:
-            return "match"
-        # Older POSIX state files stored only the process group id.
-        if (
-            isinstance(recorded, int)
-            and isinstance(current, str)
-            and current.startswith(f"{recorded}:")
-        ):
-            return "match"
-        return "mismatch"
+        return self.process_identity_match(recorded, pid)
 
     def _read_state(self) -> dict[str, Any] | None:
         try:
@@ -527,6 +540,116 @@ def _as_int(value: object) -> int | None:
 
 def _as_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _darwin_identity_match(
+    recorded: object,
+    current: object,
+) -> Literal["match", "mismatch", "unknown"]:
+    """Compare the new numeric identity with a pre-upgrade ``ps`` identity."""
+    if not isinstance(recorded, str) or not isinstance(current, str):
+        return "mismatch"
+    current_match = re.fullmatch(r"darwin:(\d+):(\d+):(\d+)", current)
+    if current_match is None:
+        return "mismatch"
+    recorded_group, separator, recorded_started_at = recorded.partition(":")
+    if not separator or not recorded_group.isdigit():
+        return "mismatch"
+    if int(recorded_group) != int(current_match.group(1)):
+        return "mismatch"
+    legacy_epoch = _legacy_darwin_started_at(recorded_started_at)
+    if legacy_epoch is None:
+        # The PID is alive and its process group still matches, but an older
+        # locale produced a date we cannot safely parse. Keep the record until
+        # the owning client exits instead of killing a live gateway.
+        return "unknown"
+    return "match" if legacy_epoch == int(current_match.group(2)) else "mismatch"
+
+
+def _legacy_darwin_started_at(value: str) -> int | None:
+    """Parse the English and numeric macOS ``ps lstart`` formats we released."""
+    english = re.fullmatch(
+        r"[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+"
+        r"(\d{2}):(\d{2}):(\d{2})\s+(\d{4})",
+        value.strip(),
+    )
+    months = {
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12,
+    }
+    if english is not None:
+        month = months.get(english.group(1))
+        if month is None:
+            return None
+        day, hour, minute, second, year = map(int, english.groups()[1:])
+    else:
+        numeric = re.fullmatch(
+            r"\S+\s+(\d{1,2})/(\d{1,2})\s+"
+            r"(\d{2}):(\d{2}):(\d{2})\s+(\d{4})",
+            value.strip(),
+        )
+        if numeric is None:
+            return None
+        month, day, hour, minute, second, year = map(int, numeric.groups())
+    try:
+        return int(time.mktime((year, month, day, hour, minute, second, -1, -1, -1)))
+    except (OverflowError, ValueError):
+        return None
+
+
+@lru_cache(maxsize=1)
+def _darwin_proc_pidinfo() -> Any | None:
+    if sys.platform != "darwin":
+        return None
+    try:
+        proc_pidinfo = ctypes.CDLL(
+            "/usr/lib/libproc.dylib",
+            use_errno=True,
+        ).proc_pidinfo
+    except (AttributeError, OSError):
+        return None
+    proc_pidinfo.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    proc_pidinfo.restype = ctypes.c_int
+    return proc_pidinfo
+
+
+def _darwin_process_birth(pid: int) -> tuple[int, int, int] | None:
+    """Read PGID and microsecond process birth time from ``proc_bsdinfo``."""
+    proc_pidinfo = _darwin_proc_pidinfo()
+    if proc_pidinfo is None:
+        return None
+    # ``proc_bsdinfo`` is 136 bytes on supported macOS versions. These stable
+    # field offsets come from ``sys/proc_info.h``: pid=12, pgid=100,
+    # start_tvsec=120, and start_tvusec=128.
+    buffer = ctypes.create_string_buffer(136)
+    try:
+        written = proc_pidinfo(pid, 3, 0, buffer, len(buffer))
+    except (OSError, ValueError):
+        return None
+    if written != len(buffer) or struct.unpack_from("=I", buffer, 12)[0] != pid:
+        return None
+    process_group = struct.unpack_from("=I", buffer, 100)[0]
+    started_at_seconds = struct.unpack_from("=Q", buffer, 120)[0]
+    started_at_microseconds = struct.unpack_from("=Q", buffer, 128)[0]
+    if started_at_seconds <= 0:
+        return None
+    return process_group, started_at_seconds, started_at_microseconds
 
 
 def _windows_process_identity(pid: int) -> str | None:

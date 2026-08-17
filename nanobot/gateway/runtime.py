@@ -535,12 +535,7 @@ class GatewayClientLease:
             if not isinstance(pid, int) or not self._process_is_running(pid):
                 stale.append(token)
                 continue
-            current_identity = self._process_identity(pid)
-            if (
-                identity is not None
-                and current_identity is not None
-                and identity != current_identity
-            ):
+            if self._process_identity_match(identity, pid) == "mismatch":
                 stale.append(token)
         for token in stale:
             clients.pop(token, None)
@@ -550,6 +545,23 @@ class GatewayClientLease:
         resolver = getattr(self.runtime, "process_identity", None)
         value = resolver(pid) if callable(resolver) else None
         return value if isinstance(value, (str, int)) else None
+
+    def _process_identity_match(
+        self,
+        recorded: object,
+        pid: int,
+    ) -> Literal["match", "mismatch", "unknown"]:
+        matcher = getattr(self.runtime, "process_identity_match", None)
+        if callable(matcher):
+            result = matcher(recorded, pid)
+            if result in {"match", "mismatch", "unknown"}:
+                return cast(Literal["match", "mismatch", "unknown"], result)
+        if recorded is None:
+            return "match"
+        current = self._process_identity(pid)
+        if current is None:
+            return "unknown"
+        return "match" if recorded == current else "mismatch"
 
     def _process_is_running(self, pid: int) -> bool:
         checker = getattr(self.runtime, "process_is_running", None)
