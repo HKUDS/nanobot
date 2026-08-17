@@ -247,7 +247,7 @@ describe("Settings system domains", () => {
 
     const primaryRow = await screen.findByTestId("model-call-order-row-primary");
     fireEvent.click(within(primaryRow).getAllByRole("button")[0]);
-    const presetName = await screen.findByDisplayValue("Primary");
+    const presetName = await screen.findByRole("textbox", { name: "Preset name" });
     fireEvent.change(presetName, { target: { value: "Unsaved model draft" } });
     fireEvent.click(screen.getByRole("button", { name: "System" }));
 
@@ -273,7 +273,9 @@ describe("Settings system domains", () => {
     fireEvent.click(screen.getByRole("button", { name: "Models" }));
     const preservedPrimaryRow = await screen.findByTestId("model-call-order-row-primary");
     fireEvent.click(within(preservedPrimaryRow).getAllByRole("button")[0]);
-    expect(await screen.findByDisplayValue("Unsaved model draft")).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Preset name" })).toHaveValue(
+      "Unsaved model draft",
+    );
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
