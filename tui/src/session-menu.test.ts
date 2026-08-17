@@ -62,4 +62,68 @@ describe("SessionMenu", () => {
       "Release checklist",
     )
   })
+
+  test("shows compact workspace names only when they distinguish sessions", async () => {
+    setup = await createTestRenderer({ width: 100, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+    })
+    setup.renderer.root.add(menu.root)
+    const scoped = sessions.map((session) => ({
+      ...session,
+      workspaceScope: {
+        project_path: "/work/nanobot",
+        project_name: "nanobot",
+        access_mode: "restricted" as const,
+      },
+    }))
+
+    menu.open(scoped, "one", 6)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).not.toContain("nanobot · Codex")
+
+    menu.open([
+      scoped[0]!,
+      {
+        ...scoped[1]!,
+        workspaceScope: {
+          project_path: "C:\\work\\desktop",
+          project_name: "desktop",
+          access_mode: "restricted",
+        },
+      },
+    ], "one", 6)
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("nanobot · Codex")
+    expect(frame).toContain("desktop")
+
+    menu.update("desktop", 6)
+    expect(menu.choose()?.chatId).toBe("two")
+
+    menu.open([
+      {
+        ...scoped[0]!,
+        workspaceScope: {
+          project_path: "/work/frontend/nanobot",
+          project_name: "nanobot",
+          access_mode: "restricted",
+        },
+      },
+      {
+        ...scoped[1]!,
+        workspaceScope: {
+          project_path: "/work/backend/nanobot",
+          project_name: "nanobot",
+          access_mode: "restricted",
+        },
+      },
+    ], "one", 6)
+    await setup.renderOnce()
+    const duplicates = setup.captureCharFrame()
+    expect(duplicates).toContain("frontend/nanobot")
+    expect(duplicates).toContain("backend/nanobot")
+  })
 })

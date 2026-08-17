@@ -25,6 +25,8 @@ function updatedLabel(value: string | null): string {
 export class SessionMenu {
   readonly root: BoxRenderable
   private readonly picker: PickerMenu<SessionMenuRow>
+  private readonly workspaceLabels = new Map<string, string>()
+  private showWorkspaces = false
 
   constructor(
     renderer: CliRenderer,
@@ -38,11 +40,14 @@ export class SessionMenu {
         session.modelPreset || "",
         session.preview,
         session.chatId,
+        session.workspaceScope?.project_name || "",
+        session.workspaceScope?.project_path || "",
       ].join(" "),
       render: (session) => {
         const age = updatedLabel(session.updatedAt)
         const preview = session.preview.trim()
         const detail = [
+          this.showWorkspaces ? this.workspaceLabel(session) : "",
           session.modelPreset,
           age,
           preview && preview !== sessionLabel(session) ? preview : "",
@@ -63,6 +68,7 @@ export class SessionMenu {
   }
 
   open(sessions: SessionSummary[], currentChatId: string, limit: number): void {
+    this.prepareWorkspaceLabels(sessions)
     const rows = sessions
       .map((session) => ({ ...session, active: session.chatId === currentChatId }))
       .sort((left, right) => {
@@ -92,4 +98,41 @@ export class SessionMenu {
   setTheme(theme: PickerMenuTheme): void {
     this.picker.setTheme(theme)
   }
+
+  private prepareWorkspaceLabels(sessions: SessionSummary[]): void {
+    this.workspaceLabels.clear()
+    const scopes = sessions.flatMap((session) => {
+      const path = normalizeWorkspacePath(session.workspaceScope?.project_path)
+      return path ? [{ path, name: session.workspaceScope?.project_name?.trim() || pathName(path) }] : []
+    })
+    const paths = new Set(scopes.map(({ path }) => path))
+    this.showWorkspaces = paths.size > 1
+    if (!this.showWorkspaces) return
+    const namePaths = new Map<string, Set<string>>()
+    for (const { path, name } of scopes) {
+      const pathsForName = namePaths.get(name) || new Set<string>()
+      pathsForName.add(path)
+      namePaths.set(name, pathsForName)
+    }
+    for (const { path, name } of scopes) {
+      this.workspaceLabels.set(path, namePaths.get(name)?.size === 1 ? name : shortPath(path))
+    }
+  }
+
+  private workspaceLabel(session: SessionSummary): string {
+    return this.workspaceLabels.get(normalizeWorkspacePath(session.workspaceScope?.project_path)) || ""
+  }
+}
+
+function normalizeWorkspacePath(value: string | undefined): string {
+  return (value || "").trim().replace(/\\/gu, "/").replace(/\/+$/u, "")
+}
+
+function pathName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) || path
+}
+
+function shortPath(path: string): string {
+  const parts = path.split("/").filter(Boolean)
+  return parts.slice(-2).join("/") || path
 }
