@@ -56,6 +56,7 @@ def build_gateway_services(
     default_restrict_to_workspace: bool,
     config_path: Path | None = None,
     runtime_model_name: Callable[[], str | None] | None,
+    refresh_runtime_config: Callable[[], None] | None = None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
     disabled_skills: set[str] | None = None,
@@ -70,7 +71,15 @@ def build_gateway_services(
     skill_state_action: Callable[[set[str]], None] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
-    settings = WebUISettingsServices.create(config_path or get_config_path())
+    settings = WebUISettingsServices.create(
+        config_path or get_config_path(),
+        rename_model_preset=(
+            session_manager.rename_model_preset
+            if session_manager is not None
+            else None
+        ),
+        refresh_runtime_config=refresh_runtime_config,
+    )
     tokens = GatewayTokenStore()
     ingress = DEFAULT_WEBUI_INGRESS_POLICY
     minimum_frame_bytes = ingress.minimum_full_policy_frame_bytes()

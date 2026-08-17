@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -1010,6 +1010,259 @@ async def test_authenticated_webui_request_returns_correlated_success(bus: Magic
 
 
 @pytest.mark.asyncio
+async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    dispatch_order: list[str] = []
+
+    async def dispatch(
+        _connection: object,
+        action: str,
+        _payload: dict[str, object],
+    ) -> Any:
+        dispatch_order.append(action)
+        if action == "settings.provider.update":
+            first_started.set()
+            await release_first.wait()
+        return _http_json_response({"action": action})
+
+    channel.gateway.http.dispatch_webui_mutation = dispatch
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-first",
+            "action": "settings.provider.update",
+            "payload": {},
+        },
+    )
+    await first_started.wait()
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-second",
+            "action": "settings.agent.update",
+            "payload": {},
+        },
+    )
+    await asyncio.sleep(0)
+    assert dispatch_order == ["settings.provider.update"]
+
+    release_first.set()
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+
+    assert dispatch_order == [
+        "settings.provider.update",
+        "settings.agent.update",
+    ]
+    responses = [json.loads(call.args[0]) for call in conn.send.await_args_list]
+    assert [response["request_id"] for response in responses] == [
+        "request-first",
+        "request-second",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    first_conn = AsyncMock()
+    retry_conn = AsyncMock()
+    first_conn.send.side_effect = ConnectionClosed(Close(1006, ""), Close(1006, ""), True)
+    channel._webui_connections.update({first_conn, retry_conn})
+    started = asyncio.Event()
+    release = asyncio.Event()
+    dispatch_order: list[str] = []
+
+    async def mutate(_connection: object, action: str, _payload: dict[str, Any]) -> Any:
+        dispatch_order.append(action)
+        if action == "automation.run":
+            started.set()
+            await release.wait()
+        return _http_json_response({"action": action})
+
+    channel.gateway.http.dispatch_webui_mutation = AsyncMock(side_effect=mutate)
+    envelope = {
+        "type": "webui_request",
+        "request_id": "request-retry",
+        "action": "automation.run",
+        "payload": {"id": "daily-summary"},
+    }
+    queued_envelope = {
+        "type": "webui_request",
+        "request_id": "request-queued",
+        "action": "automation.update",
+        "payload": {"id": "daily-summary"},
+    }
+
+    await channel._dispatch_envelope(first_conn, "webui-client", envelope)
+    await started.wait()
+    await channel._dispatch_envelope(first_conn, "webui-client", queued_envelope)
+    assert dispatch_order == ["automation.run"]
+
+    await channel._cleanup_connection(first_conn)
+    assert first_conn not in channel._webui_connections
+    await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
+    await channel._dispatch_envelope(retry_conn, "webui-client", queued_envelope)
+    await channel._dispatch_envelope(
+        retry_conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-next",
+            "action": "automation.delete",
+            "payload": {"id": "daily-summary"},
+        },
+    )
+    await asyncio.sleep(0)
+    assert dispatch_order == ["automation.run"]
+
+    pending = tuple(channel._webui_request_tasks.values())
+    release.set()
+    await asyncio.gather(*pending)
+
+    assert dispatch_order == ["automation.run", "automation.update", "automation.delete"]
+    responses = [json.loads(call.args[0]) for call in retry_conn.send.await_args_list]
+    assert [response["request_id"] for response in responses] == [
+        "request-retry",
+        "request-queued",
+        "request-next",
+    ]
+    assert first_conn not in channel._webui_request_locks
+
+
+@pytest.mark.asyncio
+async def test_webui_request_replays_completed_result_after_reconnect(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    first_conn = AsyncMock()
+    retry_conn = AsyncMock()
+    channel._webui_connections.update({first_conn, retry_conn})
+    channel.gateway.http.dispatch_webui_mutation = AsyncMock(
+        return_value=_http_json_response({"installed": True})
+    )
+    envelope = {
+        "type": "webui_request",
+        "request_id": "request-completed",
+        "action": "skill.install",
+        "payload": {"skill": "demo"},
+    }
+
+    await channel._dispatch_envelope(first_conn, "webui-client", envelope)
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+
+    channel.gateway.http.dispatch_webui_mutation.assert_awaited_once()
+    assert json.loads(retry_conn.send.await_args.args[0]) == {
+        "event": "webui_response",
+        "request_id": "request-completed",
+        "ok": True,
+        "result": {"installed": True},
+    }
+
+
+@pytest.mark.asyncio
+async def test_webui_request_rejects_request_id_reuse_with_different_payload(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    first_conn = AsyncMock()
+    retry_conn = AsyncMock()
+    channel._webui_connections.update({first_conn, retry_conn})
+    channel.gateway.http.dispatch_webui_mutation = AsyncMock(
+        return_value=_http_json_response({"ran": True})
+    )
+
+    await channel._dispatch_envelope(
+        first_conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-conflict",
+            "action": "automation.run",
+            "payload": {"id": "job-a"},
+        },
+    )
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await channel._dispatch_envelope(
+        retry_conn,
+        "webui-client",
+        {
+            "type": "webui_request",
+            "request_id": "request-conflict",
+            "action": "automation.run",
+            "payload": {"id": "job-b"},
+        },
+    )
+
+    channel.gateway.http.dispatch_webui_mutation.assert_awaited_once()
+    assert json.loads(retry_conn.send.await_args.args[0]) == {
+        "event": "webui_response",
+        "request_id": "request-conflict",
+        "ok": False,
+        "error": {
+            "status": 409,
+            "message": "request_id was already used for a different WebUI mutation",
+        },
+    }
+
+
+def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nanobot.channels.websocket.runtime as websocket_module
+
+    channel = _ch(bus)
+    now = 1_000.0
+    monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
+    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations["pending"] = SimpleNamespace(completed_at=None)
+    operations["expired"] = SimpleNamespace(
+        completed_at=now - websocket_module._WEBUI_REQUEST_CACHE_TTL_S
+    )
+    operations["fresh"] = SimpleNamespace(completed_at=now - 1)
+
+    channel._prune_webui_request_operations()
+
+    assert "pending" in operations
+    assert "expired" not in operations
+    assert "fresh" in operations
+
+
+def test_webui_request_cache_prunes_oldest_completed_at_capacity(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nanobot.channels.websocket.runtime as websocket_module
+
+    channel = _ch(bus)
+    now = 1_000.0
+    monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
+    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations["pending"] = SimpleNamespace(completed_at=None)
+    for index in range(websocket_module._WEBUI_REQUEST_CACHE_MAX + 1):
+        operations[f"completed-{index}"] = SimpleNamespace(
+            completed_at=now - 1 + index / 1_000
+        )
+
+    channel._prune_webui_request_operations()
+
+    assert "pending" in operations
+    assert "completed-0" not in operations
+    assert "completed-1" in operations
+    completed = [operation for operation in operations.values() if operation.completed_at is not None]
+    assert len(completed) == websocket_module._WEBUI_REQUEST_CACHE_MAX
+
+
+@pytest.mark.asyncio
 async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = AsyncMock()
@@ -1708,7 +1961,10 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
             channel="websocket",
             chat_id="chat-1",
             content="",
-            event=TurnModelUpdatedEvent(model="deepseek/deepseek-chat"),
+            event=TurnModelUpdatedEvent(
+                model="deepseek/deepseek-chat",
+                model_preset="Deep Research",
+            ),
         )
     )
 
@@ -1717,6 +1973,7 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "event": "turn_model_updated",
         "chat_id": "chat-1",
         "model_name": "deepseek/deepseek-chat",
+        "model_preset": "Deep Research",
     }
     chat_two.send.assert_not_awaited()
 
@@ -3198,6 +3455,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
+        assert providers["orcarouter"]["label"] == "OrcaRouter"
+        assert providers["orcarouter"]["configured"] is False
+        assert providers["orcarouter"]["api_key_required"] is True
+        assert providers["orcarouter"]["default_api_base"] == "https://api.orcarouter.ai/v1"
         assert providers["skywork"]["label"] == "Skywork"
         assert providers["skywork"]["default_api_base"] == "https://api.apifree.ai/agent/v1"
         assert providers["ant_ling"]["label"] == "Ant Ling"
@@ -3362,7 +3623,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         created_presets = {
             preset["name"]: preset for preset in created_body["model_presets"]
         }
-        assert created_presets["fast-writing"]["label"] == "Fast writing"
+        assert created_presets["fast-writing"]["label"] == "fast-writing"
         assert created_presets["fast-writing"]["provider"] == "openai"
 
         updated_preset = await _webui_mutate(
@@ -3370,7 +3631,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             "settings.model_configuration.update",
             {
                 "name": "fast-writing",
-                "label": "Codex",
+                "new_name": "Codex",
                 "provider": "openai",
                 "model": "openai/gpt-5.5",
             },
@@ -3382,24 +3643,24 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         updated_presets = {
             preset["name"]: preset for preset in updated_preset_body["model_presets"]
         }
-        assert updated_presets["fast-writing"]["label"] == "Codex"
+        assert updated_presets["Codex"]["label"] == "Codex"
 
         call_order_updated = await _webui_mutate(
             webui_client,
             "settings.model_call_order.update",
-            {"order": ["fast-writing", "deep"]},
+            {"order": ["Codex", "deep"]},
         )
         assert call_order_updated.status_code == 200
         call_order_body = call_order_updated.json()
-        assert call_order_body["agent"]["model_preset"] == "fast-writing"
+        assert call_order_body["agent"]["model_preset"] == "Codex"
         assert call_order_body["agent"]["model"] == "openai/gpt-5.5"
-        assert call_order_body["model_call_order"] == ["fast-writing", "deep"]
+        assert call_order_body["model_call_order"] == ["Codex", "deep"]
 
         duplicate_preset = await _webui_mutate(
             webui_client,
             "settings.model_configuration.create",
             {
-                "label": "Fast writing",
+                "name": "codex",
                 "provider": "openai",
                 "model": "openai/gpt-4.1-mini",
             },
@@ -3497,11 +3758,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         saved = load_config(config_path)
         assert saved.agents.defaults.model == "atomic_chat/test"
         assert saved.agents.defaults.provider == "atomic_chat"
-        assert saved.agents.defaults.model_preset == "fast-writing"
+        assert saved.agents.defaults.model_preset == "Codex"
         assert saved.agents.defaults.fallback_models == ["deep"]
-        assert saved.model_presets["fast-writing"].label == "Codex"
-        assert saved.model_presets["fast-writing"].model == "openai/gpt-5.5"
-        assert saved.model_presets["fast-writing"].provider == "openai"
+        assert saved.model_presets["Codex"].model == "openai/gpt-5.5"
+        assert saved.model_presets["Codex"].provider == "openai"
         assert saved.agents.defaults.timezone == "Asia/Shanghai"
         assert saved.agents.defaults.bot_name == "nanobot"
         assert saved.agents.defaults.bot_icon == "🐈"

@@ -33,6 +33,7 @@ from nanobot.bus.runtime_events import (
     SessionTurnStarted,
     TurnCompleted,
     TurnRunStatusChanged,
+    TurnRuntimeAdmitted,
 )
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.fallback_provider import FallbackModelObserver
@@ -459,7 +460,14 @@ def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserve
             outbound_message_for_event(
                 channel=context.channel,
                 chat_id=chat_id,
-                event=TurnModelUpdatedEvent(model=model),
+                event=TurnModelUpdatedEvent(
+                    model=model,
+                    model_preset=(
+                        context.runtime.model_preset
+                        if context.runtime is not None
+                        else None
+                    ),
+                ),
                 metadata=context.metadata,
             )
         )
@@ -485,6 +493,10 @@ class WebuiTurnCoordinator:
             runtime_events.subscribe(
                 self._handle_run_status_changed,
                 TurnRunStatusChanged,
+            ),
+            runtime_events.subscribe(
+                self._handle_turn_runtime_admitted,
+                TurnRuntimeAdmitted,
             ),
             runtime_events.subscribe(
                 self._handle_turn_completed_event,
@@ -535,6 +547,21 @@ class WebuiTurnCoordinator:
             self._ctx_msg(event.context),
             event.status,
             started_at=event.started_at,
+        )
+
+    async def _handle_turn_runtime_admitted(self, event: TurnRuntimeAdmitted) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=event.context.channel,
+                chat_id=event.context.chat_id,
+                event=TurnModelUpdatedEvent(
+                    model=event.runtime.model,
+                    model_preset=event.runtime.model_preset,
+                ),
+                metadata=event.context.metadata,
+            )
         )
 
     async def _handle_turn_completed_event(self, event: TurnCompleted) -> None:

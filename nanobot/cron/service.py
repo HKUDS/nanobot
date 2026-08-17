@@ -170,6 +170,7 @@ class CronService:
         self._timer_task: asyncio.Task[None] | None = None
         self._running = False
         self._active_executions = 0
+        self._store_dirty = False
         self.max_sleep_ms = max_sleep_ms
 
     def _should_persist_store(self) -> bool:
@@ -305,6 +306,11 @@ class CronService:
           load (during ``start``) can return ``None`` to signal an unrecoverable
           state to the caller.
         """
+        # Never replace state that a previous save failed to persist.  Reloading
+        # the older on-disk snapshot here could make an already executed job due
+        # again and repeat its side effect.
+        if self._store_dirty and self._store:
+            return self._store
         if self._active_executions > 0 and self._store and not reload_during_execution:
             return self._store
         loaded = self._load_jobs()
@@ -347,6 +353,9 @@ class CronService:
         if not self._store:
             return
 
+        # Set this before serialization/write so every exceptional exit keeps
+        # the in-memory snapshot authoritative until a later save succeeds.
+        self._store_dirty = True
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
@@ -399,6 +408,7 @@ class CronService:
         }
 
         self._atomic_write(self.store_path, json.dumps(data, indent=2, ensure_ascii=False))
+        self._store_dirty = False
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
@@ -514,12 +524,18 @@ class CronService:
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:
+            # A prior tick may have completed external side effects but failed
+            # to persist their advanced schedule.  Persist that exact snapshot
+            # before reloading or executing anything else; otherwise the older
+            # disk state can replay the same job.
+            if self._store_dirty:
+                self._save_store()
+                return
+
             store = self._load_store(reload_during_execution=reload_store)
-            # If a hot reload found a corrupt store on disk, ``self._store`` may
-            # still hold the previous, known-good in-memory snapshot.  Keep using
-            # it rather than crashing the timer or wiping live jobs.
+            # If a hot reload found a corrupt store on disk, ``self._store``
+            # may still hold the previous, known-good in-memory snapshot.
             if store is None:
-                self._arm_timer()
                 return
 
             now = _now_ms()
@@ -532,9 +548,21 @@ class CronService:
                 await self._execute_job(job)
 
             self._save_store()
+        except Exception:
+            # A load/persist failure must not kill the scheduler: keep the
+            # in-memory store and retry on the next tick.  This mirrors the
+            # read-path defense in ``_load_jobs`` (``.corrupt-<ts>`` backups);
+            # ``_load_store`` may also persist (agent-binding migrations).
+            logger.exception(
+                "Cron: tick failed ({}); "
+                "keeping in-memory state and retrying on next tick",
+                self.store_path,
+            )
         finally:
             self._active_executions -= 1
-        self._arm_timer()
+            # Always re-arm the timer, even on unexpected failures, so a
+            # single bad tick cannot silently stop all future jobs.
+            self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
@@ -797,6 +825,11 @@ class CronService:
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:
+            # A manual run is another side-effecting entrypoint.  Do not start
+            # it while the result of a previous timer execution is still only
+            # in memory.
+            if self._store_dirty:
+                self._save_store()
             store = self._require_store(reload_during_execution=reload_store)
             for job in store.jobs:
                 if job.id == job_id:

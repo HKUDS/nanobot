@@ -87,7 +87,7 @@ export function ChannelCatalogRow({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
+        "group flex w-full min-w-0 items-center gap-3 rounded-control px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
         selected ? "bg-background" : "hover:bg-muted",
       )}
     >
@@ -187,7 +187,7 @@ export function ChannelSetupPanel({
   });
 
   return (
-    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
+    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -482,7 +482,7 @@ function ChannelSetupSurface({
               ) : null}
             </div>
             {setup.command ? (
-              <code className="mt-3 block rounded-[10px] border border-border/50 bg-muted/45 px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground">
+              <code className="mt-3 block rounded-control border border-border/50 bg-muted/45 px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground">
                 {setup.command}
               </code>
             ) : null}
@@ -538,7 +538,7 @@ function ChannelSetupSurface({
       {notice ? (
         <div
           role="status"
-          className="rounded-[12px] bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground"
+          className="rounded-control bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground"
         >
           {notice}
         </div>

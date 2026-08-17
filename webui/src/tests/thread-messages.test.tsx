@@ -16,6 +16,54 @@ afterEach(() => {
 });
 
 describe("ThreadMessages", () => {
+  it("shows optimistic turn progress in the thread before the first agent output", () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-13T10:00:05.000Z").getTime();
+    vi.setSystemTime(now);
+    const prompt: UIMessage = {
+      id: "u-optimistic",
+      role: "user",
+      content: "check this",
+      turnId: "turn-optimistic",
+      turnPhase: "user",
+      deliveryStatus: "sending",
+      createdAt: now - 5_000,
+    };
+    const { rerender } = render(
+      <ThreadMessages
+        messages={[prompt]}
+        isStreaming
+        activeTurnId="turn-optimistic"
+        runStartedAt={(now - 5_000) / 1000}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Thinking for 5s" })).toBeInTheDocument();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          { ...prompt, deliveryStatus: "accepted" },
+          {
+            id: "t-optimistic",
+            role: "tool",
+            kind: "trace",
+            content: "web_search()",
+            traces: ["web_search()"],
+            turnId: "turn-optimistic",
+            turnPhase: "activity",
+            createdAt: now,
+          },
+        ]}
+        isStreaming
+        activeTurnId="turn-optimistic"
+        runStartedAt={(now - 5_000) / 1000}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Working for 5s" })).toBeInTheDocument();
+  });
+
   it("does not move a mounted tail answer into offscreen rendering on the next turn", () => {
     const completed: UIMessage[] = [
       { id: "u1", role: "user", content: "question", createdAt: 1 },
@@ -499,6 +547,66 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Working for 10s")).not.toBeInTheDocument();
   });
 
+  it("keeps a guided run's timer on its original activity cluster", () => {
+    vi.useFakeTimers();
+    const startedAt = 1_700_000_000_000;
+    vi.setSystemTime(startedAt + 215_000);
+    const messages: UIMessage[] = [
+      {
+        id: "u-original",
+        role: "user",
+        content: "research this",
+        turnId: "turn-original",
+        turnPhase: "user",
+        turnSeq: 0,
+        createdAt: startedAt,
+      },
+      {
+        id: "t-original",
+        role: "tool",
+        kind: "trace",
+        content: "web_search()",
+        traces: ["web_search()"],
+        turnId: "turn-original",
+        turnPhase: "activity",
+        turnSeq: 1,
+        createdAt: startedAt + 500,
+      },
+      {
+        id: "a-original",
+        role: "assistant",
+        content: "Continuing the search.",
+        latencyMs: 1_000,
+        turnId: "turn-original",
+        turnPhase: "answer",
+        turnSeq: 2,
+        createdAt: startedAt + 1_000,
+      },
+      {
+        id: "u-guidance",
+        role: "user",
+        content: "How is it going?",
+        turnId: "turn-guidance",
+        turnPhase: "user",
+        turnSeq: 0,
+        createdAt: startedAt + 215_000,
+      },
+    ];
+
+    render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming
+        activeTurnId="turn-original"
+        runStartedAt={startedAt / 1000}
+      />,
+    );
+
+    expect(screen.getByText("Working for 3m 35s")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 1s")).not.toBeInTheDocument();
+    expect(screen.queryByText("Thinking for 3m 35s")).not.toBeInTheDocument();
+  });
+
   it("folds final answer reasoning into the preceding activity timeline", () => {
     const messages: UIMessage[] = [
       {
@@ -945,6 +1053,143 @@ describe("ThreadMessages", () => {
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
     expect(screen.getByText("final reply")).toBeInTheDocument();
+  });
+
+  it("hides current turn actions until turn_end", () => {
+    const activeTurnId = "turn-2";
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: activeTurnId, createdAt: 3 },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "first answer slice",
+        turnId: activeTurnId,
+        createdAt: 4,
+      },
+      {
+        id: "t2",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        turnId: activeTurnId,
+        createdAt: 5,
+      },
+      {
+        id: "a3",
+        role: "assistant",
+        content: "second answer slice",
+        turnId: activeTurnId,
+        createdAt: 6,
+      },
+    ];
+    const props = { messages, onForkFromMessage: vi.fn() };
+    const { container, rerender } = render(
+      <ThreadMessages {...props} isStreaming activeTurnId={activeTurnId} />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+
+    rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(2);
+  });
+
+  it("keeps active turn actions hidden across guidance and failed user rows", () => {
+    const activeTurnId = "turn-active";
+    const messages: UIMessage[] = [
+      { id: "old-user", role: "user", content: "old question", turnId: "turn-old", createdAt: 1 },
+      { id: "old", role: "assistant", content: "old answer", turnId: "turn-old", createdAt: 2 },
+      { id: "active-user", role: "user", content: "new question", turnId: activeTurnId, createdAt: 3 },
+      { id: "live", role: "assistant", content: "live slice", createdAt: 4 },
+      { id: "guide", role: "user", content: "focus", turnId: "turn-guide", createdAt: 5 },
+      {
+        id: "failed",
+        role: "user",
+        content: "retry",
+        turnId: "turn-failed",
+        deliveryStatus: "failed",
+        createdAt: 6,
+      },
+    ];
+    const { container } = render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming
+        activeTurnId={activeTurnId}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+  });
+
+  it("only hides the active assistant-only automation turn", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "old", role: "assistant", content: "old answer", turnId: "turn-old", createdAt: 1 },
+          {
+            id: "automation",
+            role: "assistant",
+            content: "automation result",
+            turnId: "turn-automation",
+            createdAt: 2,
+          },
+        ]}
+        isStreaming
+        activeTurnId="turn-automation"
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(0);
+  });
+
+  it("falls back to the latest user boundary for untagged active slices", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "user", role: "user", content: "question", createdAt: 1 },
+          { id: "live", role: "assistant", content: "live slice", createdAt: 2 },
+        ]}
+        isStreaming
+        activeTurnId="turn-active"
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-assistant-footer] [aria-label="Copy"]'))
+      .not.toBeInTheDocument();
+    expect(container.querySelector('[data-assistant-footer] [aria-label="Fork"]'))
+      .not.toBeInTheDocument();
+  });
+
+  it("falls back to the latest user boundary while the active turn id is pending", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "old-user", role: "user", content: "old question", turnId: "old", createdAt: 1 },
+          { id: "old", role: "assistant", content: "old answer", turnId: "old", createdAt: 2 },
+          { id: "new-user", role: "user", content: "new question", turnId: "new", createdAt: 3 },
+          { id: "live", role: "assistant", content: "live slice", turnId: "new", createdAt: 4 },
+        ]}
+        isStreaming
+        activeTurnId={null}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]'))
+      .toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]'))
+      .toHaveLength(1);
   });
 
   it("shows copy on adjacent assistant text slices", () => {

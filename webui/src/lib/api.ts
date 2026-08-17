@@ -910,8 +910,7 @@ export async function createModelConfiguration(
     transport,
     "settings.model_configuration.create",
     {
-      ...(configuration.name !== undefined ? { name: configuration.name } : {}),
-      label: configuration.label,
+      name: configuration.name,
       provider: configuration.provider,
       model: configuration.model,
       ...modelGenerationSettingsPayload(configuration),
@@ -928,7 +927,7 @@ export async function updateModelConfiguration(
     "settings.model_configuration.update",
     {
       name: configuration.name,
-      ...(configuration.label !== undefined ? { label: configuration.label } : {}),
+      ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
       ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
       ...(configuration.model !== undefined ? { model: configuration.model } : {}),
       ...modelGenerationSettingsPayload(configuration),

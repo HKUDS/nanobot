@@ -570,7 +570,7 @@ function PairingCodePopup({
       aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}
       className={cn(
         "fixed right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70]",
-        "w-[min(calc(100vw-2rem),24rem)] rounded-[24px]",
+        "w-[min(calc(100vw-2rem),24rem)] rounded-modal",
         floatingSurfaceElevationClassName,
         "p-4",
         "animate-in fade-in-0 slide-in-from-top-2 duration-200",
@@ -2861,7 +2861,6 @@ function Shell({
                 addPaneDisabled={creatingPane || activePaneLimitReached}
                 addPaneDisabledLabel={activePaneLimitReached
                   ? t("workbench.paneLimit", {
-                      defaultValue: "Maximum {{count}} panes",
                       count: MAX_WORKBENCH_PANES,
                     })
                   : undefined}
@@ -3166,7 +3165,6 @@ function Shell({
                       composerPortalTarget={context.composerPortalTarget}
                       composerActive={context.active}
                       composerInputAriaLabel={t("workbench.composerAria", {
-                        defaultValue: "Message {{title}}",
                         title: pane.title,
                       })}
                       emptyComposerVariant="thread"
@@ -3246,9 +3244,9 @@ function Shell({
             <RenameChatDialog
               open
               title={pendingTabRename.label}
-              dialogTitle={t("workbench.renameTabTitle")}
-              description={t("workbench.renameTabDescription")}
-              placeholder={t("workbench.renameTabPlaceholder")}
+              dialogTitle={t("workbench.renameGroupTitle")}
+              description={t("workbench.renameGroupDescription")}
+              placeholder={t("workbench.renameGroupPlaceholder")}
               onCancel={() => setPendingTabRename(null)}
               onConfirm={onConfirmTabRename}
             />

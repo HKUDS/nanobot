@@ -23,7 +23,22 @@ AGENT_PLUGIN_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.js
 _PLUGIN_NAME = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 _MCP_SERVER_FIELDS = {"type", "command", "args", "env", "cwd"}
 _MAX_LOGO_BYTES = 256 * 1024
-_SKILL_CACHE: dict[tuple[Path, Path], tuple[tuple[str, Path], ...]] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class _PackageSnapshot:
+    root: Path
+    fingerprint: str
+    skill_dirs: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SkillCacheEntry:
+    skills: tuple[tuple[str, Path], ...]
+    packages: tuple[_PackageSnapshot, ...]
+
+
+_SKILL_CACHE: dict[tuple[Path, Path], _SkillCacheEntry] = {}
 
 
 @dataclass(frozen=True)
@@ -66,23 +81,68 @@ def _installed_plugins(workspace: Path) -> list[AgentPlugin]:
 
 def enabled_agent_plugin_skills(workspace: Path) -> list[tuple[str, Path]]:
     """Verify and return skills from plugins the user has explicitly enabled."""
-    skills = [
-        skill
-        for plugin in _installed_plugins(workspace)
-        if _enabled(workspace, plugin)
-        for skill in _discover_plugin_skills(plugin.name, plugin.root)
-    ]
-    _SKILL_CACHE[_skill_cache_key(workspace)] = tuple(skills)
+    skills: list[tuple[str, Path]] = []
+    packages: list[_PackageSnapshot] = []
+    for plugin in _installed_plugins(workspace):
+        plugin_skills = _discover_plugin_skills(plugin.name, plugin.root)
+        fingerprint = _enabled_package_fingerprint(workspace, plugin)
+        if fingerprint is None:
+            continue
+        skills.extend(plugin_skills)
+        if plugin_skills:
+            packages.append(
+                _PackageSnapshot(
+                    root=plugin.root,
+                    fingerprint=fingerprint,
+                    skill_dirs=tuple(path.parent for _name, path in plugin_skills),
+                )
+            )
+
+    key = _skill_cache_key(workspace)
+    _SKILL_CACHE[key] = _SkillCacheEntry(tuple(skills), tuple(packages))
     return skills
 
 
-def enabled_agent_plugin_skill_dirs(workspace: Path) -> tuple[Path, ...]:
-    """Return the last verified skill roots, verifying once on a cache miss."""
+def enabled_agent_plugin_skill_dirs(
+    workspace: Path,
+    *,
+    requested_path: str | Path | None = None,
+) -> tuple[Path, ...]:
+    """Return skill roots authorized for one read, revalidating their package."""
     key = _skill_cache_key(workspace)
-    skills = _SKILL_CACHE.get(key)
-    if skills is None:
-        skills = tuple(enabled_agent_plugin_skills(workspace))
-    return tuple(path.parent for _name, path in skills)
+    cached = _SKILL_CACHE.get(key)
+    if cached is None:
+        enabled_agent_plugin_skills(workspace)
+        cached = _SKILL_CACHE.get(key)
+    if cached is None:
+        return ()
+
+    target = (
+        Path(requested_path).expanduser().resolve(strict=False)
+        if requested_path is not None
+        else None
+    )
+    packages = tuple(
+        package
+        for package in cached.packages
+        if target is None
+        or any(target == root or target.is_relative_to(root) for root in package.skill_dirs)
+    )
+    if any(_package_fingerprint(package.root) != package.fingerprint for package in packages):
+        # Re-run the full activation check so a changed package loses its
+        # marker and cannot become readable again through this cache.
+        _invalidate_skill_cache(workspace)
+        enabled_agent_plugin_skills(workspace)
+        return ()
+
+    if target is None:
+        return tuple(root for package in packages for root in package.skill_dirs)
+    return tuple(
+        root
+        for package in packages
+        for root in package.skill_dirs
+        if target == root or target.is_relative_to(root)
+    )
 
 
 def _skill_cache_key(workspace: Path) -> tuple[Path, Path]:
@@ -94,6 +154,29 @@ def _skill_cache_key(workspace: Path) -> tuple[Path, Path]:
 
 def _invalidate_skill_cache(workspace: Path) -> None:
     _SKILL_CACHE.pop(_skill_cache_key(workspace), None)
+
+
+def _package_fingerprint(root: Path) -> str | None:
+    """Hash package paths, link targets, and file contents."""
+    digest = sha256()
+    try:
+        for candidate in sorted(root.rglob("*")):
+            relative = candidate.relative_to(root).as_posix()
+            digest.update(relative.encode())
+            if candidate.is_symlink():
+                digest.update(b"\0link\0")
+                digest.update(candidate.readlink().as_posix().encode())
+            elif candidate.is_file():
+                digest.update(b"\0file\0")
+                digest.update(candidate.read_bytes())
+            elif candidate.is_dir():
+                digest.update(b"\0dir\0")
+            else:
+                return None
+            digest.update(b"\0")
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 def _load_manifest(plugin_root: Path) -> AgentPlugin | None:
@@ -330,53 +413,47 @@ def _plugin_data_dir(workspace: Path, name: str, *, create: bool) -> Path:
     return current
 
 
-def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
+def _enabled_package_fingerprint(workspace: Path, plugin: AgentPlugin) -> str | None:
+    """Return the content fingerprint when this exact package is enabled."""
     marker = _plugin_data_dir(workspace, plugin.name, create=False) / "enabled"
     try:
         if not marker.is_file():
-            return False
+            return None
         current = marker.read_text(encoding="utf-8")
         activation = _activation_marker(plugin)
         if activation is None:
             marker.unlink(missing_ok=True)
             _invalidate_skill_cache(workspace)
-            return False
+            return None
+        payload = cast(dict[str, object], json.loads(activation))
+        fingerprint = payload.get("fingerprint")
+        if not isinstance(fingerprint, str):
+            return None
         if current == activation:
-            return True
+            return fingerprint
         if current == str(plugin.root):
             marker.write_text(activation, encoding="utf-8")
             marker.chmod(0o600)
-            return True
+            return fingerprint
         marker.unlink(missing_ok=True)
         _invalidate_skill_cache(workspace)
-        return False
-    except OSError:
+        return None
+    except (OSError, json.JSONDecodeError):
         _invalidate_skill_cache(workspace)
-        return False
+        return None
+
+
+def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
+    return _enabled_package_fingerprint(workspace, plugin) is not None
 
 
 def _activation_marker(plugin: AgentPlugin) -> str | None:
     """Bind activation to one immutable package snapshot."""
-    digest = sha256()
-    try:
-        for candidate in sorted(plugin.root.rglob("*")):
-            relative = candidate.relative_to(plugin.root).as_posix()
-            digest.update(relative.encode())
-            if candidate.is_symlink():
-                digest.update(b"\0link\0")
-                digest.update(candidate.readlink().as_posix().encode())
-            elif candidate.is_file():
-                digest.update(b"\0file\0")
-                digest.update(candidate.read_bytes())
-            elif candidate.is_dir():
-                digest.update(b"\0dir\0")
-            else:
-                return None
-            digest.update(b"\0")
-    except OSError:
+    fingerprint = _package_fingerprint(plugin.root)
+    if fingerprint is None:
         return None
     return json.dumps(
-        {"fingerprint": digest.hexdigest(), "root": str(plugin.root)},
+        {"fingerprint": fingerprint, "root": str(plugin.root)},
         separators=(",", ":"),
         sort_keys=True,
     )

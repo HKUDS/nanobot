@@ -108,7 +108,7 @@ describe("MessageBubble", () => {
     const pill = screen.getByText("hello");
 
     expect(row).toHaveClass("ml-auto", "flex");
-    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
+    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
@@ -286,7 +286,7 @@ describe("MessageBubble", () => {
     expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(command.parentElement).toHaveTextContent("/model gpt-5");
-    expect(command.parentElement).toHaveClass("rounded-[18px]", "bg-secondary/70");
+    expect(command.parentElement).toHaveClass("rounded-floating", "bg-secondary/70");
   });
 
   it("keeps unknown and invalid slash commands as plain message text", () => {
@@ -934,7 +934,7 @@ describe("MessageBubble", () => {
     const { container } = render(<MessageBubble message={message} />);
 
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-[20px]");
+    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-panel");
     expect(imageButton).toHaveClass(
       "border",
       "border-border/60",

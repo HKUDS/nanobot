@@ -189,7 +189,15 @@ class TurnDelivery:
                 started_at=started_at,
             )
 
-    def record_runtime(self, runtime: LLMRuntime) -> None:
+    async def runtime_admitted(self, runtime: LLMRuntime) -> None:
+        """Record the immutable runtime and expose it at the lifecycle seam."""
+        if self.route.publish_lifecycle:
+            await self.runtime_event_publisher.turn_runtime_admitted(
+                self.delivery_message,
+                self.session_key,
+                runtime,
+            )
+            return
         self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime)
 
     def record_latency(self, latency_ms: int | None) -> None:

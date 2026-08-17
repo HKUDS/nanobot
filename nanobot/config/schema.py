@@ -97,7 +97,6 @@ FallbackCandidate = str | InlineFallbackConfig
 class ModelPresetConfig(Base):
     """A named set of model + generation parameters for quick switching."""
 
-    label: str | None = None
     model: str
     provider: str = "auto"
     max_tokens: int = 8192
@@ -262,6 +261,7 @@ class ProvidersConfig(Base):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)  # OrcaRouter API gateway
     assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)  # AssemblyAI voice transcription
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     skywork: ProviderConfig = Field(default_factory=ProviderConfig)  # Skywork / APIFree API gateway
@@ -462,6 +462,9 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
+        # Keep persisted names accepted by previous releases loadable. New
+        # names are normalized and checked case-insensitively at mutation
+        # boundaries, where conflicts can be reported without breaking startup.
         if "default" in self.model_presets:
             raise ValueError("model_preset name 'default' is reserved for agents.defaults")
         name = self.agents.defaults.model_preset

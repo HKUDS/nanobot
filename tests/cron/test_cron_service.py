@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -957,6 +958,84 @@ def test_stale_instance_remove_preserves_external_add(tmp_path) -> None:
 
 
 # ── timer race regression tests ──
+
+
+@pytest.mark.asyncio
+async def test_save_store_failure_retries_without_replaying_job(tmp_path, monkeypatch):
+    """A failed post-run save must be retried before jobs can execute again."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    calls: list[str] = []
+    arm_calls: list[str] = []
+
+    async def on_job(job):
+        calls.append(job.id)
+
+    service = CronService(store_path, on_job=on_job)
+    service._running = True
+    service._load_store()
+
+    # Spy on _arm_timer so we can assert the scheduler is re-armed even when
+    # the tick fails, without actually scheduling a real timer task.
+    def arm_spy() -> None:
+        arm_calls.append("arm")
+
+    monkeypatch.setattr(service, "_arm_timer", arm_spy)
+
+    job = service.add_job(
+        name="persist-failure",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    job.state.next_run_at_ms = max(1, int(time.time() * 1000) - 1_000)
+    service._save_store()
+    arm_calls.clear()
+
+    real_atomic_write = service._atomic_write
+    save_attempts = 0
+    writes_fail = True
+
+    def flaky_atomic_write(path: Path, content: str) -> None:
+        nonlocal save_attempts, writes_fail
+        save_attempts += 1
+        if writes_fail:
+            raise OSError("disk full")
+        real_atomic_write(path, content)
+
+    monkeypatch.setattr(service, "_atomic_write", flaky_atomic_write)
+    await service._on_timer()
+
+    # The failed tick stays alive and retains the advanced in-memory state,
+    # including when a public read would normally reload from disk.
+    assert arm_calls == ["arm"], "scheduler must re-arm after a failed tick"
+    assert service._active_executions == 0
+    assert calls == [job.id]
+    assert service._store_dirty is True
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert loaded.state.last_run_at_ms is not None
+
+    # Manual execution is a second side-effecting entrypoint.  It must also
+    # refuse to run until the previous result can be made durable.
+    with pytest.raises(OSError, match="disk full"):
+        await service.run_job(job.id, force=True)
+    assert calls == [job.id]
+
+    # The next healthy tick is reserved for persisting the dirty snapshot.  It
+    # must not reload the stale due record or execute the side effect twice.
+    writes_fail = False
+    await service._on_timer()
+
+    assert calls == [job.id]
+    assert arm_calls == ["arm", "arm", "arm"]
+    assert save_attempts == 3
+    assert service._store_dirty is False
+
+    persisted = CronService(store_path).get_job(job.id)
+    assert persisted is not None
+    assert persisted.state.last_run_at_ms is not None
+    assert persisted.state.next_run_at_ms is not None
+    assert persisted.state.next_run_at_ms > persisted.state.last_run_at_ms
 
 
 @pytest.mark.asyncio

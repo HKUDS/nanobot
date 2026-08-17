@@ -52,6 +52,8 @@ import type {
 
 interface MessageBubbleProps {
   message: UIMessage;
+  /** The containing agent turn has not received turn_end yet. */
+  isTurnStreaming?: boolean;
   /** Give temporary-chat user turns the dashed private-mode treatment. */
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
@@ -260,6 +262,7 @@ function UserDeliveryStatus({
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
+  isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
   cliApps = [],
@@ -331,7 +334,7 @@ export function MessageBubble({
           <p
             data-temporary-message={temporary ? "true" : undefined}
             className={cn(
-              "ml-auto w-fit max-w-full min-w-0 rounded-[18px] px-4 py-2",
+              "ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
               "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
               temporary
                 ? "border border-dashed border-muted-foreground/40 bg-transparent"
@@ -381,7 +384,8 @@ export function MessageBubble({
     : "";
   const automationTriggeredLabel = t("message.automationTriggered");
 
-  const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
+  const showAssistantActions =
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming && !empty;
   const showCopyButton = showCopyAction && showAssistantActions;
   const showForkButton = showAssistantActions && !!onForkFromHere;
   const forkLabel = t("message.forkFromHere");
@@ -499,7 +503,7 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
   return (
     <blockquote
       className={cn(
-        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-[14px]",
+        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-control",
         "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
       )}
       aria-label={label}
@@ -718,8 +722,8 @@ function UserImageCell({
   const tileClasses = cn(
     "relative overflow-hidden border border-border/60 bg-muted/40",
     size === "large"
-      ? "w-[min(100%,34rem)] rounded-[20px] bg-transparent"
-      : "h-24 w-24 rounded-[14px]",
+      ? "w-[min(100%,34rem)] rounded-panel bg-transparent"
+      : "h-24 w-24 rounded-control",
     "shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]",
   );
 

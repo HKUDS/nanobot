@@ -993,7 +993,9 @@ class ExecTool(Tool):
                 ):
                     current.append(ch)
                     operator_len = 1
-                elif ch in {";", "|"}:
+                # A newline separates commands just like ";" does, so a payload
+                # smuggled onto its own line must be checked on its own too.
+                elif ch in {";", "|", "\n", "\r"}:
                     operator_len = 1
 
             if operator_len:

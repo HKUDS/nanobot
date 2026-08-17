@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import ipaddress
 import json
 import re
 import ssl
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
@@ -92,6 +95,8 @@ from nanobot.webui.websocket_logging import websockets_server_logger
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
+_WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
+_WEBUI_REQUEST_CACHE_MAX = 256
 
 
 _ROUTING_ASSERTION_HEADERS = frozenset(
@@ -348,6 +353,21 @@ def _is_websocket_upgrade(request: WsRequest) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class _WebUIRequestResult:
+    result: Any = None
+    status: int | None = None
+    message: str | None = None
+
+
+@dataclass
+class _WebUIRequestOperation:
+    action: str
+    payload_digest: bytes
+    task: asyncio.Task[_WebUIRequestResult]
+    completed_at: float | None = None
+
+
 class WebSocketChannel(BaseChannel):
     """Run a local WebSocket server; forward text/JSON messages to the message bus."""
 
@@ -373,13 +393,17 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[ServerConnection, str] = {}
         # Connections authenticated with a one-time token from /webui/bootstrap.
         self._webui_connections: set[ServerConnection] = set()
-        # Request/reply mutations aren't replayed across reconnects. Tasks may
-        # finish after a client-side deadline so an already-started mutation
-        # isn't ambiguously cancelled halfway through.
+        # Delivery tasks are connection-bound, while operations are keyed only
+        # by request_id so reconnect retries join or replay the original work.
         self._webui_request_tasks: dict[
             tuple[ServerConnection, str],
             asyncio.Task[None],
         ] = {}
+        self._webui_request_operations: dict[str, _WebUIRequestOperation] = {}
+        # Preserve request/response order for mutations from one
+        # UI. Without this, an earlier slow settings response can overwrite a
+        # newer settings snapshot in the client.
+        self._webui_request_locks: dict[ServerConnection, asyncio.Lock] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -476,6 +500,7 @@ class WebSocketChannel(BaseChannel):
             await self._discard_connection_owned_chat(connection, cid)
         self._conn_default.pop(connection, None)
         self._webui_connections.discard(connection)
+        self._discard_webui_request_lock_if_idle(connection)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -925,7 +950,10 @@ class WebSocketChannel(BaseChannel):
             )
             return
         if t == "transcribe_audio":
-            event, payload = await webui_transcription_event(envelope)
+            event, payload = await webui_transcription_event(
+                envelope,
+                config_path=self.gateway.settings.config.path,
+            )
             await self._send_event(connection, event, **payload)
             return
         if t == "message":
@@ -1064,7 +1092,10 @@ class WebSocketChannel(BaseChannel):
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
-            mcp_presets = normalize_mcp_preset_mentions(envelope.get("mcp_presets"))
+            mcp_presets = normalize_mcp_preset_mentions(
+                envelope.get("mcp_presets"),
+                config_path=self.gateway.settings.config.path,
+            )
             if mcp_presets:
                 metadata["mcp_presets"] = mcp_presets
             session_mentions: list[SessionMention] = []
@@ -1196,80 +1227,169 @@ class WebSocketChannel(BaseChannel):
             )
             return
 
-        key = (connection, request_id)
-        if key in self._webui_request_tasks:
+        payload_digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).digest()
+        self._prune_webui_request_operations()
+        operation = self._webui_request_operations.get(request_id)
+        is_replay = operation is not None
+        if operation is not None and (
+            operation.action != action or operation.payload_digest != payload_digest
+        ):
             await self._send_webui_response(
                 connection,
                 request_id,
                 status=409,
-                message="duplicate WebUI request_id",
+                message="request_id was already used for a different WebUI mutation",
             )
             return
-        task = asyncio.create_task(
-            self._complete_webui_request(
+        if operation is None:
+            operation_task = asyncio.create_task(
+                self._execute_webui_request(
+                    connection,
+                    action,
+                    cast(dict[str, Any], payload),
+                )
+            )
+            new_operation = _WebUIRequestOperation(
+                action=action,
+                payload_digest=payload_digest,
+                task=operation_task,
+            )
+            operation = new_operation
+            self._webui_request_operations[request_id] = new_operation
+
+            def mark_complete(_task: asyncio.Task[_WebUIRequestResult]) -> None:
+                current = self._webui_request_operations.get(request_id)
+                if current is not new_operation:
+                    return
+                new_operation.completed_at = time.monotonic()
+                self._prune_webui_request_operations()
+
+            operation_task.add_done_callback(mark_complete)
+
+        key = (connection, request_id)
+        if key in self._webui_request_tasks:
+            return
+        delivery_task = asyncio.create_task(
+            self._deliver_webui_request(
                 connection,
                 request_id,
-                action,
-                cast(dict[str, Any], payload),
+                operation.task,
+                sequence=is_replay,
             )
         )
-        self._webui_request_tasks[key] = task
+        self._webui_request_tasks[key] = delivery_task
 
-    async def _complete_webui_request(
+    def _prune_webui_request_operations(self) -> None:
+        now = time.monotonic()
+        for request_id, operation in tuple(self._webui_request_operations.items()):
+            if (
+                operation.completed_at is not None
+                and now - operation.completed_at >= _WEBUI_REQUEST_CACHE_TTL_S
+            ):
+                self._webui_request_operations.pop(request_id, None)
+
+        completed = sorted(
+            (
+                (operation.completed_at, request_id)
+                for request_id, operation in self._webui_request_operations.items()
+                if operation.completed_at is not None
+            ),
+            key=lambda item: item[0],
+        )
+        for _, request_id in completed[:-_WEBUI_REQUEST_CACHE_MAX]:
+            self._webui_request_operations.pop(request_id, None)
+
+    def _discard_webui_request_lock_if_idle(self, connection: ServerConnection) -> None:
+        if connection in self._webui_connections:
+            return
+        if any(task_connection is connection for task_connection, _ in self._webui_request_tasks):
+            return
+        self._webui_request_locks.pop(connection, None)
+
+    async def _deliver_webui_request(
         self,
         connection: ServerConnection,
         request_id: str,
-        action: str,
-        payload: dict[str, Any],
+        operation_task: asyncio.Task[_WebUIRequestResult],
+        *,
+        sequence: bool = False,
     ) -> None:
         try:
-            response = await self._http_router.dispatch_webui_mutation(
-                connection,
-                action,
-                payload,
-            )
-            status = response.status_code
-            body = bytes(response.body).decode("utf-8", errors="replace").strip()
-            if 200 <= status < 300:
-                try:
-                    result = json.loads(body)
-                except json.JSONDecodeError:
+            if sequence:
+                # Make replayed work the predecessor for subsequent mutations on
+                # this connection without blocking its receive loop.
+                lock = self._webui_request_locks.setdefault(connection, asyncio.Lock())
+                async with lock:
+                    result = await asyncio.shield(operation_task)
                     await self._send_webui_response(
                         connection,
                         request_id,
-                        status=502,
-                        message="WebUI mutation returned an invalid response",
+                        result=result.result,
+                        status=result.status,
+                        message=result.message,
                     )
-                    return
-                if action == "sidebar.update" and isinstance(result, dict):
-                    await self._broadcast_webui_event(
-                        "sidebar_state_updated",
-                        state=result,
-                    )
-                await self._send_webui_response(
-                    connection,
-                    request_id,
-                    result=result,
-                )
                 return
+            result = await asyncio.shield(operation_task)
             await self._send_webui_response(
                 connection,
                 request_id,
-                status=status,
-                message=body or response.reason_phrase,
+                result=result.result,
+                status=result.status,
+                message=result.message,
             )
+        finally:
+            self._webui_request_tasks.pop((connection, request_id), None)
+            self._discard_webui_request_lock_if_idle(connection)
+
+    async def _execute_webui_request(
+        self,
+        connection: ServerConnection,
+        action: str,
+        payload: dict[str, Any],
+    ) -> _WebUIRequestResult:
+        try:
+            lock = self._webui_request_locks.setdefault(connection, asyncio.Lock())
+            async with lock:
+                response = await self._http_router.dispatch_webui_mutation(
+                    connection,
+                    action,
+                    payload,
+                )
+                status = response.status_code
+                body = bytes(response.body).decode("utf-8", errors="replace").strip()
+                if 200 <= status < 300:
+                    try:
+                        result = json.loads(body)
+                    except json.JSONDecodeError:
+                        return _WebUIRequestResult(
+                            status=502,
+                            message="WebUI mutation returned an invalid response",
+                        )
+                    if action == "sidebar.update" and isinstance(result, dict):
+                        await self._broadcast_webui_event(
+                            "sidebar_state_updated",
+                            state=result,
+                        )
+                    return _WebUIRequestResult(result=result)
+                return _WebUIRequestResult(
+                    status=status,
+                    message=body or response.reason_phrase,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
             self.logger.exception("WebUI mutation '{}' failed", action)
-            await self._send_webui_response(
-                connection,
-                request_id,
+            return _WebUIRequestResult(
                 status=500,
                 message="WebUI mutation failed",
             )
-        finally:
-            self._webui_request_tasks.pop((connection, request_id), None)
 
     async def _send_webui_response(
         self,
@@ -1340,12 +1460,19 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None
-        mutation_tasks = tuple(self._webui_request_tasks.values())
-        for task in mutation_tasks:
+        delivery_tasks = tuple(self._webui_request_tasks.values())
+        operation_tasks = tuple(
+            operation.task for operation in self._webui_request_operations.values()
+        )
+        for task in (*delivery_tasks, *operation_tasks):
             task.cancel()
-        if mutation_tasks:
-            await asyncio.gather(*mutation_tasks, return_exceptions=True)
+        if delivery_tasks:
+            await asyncio.gather(*delivery_tasks, return_exceptions=True)
+        if operation_tasks:
+            await asyncio.gather(*operation_tasks, return_exceptions=True)
         self._webui_request_tasks.clear()
+        self._webui_request_locks.clear()
+        self._webui_request_operations.clear()
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
@@ -1432,6 +1559,7 @@ class WebSocketChannel(BaseChannel):
                 await self.send_turn_model_updated(
                     msg.chat_id,
                     model_name=event.model,
+                    model_preset=event.model_preset,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -1799,6 +1927,7 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         *,
         model_name: Any,
+        model_preset: Any = None,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1813,6 +1942,8 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "model_name": model_name.strip(),
         }
+        if isinstance(model_preset, str) and model_preset.strip():
+            body["model_preset"] = model_preset.strip()
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")

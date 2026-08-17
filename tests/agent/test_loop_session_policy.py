@@ -131,6 +131,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
         terminate_exec_sessions,
     )
     key = "websocket:transient-cancelled"
+    previous_file_state = loop._file_state_store.for_session(key)
     loop.sessions.get_or_create_transient(
         key,
         disabled_tools={"create_goal", "update_goal", "spawn", "cron"},
@@ -157,6 +158,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
         await asyncio.wait_for(active_task, timeout=2)
     await asyncio.wait_for(wait_for_discard(key), timeout=2)
     assert loop.sessions.get_cached(key) is None
+    assert loop._file_state_store.for_session(key) is not previous_file_state
     terminate_exec_sessions.assert_awaited_once_with(key)
 
     loop.stop()

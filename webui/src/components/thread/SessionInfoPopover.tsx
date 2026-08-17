@@ -41,12 +41,12 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
   const [open, setOpen] = useState(false);
   const { jobs, loading, loadFailed, now } = useSessionAutomationJobs(open, token, sessionKey);
   const automationContent = loading ? (
-    <div className="flex items-center gap-2 rounded-[16px] bg-muted/45 px-3 py-3 text-[12.5px] text-muted-foreground">
+    <div className="flex items-center gap-2 rounded-floating bg-muted/45 px-3 py-3 text-[12.5px] text-muted-foreground">
       <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
       {t("thread.sessionInfo.loading")}
     </div>
   ) : loadFailed ? (
-    <div className="flex items-center gap-2 rounded-[16px] bg-destructive/10 px-3 py-3 text-[12.5px] text-destructive">
+    <div className="flex items-center gap-2 rounded-floating bg-destructive/10 px-3 py-3 text-[12.5px] text-destructive">
       <CircleAlert className="h-3.5 w-3.5" />
       {t("thread.sessionInfo.loadFailed")}
     </div>
@@ -57,7 +57,7 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
       ))}
     </div>
   ) : (
-    <div className="rounded-[16px] bg-muted/35 px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+    <div className="rounded-floating bg-muted/35 px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
       {t("thread.sessionInfo.empty")}
     </div>
   );
@@ -124,7 +124,7 @@ function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number })
     : "bg-muted-foreground/35";
 
   return (
-    <div className="rounded-[16px] px-3 py-2.5 transition-colors hover:bg-muted/40">
+    <div className="rounded-floating px-3 py-2.5 transition-colors hover:bg-muted/40">
       <div className="flex items-start gap-2.5">
         <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", statusClass)} />
         <div className="min-w-0 flex-1">

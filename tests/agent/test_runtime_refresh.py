@@ -226,7 +226,7 @@ def test_named_default_refresh_is_used_by_sessions_without_override(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_config_invalidation_notifies_clients_before_session_runtime_refresh(
+async def test_config_invalidation_defers_canonical_notification_until_default_refresh(
     tmp_path: Path,
 ) -> None:
     provider = _provider("model-a")
@@ -266,11 +266,58 @@ async def test_config_invalidation_notifies_clients_before_session_runtime_refre
     runtime = loop.runtime_for_session(session)
     await asyncio.sleep(0)
 
-    assert [(event.model, event.model_preset) for event in published] == [
-        ("model-a", "fast"),
-    ]
+    assert published == []
     assert runtime.model == "model-b"
     assert loop.model_presets["fast"].model == "model-b"
+
+    assert loop.llm_runtime().model == "model-b"
+    await asyncio.sleep(0)
+
+    assert [(event.model, event.model_preset) for event in published] == [
+        ("model-b", "fast"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_config_refresh_publishes_renamed_canonical_preset(tmp_path: Path) -> None:
+    provider = _provider("model-a")
+    catalog = {"fast": ModelPresetConfig(model="model-a")}
+    default_name = "fast"
+    published: list[RuntimeModelChanged] = []
+
+    def load_preset(name: str) -> ProviderSnapshot:
+        return ProviderSnapshot(
+            provider=provider,
+            model=catalog[name].model,
+            context_window_tokens=16_000,
+            signature=(name, catalog[name].model),
+            model_preset=name,
+        )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="model-a",
+        context_window_tokens=16_000,
+        provider_signature=("fast", "model-a"),
+        provider_snapshot_loader=lambda: load_preset(default_name),
+        model_presets=catalog,
+        preset_catalog_loader=lambda: catalog,
+        model_preset="fast",
+        preset_snapshot_loader=load_preset,
+    )
+    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    catalog["Codex"] = catalog.pop("fast")
+    default_name = "Codex"
+
+    runtime = loop.refresh_runtime_config()
+    await asyncio.sleep(0)
+
+    assert (runtime.model, runtime.model_preset) == ("model-a", "Codex")
+    assert [(event.model, event.model_preset) for event in published] == [
+        ("model-a", "Codex"),
+    ]
 
 
 def test_next_turn_captures_generation_changed_after_previous_admission(

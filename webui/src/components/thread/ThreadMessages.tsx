@@ -11,6 +11,9 @@ interface ThreadMessagesProps {
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
+  activeTurnId?: string | null;
+  /** Optimistic or canonical active-turn start, in unix seconds. */
+  runStartedAt?: number | null;
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -53,6 +56,8 @@ export function ThreadMessages({
   messages,
   temporary = false,
   isStreaming = false,
+  activeTurnId = null,
+  runStartedAt = null,
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
@@ -71,9 +76,24 @@ export function ThreadMessages({
   );
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
-    () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
-    [isStreaming, units],
+    () => isStreaming
+      ? currentActivityClusterIndices(units, activeTurnId)
+      : new Set<number>(),
+    [activeTurnId, isStreaming, units],
   );
+  const pendingTurn = useMemo(
+    () => pendingTurnProjection(messages, activeTurnId),
+    [activeTurnId, messages],
+  );
+  const pendingActivity = (
+    isStreaming
+    && liveActivityClusterIndices.size === 0
+    && pendingTurn !== null
+    && !pendingTurn.hasVisibleOutput
+  ) ? pendingTurn : null;
+  const currentTurnStartIndex = isStreaming
+    ? activeTurnStartIndex(units, activeTurnId)
+    : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
   let nextUserIndex = hiddenUserMessageCount;
 
@@ -123,7 +143,15 @@ export function ThreadMessages({
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             deferOffscreenRender={deferOffscreenRender}
-            isTurnStreaming={liveActivityClusterIndices.has(index)}
+            isTurnStreaming={
+              unit.type === "activity"
+                ? liveActivityClusterIndices.has(index)
+                : isStreaming && (
+                    unit.message.turnId && activeTurnId !== null
+                      ? unit.message.turnId === activeTurnId
+                      : index > currentTurnStartIndex
+                  )
+            }
             forkIndex={forkIndex}
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
             forkBoundaryLabel={t("thread.forkedFromHistory")}
@@ -136,8 +164,66 @@ export function ThreadMessages({
           />
         );
       })}
+      {pendingActivity ? (
+        <div className={units.length > 0 ? "mt-5" : undefined}>
+          <AgentActivityCluster
+            messages={[]}
+            isTurnStreaming
+            hasBodyBelow={false}
+            startedAtMs={
+              runStartedAt != null
+                ? runStartedAt * 1000
+                : pendingActivity.startedAtMs
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
+}
+
+interface PendingTurnProjection {
+  startedAtMs?: number;
+  hasVisibleOutput: boolean;
+}
+
+function pendingTurnProjection(
+  messages: UIMessage[],
+  activeTurnId: string | null,
+): PendingTurnProjection | null {
+  let promptIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      message.role === "user"
+      && message.deliveryStatus !== "failed"
+      && (activeTurnId === null || message.turnId === activeTurnId)
+    ) {
+      promptIndex = index;
+      break;
+    }
+  }
+  if (promptIndex < 0) return null;
+
+  const prompt = messages[promptIndex];
+  const hasVisibleOutput = messages.slice(promptIndex + 1).some((message) => {
+    if (message.role === "user") return false;
+    if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false;
+    return (
+      message.content.trim().length > 0
+      || !!message.reasoning?.trim()
+      || !!message.reasoningStreaming
+      || message.kind === "trace"
+      || !!message.media?.length
+    );
+  });
+
+  return {
+    ...(typeof prompt.createdAt === "number" && Number.isFinite(prompt.createdAt)
+      ? { startedAtMs: prompt.createdAt }
+      : {}),
+    hasVisibleOutput,
+  };
 }
 
 interface ThreadDisplayUnitProps {
@@ -205,6 +291,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         ) : (
           <MessageBubble
             message={unit.message}
+            isTurnStreaming={isTurnStreaming}
             temporary={temporary}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
@@ -240,6 +327,27 @@ function threadDisplayUnitPropsEqual(
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
   );
+}
+
+function activeTurnStartIndex(units: DisplayUnit[], activeTurnId: string | null): number {
+  if (activeTurnId) {
+    const index = units.findIndex((unit) => (
+      unit.type === "message"
+      && unit.message.role === "user"
+      && unit.message.deliveryStatus !== "failed"
+      && unit.message.turnId === activeTurnId
+    ));
+    if (index >= 0) return index;
+  }
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    const unit = units[i];
+    if (
+      unit.type === "message"
+      && unit.message.role === "user"
+      && unit.message.deliveryStatus !== "failed"
+    ) return i;
+  }
+  return -1;
 }
 
 function displayUnitsEqual(previous: DisplayUnit, next: DisplayUnit): boolean {
@@ -289,8 +397,24 @@ function ForkBoundaryDivider({ label }: { label: string }) {
   );
 }
 
-function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
+function currentActivityClusterIndices(
+  units: DisplayUnit[],
+  activeTurnId: string | null,
+): Set<number> {
   const indices = new Set<number>();
+  if (activeTurnId) {
+    for (let i = units.length - 1; i >= 0; i -= 1) {
+      const unit = units[i];
+      if (
+        unit.type === "activity"
+        && unit.messages.some((message) => message.turnId === activeTurnId)
+      ) {
+        indices.add(i);
+        return indices;
+      }
+    }
+  }
+
   let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];

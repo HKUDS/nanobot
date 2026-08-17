@@ -9,12 +9,12 @@ import re
 import secrets
 import stat
 from collections import OrderedDict
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Collection, Protocol, TypedDict, cast
+from typing import Any, Callable, Collection, Generator, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
 from filelock import FileLock
@@ -26,6 +26,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -65,6 +66,7 @@ _WORKSPACE_STATE_DIR = ".nanobot"
 _WORKSPACE_ID_FILE = "workspace-id"
 _WORKSPACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _SESSION_MIGRATION_LOCK_TIMEOUT_SECONDS = 30
+_SESSION_FILES_LOCK_FILENAME = ".session-files.lock"
 _COPY_CHUNK_SIZE = 1024 * 1024
 
 
@@ -472,13 +474,28 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
+        original_messages = self.messages
+        original_last_consolidated = self.last_consolidated
+        original_provider_state = self.provider_state
+        original_updated_at = self.updated_at
         result = self.retain_recent_legal_suffix(limit)
         if not result.dropped:
             return
 
         archive_chunk = result.dropped[result.already_consolidated_count:]
         if archive_chunk and on_archive:
-            on_archive(archive_chunk)
+            try:
+                on_archive(archive_chunk)
+            except BaseException:
+                # Retention runs before the archive callback so the callback can
+                # receive the exact dropped prefix. Restore the in-memory session
+                # if archival fails; otherwise a later save would persist the
+                # trimmed state and make that prefix impossible to retry.
+                self.messages = original_messages
+                self.last_consolidated = original_last_consolidated
+                self.provider_state = original_provider_state
+                self.updated_at = original_updated_at
+                raise
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,
@@ -576,7 +593,17 @@ class JsonlSessionStore:
             )
             self.sessions_dir = ensure_dir(root / workspace_id)
             self.legacy_sessions_dir = get_legacy_sessions_dir()
-            self._migrate_from_workspace(canonical_workspace)
+            self._session_files_lock = FileLock(
+                str(self.sessions_dir / _SESSION_FILES_LOCK_FILENAME)
+            )
+            with self._session_files_lock:
+                self._migrate_from_workspace(canonical_workspace)
+
+    @contextmanager
+    def locked_session_files(self) -> Generator[Path, None, None]:
+        """Guard direct access to canonical session files in this directory."""
+        with self._session_files_lock:
+            yield self.sessions_dir
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
@@ -959,7 +986,7 @@ class JsonlSessionStore:
             raise RuntimeError(f"refusing to restore into symlinked sessions directory: {old_dir}")
         ensure_dir(old_dir)
 
-        with self._migration_lock:
+        with self._migration_lock, self._session_files_lock:
             for src in self.sessions_dir.glob("*.jsonl"):
                 if self.session_key_from_path(src) is None:
                     continue
@@ -1021,6 +1048,10 @@ class JsonlSessionStore:
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def load(self, key: str) -> Session | None:
+        with self._session_files_lock:
+            return self._load_unlocked(key)
+
+    def _load_unlocked(self, key: str) -> Session | None:
         path = self.get_session_path(key)
         if not path.exists():
             return None
@@ -1086,7 +1117,7 @@ class JsonlSessionStore:
             )
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
-            repaired = self.repair(key)
+            repaired = self._repair_unlocked(key)
             if repaired is not None:
                 logger.info(
                     "Recovered session {} from corrupt file ({} messages)",
@@ -1096,6 +1127,10 @@ class JsonlSessionStore:
             return repaired
 
     def repair(self, key: str, *, path: Path | None = None) -> Session | None:
+        with self._session_files_lock:
+            return self._repair_unlocked(key, path=path)
+
+    def _repair_unlocked(self, key: str, *, path: Path | None = None) -> Session | None:
         if path is None:
             path = self.get_session_path(key)
         if not path.exists():
@@ -1188,11 +1223,15 @@ class JsonlSessionStore:
         }
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
+        with self._session_files_lock:
+            self._save_unlocked(session, fsync=fsync)
+
+    def _save_unlocked(self, session: Session, *, fsync: bool = False) -> None:
         path = self.get_session_path(session.key)
-        tmp_path = path.with_suffix(".jsonl.tmp")
+        tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
 
         try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            with open(tmp_path, "x", encoding="utf-8") as f:
                 metadata_line = {
                     "_type": "metadata",
                     "key": session.key,
@@ -1226,11 +1265,14 @@ class JsonlSessionStore:
                             raise
                     finally:
                         os.close(fd)
-        except BaseException:
+        finally:
             tmp_path.unlink(missing_ok=True)
-            raise
 
     def delete(self, key: str) -> bool:
+        with self._session_files_lock:
+            return self._delete_unlocked(key)
+
+    def _delete_unlocked(self, key: str) -> bool:
         paths = [
             self.get_session_path(key),
             self.get_legacy_lossy_path(key),
@@ -1248,6 +1290,10 @@ class JsonlSessionStore:
         return deleted
 
     def read(self, key: str) -> SessionPayload | None:
+        with self._session_files_lock:
+            return self._read_unlocked(key)
+
+    def _read_unlocked(self, key: str) -> SessionPayload | None:
         path = self.get_session_path(key)
         if not path.exists():
             return None
@@ -1297,13 +1343,17 @@ class JsonlSessionStore:
             }
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session {}: {}", key, e)
-            repaired = self.repair(key, path=path)
+            repaired = self._repair_unlocked(key, path=path)
             if repaired is not None:
                 logger.info("Recovered read-only session view {} from corrupt file", key)
                 return self.session_payload(repaired)
             return None
 
     def read_metadata(self, key: str) -> SessionMetadataPayload | None:
+        with self._session_files_lock:
+            return self._read_metadata_unlocked(key)
+
+    def _read_metadata_unlocked(self, key: str) -> SessionMetadataPayload | None:
         path = self.get_session_path(key)
         if not path.exists():
             return None
@@ -1338,7 +1388,7 @@ class JsonlSessionStore:
             return None
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session metadata {}: {}", key, e)
-            repaired = self.repair(key, path=path)
+            repaired = self._repair_unlocked(key, path=path)
             if repaired is not None:
                 logger.info("Recovered read-only session metadata {} from corrupt file", key)
                 return {
@@ -1350,6 +1400,10 @@ class JsonlSessionStore:
             return None
 
     def list_sessions(self) -> list[SessionInfo]:
+        with self._session_files_lock:
+            return self._list_sessions_unlocked()
+
+    def _list_sessions_unlocked(self) -> list[SessionInfo]:
         sessions: list[SessionInfo] = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
@@ -1427,7 +1481,7 @@ class JsonlSessionStore:
             except FileNotFoundError:
                 continue
             except _SESSION_DATA_ERRORS:
-                repaired = self.repair(storage_key, path=path)
+                repaired = self._repair_unlocked(storage_key, path=path)
                 if repaired is not None:
                     sessions.append(
                         {
@@ -1470,6 +1524,7 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
+        self._delete_observer: Callable[[str], None] | None = None
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1498,6 +1553,10 @@ class SessionManager:
     def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
         """Archive unconsolidated overflow whenever a session is persisted."""
         self._file_cap_archiver = archiver
+
+    def set_delete_observer(self, observer: Callable[[str], None]) -> None:
+        """Observe explicit session deletion for process-local state cleanup."""
+        self._delete_observer = observer
 
     @staticmethod
     def safe_key(key: str) -> str:
@@ -1535,6 +1594,12 @@ class SessionManager:
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self._jsonl_store.get_legacy_session_path(key)
+
+    @contextmanager
+    def locked_session_files(self) -> Generator[Path, None, None]:
+        """Guard exceptional direct access to canonical JSONL files."""
+        with self._jsonl_store.locked_session_files() as sessions_dir:
+            yield sessions_dir
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -1631,6 +1696,47 @@ class SessionManager:
         self._store.save(session, fsync=fsync)
         self._remember(session)
 
+    def rename_model_preset(self, old_name: str, new_name: str) -> int:
+        """Rename a session-scoped model preset across durable and live sessions."""
+        if old_name == new_name:
+            return 0
+
+        cached = dict(self._overflow_cache.items())
+        cached.update(self._cache)
+        keys = set(cached)
+        keys.update(item["key"] for item in self._store.list_sessions())
+
+        changed: list[Session] = []
+        try:
+            for key in sorted(keys):
+                session = cached.get(key) or self._load(key)
+                if (
+                    session is None
+                    or session.metadata.get(SESSION_MODEL_PRESET_METADATA_KEY) != old_name
+                ):
+                    continue
+                session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = new_name
+                changed.append(session)
+                if session.policy.persist:
+                    self.save(session, fsync=True)
+                else:
+                    self._remember(session)
+        except BaseException:
+            for session in reversed(changed):
+                session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = old_name
+                try:
+                    if session.policy.persist:
+                        self.save(session, fsync=True)
+                    else:
+                        self._remember(session)
+                except Exception:
+                    logger.exception(
+                        "Failed to roll back model preset rename for session {}",
+                        session.key,
+                    )
+            raise
+        return len(changed)
+
     def flush_all(self) -> int:
         """Re-save every cached session with fsync for durable shutdown.
 
@@ -1657,7 +1763,10 @@ class SessionManager:
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
         self.invalidate(key)
-        return self._store.delete(key)
+        deleted = self._store.delete(key)
+        if self._delete_observer is not None:
+            self._delete_observer(key)
+        return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
         """Restore session files to the pre-relocation path for an explicit rollback."""

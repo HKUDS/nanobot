@@ -1,8 +1,11 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 import nanobot.session as session_api
 from nanobot.session import Session, SessionManager
 from nanobot.session.manager import FILE_MAX_MESSAGES, SessionStore
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
 def test_store_types_are_not_public_session_api() -> None:
@@ -59,6 +62,38 @@ def test_manager_delegates_persistence_to_store(tmp_path) -> None:
     assert manager.get_cached(stored.key) is None
 
 
+def test_manager_renames_model_preset_in_live_and_persisted_sessions(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager(workspace, sessions_root=sessions_root)
+    selected = manager.get_or_create("websocket:selected")
+    selected.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    manager.save(selected)
+    other = manager.get_or_create("websocket:other")
+    other.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "backup"
+    manager.save(other)
+    transient = manager.get_or_create_transient("websocket:temporary")
+    transient.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+
+    assert manager.rename_model_preset("openai", "Codex") == 2
+    assert selected.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+    assert transient.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+
+    reloaded = SessionManager(workspace, sessions_root=sessions_root)
+    assert (
+        reloaded.get_or_create("websocket:selected").metadata[
+            SESSION_MODEL_PRESET_METADATA_KEY
+        ]
+        == "Codex"
+    )
+    assert (
+        reloaded.get_or_create("websocket:other").metadata[
+            SESSION_MODEL_PRESET_METADATA_KEY
+        ]
+        == "backup"
+    )
+
+
 def test_manager_applies_file_cap_before_store_save(tmp_path) -> None:
     store = MagicMock(spec=SessionStore)
     archiver = MagicMock()
@@ -76,4 +111,32 @@ def test_manager_applies_file_cap_before_store_save(tmp_path) -> None:
 
     assert len(session.messages) == FILE_MAX_MESSAGES
     archiver.assert_called_once()
+    store.save.assert_called_once_with(session, fsync=False)
+
+
+def test_manager_retries_file_cap_archive_after_failure(tmp_path) -> None:
+    store = MagicMock(spec=SessionStore)
+    archiver = MagicMock(side_effect=[RuntimeError("history unavailable"), None])
+    manager = SessionManager(tmp_path, store=store)
+    manager.set_file_cap_archiver(archiver)
+    session = Session(
+        key="cli:retry-large",
+        messages=[
+            {"role": "user", "content": str(index)}
+            for index in range(FILE_MAX_MESSAGES + 1)
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="history unavailable"):
+        manager.save(session)
+
+    assert len(session.messages) == FILE_MAX_MESSAGES + 1
+    store.save.assert_not_called()
+
+    manager.save(session)
+
+    assert len(session.messages) == FILE_MAX_MESSAGES
+    assert archiver.call_count == 2
+    assert archiver.call_args_list[0].args[0][0]["content"] == "0"
+    assert archiver.call_args_list[1].args[0][0]["content"] == "0"
     store.save.assert_called_once_with(session, fsync=False)

@@ -216,17 +216,18 @@ function isStaleThreadSnapshot(
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
-function latestActiveTurnId(messages: UIMessage[]): string | null {
+function latestActiveTurnId(messages: UIMessage[], runStartedAt: number | null): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.isStreaming && message.turnId) return message.turnId;
   }
+  if (runStartedAt === null) return null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (
-      message.role === "user"
-      && message.deliveryStatus !== "failed"
+      message.role !== "user"
       && message.turnId
+      && message.createdAt >= runStartedAt * 1000
     ) return message.turnId;
   }
   return null;
@@ -380,7 +381,11 @@ function toModelBadgeInfo(
   const model = scopedPreset
     ? preset?.model || null
     : settings?.agent.model || modelName || null;
-  const label = preset?.label?.trim() || scopedPreset || toModelBadgeLabel(model);
+  const label = preset
+    ? preset.is_default
+      ? preset.label?.trim() || "Default"
+      : preset.name.trim()
+    : scopedPreset || toModelBadgeLabel(model);
   const rawProvider = preset?.provider
     || (!scopedPreset ? settings?.agent.provider : null)
     || null;
@@ -421,7 +426,6 @@ function modelPresetOptionsFromSettings(
       const name = preset.name.trim();
       return {
         name,
-        label: preset.label?.trim() || name,
         model: preset.model,
         provider: preset.resolved_provider || preset.provider,
       };
@@ -667,6 +671,14 @@ export function ThreadShell({
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
   const { client, getToken, ingressLimits, modelName, token } = useClient();
+  const pickWorkspaceFolder = useCallback(async (): Promise<string | null> => {
+    const response = await client.requestMutation<{ path: unknown }>(
+      "workspace.pick_folder",
+      {},
+      300_000,
+    );
+    return typeof response.path === "string" ? response.path : null;
+  }, [client]);
   const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
@@ -806,14 +818,20 @@ export function ThreadShell({
   const currentGoalState = messagesReady ? goalState : undefined;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
   const restoredViewportTurnId = useMemo(
-    () => turnActive ? latestActiveTurnId(displayMessages) : null,
-    [displayMessages, turnActive],
+    () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
+    [currentRunStartedAt, displayMessages, turnActive],
   );
   const rememberedViewportTurnId = chatId
     ? activeViewportTurnByChatIdRef.current.get(chatId) ?? null
     : null;
+  const canonicalRunTurnId = chatId && messagesReady && turnActive
+    ? client.getRunTurnId(chatId)
+    : null;
   const viewportTurnId = messagesReady && turnActive
-    ? rememberedViewportTurnId ?? restoredViewportTurnId
+    ? canonicalRunTurnId
+      ?? rememberedViewportTurnId
+      ?? historyActiveTurnId
+      ?? restoredViewportTurnId
     : null;
   const activeTurnStartedHere =
     viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;
@@ -1320,7 +1338,12 @@ export function ThreadShell({
       }
       setFallbackModelName(null);
       const submitted = send(content, images, withWorkspaceScope(options));
-      if (chatId && submitted && !submitted.sideChannel) {
+      if (
+        chatId
+        && submitted
+        && !submitted.sideChannel
+        && options?.continueActiveTurn !== true
+      ) {
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
         setSubmittedViewportTurnId(submitted.turnId);
       }
@@ -1465,7 +1488,6 @@ export function ThreadShell({
           skills={skills}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
-          runStartedAt={currentRunStartedAt}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
           workspaceControlsHidden={temporary}
@@ -1473,6 +1495,9 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
+          onPickWorkspaceFolder={
+            workspaceControls?.can_pick_folder ? pickWorkspaceFolder : undefined
+          }
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={temporary ? null : chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
@@ -1509,7 +1534,6 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           surfaceRef={composerSurfaceRef}
-          runStartedAt={currentRunStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
@@ -1518,6 +1542,9 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
+          onPickWorkspaceFolder={
+            workspaceControls?.can_pick_folder ? pickWorkspaceFolder : undefined
+          }
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
@@ -1582,6 +1609,7 @@ export function ThreadShell({
             messages={displayMessages}
             temporary={temporary}
             isStreaming={turnActive}
+            runStartedAt={currentRunStartedAt}
             emptyState={emptyState}
             composer={composerPortalTarget === undefined ? composer : null}
             dockEmptyComposer={dockEmptyComposer}

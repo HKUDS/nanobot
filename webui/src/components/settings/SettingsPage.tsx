@@ -136,6 +136,8 @@ export function SettingsPage({
     modelMigrationSaving,
     modelPresetBeforeCreateRef,
     modelPresetCreating,
+    modelPresetEditingName,
+    modelPresetNameError,
     modelPresetPendingDelete,
     nanobotFeatureAction,
     nanobotFeatureConfirm,
@@ -185,6 +187,8 @@ export function SettingsPage({
     setMcpOAuthCallbackError,
     setMcpOAuthCallbackUrl,
     setModelPresetCreating,
+    setModelPresetEditingName,
+    setModelPresetNameError,
     setModelPresetPendingDelete,
     setNanobotFeatureConfirm,
     setNanobotFeatures,
@@ -240,6 +244,8 @@ export function SettingsPage({
               token={token}
               form={form}
               setForm={setForm}
+              editingPresetName={modelPresetEditingName}
+              presetNameError={modelPresetNameError}
               settings={settings}
               dirty={modelDirty}
               creating={modelPresetCreating}
@@ -256,8 +262,11 @@ export function SettingsPage({
               onMigrate={handleMigrateModelConfigurations}
               onBeginCreate={beginModelPresetCreation}
               onCancelCreate={cancelModelPresetCreation}
-              onSelectConfiguration={() => {
+              onClearPresetNameError={() => setModelPresetNameError(null)}
+              onSelectConfiguration={(name) => {
                 setModelPresetCreating(false);
+                setModelPresetEditingName(name);
+                setModelPresetNameError(null);
                 modelPresetBeforeCreateRef.current = null;
               }}
               onDeleteConfiguration={setModelPresetPendingDelete}
@@ -621,7 +630,7 @@ export function SettingsPage({
           ) : null}
 
           {loading ? (
-            <div className="flex h-48 items-center justify-center rounded-[22px] bg-settings-surface text-sm text-muted-foreground">
+            <div className="flex h-48 items-center justify-center rounded-panel bg-settings-surface text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               {t("settings.status.loading")}
             </div>
@@ -640,7 +649,7 @@ export function SettingsPage({
               )}
             >
               {error ? (
-                <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+                <div className="rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
                 </div>
               ) : null}

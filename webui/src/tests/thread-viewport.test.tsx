@@ -241,6 +241,10 @@ describe("ThreadViewport", () => {
     takeUserControl.mockClear();
     fireEvent.keyDown(disclosure, { key: "Enter" });
     expect(takeUserControl).toHaveBeenCalledTimes(1);
+
+    takeUserControl.mockClear();
+    fireEvent.keyDown(disclosure, { key: " " });
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
   });
 
   it("top-aligns short threads in the message rendering area", () => {
@@ -653,7 +657,7 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it("coalesces streamed layout growth into frame-driven camera targets", async () => {
+  it("settles observed streamed layout growth before paint", async () => {
     const resizeObserver = stubResizeObserver();
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
       .mockReturnValue("started");
@@ -740,10 +744,7 @@ describe("ThreadViewport", () => {
       });
       act(() => {
         contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
-        contentObserver!.callback([], contentObserver as unknown as ResizeObserver);
       });
-      expect(followTo).not.toHaveBeenCalled();
-      await flushAnimationFrame();
       expect(followTo).toHaveBeenCalledTimes(1);
       expect(followTo).toHaveBeenLastCalledWith(1448);
       followTo.mockClear();
@@ -1959,6 +1960,12 @@ describe("ThreadViewport", () => {
   it("waits for the next conversation's transcript before restoring its bottom", async () => {
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+    const handoffAnimation = {
+      cancel: vi.fn(),
+      oncancel: null,
+      onfinish: null,
+    } as unknown as Animation;
+    const animate = vi.fn(() => handoffAnimation);
     const oldMessages: UIMessage[] = [
       {
         id: "old-user",
@@ -1998,6 +2005,7 @@ describe("ThreadViewport", () => {
       scrollHeight: { configurable: true, value: 2400 },
       clientHeight: { configurable: true, value: 600 },
       scrollTop: { configurable: true, writable: true, value: 300 },
+      animate: { configurable: true, value: animate },
     });
     jumpTo.mockClear();
 
@@ -2013,6 +2021,14 @@ describe("ThreadViewport", () => {
     );
     expect(scroller.scrollTop).toBe(300);
     expect(jumpTo).not.toHaveBeenCalled();
+    expect(animate).toHaveBeenCalledWith(
+      [{ opacity: 1 }, { opacity: 0.82 }],
+      {
+        duration: 80,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+        fill: "forwards",
+      },
+    );
 
     Object.defineProperty(scroller, "scrollHeight", {
       configurable: true,
@@ -2033,6 +2049,17 @@ describe("ThreadViewport", () => {
     await flushAnimationFrame();
     expect(jumpTo.mock.calls).toEqual([[2400]]);
     expect(followTo).toHaveBeenCalledWith(2400);
+    expect(handoffAnimation.cancel).toHaveBeenCalled();
+    expect(animate).toHaveBeenCalledWith(
+      [{ opacity: 0.82 }, { opacity: 1 }],
+      {
+        duration: 140,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    );
+    expect(jumpTo.mock.invocationCallOrder[0]).toBeLessThan(
+      animate.mock.invocationCallOrder[1],
+    );
   });
 
   it("waits for hydrated messages before fulfilling open-chat bottom scroll", async () => {

@@ -52,6 +52,7 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "novita",
   "ollama",
   "openrouter",
+  "orcarouter",
   "ovms",
   "siliconflow",
   "vllm",
@@ -309,7 +310,7 @@ export function ModelIdPicker({
       key={model.id}
       {...navigation.getOptionProps(model.id)}
       className={cn(
-        "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-2 py-1.5 text-[12px]",
+        "flex cursor-default items-center justify-between gap-2 rounded-control px-2 py-1.5 text-[12px]",
         options.selected && "text-foreground",
       )}
     >
@@ -455,7 +456,7 @@ export function ModelIdPicker({
                 ) : null}
                 <ComboboxOption
                   {...navigation.getOptionProps(customCandidate)}
-                  className="flex cursor-default items-center gap-2 rounded-[12px] px-2 py-1.5 text-[12px]"
+                  className="flex cursor-default items-center gap-2 rounded-control px-2 py-1.5 text-[12px]"
                 >
                   <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted/80 text-muted-foreground">
                     <Pencil className="h-3 w-3" aria-hidden />
@@ -577,6 +578,7 @@ export function optionRowsWithCurrent(
 export const PROVIDER_ICONS: Record<string, LucideIcon> = {
   custom: Hexagon,
   openrouter: Sparkles,
+  orcarouter: Sparkles,
   skywork: Sparkles,
   aihubmix: Triangle,
   anthropic: Brain,

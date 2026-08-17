@@ -61,7 +61,7 @@ function WebFavicon({ host, active }: { host: string; active: boolean }) {
     <img
       src={logoUrl}
       alt=""
-      className={`h-4 w-4 shrink-0 rounded-[3px] object-contain${active ? " animate-pulse" : ""}`}
+      className={`h-4 w-4 shrink-0 rounded-mark object-contain${active ? " animate-pulse" : ""}`}
       decoding="async"
       loading="lazy"
       referrerPolicy="no-referrer"

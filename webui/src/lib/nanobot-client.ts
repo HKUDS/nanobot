@@ -109,6 +109,10 @@ interface PendingRequest<T> {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingWebUIRequest extends PendingRequest<unknown> {
+  serializedFrame: string;
+}
+
 export class WebUIMutationError extends Error {
   status: number;
 
@@ -215,7 +219,7 @@ export class NanobotClient {
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
-  private pendingWebUIRequests = new Map<string, PendingRequest<unknown>>();
+  private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -306,6 +310,11 @@ export class NanobotClient {
   getRunStartedAt(chatId: string): number | null {
     const v = this.runStartedAtByChatId.get(chatId);
     return v === undefined ? null : v;
+  }
+
+  /** Canonical lifecycle turn currently owning the run for *chatId*, if known. */
+  getRunTurnId(chatId: string): string | null {
+    return this.latestRunTurnIdByChatId.get(chatId) ?? null;
   }
 
   /** Clear the optimistic run state immediately after the user stops a turn. */
@@ -843,9 +852,9 @@ export class NanobotClient {
   }
 
   /**
-   * Send one non-replayable WebUI mutation over the authenticated socket.
-   * A client-side timeout only abandons the reply; the server may finish work
-   * that already started, so timed-out requests are never retried automatically.
+   * Send one WebUI mutation over the authenticated socket. Pending requests are
+   * replayed with the same request_id after reconnect so the gateway can join or
+   * replay the original operation. A client-side timeout still ends all retries.
    */
   requestMutation<T>(
     action: string,
@@ -872,6 +881,13 @@ export class NanobotClient {
     }
 
     return new Promise<T>((resolve, reject) => {
+      let serializedFrame: string;
+      try {
+        serializedFrame = JSON.stringify(frame);
+      } catch {
+        reject(new WebUIMutationError(503, "Could not encode WebUI request"));
+        return;
+      }
       const timer = setTimeout(() => {
         this.pendingWebUIRequests.delete(requestId);
         reject(
@@ -885,9 +901,10 @@ export class NanobotClient {
         resolve: (value) => resolve(value as T),
         reject,
         timer,
+        serializedFrame,
       });
       try {
-        socket.send(JSON.stringify(frame));
+        socket.send(serializedFrame);
       } catch {
         clearTimeout(timer);
         this.pendingWebUIRequests.delete(requestId);
@@ -1029,6 +1046,9 @@ export class NanobotClient {
     // Re-attach every known chat_id so deliveries continue routing after a drop.
     for (const chatId of this.knownChats) {
       this.rawSend({ type: "attach", chat_id: chatId });
+    }
+    for (const pending of this.pendingWebUIRequests.values()) {
+      this.rawSendSerialized(pending.serializedFrame);
     }
     // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
@@ -1262,19 +1282,22 @@ export class NanobotClient {
   private handleClose(event?: { code?: number }): void {
     this.socket = null;
     this.clearTemporaryChats();
+    const willReconnect = !this.intentionallyClosed && this.shouldReconnect;
     if (this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
     this.rejectAllTranscriptions("socket closed");
-    for (const pending of this.pendingWebUIRequests.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(
-        new WebUIMutationError(503, "Socket closed before WebUI response"),
-      );
+    if (!willReconnect) {
+      for (const pending of this.pendingWebUIRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(
+          new WebUIMutationError(503, "Socket closed before WebUI response"),
+        );
+      }
+      this.pendingWebUIRequests.clear();
     }
-    this.pendingWebUIRequests.clear();
     for (const pending of this.pendingSystemCommands.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("socket closed"));
@@ -1322,7 +1345,7 @@ export class NanobotClient {
     }
     this.socketPendingMessageSendKeys.clear();
     this.lastSocketMessageSendKey = null;
-    if (this.intentionallyClosed || !this.shouldReconnect) {
+    if (!willReconnect) {
       this.setStatus("closed");
       return;
     }
@@ -1471,6 +1494,15 @@ export class NanobotClient {
     } catch {
       // Send failure will materialize as a close; queue the frame for retry.
       this.sendQueue.push(frame);
+    }
+  }
+
+  private rawSendSerialized(serializedFrame: string): void {
+    if (!this.socket) return;
+    try {
+      this.socket.send(serializedFrame);
+    } catch {
+      // The pending request remains available for the next successful reconnect.
     }
   }
 }

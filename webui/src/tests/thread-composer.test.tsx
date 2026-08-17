@@ -307,9 +307,9 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
 }
 
 const MODEL_PRESETS = [
-  { name: "kimi", label: "Kimi", provider: "moonshot" },
-  { name: "dflash", label: "DFlash", provider: "deepseek" },
-  { name: "dspro", label: "DS Pro", provider: "deepseek" },
+  { name: "kimi", provider: "moonshot" },
+  { name: "dflash", provider: "deepseek" },
+  { name: "dspro", provider: "deepseek" },
 ];
 
 function renderPresetComposer(variant: "thread" | "hero" = "thread") {
@@ -317,7 +317,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
   render(
     <ThreadComposer
       onSend={vi.fn()}
-      modelLabel="Kimi"
+      modelLabel="kimi"
       modelPreset="kimi"
       modelProvider="moonshot"
       modelPresets={MODEL_PRESETS}
@@ -327,7 +327,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
     />,
   );
   return {
-    badge: screen.getByRole("spinbutton", { name: "Kimi" }),
+    badge: screen.getByRole("spinbutton", { name: "kimi" }),
     onPresetChange,
   };
 }
@@ -554,7 +554,7 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
-    expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
+    expect(input.parentElement?.parentElement?.className).toContain("rounded-panel");
     expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
     expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
@@ -604,7 +604,7 @@ describe("ThreadComposer", () => {
     expect(Array.from(pills).every((pill) => pill.querySelector("img"))).toBe(true);
     expect(Array.from(badge.querySelectorAll("img")).every((image) => !image.draggable)).toBe(true);
     const centeredPill = track.querySelector<HTMLElement>("[data-preset-offset='0']");
-    expect(centeredPill).toHaveTextContent("Kimi");
+    expect(centeredPill).toHaveTextContent("kimi");
     expect(centeredPill).toHaveStyle({ transform: "scale(1.0800)" });
     expect(
       track.querySelector<HTMLElement>("[data-preset-offset='1']"),
@@ -615,13 +615,13 @@ describe("ThreadComposer", () => {
       pointerId: 7,
       pointerType: "mouse",
     });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("Kimi");
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("kimi");
     fireEvent.pointerMove(badge, {
       clientY: 123,
       pointerId: 7,
       pointerType: "mouse",
     });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("DS Pro");
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("dspro");
     fireEvent.pointerUp(badge, {
       clientY: 123,
       pointerId: 7,
@@ -1260,6 +1260,45 @@ describe("ThreadComposer", () => {
     }));
   });
 
+  it("uses the gateway folder picker for a locally hosted WebUI", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    const pickFolder = vi.fn().mockResolvedValue("/Users/test/gateway-project");
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{
+          can_change_project: true,
+          can_use_full_access: true,
+          can_pick_folder: true,
+        }}
+        onPickWorkspaceFolder={pickFolder}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+
+    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Paste path")).not.toBeInTheDocument();
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/Users/test/gateway-project",
+      project_name: "gateway-project",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+  });
+
   it("uses the web path menu when no native host picker is available", async () => {
     const user = userEvent.setup();
     const defaultScope = {
@@ -1287,54 +1326,21 @@ describe("ThreadComposer", () => {
     expect(screen.getByLabelText("Paste path")).toBeInTheDocument();
   });
 
-  it("shows turn run timer when runStartedAt is set", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date((1_000 + 125) * 1000));
-
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        runStartedAt={1000}
-      />,
-    );
-
-    const status = screen.getByRole("status");
-    expect(status).toHaveTextContent(/Running/);
-    expect(status).toHaveTextContent(/2:05/);
-    expect(status).toHaveClass("composer-status-drawer-content");
-    expect(status.closest("[data-composer-status-drawer]")).toHaveAttribute(
-      "data-state",
-      "open",
-    );
-    expect(status.querySelector(".run-pulse-icon")).not.toBeNull();
-
-    vi.useRealTimers();
-  });
-
-  it("opens and closes the run timer through one persistent drawer", () => {
+  it("closes the sustained goal through its existing drawer", () => {
     const { container, rerender } = render(
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Type your message..."
-        runStartedAt={null}
+        goalState={{
+          active: true,
+          objective: "Ship the release",
+          ui_summary: "Preparing release",
+        }}
       />,
     );
 
     const drawer = container.querySelector("[data-composer-status-drawer]");
     expect(drawer).not.toBeNull();
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-
-    rerender(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        runStartedAt={Math.floor(Date.now() / 1000)}
-      />,
-    );
-
-    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
     expect(drawer).toHaveAttribute("data-state", "open");
     expect(drawer).not.toHaveAttribute("aria-hidden");
     const status = screen.getByRole("status");
@@ -1344,7 +1350,7 @@ describe("ThreadComposer", () => {
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Type your message..."
-        runStartedAt={null}
+        goalState={{ active: false }}
       />,
     );
 
@@ -1353,6 +1359,9 @@ describe("ThreadComposer", () => {
     expect(drawer).toHaveAttribute("aria-hidden", "true");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(drawer?.querySelector('[role="status"]')).toBe(status);
+
+    fireEvent.transitionEnd(drawer as Element, { propertyName: "grid-template-rows" });
+    expect(container.querySelector("[data-composer-status-drawer]")).toBeNull();
   });
 
   it("opens an upward anchored goal panel with markdown content when expand is clicked", async () => {
@@ -1798,7 +1807,7 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("rejects session drops that are unavailable to the composer", () => {
+  it("rejects self-session drops that are unavailable to the composer", () => {
     render(
       <ThreadComposer
         onSend={vi.fn()}

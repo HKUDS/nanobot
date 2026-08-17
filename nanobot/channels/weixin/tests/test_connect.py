@@ -66,6 +66,63 @@ async def test_weixin_connect_store_saves_confirmed_qr_login(
     assert saved["token"] == "wx-token"
     assert saved["base_url"] == "https://weixin.example"
 
+    # Token and base_url must also be persisted to config.json so the
+    # post-connect enable step does not overwrite them with empty defaults.
+    config_data = json.loads(config_path.read_text(encoding="utf-8"))
+    weixin_cfg = config_data.get("channels", {}).get("weixin", {})
+    assert weixin_cfg.get("token") == "wx-token"
+    assert weixin_cfg.get("baseUrl") == "https://weixin.example"
+    assert weixin_cfg.get("stateDir") == str(state_dir)
+
+
+@pytest.mark.asyncio
+async def test_weixin_connect_persists_credentials_without_channels_config(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When config.json has no channels key at all, connect must still write
+    the obtained token and base_url back to config.json."""
+    config_path = tmp_path / "config.json"
+    # config.json with NO channels key — the bug scenario
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"model": "test"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    async def fake_fetch_qr_code(
+        self: WeixinChannel, **_kwargs: Any
+    ) -> tuple[str, str]:
+        return "qr-1", "https://qr.example/1"
+
+    async def fake_api_get_with_base(
+        self: WeixinChannel,
+        *,
+        base_url: str,
+        endpoint: str,
+        params: dict[str, Any],
+        auth: bool,
+    ) -> dict[str, str]:
+        return {
+            "status": "confirmed",
+            "bot_token": "wx-token",
+            "baseurl": "https://weixin.example",
+            "ilink_user_id": "wx-user",
+        }
+
+    monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+    monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
+
+    store = WeixinConnectStore()
+    started = await store.start()
+    completed = await store.poll(started["session_id"])
+    assert completed["status"] == "succeeded"
+
+    config_data = json.loads(config_path.read_text(encoding="utf-8"))
+    weixin_cfg = config_data.get("channels", {}).get("weixin", {})
+    assert weixin_cfg.get("token") == "wx-token"
+    assert weixin_cfg.get("baseUrl") == "https://weixin.example"
+
 
 @pytest.mark.asyncio
 async def test_weixin_reconnect_keeps_existing_account_until_scan_succeeds(

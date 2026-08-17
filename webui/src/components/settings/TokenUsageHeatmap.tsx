@@ -224,7 +224,7 @@ export function TokenUsageHeatmap({
                     <span
                       aria-label={ariaLabel}
                       className={cn(
-                        "aspect-square w-full rounded-[2px] transition-transform hover:scale-110 sm:rounded-[4px]",
+                        "aspect-square w-full rounded-mark transition-transform hover:scale-110",
                         tokenUsageCellClass(level, cell.future),
                       )}
                     />

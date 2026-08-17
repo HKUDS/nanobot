@@ -107,6 +107,7 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
     finishRunLocally: vi.fn((chatId: string) => {
       runStartedAtByChatId.delete(chatId);
       latestRunTurnIdByChatId.delete(chatId);
@@ -470,6 +471,54 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
   });
 
+  it("hides actions for a complete assistant-only message until turn_end", async () => {
+    const client = makeClient();
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("websocket%3Aassistant-only-actions/webui-thread")
+        ? httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "old automation", turnId: "turn-old" },
+          ]))
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("assistant-only-actions")}
+        title="Assistant-only actions"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1));
+    const turnId = "turn-automation";
+    const startedAt = Date.now() / 1000;
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "goal_status",
+      chat_id: "assistant-only-actions",
+      status: "running",
+      started_at: startedAt,
+      turn_id: turnId,
+    }));
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "message",
+      chat_id: "assistant-only-actions",
+      text: "new automation",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getByText("new automation")).toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "turn_end",
+      chat_id: "assistant-only-actions",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2));
+  });
+
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
     const onGoHome = vi.fn();
@@ -560,7 +609,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
     expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
   });
 
@@ -596,19 +645,19 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model fast",
     );
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
     fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Fast" }),
+      screen.getByRole("spinbutton", { name: "fast" }),
       { key: "End" },
     );
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
     );
-    expect(await screen.findByText("Extra")).toBeInTheDocument();
+    expect(await screen.findByText("extra")).toBeInTheDocument();
 
     rerender(view("fast"));
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -643,7 +692,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-4 · Company Proxy")).toBeInTheDocument();
+    expect(await screen.findByTitle("fast · gpt-4 · Company Proxy")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
@@ -1021,7 +1070,7 @@ describe("ThreadShell", () => {
       await screen.findByRole("spinbutton", { name: "Default" }),
       { key: "ArrowDown" },
     );
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Message input"), {
@@ -2782,6 +2831,72 @@ describe("ThreadShell", () => {
       "active-resume-chat",
       "queued guidance",
     ));
+  });
+
+  it("keeps active-run timing attached to the original turn after guidance", async () => {
+    const client = makeClient();
+    const turnId = "turn-active-timing";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Atiming-chat/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([{
+            role: "user",
+            content: "research this",
+            turnId,
+          }]));
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("timing-chat")}
+          title="Timing chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("research this")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("timing-chat", {
+        event: "goal_status",
+        chat_id: "timing-chat",
+        status: "running",
+        started_at: Date.now() / 1000 - 215,
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        kind: "progress",
+        text: "web_search()",
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        text: "Continuing the search.",
+        latency_ms: 1_000,
+        turn_id: turnId,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("Continuing the search.")).toBeInTheDocument());
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "How is it going?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByText("How is it going?")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Working for / })).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 1s")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /^Thinking for / })).not.toBeInTheDocument();
   });
 
   it("refreshes the current thread when the page returns to the foreground", async () => {
