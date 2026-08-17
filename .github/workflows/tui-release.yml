@@ -10,22 +10,17 @@ permissions:
 jobs:
   build:
     name: ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-15
-            target: darwin-arm64
-          - os: macos-15-intel
-            target: darwin-x64
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: ubuntu-24.04-arm
-            target: linux-arm64
-          - os: windows-latest
-            target: win32-x64
+        target:
+          - darwin-arm64
+          - darwin-x64
+          - linux-arm64
+          - linux-x64
+          - win32-x64
 
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +34,30 @@ jobs:
         working-directory: tui
         run: bun install --frozen-lockfile
 
+      - name: Install ${{ matrix.target }} native dependencies
+        working-directory: tui
+        run: bun scripts/prepare-target.ts ${{ matrix.target }}
+
       - name: Build ${{ matrix.target }}
         working-directory: tui
         run: bun run build -- ${{ matrix.target }}
+
+      - name: Ad-hoc sign macOS executable
+        if: startsWith(matrix.target, 'darwin-')
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957 # v1
+        with:
+          input_path: tui/dist/nanobot-tui-${{ matrix.target }}
+          rcodesign_version: 0.29.0
+
+      - name: Refresh signed checksum
+        working-directory: tui/dist
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          asset="nanobot-tui-${TARGET}"
+          if [[ "$TARGET" == win32-* ]]; then asset="${asset}.exe"; fi
+          sha256sum "$asset" > "${asset}.sha256"
 
       - name: Upload release assets
         env:
