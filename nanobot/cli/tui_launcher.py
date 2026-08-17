@@ -120,14 +120,19 @@ def _resolve_tui_command() -> list[str]:
             "on that platform; use the classic prompt until the upstream runtime supports it"
         )
     asset = f"nanobot-tui-{system}-{machine}{suffix}"
+    source_dir = _source_checkout_tui_dir()
+    if source_dir is not None:
+        bun = shutil.which("bun")
+        if not bun:
+            raise TuiUnavailableError(
+                "this source checkout requires Bun to run its matching TUI; "
+                "install Bun, then run `nanobot agent` again"
+            )
+        return _resolve_source_tui_command(source_dir, bun)
+
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
     if packaged.is_file():
         return [str(packaged)]
-
-    source_dir = Path(__file__).resolve().parents[2] / "tui"
-    bun = shutil.which("bun")
-    if bun and (source_dir / "package.json").is_file():
-        return _resolve_source_tui_command(source_dir, bun)
 
     downloaded = _download_release_tui(asset)
     if downloaded is not None:
@@ -137,6 +142,15 @@ def _resolve_tui_command() -> list[str]:
         "this build does not include the native TUI; install Bun for a source checkout "
         "or use `nanobot agent --classic`"
     )
+
+
+def _source_checkout_tui_dir() -> Path | None:
+    """Return this checkout's TUI source, never a neighboring unrelated directory."""
+    project_root = Path(__file__).resolve().parents[2]
+    source_dir = project_root / "tui"
+    if (project_root / "pyproject.toml").is_file() and (source_dir / "package.json").is_file():
+        return source_dir
+    return None
 
 
 def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:

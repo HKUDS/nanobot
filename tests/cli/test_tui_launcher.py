@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 import typer
 
+import nanobot.cli.tui_launcher as tui_launcher
 from nanobot.cli.agent import agent
 from nanobot.cli.tui_launcher import (
     TuiSessionError,
@@ -144,6 +145,45 @@ def test_windows_arm64_fails_instead_of_using_the_classic_prompt(
 
     with pytest.raises(TuiUnavailableError, match="Windows ARM64"):
         _resolve_tui_command()
+
+
+def test_source_checkout_does_not_fall_back_to_a_release_tui_without_bun(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "tui"
+    source_dir.mkdir()
+    monkeypatch.delenv("NANOBOT_TUI_BIN", raising=False)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._source_checkout_tui_dir",
+        lambda: source_dir,
+    )
+    monkeypatch.setattr("nanobot.cli.tui_launcher.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._download_release_tui",
+        lambda _asset: pytest.fail("a source checkout must not download a release TUI"),
+    )
+
+    with pytest.raises(TuiUnavailableError, match="source checkout requires Bun"):
+        _resolve_tui_command()
+
+
+def test_source_checkout_requires_project_and_tui_markers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    module_path = project_root / "nanobot" / "cli" / "tui_launcher.py"
+    source_dir = project_root / "tui"
+    module_path.parent.mkdir(parents=True)
+    source_dir.mkdir()
+    monkeypatch.setattr(tui_launcher, "__file__", str(module_path))
+
+    assert tui_launcher._source_checkout_tui_dir() is None
+    (source_dir / "package.json").write_text("{}", encoding="utf-8")
+    assert tui_launcher._source_checkout_tui_dir() is None
+    (project_root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    assert tui_launcher._source_checkout_tui_dir() == source_dir
 
 
 def test_interactive_agent_uses_native_tui(

@@ -218,6 +218,10 @@ def webui(
             )
 
     webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
+    _prepare_webui_bundle_for_gateway(
+        runtime_config,
+        mode="skip" if dev else webui_bundle_mode,
+    )
 
     config_arg = str(config_path)
     workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
@@ -236,10 +240,6 @@ def webui(
 
     def ensure_shared_gateway(*, client_lease: GatewayClientLease) -> None:
         """Start or refresh the one managed gateway shared by local clients."""
-        _prepare_webui_bundle_for_gateway(
-            runtime_config,
-            mode="skip" if dev else webui_bundle_mode,
-        )
         result = client_lease.ensure_on_demand_gateway(start_options)
         restarted = False
         restart_attempted = False

@@ -24,6 +24,7 @@ from nanobot.webui.build import (
     BuildMode,
     WebUIBuildError,
     ensure_webui_bundle,
+    inspect_webui_bundle,
 )
 
 if TYPE_CHECKING:
@@ -191,6 +192,11 @@ def _prepare_webui_bundle_for_gateway(
         return typer.confirm(message, default=True)
 
     try:
+        # A source checkout is the development product. Every gateway entrypoint
+        # keeps its browser client in lockstep with Python; only Vite mode skips
+        # the production bundle intentionally.
+        if mode != "skip" and inspect_webui_bundle().source_available:
+            mode = "auto"
         ensure_webui_bundle(
             mode=mode,
             confirm=_confirm if mode == "prompt" else None,

@@ -136,6 +136,19 @@ GitHub Actions' free tier:
 If your change genuinely needs to step outside this, please call it out
 explicitly in the PR description so it can be discussed before merge.
 
+## Release Packaging Contract
+
+A stable install must never combine Python from one version with a TUI from another. Publish in
+this order:
+
+1. Set the package version and publish the matching GitHub release tag (`vX.Y.Z`).
+2. Wait for `tui-release.yml` to upload every supported native TUI and checksum to that release.
+3. Only then publish the same `X.Y.Z` package to PyPI.
+
+The wheel contains the built WebUI. The native TUI stays a platform-specific release sidecar so
+users download only the binary for their machine. Source checkouts use an editable Python install,
+run `tui/` with Bun, and rebuild stale `webui/` assets locally.
+
 ## Questions?
 
 If you have questions, ideas, or half-formed insights, you are warmly welcome here.
