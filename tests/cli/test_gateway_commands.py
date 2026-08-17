@@ -8,7 +8,13 @@ from typer.testing import CliRunner
 
 from nanobot.cli.gateway import _resolved_config_selector, create_gateway_app
 from nanobot.config.schema import Config
-from nanobot.gateway import GatewayRuntimePaths, GatewayStartOptions, GatewayStatus, RuntimeResult
+from nanobot.gateway import (
+    GatewayInstance,
+    GatewayRuntimePaths,
+    GatewayStartOptions,
+    GatewayStatus,
+    RuntimeResult,
+)
 from nanobot.gateway.service import GatewayServiceOptions, GatewayServiceResult
 
 runner = CliRunner()
@@ -111,7 +117,9 @@ def _test_app(
     app = typer.Typer()
     fake_runtime = FakeRuntime(tmp_path)
     fake_service = FakeServiceInstaller(tmp_path)
-    run_calls: list[tuple[Config, int | None, str | None, str | None]] = []
+    run_calls: list[
+        tuple[Config, int | None, str | None, str | None, GatewayInstance | None]
+    ] = []
     prepare_calls: list[tuple[Config, str]] = []
 
     def load_runtime_config(_config_path: str | None, _workspace: str | None) -> Config:
@@ -123,9 +131,10 @@ def _test_app(
         port: int | None = None,
         webui_bundle_mode: str | None = None,
         unconfigured_provider_error: str | None = None,
+        gateway_instance: GatewayInstance | None = None,
     ) -> None:
         run_calls.append(
-            (config, port, webui_bundle_mode, unconfigured_provider_error)
+            (config, port, webui_bundle_mode, unconfigured_provider_error, gateway_instance)
         )
 
     def prepare_webui_bundle(config: Config, mode: str) -> None:
@@ -162,6 +171,22 @@ def test_gateway_default_still_runs_foreground(tmp_path):
     assert len(calls) == 1
     assert calls[0][1] == 18791
     assert calls[0][2] == "warn"
+    assert calls[0][4] == GatewayInstance.resolve(
+        config_path=_resolved_config_selector(None)
+    )
+
+
+def test_config_workspace_does_not_split_the_foreground_instance(tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "configured-workspace")
+    app, _runtime, _service, calls, _prepare_calls = _test_app(tmp_path, config=config)
+
+    result = runner.invoke(app, ["gateway"])
+
+    assert result.exit_code == 0
+    assert calls[0][4] == GatewayInstance.resolve(
+        config_path=_resolved_config_selector(None)
+    )
 
 
 def test_gateway_foreground_passes_recoverable_provider_error_to_runner(tmp_path):
@@ -213,7 +238,9 @@ def test_gateway_background_starts_detached_runtime(tmp_path):
 
     assert result.exit_code == 0
     assert "Gateway started in the background" in result.stdout
-    assert fake_runtime.started_options == GatewayStartOptions(port=18792)
+    assert fake_runtime.started_options == GatewayInstance.resolve(
+        config_path=_resolved_config_selector(None)
+    ).start_options(port=18792)
     assert prepare_calls == [(config, "warn")]
 
 
@@ -344,7 +371,9 @@ def test_gateway_restart_starts_background_runtime(tmp_path):
     assert result.exit_code == 0
     assert "Gateway restarted in the background" in result.stdout
     assert fake_runtime.stop_timeout == 9
-    assert fake_runtime.restarted_options == GatewayStartOptions(port=18793, verbose=True)
+    assert fake_runtime.restarted_options == GatewayInstance.resolve(
+        config_path=_resolved_config_selector(None)
+    ).start_options(port=18793, verbose=True)
     assert prepare_calls == [(config, "warn")]
     assert json.loads(lease_state.read_text(encoding="utf-8"))["auto_stop"] is True
 

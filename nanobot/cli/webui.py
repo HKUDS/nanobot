@@ -101,9 +101,8 @@ def webui(
     from nanobot.config.loader import resolve_config_env_vars, save_config
     from nanobot.gateway import (
         GatewayClientLease,
+        GatewayInstance,
         GatewayRuntime,
-        GatewayRuntimePaths,
-        GatewayStartOptions,
     )
 
     cli_terminal._ensure_interactive_tty_mode()
@@ -223,20 +222,12 @@ def webui(
         mode="skip" if dev else webui_bundle_mode,
     )
 
-    config_arg = str(config_path)
-    workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-    runtime = GatewayRuntime(
-        paths=GatewayRuntimePaths.for_instance(
-            data_dir=config_path.parent,
-            workspace=workspace_arg,
-            config_path=config_arg,
-        )
+    instance = GatewayInstance.resolve(
+        config_path=config_path,
+        workspace=workspace,
     )
-    start_options = GatewayStartOptions(
-        port=effective_gateway_port,
-        workspace=workspace_arg,
-        config_path=config_arg,
-    )
+    runtime = GatewayRuntime(paths=instance.paths)
+    start_options = instance.start_options(port=effective_gateway_port)
 
     def ensure_shared_gateway(*, client_lease: GatewayClientLease) -> None:
         """Start or refresh the one managed gateway shared by local clients."""

@@ -37,6 +37,10 @@ GatewayLaunchMode = Literal["foreground", "background", "unknown"]
 GatewayLifetime = Literal["explicit", "on_demand"]
 
 
+def _default_config_path() -> Path:
+    return (Path.home() / ".nanobot" / "config.json").resolve(strict=False)
+
+
 @dataclass(frozen=True)
 class GatewayStatus(ProcessStatus):
     """Observable lifecycle state for one shared local gateway."""
@@ -104,6 +108,56 @@ class GatewayRuntimePaths(ProcessRuntimePaths):
             logs_dir=logs_dir,
             state_path=run_dir / f"{stem}.json",
             log_path=logs_dir / f"{stem}.log",
+        )
+
+
+@dataclass(frozen=True)
+class GatewayInstance:
+    """One stable local gateway identity and its child-process selectors."""
+
+    config_path: Path
+    workspace: str | None
+    paths: GatewayRuntimePaths
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        config_path: str | Path,
+        workspace: str | None = None,
+    ) -> "GatewayInstance":
+        resolved_config = Path(config_path).expanduser().resolve(strict=False)
+        resolved_workspace = (
+            str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
+        )
+        # The released default instance used gateway.json. Keep that identity stable
+        # across upgrades while still namespacing explicit configs and workspaces.
+        config_selector = (
+            None if resolved_config == _default_config_path() else str(resolved_config)
+        )
+        return cls(
+            config_path=resolved_config,
+            workspace=resolved_workspace,
+            paths=GatewayRuntimePaths.for_instance(
+                data_dir=resolved_config.parent,
+                workspace=resolved_workspace,
+                config_path=config_selector,
+            ),
+        )
+
+    def start_options(
+        self,
+        *,
+        port: int,
+        verbose: bool = False,
+    ) -> GatewayStartOptions:
+        return GatewayStartOptions(
+            port=port,
+            verbose=verbose,
+            workspace=self.workspace,
+            config_path=(
+                None if self.config_path == _default_config_path() else str(self.config_path)
+            ),
         )
 
 

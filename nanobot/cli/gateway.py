@@ -14,8 +14,8 @@ from rich.console import Console
 
 from nanobot.config.schema import Config
 from nanobot.gateway import (
+    GatewayInstance,
     GatewayRuntime,
-    GatewayRuntimePaths,
     GatewayStartOptions,
     GatewayStatus,
 )
@@ -78,19 +78,21 @@ def create_gateway_app(
             filter=lambda record: record["extra"].setdefault("channel", "-") or True,
         )
 
+    def instance_for_selectors(
+        *,
+        workspace: str | None = None,
+        config: str | None = None,
+    ) -> GatewayInstance:
+        return GatewayInstance.resolve(
+            config_path=_resolved_config_selector(config),
+            workspace=workspace,
+        )
+
     def runtime_for_instance(*, workspace: str | None = None, config: str | None = None):
         if runtime_factory is not None:
             return runtime_factory(workspace=workspace, config=config)
-        resolved_config = _resolved_config_selector(config)
-        config_path = str(resolved_config)
-        workspace_path = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        return GatewayRuntime(
-            paths=GatewayRuntimePaths.for_instance(
-                data_dir=resolved_config.parent,
-                workspace=workspace_path,
-                config_path=config_path,
-            )
-        )
+        instance = instance_for_selectors(workspace=workspace, config=config)
+        return GatewayRuntime(paths=instance.paths)
 
     def service_installer():
         return service_factory() if service_factory is not None else GatewayServiceInstaller()
@@ -109,13 +111,12 @@ def create_gateway_app(
         loaded_config: Config | None = None,
     ) -> GatewayStartOptions:
         cfg = loaded_config or load_runtime_config(config, workspace)
-        resolved_config = str(_resolved_config_selector(config)) if config else None
-        resolved_workspace = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        return GatewayStartOptions(
+        return instance_for_selectors(
+            workspace=workspace,
+            config=config,
+        ).start_options(
             port=port if port is not None else cfg.gateway.port,
             verbose=verbose,
-            workspace=resolved_workspace,
-            config_path=resolved_config,
         )
 
     def print_status(status: GatewayStatus) -> None:
@@ -235,17 +236,24 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
+        instance = instance_for_selectors(workspace=workspace, config=config)
         unconfigured_provider_error = None
         if validate_startup_config is not None:
             unconfigured_provider_error = validate_startup_config(cfg)
         if unconfigured_provider_error is None:
-            run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
+            run_gateway(
+                cfg,
+                port=port,
+                webui_bundle_mode=interactive_build_mode(),
+                gateway_instance=instance,
+            )
         else:
             run_gateway(
                 cfg,
                 port=port,
                 webui_bundle_mode=interactive_build_mode(),
                 unconfigured_provider_error=unconfigured_provider_error,
+                gateway_instance=instance,
             )
 
     @gateway_app.command("status")

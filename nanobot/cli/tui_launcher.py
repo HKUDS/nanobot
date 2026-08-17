@@ -256,24 +256,16 @@ def _ensure_gateway(
 ) -> _GatewayHandle:
     from nanobot.gateway import (
         GatewayClientLease,
+        GatewayInstance,
         GatewayRuntime,
-        GatewayRuntimePaths,
-        GatewayStartOptions,
     )
 
     base_url = _webui_browser_url(config).split("/#/", 1)[0].rstrip("/")
-    workspace_override_path = (
-        str(Path(workspace_override).expanduser().resolve(strict=False))
-        if workspace_override
-        else None
+    instance = GatewayInstance.resolve(
+        config_path=config_path,
+        workspace=workspace_override,
     )
-    runtime = GatewayRuntime(
-        paths=GatewayRuntimePaths.for_instance(
-            data_dir=config_path.parent,
-            workspace=workspace_override_path,
-            config_path=str(config_path),
-        )
-    )
+    runtime = GatewayRuntime(paths=instance.paths)
     lease = GatewayClientLease(runtime, kind="tui")
     lease.acquire()
     try:
@@ -294,11 +286,7 @@ def _ensure_gateway(
             )
 
         result = lease.ensure_on_demand_gateway(
-            GatewayStartOptions(
-                port=config.gateway.port,
-                workspace=workspace_override_path,
-                config_path=str(config_path),
-            )
+            instance.start_options(port=config.gateway.port)
         )
         if not result.ok and result.message != "gateway_already_running":
             raise TuiUnavailableError(

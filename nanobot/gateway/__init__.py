@@ -2,6 +2,7 @@
 
 from nanobot.gateway.runtime import (
     GatewayClientLease,
+    GatewayInstance,
     GatewayRuntime,
     GatewayRuntimePaths,
     GatewayStartOptions,
@@ -12,6 +13,7 @@ from nanobot.gateway.runtime import (
 
 __all__ = [
     "GatewayClientLease",
+    "GatewayInstance",
     "GatewayRuntime",
     "GatewayRuntimePaths",
     "GatewayStartOptions",

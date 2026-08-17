@@ -32,6 +32,7 @@ from nanobot.cli.webui_support import (
 )
 from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.gateway.runtime import GatewayInstance
 from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
@@ -298,6 +299,7 @@ def _run_gateway(
     health_server_enabled: bool = True,
     unconfigured_provider_error: str | None = None,
     webui_dev_server: WebUIDevServer | None = None,
+    gateway_instance: GatewayInstance | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
@@ -392,28 +394,15 @@ def _run_gateway(
     from nanobot.gateway.runtime import (
         GatewayClientLease,
         GatewayRuntime,
-        GatewayRuntimePaths,
-        GatewayStartOptions,
         monitor_gateway_clients,
     )
 
-    config_path = str(get_config_path().resolve(strict=False))
-    gateway_workspace = (
-        str(config.workspace_path)
-        if not is_default_workspace(config.workspace_path)
-        else None
+    instance = gateway_instance or GatewayInstance.resolve(
+        config_path=get_config_path(),
     )
-    gateway_runtime = GatewayRuntime(
-        paths=GatewayRuntimePaths.for_instance(
-            workspace=gateway_workspace,
-            config_path=config_path,
-        )
-    )
-    gateway_start_options = GatewayStartOptions(
-        port=port,
-        workspace=gateway_workspace,
-        config_path=config_path,
-    )
+    config_path = str(instance.config_path)
+    gateway_runtime = GatewayRuntime(paths=instance.paths)
+    gateway_start_options = instance.start_options(port=port)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):

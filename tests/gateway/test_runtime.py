@@ -12,6 +12,7 @@ import pytest
 
 from nanobot.gateway import (
     GatewayClientLease,
+    GatewayInstance,
     GatewayRuntime,
     GatewayRuntimePaths,
     GatewayStartOptions,
@@ -56,6 +57,34 @@ def test_paths_use_stable_instance_suffix_for_custom_selectors(tmp_path):
     assert first_paths.state_path.name.startswith("gateway.")
     assert first_paths.state_path != second_paths.state_path
     assert first_paths.log_path != second_paths.log_path
+
+
+def test_default_instance_preserves_released_gateway_paths() -> None:
+    config_path = Path.home() / ".nanobot" / "config.json"
+
+    instance = GatewayInstance.resolve(config_path=config_path)
+
+    assert instance.paths.state_path == config_path.parent / "run" / "gateway.json"
+    assert instance.paths.log_path == config_path.parent / "logs" / "gateway.log"
+    assert instance.start_options(port=18790) == GatewayStartOptions(port=18790)
+
+
+def test_custom_instance_round_trips_the_same_child_selectors(tmp_path: Path) -> None:
+    config_path = tmp_path / "instance" / "config.json"
+    workspace = tmp_path / "workspace"
+    parent = GatewayInstance.resolve(
+        config_path=config_path,
+        workspace=str(workspace),
+    )
+    options = parent.start_options(port=18790)
+
+    child = GatewayInstance.resolve(
+        config_path=options.config_path or "",
+        workspace=options.workspace,
+    )
+
+    assert child == parent
+    assert parent.paths.state_path.name.startswith("gateway.")
 
 
 def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
