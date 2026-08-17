@@ -457,7 +457,11 @@ export class NanobotTui {
     )
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.commandMenu.setCommands([], this.localCommands)
-    this.sessionMenu = new SessionMenu(renderer, commandMenuTheme(this.palette))
+    this.sessionMenu = new SessionMenu(
+      renderer,
+      commandMenuTheme(this.palette),
+      (session) => this.switchSession(session),
+    )
     this.mentionMenu = new MentionMenu(renderer, commandMenuTheme(this.palette))
     this.branchMenu = new BranchMenu(renderer, commandMenuTheme(this.palette))
     this.contextPanel = new ContextPanel(renderer, contextPanelTheme(this.palette))
@@ -492,6 +496,9 @@ export class NanobotTui {
         // outside their trigger or body dismisses them; hide() restores the
         // composer focus through the shared visibility callback.
         this.dismissRuntimeControls()
+        if (this.sessionLoading || this.sessionMenu.visible) {
+          this.closeSessions()
+        }
         // Selection belongs to transcript/input content, never to empty chrome.
         // Clearing it here prevents default-background cells from lingering as
         // opaque blocks in terminals with differential repainting.
@@ -517,6 +524,21 @@ export class NanobotTui {
       truncate: true,
       fg: this.palette.muted,
       selectable: false,
+      ...(host.hosted ? {} : {
+        onMouseOver: () => { this.titleText.fg = this.palette.accent },
+        onMouseOut: () => this.renderTitleColor(),
+        onMouseDown: (event) => {
+          if (event.button !== 0) return
+          event.preventDefault()
+          event.stopPropagation()
+          this.renderer.clearSelection()
+          if (this.sessionLoading || this.sessionMenu.visible) {
+            this.closeSessions()
+            return
+          }
+          void this.openSessions()
+        },
+      }),
     })
     this.runtimeControls = new RuntimeControls(
       renderer,
@@ -1458,7 +1480,7 @@ export class NanobotTui {
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
     this.composer.cursorColor = this.palette.accent
-    this.titleText.fg = this.palette.muted
+    this.renderTitleColor()
     this.status.fg = this.palette.muted
     this.meta.fg = this.palette.faint
     this.updateMeta()
@@ -1556,6 +1578,12 @@ export class NanobotTui {
     this.runtimeControls.updateModel(this.modelName, this.modelPreset)
     this.runtimeControls.updateContext(context)
     this.syncHostMetadata()
+  }
+
+  private renderTitleColor(): void {
+    this.titleText.fg = !this.host.hosted && (this.sessionLoading || this.sessionMenu.visible)
+      ? this.palette.accent
+      : this.palette.muted
   }
 
   private setCurrentTask(task: string): void {
@@ -1848,11 +1876,13 @@ export class NanobotTui {
       return
     }
     this.commandMenu.hide()
+    this.dismissRuntimeControls()
     this.mentionMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
     this.clearComposer()
     this.sessionLoading = true
+    this.renderTitleColor()
     const loadId = ++this.sessionLoadId
     this.status.content = "Loading sessions…"
     try {
@@ -1868,6 +1898,7 @@ export class NanobotTui {
       }
       const limit = this.renderer.height >= 20 ? 8 : 4
       this.sessionMenu.open(sessions, this.client.activeChatId, limit)
+      this.renderTitleColor()
       this.sessionMenu.update(this.composer.plainText, limit)
       this.syncComposerPlaceholder()
       this.updateMeta()
@@ -1875,6 +1906,7 @@ export class NanobotTui {
     } catch (error) {
       if (loadId !== this.sessionLoadId) return
       this.sessionLoading = false
+      this.renderTitleColor()
       this.status.content = error instanceof Error ? error.message : String(error)
     }
   }
@@ -2035,8 +2067,10 @@ export class NanobotTui {
     this.sessionLoadId += 1
     this.sessionLoading = false
     this.sessionMenu.hide()
+    this.renderTitleColor()
     this.clearComposer()
     this.syncComposerPlaceholder()
+    this.composer.focus()
     if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
     this.updateMeta()
   }

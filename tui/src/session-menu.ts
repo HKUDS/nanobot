@@ -26,8 +26,12 @@ export class SessionMenu {
   readonly root: BoxRenderable
   private readonly picker: PickerMenu<SessionMenuRow>
 
-  constructor(renderer: CliRenderer, theme: PickerMenuTheme) {
-    this.picker = new PickerMenu(renderer, theme, {
+  constructor(
+    renderer: CliRenderer,
+    theme: PickerMenuTheme,
+    onSelect?: (session: SessionSummary) => void,
+  ) {
+    this.picker = new PickerMenu<SessionMenuRow>(renderer, theme, {
       id: "nanobot-tui-session-menu",
       searchText: (session) => [
         sessionLabel(session),
@@ -49,6 +53,7 @@ export class SessionMenu {
         return `${marker}${sessionLabel(session)}${detail ? `  ${detail}` : ""}`
       },
       emptyText: "No matching sessions",
+      onSelect,
     })
     this.root = this.picker.root
   }

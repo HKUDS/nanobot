@@ -764,6 +764,67 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("opens and switches sessions from the clickable title", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/api/webui/sidebar-state")) {
+        return Promise.resolve(new Response(JSON.stringify({})))
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        sessions: [
+          { key: "websocket:chat", title: "Current chat", preview: "Current work" },
+          { key: "websocket:other", title: "Release checklist", preview: "Ship it" },
+        ],
+      })))
+    }) as typeof fetch
+    const attached: string[] = []
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      client([], attached),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      sessionMenu: { visible: boolean; root: { getChildren(): unknown[] } }
+      titleText: TextRenderable
+      status: TextRenderable
+    }
+
+    try {
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.renderOnce()
+      await setup.mockMouse.click(ui.titleText.x + 2, ui.titleText.y)
+      await waitUntil(() => ui.sessionMenu.visible)
+      await setup.flush()
+      expect(ui.composer.placeholder).toBe("Search sessions")
+
+      const rows = ui.sessionMenu.root.getChildren() as TextRenderable[]
+      const other = rows.find((row) => row.plainText.includes("Release checklist"))
+      if (!other) throw new Error("other session row was not rendered")
+      ui.composer.blur()
+      await setup.mockMouse.click(other.x + 2, other.y)
+      await waitUntil(() => attached.length === 1)
+      expect(attached).toEqual(["other"])
+      expect(ui.sessionMenu.visible).toBe(false)
+      expect(ui.composer.focused).toBe(true)
+      expect(ui.titleText.plainText).toContain("Release checklist")
+
+      app.accept({ event: "attached", chat_id: "other" })
+      await setup.mockMouse.click(ui.titleText.x + 2, ui.titleText.y)
+      await waitUntil(() => ui.sessionMenu.visible)
+      ui.composer.blur()
+      await setup.mockMouse.click(ui.status.x, ui.status.y)
+      expect(ui.sessionMenu.visible).toBe(false)
+      expect(ui.composer.focused).toBe(true)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("preserves gateway slash lifecycle while local navigation stays in the same menu", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const sent: string[] = []
