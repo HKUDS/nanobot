@@ -765,7 +765,7 @@ async def test_runner_does_not_retry_blank_policy_terminal(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finish_reason", ["refusal", "content_filter"])
-async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
+async def test_runner_stops_after_policy_terminal(
     finish_reason: str,
 ) -> None:
     from nanobot.agent.runner import AgentRunner
@@ -785,7 +785,6 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
     ))
 
     assert provider.chat_with_retry.await_count == 1

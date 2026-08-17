@@ -1481,42 +1481,6 @@ async def test_process_message_uses_explicit_session_for_goal_context(
 
 
 @pytest.mark.asyncio
-async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
-    tmp_path: Path,
-) -> None:
-    from nanobot.agent.runner import AgentRunResult
-
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:late-goal")
-    seen: dict[str, str | None] = {}
-
-    async def fake_run(spec):
-        assert callable(spec.goal_continue_message)
-        session.metadata[GOAL_STATE_KEY] = {
-            "status": "active",
-            "objective": "Goal created during this runner call.",
-        }
-        seen["goal_continue"] = spec.goal_continue_message()
-        return AgentRunResult(
-            final_content="ok",
-            messages=[{"role": "assistant", "content": "ok"}],
-        )
-
-    loop.runner.run = fake_run  # type: ignore[method-assign]
-
-    await loop._run_agent_loop(
-        [],
-        runtime=loop.llm_runtime(),
-        session=session,
-        channel="websocket",
-        chat_id="late-goal",
-        session_key=session.key,
-    )
-
-    assert "Goal created during this runner call." in (seen["goal_continue"] or "")
-
-
-@pytest.mark.asyncio
 async def test_process_direct_rejects_reserved_system_channel(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop._process_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
