@@ -57,6 +57,7 @@ class FakeRuntime:
 
     def stop(self, *, timeout_s: int) -> RuntimeResult:
         self.stop_timeout = timeout_s
+        self.paths.state_path.with_name("gateway.clients.json").unlink(missing_ok=True)
         return RuntimeResult(True, "gateway_stopped", self.status_value)
 
     def status(self) -> GatewayStatus:
@@ -223,7 +224,13 @@ def test_gateway_background_adopts_an_existing_on_demand_gateway(tmp_path):
     lease_state.write_text('{"auto_stop": true, "clients": {}}', encoding="utf-8")
 
     def already_running(_options: GatewayStartOptions) -> RuntimeResult:
-        return RuntimeResult(False, "gateway_already_running", fake_runtime.status_value)
+        lease_state.unlink(missing_ok=True)
+        return RuntimeResult(
+            False,
+            "gateway_already_running",
+            fake_runtime.status_value,
+            promoted=True,
+        )
 
     fake_runtime.start_background = already_running  # type: ignore[method-assign]
 
@@ -311,6 +318,7 @@ def test_gateway_stop_treats_not_running_as_clean(tmp_path):
 
     def fake_stop(*, timeout_s: int) -> RuntimeResult:
         fake_runtime.stop_timeout = timeout_s
+        lease_state.unlink(missing_ok=True)
         return RuntimeResult(False, "gateway_not_running", fake_runtime.status_value)
 
     fake_runtime.stop = fake_stop  # type: ignore[method-assign]

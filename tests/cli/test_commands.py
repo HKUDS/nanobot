@@ -1991,6 +1991,8 @@ def _patch_webui_managed_gateway(
             self.running = False
             return RuntimeResult(True, "gateway_stopped", self.status())
 
+        _stop = stop
+
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
     monkeypatch.setattr(
         "nanobot.cli.webui._prepare_webui_bundle_for_gateway",

@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -284,7 +285,7 @@ def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatc
         stopped.append(timeout_s)
         return SimpleNamespace(ok=True, message="gateway_stopped")
 
-    monkeypatch.setattr(runtime, "stop", stop)
+    monkeypatch.setattr(runtime, "_stop", stop)
     tui = GatewayClientLease(runtime, kind="tui", pid=os.getpid(), token="tui")
     webui = GatewayClientLease(runtime, kind="webui", pid=os.getpid(), token="webui")
 
@@ -297,6 +298,95 @@ def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatc
     assert webui.release() is True
     assert stopped == [20]
     assert not webui.state_path.exists()
+
+
+def test_last_client_shutdown_preserves_a_replacement_lease(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    stop_started = threading.Event()
+    finish_stop = threading.Event()
+    replacement_acquired = threading.Event()
+
+    def stop(*, timeout_s: int):
+        assert timeout_s == 20
+        stop_started.set()
+        assert finish_stop.wait(timeout=2)
+        return SimpleNamespace(
+            ok=True,
+            message="gateway_stopped",
+            status=runtime.status(),
+        )
+
+    monkeypatch.setattr(runtime, "_stop", stop)
+    original = GatewayClientLease(runtime, kind="tui", token="original")
+    replacement = GatewayClientLease(runtime, kind="webui", token="replacement")
+    original.acquire()
+    original.mark_ephemeral()
+
+    release_thread = threading.Thread(target=original.release)
+    release_thread.start()
+    assert stop_started.wait(timeout=2)
+
+    acquire_thread = threading.Thread(
+        target=lambda: (replacement.acquire(), replacement_acquired.set())
+    )
+    acquire_thread.start()
+    assert not replacement_acquired.wait(timeout=0.05)
+
+    finish_stop.set()
+    release_thread.join(timeout=2)
+    acquire_thread.join(timeout=2)
+
+    assert replacement_acquired.is_set()
+    state = json.loads(replacement.state_path.read_text(encoding="utf-8"))
+    assert set(state["clients"]) == {"replacement"}
+
+
+def test_explicit_stop_clears_leases_before_accepting_a_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    stop_started = threading.Event()
+    finish_stop = threading.Event()
+    replacement_acquired = threading.Event()
+
+    stale = GatewayClientLease(runtime, kind="tui", token="stale")
+    replacement = GatewayClientLease(runtime, kind="webui", token="replacement")
+    stale.acquire()
+    stale.mark_ephemeral()
+
+    def stop(*, timeout_s: int):
+        assert timeout_s == 20
+        stop_started.set()
+        assert finish_stop.wait(timeout=2)
+        return SimpleNamespace(
+            ok=True,
+            message="gateway_stopped",
+            status=runtime.status(),
+        )
+
+    monkeypatch.setattr(runtime, "_stop", stop)
+    stop_thread = threading.Thread(target=runtime.stop)
+    stop_thread.start()
+    assert stop_started.wait(timeout=2)
+
+    acquire_thread = threading.Thread(
+        target=lambda: (replacement.acquire(), replacement_acquired.set())
+    )
+    acquire_thread.start()
+    assert not replacement_acquired.wait(timeout=0.05)
+
+    finish_stop.set()
+    stop_thread.join(timeout=2)
+    acquire_thread.join(timeout=2)
+
+    assert replacement_acquired.is_set()
+    state = json.loads(replacement.state_path.read_text(encoding="utf-8"))
+    assert set(state["clients"]) == {"replacement"}
 
 
 def test_on_demand_lifetime_is_recorded_before_the_gateway_spawns(tmp_path, monkeypatch):
@@ -331,18 +421,28 @@ def test_explicit_background_gateway_survives_the_last_client(tmp_path, monkeypa
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
     monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    runtime._write_state(
+        {
+            "pid": os.getpid(),
+            "identity": os.getpid(),
+            "launch_mode": "background",
+        }
+    )
     stopped: list[int] = []
     monkeypatch.setattr(
         runtime,
-        "stop",
+        "_stop",
         lambda *, timeout_s: stopped.append(timeout_s),
     )
     client = GatewayClientLease(runtime, kind="webui", pid=os.getpid())
 
     client.acquire()
     client.mark_ephemeral()
-    assert GatewayClientLease(runtime, kind="gateway-background").mark_persistent() is True
+    result = runtime.start_background(GatewayStartOptions(port=18790))
 
+    assert result.ok is False
+    assert result.message == "gateway_already_running"
+    assert result.promoted is True
     assert client.release() is False
     assert stopped == []
     assert not client.state_path.exists()
@@ -354,7 +454,7 @@ def test_failed_last_client_shutdown_remains_retryable(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
     monkeypatch.setattr(
         runtime,
-        "stop",
+        "_stop",
         lambda *, timeout_s: SimpleNamespace(ok=False, message="gateway_stop_timeout"),
     )
     client = GatewayClientLease(runtime, kind="tui", pid=os.getpid())
@@ -400,6 +500,39 @@ async def test_client_monitor_stops_an_orphaned_on_demand_gateway(tmp_path):
 
     assert orphaned is True
     assert shutdown_event.is_set()
+    assert json.loads(lease.state_path.read_text(encoding="utf-8"))["stopping"] is True
+
+
+async def test_client_monitor_blocks_replacement_until_gateway_exit(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    runtime._write_state({"pid": os.getpid(), "identity": os.getpid()})
+    monitor = GatewayClientLease(runtime, kind="gateway-monitor")
+    monitor.mark_ephemeral()
+    shutdown_event = asyncio.Event()
+
+    assert await monitor_gateway_clients(
+        monitor,
+        shutdown_event,
+        poll_interval_s=0.001,
+    ) is True
+
+    replacement = GatewayClientLease(runtime, kind="webui", token="replacement")
+    replacement_acquired = threading.Event()
+    acquire_thread = threading.Thread(
+        target=lambda: (replacement.acquire(), replacement_acquired.set())
+    )
+    acquire_thread.start()
+    assert not replacement_acquired.wait(timeout=0.05)
+
+    runtime._release_current_process()
+    acquire_thread.join(timeout=2)
+
+    assert replacement_acquired.is_set()
+    state = json.loads(replacement.state_path.read_text(encoding="utf-8"))
+    assert set(state["clients"]) == {"replacement"}
+    assert "stopping" not in state
 
 
 def test_start_background_uses_windows_process_group_flags(tmp_path, monkeypatch):

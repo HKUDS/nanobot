@@ -1,5 +1,7 @@
 """Gateway-specific configuration for the shared background process runtime."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import asyncio
@@ -57,6 +59,7 @@ class RuntimeResult(ProcessResult):
     """Result of a gateway lifecycle operation."""
 
     status: GatewayStatus
+    promoted: bool = False
 
 
 def build_gateway_command(python_executable: str, options: GatewayStartOptions) -> list[str]:
@@ -133,8 +136,15 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
 
     def start_background(self, options: ProcessStartOptions) -> RuntimeResult:
         """Start the gateway detached from the current terminal."""
-        with self._lifecycle_lock():
-            return self._start_background(options)
+        lease = GatewayClientLease(self, kind="gateway-background")
+        while True:
+            lease.wait_for_shutdown()
+            with self._lifecycle_lock():
+                promoted = lease._try_mark_persistent_locked()
+                if promoted is None:
+                    continue
+                result = self._start_background(options)
+                return RuntimeResult(result.ok, result.message, result.status, promoted)
 
     def start_on_demand(self, options: ProcessStartOptions) -> RuntimeResult:
         """Atomically reuse a gateway or start one owned by local client leases."""
@@ -142,7 +152,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             status = self.status()
             if status.running:
                 return RuntimeResult(False, "gateway_already_running", status)
-            GatewayClientLease(self, kind="gateway-start").mark_ephemeral()
+            GatewayClientLease(self, kind="gateway-start")._mark_ephemeral_locked()
             return self._start_background(options)
 
     def _start_background(self, options: ProcessStartOptions) -> RuntimeResult:
@@ -158,7 +168,10 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
     def stop(self, *, timeout_s: int = 20) -> RuntimeResult:
         """Stop the gateway recorded by this runtime."""
         with self._lifecycle_lock():
-            return self._result(self._stop(timeout_s=timeout_s))
+            result = self._stop(timeout_s=timeout_s)
+            if result.ok or result.message in {"gateway_not_running", "gateway_state_stale"}:
+                GatewayClientLease(self, kind="gateway-stop")._clear_locked()
+            return self._result(result)
 
     def status(self, *, reason: str | None = None) -> GatewayStatus:
         """Return process, launch, and client lifetime state in one snapshot."""
@@ -186,9 +199,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
     @contextmanager
     def foreground_instance(self, options: ProcessStartOptions) -> Generator[None]:
         """Publish this foreground gateway while it is available to local clients."""
-        launch_mode = self._claim_current_process(options)
-        if launch_mode == "foreground":
-            GatewayClientLease(self, kind="gateway-foreground").mark_persistent()
+        self._claim_current_process(options)
         try:
             yield
         finally:
@@ -218,6 +229,11 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                 }
             )
             self._write_state(state)
+            if launch_mode == "foreground":
+                GatewayClientLease(
+                    self,
+                    kind="gateway-foreground",
+                )._try_mark_persistent_locked()
             return launch_mode
 
     def _release_current_process(self) -> None:
@@ -225,6 +241,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             state = self._read_state()
             if state and self._record_matches_process(state, os.getpid()):
                 self._clear_state()
+            GatewayClientLease(self, kind="gateway-exit")._finish_shutdown_locked()
 
     def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> RuntimeResult:
         """Restart an existing gateway without creating a new persistent instance."""
@@ -264,21 +281,20 @@ class GatewayClientLease:
         self.state_path = state_path.with_name(
             f"{state_path.stem}.clients{state_path.suffix}"
         )
+        self.lifecycle_lock = FileLock(f"{state_path}.lock")
         self.lock = FileLock(f"{self.state_path}.lock")
         self._acquired = False
 
     def acquire(self) -> None:
         """Register this client before it starts or attaches to the gateway."""
-        with self.lock:
-            state = self._live_state()
-            clients = self._clients(state)
-            clients[self.token] = {
-                "pid": self.pid,
-                "kind": self.kind,
-                "identity": self._process_identity(self.pid),
-            }
-            self._write_state(state)
-            self._acquired = True
+        while True:
+            self.wait_for_shutdown()
+            with self.lifecycle_lock, self.lock:
+                state = self._live_state()
+                if state.get("stopping"):
+                    continue
+                self._register(state)
+                return
 
     def ensure_on_demand_gateway(self, options: GatewayStartOptions) -> RuntimeResult:
         """Atomically reuse a gateway or start one owned by local client leases."""
@@ -288,6 +304,10 @@ class GatewayClientLease:
 
     def mark_ephemeral(self) -> None:
         """Mark a gateway started by a client for last-client shutdown."""
+        with self.lifecycle_lock:
+            self._mark_ephemeral_locked()
+
+    def _mark_ephemeral_locked(self) -> None:
         with self.lock:
             state = self._live_state()
             state["auto_stop"] = True
@@ -295,8 +315,18 @@ class GatewayClientLease:
 
     def mark_persistent(self) -> bool:
         """Keep an explicitly backgrounded gateway alive; return whether it was promoted."""
+        while True:
+            self.wait_for_shutdown()
+            with self.lifecycle_lock:
+                promoted = self._try_mark_persistent_locked()
+                if promoted is not None:
+                    return promoted
+
+    def _try_mark_persistent_locked(self) -> bool | None:
         with self.lock:
             state = self._live_state()
+            if state.get("stopping"):
+                return None
             promoted = bool(state.get("auto_stop"))
             state["auto_stop"] = False
             self._write_or_clear(state)
@@ -304,6 +334,10 @@ class GatewayClientLease:
 
     def clear(self) -> None:
         """Forget leases after an explicit gateway stop."""
+        with self.lifecycle_lock:
+            self._clear_locked()
+
+    def _clear_locked(self) -> None:
         with self.lock:
             self.state_path.unlink(missing_ok=True)
 
@@ -317,35 +351,76 @@ class GatewayClientLease:
                 clients=len(self._clients(state)),
             )
 
-    def orphaned_on_demand(self) -> bool:
-        """Return whether an on-demand gateway has lost every live client."""
-        snapshot = self.snapshot()
-        return snapshot.auto_stop and snapshot.clients == 0
+    def begin_orphan_shutdown(self) -> bool:
+        """Commit shutdown only while an on-demand gateway still has no clients."""
+        with self.lifecycle_lock, self.lock:
+            state = self._live_state()
+            if not bool(state.get("auto_stop")) or self._clients(state):
+                self._write_or_clear(state)
+                return False
+            state["stopping"] = True
+            self._write_state(state)
+            return True
 
     def release(self, *, timeout_s: int = 20) -> bool:
         """Release this client and stop an ephemeral gateway when it was the last."""
         if not self._acquired:
             return False
-        should_stop = False
+        with self.lifecycle_lock:
+            with self.lock:
+                state = self._live_state()
+                clients = self._clients(state)
+                clients.pop(self.token, None)
+                self._acquired = False
+                should_stop = not clients and bool(state.get("auto_stop"))
+                self._write_or_clear(state)
+            if not should_stop:
+                return False
+            result = self.runtime._stop(timeout_s=timeout_s)
+            stopped = result.ok or result.message in {
+                "gateway_not_running",
+                "gateway_state_stale",
+            }
+            if stopped:
+                self._clear_locked()
+            else:
+                self._mark_ephemeral_locked()
+            return stopped
+
+    def wait_for_shutdown(self, *, timeout_s: float = 20) -> None:
+        """Wait until a committed orphan shutdown can no longer accept clients."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            with self.lifecycle_lock:
+                with self.lock:
+                    state = self._live_state()
+                    if not state.get("stopping"):
+                        return
+                if not self.runtime.status().running:
+                    self._finish_shutdown_locked()
+                    return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("gateway is still shutting down; try again shortly")
+            time.sleep(0.05)
+
+    def _finish_shutdown_locked(self) -> None:
         with self.lock:
             state = self._live_state()
-            clients = self._clients(state)
-            clients.pop(self.token, None)
-            self._acquired = False
-            should_stop = not clients and bool(state.get("auto_stop"))
-            self._write_or_clear(state)
-        if not should_stop:
-            return False
-        result = self.runtime.stop(timeout_s=timeout_s)
-        with self.lock:
-            stopped = result.ok or result.message == "gateway_not_running"
-            if stopped:
+            state.pop("stopping", None)
+            if not self._clients(state):
                 self.state_path.unlink(missing_ok=True)
             else:
-                state = self._live_state()
-                state["auto_stop"] = True
                 self._write_state(state)
-            return stopped
+
+    def _register(self, state: dict[str, object]) -> None:
+        clients = self._clients(state)
+        clients[self.token] = {
+            "pid": self.pid,
+            "kind": self.kind,
+            "identity": self._process_identity(self.pid),
+        }
+        self._write_state(state)
+        self._acquired = True
 
     def _live_state(self) -> dict[str, object]:
         state = self._read_state()
@@ -432,7 +507,7 @@ async def monitor_gateway_clients(
         try:
             await asyncio.wait_for(shutdown_event.wait(), timeout=poll_interval_s)
         except TimeoutError:
-            if lease.orphaned_on_demand():
+            if lease.begin_orphan_shutdown():
                 shutdown_event.set()
                 return True
     return False

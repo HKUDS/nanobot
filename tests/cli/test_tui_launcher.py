@@ -537,6 +537,8 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
             stopped = True
             return SimpleNamespace(ok=True, message="gateway_stopped")
 
+        _stop = stop
+
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._webui_endpoint_reachable",
