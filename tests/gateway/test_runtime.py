@@ -660,6 +660,28 @@ def test_lease_snapshot_keeps_a_legacy_localized_darwin_client(tmp_path, monkeyp
     assert snapshot.clients == 1
 
 
+def test_darwin_lease_keeps_old_readers_compatible_and_detects_pid_reuse(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    identity = "darwin:42:1786992348:123456"
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: identity)
+    client = GatewayClientLease(runtime, kind="tui", pid=12345, token="client")
+
+    client.acquire()
+    client.mark_ephemeral()
+    state = json.loads(client.state_path.read_text(encoding="utf-8"))
+    record = state["clients"]["client"]
+
+    assert record["identity"] is None  # Pre-upgrade lease readers keep the live PID.
+    assert record["stable_identity"] == identity
+
+    identity = "darwin:42:1786992348:654321"
+    assert client.snapshot().clients == 0
+
+
 def test_lease_snapshot_keeps_a_client_when_identity_probe_is_unavailable(
     tmp_path,
     monkeypatch,
@@ -925,14 +947,72 @@ def test_darwin_process_identity_is_locale_independent(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("LANG", "zh_CN.UTF-8")
     monkeypatch.setenv("LC_ALL", "zh_CN.UTF-8")
+    monkeypatch.setattr("nanobot.process_runtime._platform_name", lambda: "Darwin")
     started_at = int(time.mktime((2026, 8, 18, 2, 17, 54, -1, -1, -1)))
     monkeypatch.setattr(
         "nanobot.process_runtime._darwin_process_birth",
         lambda _pid: (42, started_at, 123456),
     )
 
-    assert runtime.process_identity(12345) == f"darwin:42:{started_at}:123456"
+    identity = f"darwin:42:{started_at}:123456"
+    assert runtime.process_identity(12345) == identity
+    assert runtime.process_identity_record(12345) == {
+        "identity": 42,
+        "stable_identity": identity,
+    }
     assert runtime._record_matches_process({"identity": 42}, 12345) is True
+
+
+def test_darwin_status_discovers_a_legacy_localized_state(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    started_at = int(time.mktime((2026, 8, 18, 2, 17, 54, -1, -1, -1)))
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text(
+        '{"pid": 12345, "identity": "42:二  8/18 02:17:54 2026"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(
+        runtime,
+        "_process_identity",
+        lambda _pid: f"darwin:42:{started_at}:123456",
+    )
+
+    status = runtime.status()
+
+    assert status.running is True
+    assert status.reason == "running"
+    assert runtime.paths.state_path.exists()
+
+
+def test_darwin_status_prefers_stable_identity_over_compatibility_pgid(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "identity": 42,
+                "stable_identity": "darwin:42:1786992348:123456",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(
+        runtime,
+        "_process_identity",
+        lambda _pid: "darwin:42:1786992348:654321",
+    )
+
+    status = runtime.status()
+
+    assert status.running is False
+    assert status.reason == "stale_state"
+    assert not runtime.paths.state_path.exists()
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS proc_pidinfo")

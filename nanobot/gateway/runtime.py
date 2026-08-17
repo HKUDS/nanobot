@@ -28,6 +28,7 @@ from nanobot.process_runtime import (
     ProcessRuntimePaths,
     ProcessStartOptions,
     ProcessStatus,
+    process_identity_record,
     process_is_running,
 )
 
@@ -300,7 +301,6 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                 state.update(
                     {
                         "pid": pid,
-                        "identity": self._process_identity(pid),
                         "started_at": datetime.now(UTC).isoformat(),
                         "platform": self.platform_name,
                         "port": options.port,
@@ -311,6 +311,8 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                         "launch_mode": launch_mode,
                     }
                 )
+                state.pop("stable_identity", None)
+                state.update(self.process_identity_record(pid))
                 self._write_state(state)
                 if launch_mode == "foreground":
                     lease._try_mark_persistent_locked()
@@ -513,11 +515,12 @@ class GatewayClientLease:
 
     def _register(self, state: dict[str, object]) -> None:
         clients = self._clients(state)
-        clients[self.token] = {
+        record: dict[str, object] = {
             "pid": self.pid,
             "kind": self.kind,
-            "identity": self._process_identity(self.pid),
         }
+        record.update(process_identity_record(self._process_identity(self.pid), lease=True))
+        clients[self.token] = record
         self._write_state(state)
         self._acquired = True
 
@@ -531,7 +534,9 @@ class GatewayClientLease:
                 continue
             record = cast(dict[str, object], value)
             pid = record.get("pid")
-            identity = record.get("identity")
+            identity = record.get("stable_identity")
+            if identity is None:
+                identity = record.get("identity")
             if not isinstance(pid, int) or not self._process_is_running(pid):
                 stale.append(token)
                 continue

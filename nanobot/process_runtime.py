@@ -107,7 +107,8 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             return
         state["pid"] = os.getpid()
         runtime = cls(paths=paths)
-        state["identity"] = runtime._process_identity(os.getpid())
+        state.pop("stable_identity", None)
+        state.update(runtime.process_identity_record(os.getpid()))
         state["started_at"] = _utc_now()
         runtime._write_state(state)
 
@@ -140,19 +141,18 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         if not self._is_pid_running(pid):
             return ProcessResult(False, self._message("exited_during_startup"), self.status())
 
-        self._write_state(
-            {
-                "pid": pid,
-                "identity": self._process_identity(pid),
-                "started_at": _utc_now(),
-                "platform": self.platform_name,
-                "port": options.port,
-                "workspace": options.workspace,
-                "config_path": options.config_path,
-                "command": command,
-                "log_path": str(self.paths.log_path),
-            }
-        )
+        state: dict[str, object] = {
+            "pid": pid,
+            "started_at": _utc_now(),
+            "platform": self.platform_name,
+            "port": options.port,
+            "workspace": options.workspace,
+            "config_path": options.config_path,
+            "command": command,
+            "log_path": str(self.paths.log_path),
+        }
+        state.update(self.process_identity_record(pid))
+        self._write_state(state)
         return ProcessResult(True, self._message("started_background"), self.status())
 
     def stop(self, *, timeout_s: int = 20) -> ProcessResult:
@@ -272,6 +272,15 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
     def process_identity(self, pid: int) -> str | int | None:
         """Return an identity that changes when an operating-system PID is reused."""
         return self._process_identity(pid)
+
+    def process_identity_record(
+        self,
+        pid: int,
+        *,
+        lease: bool = False,
+    ) -> dict[str, str | int | None]:
+        """Serialize an identity without breaking pre-upgrade macOS readers."""
+        return process_identity_record(self._process_identity(pid), lease=lease)
 
     def process_identity_match(
         self,
@@ -436,7 +445,9 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
     ) -> Literal["match", "mismatch", "unknown"]:
         if not state:
             return "mismatch"
-        recorded = state.get("identity")
+        recorded = state.get("stable_identity")
+        if recorded is None:
+            recorded = state.get("identity")
         return self.process_identity_match(recorded, pid)
 
     def _read_state(self) -> dict[str, Any] | None:
@@ -549,13 +560,14 @@ def _darwin_identity_match(
     """Compare the new numeric identity with a pre-upgrade ``ps`` identity."""
     if not isinstance(recorded, str) or not isinstance(current, str):
         return "mismatch"
-    current_match = re.fullmatch(r"darwin:(\d+):(\d+):(\d+)", current)
-    if current_match is None:
+    current_identity = _parse_darwin_identity(current)
+    if current_identity is None:
         return "mismatch"
+    current_group, current_seconds, _ = current_identity
     recorded_group, separator, recorded_started_at = recorded.partition(":")
     if not separator or not recorded_group.isdigit():
         return "mismatch"
-    if int(recorded_group) != int(current_match.group(1)):
+    if int(recorded_group) != current_group:
         return "mismatch"
     legacy_epoch = _legacy_darwin_started_at(recorded_started_at)
     if legacy_epoch is None:
@@ -563,7 +575,35 @@ def _darwin_identity_match(
         # locale produced a date we cannot safely parse. Keep the record until
         # the owning client exits instead of killing a live gateway.
         return "unknown"
-    return "match" if legacy_epoch == int(current_match.group(2)) else "mismatch"
+    return "match" if legacy_epoch == current_seconds else "mismatch"
+
+
+def _parse_darwin_identity(value: object) -> tuple[int, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"darwin:(\d+):(\d+):(\d+)", value)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def process_identity_record(
+    identity: str | int | None,
+    *,
+    lease: bool = False,
+) -> dict[str, str | int | None]:
+    """Serialize an identity without breaking pre-upgrade macOS readers."""
+    darwin = _parse_darwin_identity(identity)
+    if darwin is None:
+        return {"identity": identity}
+    process_group, _, _ = darwin
+    # Old process-state readers understand a PGID-only integer. Old lease
+    # readers raw-compare identities, so ``None`` asks them to rely on the
+    # still-live PID while upgraded readers use the stable native value.
+    return {
+        "identity": None if lease else process_group,
+        "stable_identity": identity,
+    }
 
 
 def _legacy_darwin_started_at(value: str) -> int | None:
@@ -603,7 +643,7 @@ def _legacy_darwin_started_at(value: str) -> int | None:
         month, day, hour, minute, second, year = map(int, numeric.groups())
     try:
         return int(time.mktime((year, month, day, hour, minute, second, -1, -1, -1)))
-    except (OverflowError, ValueError):
+    except (OSError, OverflowError, ValueError):
         return None
 
 
