@@ -736,6 +736,27 @@ describe("NanobotTui layout", () => {
         access_mode: "full",
         restrict_to_workspace: false,
       }])
+
+      await setup.mockMouse.click(
+        ui.runtimeControls.modelText.x + 2,
+        ui.runtimeControls.modelText.y,
+      )
+      await waitUntil(() => ui.runtimeControls.visible)
+      ui.composer.blur()
+      await setup.mockMouse.click(ui.status.x, ui.status.y)
+      expect(ui.runtimeControls.visible).toBe(false)
+      expect(ui.composer.focused).toBe(true)
+
+      await setup.mockMouse.click(
+        ui.runtimeControls.accessText.x + 2,
+        ui.runtimeControls.accessText.y,
+      )
+      await waitUntil(() => ui.runtimeControls.visible)
+      ui.composer.blur()
+      await setup.mockMouse.click(ui.status.x, ui.status.y)
+      expect(ui.runtimeControls.visible).toBe(false)
+      expect(ui.composer.focused).toBe(true)
+
       expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(true)
       app.accept({ event: "goal_status", chat_id: "chat", status: "idle" })
     } finally {

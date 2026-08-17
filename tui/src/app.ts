@@ -487,10 +487,15 @@ export class NanobotTui {
       flexDirection: "column",
       backgroundColor: RGBA.defaultBackground(),
       onMouseDown: (event) => {
+        if (event.button !== 0) return
+        // Runtime pickers are transient popovers. A primary click anywhere
+        // outside their trigger or body dismisses them; hide() restores the
+        // composer focus through the shared visibility callback.
+        this.dismissRuntimeControls()
         // Selection belongs to transcript/input content, never to empty chrome.
         // Clearing it here prevents default-background cells from lingering as
         // opaque blocks in terminals with differential repainting.
-        if (event.button === 0 && event.target && !event.target.selectable) {
+        if (event.target && !event.target.selectable) {
           this.renderer.clearSelection()
         }
       },
@@ -1730,6 +1735,10 @@ export class NanobotTui {
     this.branchMenu.hide()
     this.contextPanel.hide()
     this.activeMentionQuery = null
+  }
+
+  private dismissRuntimeControls(): void {
+    if (this.runtimeControls.visible) this.runtimeControls.hide()
   }
 
   private applyWorkspaceScope(scope: WorkspaceScopePayload): void {
