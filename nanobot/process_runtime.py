@@ -12,6 +12,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -540,7 +541,21 @@ def _windows_process_identity(pid: int) -> str | None:
             return (int(self.high) << 32) | int(self.low)
 
     process_query_limited_information = 0x1000
-    kernel32 = ctypes.windll.kernel32
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(FileTime),
+        ctypes.POINTER(FileTime),
+        ctypes.POINTER(FileTime),
+        ctypes.POINTER(FileTime),
+    ]
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
     handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
     if not handle:
         return None
@@ -558,7 +573,7 @@ def _windows_process_identity(pid: int) -> str | None:
         )
         if not ok:
             return None
-        exit_code = ctypes.c_uint32()
+        exit_code = wintypes.DWORD()
         if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
             return None
         if exit_code.value != 259:
