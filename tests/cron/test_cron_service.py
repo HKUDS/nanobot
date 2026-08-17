@@ -785,6 +785,39 @@ def test_remove_job_refuses_system_jobs(tmp_path) -> None:
     assert service.get_job("dream") is not None
 
 
+def test_remove_system_job_retires_persisted_system_job(tmp_path) -> None:
+    """Disabling a system job (e.g. gateway.heartbeat.enabled=false) must
+    actually retire the previously persisted job, not just skip registration."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+    service.register_system_job(CronJob(
+        id="heartbeat",
+        name="heartbeat",
+        schedule=CronSchedule(kind="every", every_ms=1_800_000, tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+    assert service.get_job("heartbeat") is not None
+
+    removed = service.remove_system_job("heartbeat")
+
+    assert removed is True
+    assert service.get_job("heartbeat") is None
+    # Removal must persist: a fresh instance (next gateway start) must not
+    # resurrect the job from the on-disk store.
+    assert CronService(store_path).get_job("heartbeat") is None
+    # Idempotent: removing a missing system job reports False without raising.
+    assert service.remove_system_job("heartbeat") is False
+    # User-facing removal still protects remaining system jobs.
+    other = CronService(store_path)
+    other.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+    assert other.remove_job("dream") == "protected"
+
+
 @pytest.mark.asyncio
 async def test_start_server_not_jobs(tmp_path):
     store_path = tmp_path / "cron" / "jobs.json"

@@ -785,6 +785,7 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
         console.print("[yellow]○[/yellow] Dream: disabled")
+        cron.remove_system_job("dream")
         _advance_dream_cursor_if_behind(agent.context.memory)
 
     # Register Heartbeat system job (idempotent on restart)
@@ -799,6 +800,10 @@ def _run_gateway(
             ),
             payload=CronPayload(kind="system_event"),
         ))
+    else:
+        # Retire any previously persisted heartbeat job so that disabling
+        # gateway.heartbeat in config takes effect after restart.
+        cron.remove_system_job("heartbeat")
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
