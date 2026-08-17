@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from nanobot.cli.gateway import _resolved_config_selector, create_gateway_app
 from nanobot.config.schema import Config
 from nanobot.gateway import (
+    GatewayAlreadyRunningError,
     GatewayInstance,
     GatewayRuntimePaths,
     GatewayStartOptions,
@@ -113,6 +114,7 @@ def _test_app(
     tmp_path: Path,
     config: Config | None = None,
     startup_error: str | None = None,
+    run_error: Exception | None = None,
 ):
     app = typer.Typer()
     fake_runtime = FakeRuntime(tmp_path)
@@ -133,6 +135,8 @@ def _test_app(
         unconfigured_provider_error: str | None = None,
         gateway_instance: GatewayInstance | None = None,
     ) -> None:
+        if run_error is not None:
+            raise run_error
         run_calls.append(
             (config, port, webui_bundle_mode, unconfigured_provider_error, gateway_instance)
         )
@@ -174,6 +178,27 @@ def test_gateway_default_still_runs_foreground(tmp_path):
     assert calls[0][4] == GatewayInstance.resolve(
         config_path=_resolved_config_selector(None)
     )
+
+
+def test_gateway_foreground_reports_a_competing_live_instance(tmp_path):
+    status = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=tmp_path / "gateway.json",
+        log_path=tmp_path / "gateway.log",
+        reason="running",
+        launch_mode="foreground",
+    )
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(
+        tmp_path,
+        run_error=GatewayAlreadyRunningError(status),
+    )
+
+    result = runner.invoke(app, ["gateway"])
+
+    assert result.exit_code == 1
+    assert "Gateway is already running" in result.output
+    assert "PID: 12345" in result.output
 
 
 def test_config_workspace_does_not_split_the_foreground_instance(tmp_path: Path) -> None:

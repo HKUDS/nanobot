@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,6 +39,66 @@ class PollableProcess(FakeProcess):
 
 def _paths(tmp_path: Path) -> GatewayRuntimePaths:
     return GatewayRuntimePaths.for_instance(data_dir=tmp_path)
+
+
+_FOREGROUND_CHILD = r"""
+import signal
+import sys
+import time
+from pathlib import Path
+
+from nanobot.gateway import (
+    GatewayAlreadyRunningError,
+    GatewayRuntime,
+    GatewayRuntimePaths,
+    GatewayStartOptions,
+)
+
+root = Path(sys.argv[1])
+duration = float(sys.argv[2])
+runtime = GatewayRuntime(paths=GatewayRuntimePaths.for_instance(data_dir=root))
+
+def stop(*_args):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, stop)
+try:
+    with runtime.foreground_instance(GatewayStartOptions(port=18790)):
+        print("claimed", flush=True)
+        time.sleep(duration)
+except GatewayAlreadyRunningError:
+    print("occupied", flush=True)
+    raise SystemExit(17)
+"""
+
+
+def _foreground_child(runtime_dir: Path, duration_s: float) -> subprocess.Popen[str]:
+    env = os.environ.copy()
+    root = str(Path(__file__).resolve().parents[2])
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (root, env.get("PYTHONPATH"))))
+    return subprocess.Popen(
+        [sys.executable, "-c", _FOREGROUND_CHILD, str(runtime_dir), str(duration_s)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=os.name != "nt",
+    )
+
+
+def _wait_for_claim(runtime: GatewayRuntime, process: subprocess.Popen[str]) -> None:
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and process.poll() is None:
+        try:
+            state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            time.sleep(0.01)
+            continue
+        if state.get("pid") == process.pid:
+            return
+        time.sleep(0.01)
+    stdout, stderr = process.communicate(timeout=3)
+    pytest.fail(f"gateway claim failed: stdout={stdout!r}, stderr={stderr!r}")
 
 
 def test_paths_use_stable_instance_suffix_for_custom_selectors(tmp_path):
@@ -198,6 +259,51 @@ def test_foreground_gateway_clears_its_state_after_an_error(tmp_path, monkeypatc
             raise RuntimeError("startup failed")
 
     assert not runtime.paths.state_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signal escalation regression")
+def test_stop_allows_a_foreground_gateway_to_release_before_timeout(tmp_path):
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    child = _foreground_child(tmp_path, 30)
+    try:
+        _wait_for_claim(runtime, child)
+
+        result = runtime.stop(timeout_s=1)
+        child.wait(timeout=3)
+
+        assert result.ok is True
+        assert child.returncode == 0
+        assert not runtime.paths.state_path.exists()
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=3)
+
+
+def test_competing_foreground_claim_preserves_the_live_gateway(tmp_path):
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    first = _foreground_child(tmp_path, 30)
+    try:
+        _wait_for_claim(runtime, first)
+        second = _foreground_child(tmp_path, 0)
+        try:
+            second.wait(timeout=3)
+            assert second.stdout is not None
+            assert second.stdout.read().strip() == "occupied"
+            assert second.returncode == 17
+        finally:
+            if second.poll() is None:
+                second.kill()
+                second.wait(timeout=3)
+
+        state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
+        assert state["pid"] == first.pid
+        assert runtime.status().pid == first.pid
+    finally:
+        if first.poll() is None:
+            first.terminate()
+            first.wait(timeout=3)
+        runtime.status()
 
 
 def test_stop_reaps_an_owned_child_without_consuming_the_shutdown_timeout(

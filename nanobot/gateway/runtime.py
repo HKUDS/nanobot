@@ -66,6 +66,14 @@ class RuntimeResult(ProcessResult):
     promoted: bool = False
 
 
+class GatewayAlreadyRunningError(RuntimeError):
+    """Raised when a foreground gateway tries to replace a live instance."""
+
+    def __init__(self, status: GatewayStatus) -> None:
+        super().__init__("gateway_already_running")
+        self.status = status
+
+
 def build_gateway_command(python_executable: str, options: GatewayStartOptions) -> list[str]:
     """Build a foreground gateway command for process supervisors."""
     command = [
@@ -188,12 +196,16 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
     def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
         return build_gateway_command(self.python_executable, options)
 
+    def _transition_lock(self) -> FileLock:
+        """Serialize long lifecycle transitions without blocking child cleanup."""
+        return FileLock(f"{self.paths.state_path}.transition.lock")
+
     def start_background(self, options: ProcessStartOptions) -> RuntimeResult:
         """Start the gateway detached from the current terminal."""
         lease = GatewayClientLease(self, kind="gateway-background")
         while True:
             lease.wait_for_shutdown()
-            with self._lifecycle_lock():
+            with self._transition_lock(), self._lifecycle_lock():
                 promoted = lease._try_mark_persistent_locked()
                 if promoted is None:
                     continue
@@ -202,12 +214,17 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
 
     def start_on_demand(self, options: ProcessStartOptions) -> RuntimeResult:
         """Atomically reuse a gateway or start one owned by local client leases."""
-        with self._lifecycle_lock():
-            status = self.status()
-            if status.running:
-                return RuntimeResult(False, "gateway_already_running", status)
-            GatewayClientLease(self, kind="gateway-start")._mark_ephemeral_locked()
-            return self._start_background(options)
+        lease = GatewayClientLease(self, kind="gateway-start")
+        while True:
+            lease.wait_for_shutdown()
+            with self._transition_lock(), self._lifecycle_lock():
+                if lease._shutdown_pending_locked():
+                    continue
+                status = self.status()
+                if status.running:
+                    return RuntimeResult(False, "gateway_already_running", status)
+                lease._mark_ephemeral_locked()
+                return self._start_background(options)
 
     def _start_background(self, options: ProcessStartOptions) -> RuntimeResult:
         result = super()._start_background(options)
@@ -221,10 +238,14 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
 
     def stop(self, *, timeout_s: int = 20) -> RuntimeResult:
         """Stop the gateway recorded by this runtime."""
-        with self._lifecycle_lock():
+        with self._transition_lock():
             result = self._stop(timeout_s=timeout_s)
-            if result.ok or result.message in {"gateway_not_running", "gateway_state_stale"}:
-                GatewayClientLease(self, kind="gateway-stop")._clear_locked()
+            with self._lifecycle_lock():
+                if result.ok or result.message in {
+                    "gateway_not_running",
+                    "gateway_state_stale",
+                }:
+                    GatewayClientLease(self, kind="gateway-stop")._clear_locked()
             return self._result(result)
 
     def status(self, *, reason: str | None = None) -> GatewayStatus:
@@ -260,55 +281,69 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             self._release_current_process()
 
     def _claim_current_process(self, options: ProcessStartOptions) -> GatewayLaunchMode:
-        with self._lifecycle_lock():
-            state = self._read_state() or {}
-            pid = os.getpid()
-            launch_mode = (
-                "background"
-                if state.get("pid") == pid and state.get("launch_mode") == "background"
-                else "foreground"
-            )
-            state.update(
-                {
-                    "pid": pid,
-                    "identity": self._process_identity(pid),
-                    "started_at": datetime.now(UTC).isoformat(),
-                    "platform": self.platform_name,
-                    "port": options.port,
-                    "workspace": options.workspace,
-                    "config_path": options.config_path,
-                    "command": self._build_child_command(options),
-                    "log_path": str(self.paths.log_path),
-                    "launch_mode": launch_mode,
-                }
-            )
-            self._write_state(state)
-            if launch_mode == "foreground":
-                GatewayClientLease(
-                    self,
-                    kind="gateway-foreground",
-                )._try_mark_persistent_locked()
-            return launch_mode
+        lease = GatewayClientLease(self, kind="gateway-foreground")
+        pid = os.getpid()
+        while True:
+            lease.wait_for_shutdown()
+            with self._transition_lock(), self._lifecycle_lock():
+                current = self.status()
+                if current.running and current.pid != pid:
+                    raise GatewayAlreadyRunningError(current)
+                if lease._shutdown_pending_locked():
+                    continue
+                state = self._read_state() or {}
+                launch_mode: GatewayLaunchMode = (
+                    "background"
+                    if state.get("pid") == pid and state.get("launch_mode") == "background"
+                    else "foreground"
+                )
+                state.update(
+                    {
+                        "pid": pid,
+                        "identity": self._process_identity(pid),
+                        "started_at": datetime.now(UTC).isoformat(),
+                        "platform": self.platform_name,
+                        "port": options.port,
+                        "workspace": options.workspace,
+                        "config_path": options.config_path,
+                        "command": self._build_child_command(options),
+                        "log_path": str(self.paths.log_path),
+                        "launch_mode": launch_mode,
+                    }
+                )
+                self._write_state(state)
+                if launch_mode == "foreground":
+                    lease._try_mark_persistent_locked()
+                return launch_mode
 
     def _release_current_process(self) -> None:
         with self._lifecycle_lock():
             state = self._read_state()
             if state and self._record_matches_process(state, os.getpid()):
                 self._clear_state()
-            GatewayClientLease(self, kind="gateway-exit")._finish_shutdown_locked()
+            GatewayClientLease(
+                self,
+                kind="gateway-exit",
+            )._finish_shutdown_locked()
 
     def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> RuntimeResult:
         """Restart an existing gateway without creating a new persistent instance."""
-        with self._lifecycle_lock():
-            status = self.status()
-            if not status.running:
-                return RuntimeResult(False, "gateway_not_running", status)
-            if status.launch_mode == "foreground":
-                return RuntimeResult(False, "gateway_foreground_restart_required", status)
+        with self._transition_lock():
+            with self._lifecycle_lock():
+                status = self.status()
+                if not status.running:
+                    return RuntimeResult(False, "gateway_not_running", status)
+                if status.launch_mode == "foreground":
+                    return RuntimeResult(
+                        False,
+                        "gateway_foreground_restart_required",
+                        status,
+                    )
             stop_result = self._stop(timeout_s=timeout_s)
             if not stop_result.ok:
                 return self._result(stop_result)
-            return self._start_background(options)
+            with self._lifecycle_lock():
+                return self._start_background(options)
 
     def _result(self, result: ProcessResult) -> RuntimeResult:
         status = result.status
@@ -335,6 +370,7 @@ class GatewayClientLease:
         self.state_path = state_path.with_name(
             f"{state_path.stem}.clients{state_path.suffix}"
         )
+        self.transition_lock = FileLock(f"{state_path}.transition.lock")
         self.lifecycle_lock = FileLock(f"{state_path}.lock")
         self.lock = FileLock(f"{self.state_path}.lock")
         self._acquired = False
@@ -343,7 +379,7 @@ class GatewayClientLease:
         """Register this client before it starts or attaches to the gateway."""
         while True:
             self.wait_for_shutdown()
-            with self.lifecycle_lock, self.lock:
+            with self.transition_lock, self.lifecycle_lock, self.lock:
                 state = self._live_state()
                 if state.get("stopping"):
                     continue
@@ -358,7 +394,7 @@ class GatewayClientLease:
 
     def mark_ephemeral(self) -> None:
         """Mark a gateway started by a client for last-client shutdown."""
-        with self.lifecycle_lock:
+        with self.transition_lock, self.lifecycle_lock:
             self._mark_ephemeral_locked()
 
     def _mark_ephemeral_locked(self) -> None:
@@ -371,7 +407,7 @@ class GatewayClientLease:
         """Keep an explicitly backgrounded gateway alive; return whether it was promoted."""
         while True:
             self.wait_for_shutdown()
-            with self.lifecycle_lock:
+            with self.transition_lock, self.lifecycle_lock:
                 promoted = self._try_mark_persistent_locked()
                 if promoted is not None:
                     return promoted
@@ -388,7 +424,7 @@ class GatewayClientLease:
 
     def clear(self) -> None:
         """Forget leases after an explicit gateway stop."""
-        with self.lifecycle_lock:
+        with self.transition_lock, self.lifecycle_lock:
             self._clear_locked()
 
     def _clear_locked(self) -> None:
@@ -407,7 +443,7 @@ class GatewayClientLease:
 
     def begin_orphan_shutdown(self) -> bool:
         """Commit shutdown only while an on-demand gateway still has no clients."""
-        with self.lifecycle_lock, self.lock:
+        with self.transition_lock, self.lifecycle_lock, self.lock:
             state = self._live_state()
             if not bool(state.get("auto_stop")) or self._clients(state):
                 self._write_or_clear(state)
@@ -420,26 +456,31 @@ class GatewayClientLease:
         """Release this client and stop an ephemeral gateway when it was the last."""
         if not self._acquired:
             return False
-        with self.lifecycle_lock:
-            with self.lock:
-                state = self._live_state()
-                clients = self._clients(state)
-                clients.pop(self.token, None)
-                self._acquired = False
-                should_stop = not clients and bool(state.get("auto_stop"))
-                self._write_or_clear(state)
-            if not should_stop:
-                return False
-            result = self.runtime._stop(timeout_s=timeout_s)
-            stopped = result.ok or result.message in {
-                "gateway_not_running",
-                "gateway_state_stale",
-            }
-            if stopped:
-                self._clear_locked()
-            else:
-                self._mark_ephemeral_locked()
-            return stopped
+        while True:
+            self.wait_for_shutdown()
+            with self.transition_lock:
+                with self.lifecycle_lock, self.lock:
+                    state = self._live_state()
+                    if state.get("stopping"):
+                        continue
+                    clients = self._clients(state)
+                    clients.pop(self.token, None)
+                    self._acquired = False
+                    should_stop = not clients and bool(state.get("auto_stop"))
+                    self._write_or_clear(state)
+                if not should_stop:
+                    return False
+                result = self.runtime._stop(timeout_s=timeout_s)
+                stopped = result.ok or result.message in {
+                    "gateway_not_running",
+                    "gateway_state_stale",
+                }
+                with self.lifecycle_lock:
+                    if stopped:
+                        self._clear_locked()
+                    else:
+                        self._mark_ephemeral_locked()
+                return stopped
 
     def wait_for_shutdown(self, *, timeout_s: float = 20) -> None:
         """Wait until a committed orphan shutdown can no longer accept clients."""
@@ -456,6 +497,10 @@ class GatewayClientLease:
             if time.monotonic() >= deadline:
                 raise RuntimeError("gateway is still shutting down; try again shortly")
             time.sleep(0.05)
+
+    def _shutdown_pending_locked(self) -> bool:
+        with self.lock:
+            return bool(self._live_state().get("stopping"))
 
     def _finish_shutdown_locked(self) -> None:
         with self.lock:

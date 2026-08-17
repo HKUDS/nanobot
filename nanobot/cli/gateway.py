@@ -14,6 +14,7 @@ from rich.console import Console
 
 from nanobot.config.schema import Config
 from nanobot.gateway import (
+    GatewayAlreadyRunningError,
     GatewayInstance,
     GatewayRuntime,
     GatewayStartOptions,
@@ -240,14 +241,7 @@ def create_gateway_app(
         unconfigured_provider_error = None
         if validate_startup_config is not None:
             unconfigured_provider_error = validate_startup_config(cfg)
-        if unconfigured_provider_error is None:
-            run_gateway(
-                cfg,
-                port=port,
-                webui_bundle_mode=interactive_build_mode(),
-                gateway_instance=instance,
-            )
-        else:
+        try:
             run_gateway(
                 cfg,
                 port=port,
@@ -255,6 +249,10 @@ def create_gateway_app(
                 unconfigured_provider_error=unconfigured_provider_error,
                 gateway_instance=instance,
             )
+        except GatewayAlreadyRunningError as exc:
+            console.print("[yellow]Gateway is already running.[/yellow]")
+            print_status(exc.status)
+            raise typer.Exit(1) from None
 
     @gateway_app.command("status")
     def gateway_status(  # pyright: ignore[reportUnusedFunction]
