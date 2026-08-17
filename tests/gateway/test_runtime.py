@@ -67,7 +67,7 @@ try:
     if os.name != "nt":
         signal.signal(signal.SIGTERM, stop)
     with runtime.foreground_instance(GatewayStartOptions(port=18790)):
-        marker.write_text("claimed", encoding="utf-8")
+        marker.write_text(f"claimed:{os.getpid()}", encoding="utf-8")
         time.sleep(duration)
 except GatewayAlreadyRunningError:
     marker.write_text("occupied", encoding="utf-8")
@@ -105,13 +105,13 @@ def _foreground_child(
 def _wait_for_claim(
     process: subprocess.Popen[str],
     marker: Path,
-) -> None:
+) -> int:
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         if marker.exists():
             detail = marker.read_text(encoding="utf-8")
-            if detail == "claimed":
-                return
+            if detail.startswith("claimed:"):
+                return int(detail.partition(":")[2])
             pytest.fail(f"gateway claim failed: returncode={process.poll()}, {detail}")
         if process.poll() is not None:
             break
@@ -305,7 +305,7 @@ def test_competing_foreground_claim_preserves_the_live_gateway(tmp_path):
     first_marker = tmp_path / "first.marker"
     first = _foreground_child(tmp_path, 30, first_marker)
     try:
-        _wait_for_claim(first, first_marker)
+        first_pid = _wait_for_claim(first, first_marker)
         second_marker = tmp_path / "second.marker"
         second = _foreground_child(tmp_path, 0, second_marker)
         try:
@@ -318,8 +318,8 @@ def test_competing_foreground_claim_preserves_the_live_gateway(tmp_path):
                 second.wait(timeout=3)
 
         state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
-        assert state["pid"] == first.pid
-        assert runtime.status().pid == first.pid
+        assert state["pid"] == first_pid
+        assert runtime.status().pid == first_pid
     finally:
         if first.poll() is None:
             first.terminate()
