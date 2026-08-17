@@ -103,19 +103,18 @@ def _foreground_child(
 
 
 def _wait_for_claim(
-    runtime: GatewayRuntime,
     process: subprocess.Popen[str],
     marker: Path,
 ) -> None:
     deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and process.poll() is None:
-        try:
-            state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            time.sleep(0.01)
-            continue
-        if state.get("pid") == process.pid:
-            return
+    while time.monotonic() < deadline:
+        if marker.exists():
+            detail = marker.read_text(encoding="utf-8")
+            if detail == "claimed":
+                return
+            pytest.fail(f"gateway claim failed: returncode={process.poll()}, {detail}")
+        if process.poll() is not None:
+            break
         time.sleep(0.01)
     detail = marker.read_text(encoding="utf-8") if marker.exists() else "no marker"
     pytest.fail(f"gateway claim failed: returncode={process.poll()}, {detail}")
@@ -287,7 +286,7 @@ def test_stop_allows_a_foreground_gateway_to_release_before_timeout(tmp_path):
     marker = tmp_path / "foreground.marker"
     child = _foreground_child(tmp_path, 30, marker)
     try:
-        _wait_for_claim(runtime, child, marker)
+        _wait_for_claim(child, marker)
 
         result = runtime.stop(timeout_s=1)
         child.wait(timeout=3)
@@ -306,7 +305,7 @@ def test_competing_foreground_claim_preserves_the_live_gateway(tmp_path):
     first_marker = tmp_path / "first.marker"
     first = _foreground_child(tmp_path, 30, first_marker)
     try:
-        _wait_for_claim(runtime, first, first_marker)
+        _wait_for_claim(first, first_marker)
         second_marker = tmp_path / "second.marker"
         second = _foreground_child(tmp_path, 0, second_marker)
         try:
