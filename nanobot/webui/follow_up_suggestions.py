@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from typing import Any, Literal, TypedDict, cast
 
@@ -21,6 +20,7 @@ _MAX_CONTEXT_MESSAGES = 6
 _MAX_MESSAGE_CHARS = 4_000
 _MAX_SUGGESTIONS = 3
 _MAX_SUGGESTION_CHARS = 200
+_SUGGESTION_PREFIX = "SUGGESTION: "
 
 
 class _ConversationMessage(TypedDict):
@@ -62,22 +62,24 @@ def _request_context(payload: dict[str, Any]) -> tuple[str, str, list[_Conversat
 def _normalize_suggestions(content: str | None) -> list[str]:
     if not content:
         return []
-    parsed = json.loads(content)
-    if not isinstance(parsed, list):
-        raise ValueError("suggestions response must be a JSON array")
+    if content.strip() == "NONE":
+        return []
 
     suggestions: list[str] = []
     seen: set[str] = set()
-    for item in cast(list[object], parsed):
-        if not isinstance(item, str):
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
             continue
-        suggestion = " ".join(item.split())[:_MAX_SUGGESTION_CHARS].rstrip()
+        if not line.startswith(_SUGGESTION_PREFIX):
+            raise ValueError("invalid follow-up suggestion line")
+        suggestion = " ".join(line.removeprefix(_SUGGESTION_PREFIX).split())
+        suggestion = suggestion[:_MAX_SUGGESTION_CHARS].rstrip()
         if not suggestion or suggestion.startswith("/") or suggestion in seen:
             continue
         seen.add(suggestion)
-        suggestions.append(suggestion)
-        if len(suggestions) == _MAX_SUGGESTIONS:
-            break
+        if len(suggestions) < _MAX_SUGGESTIONS:
+            suggestions.append(suggestion)
     return suggestions
 
 
@@ -99,13 +101,11 @@ async def generate_follow_up_suggestions(
         provider = runtime.provider
         if isinstance(provider, FallbackProvider):
             provider = provider.primary_provider
-        provider_messages: list[dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": render_template("agent/follow_up_suggestions.md", strip=True),
-            }
-        ]
-        provider_messages.extend(dict(message) for message in messages)
+        provider_messages: list[dict[str, Any]] = [dict(message) for message in messages]
+        provider_messages.append({
+            "role": "user",
+            "content": render_template("agent/follow_up_suggestions.md", strip=True),
+        })
         request_started = True
         async with asyncio.timeout(_GENERATION_TIMEOUT_SECONDS):
             response = await provider.chat(

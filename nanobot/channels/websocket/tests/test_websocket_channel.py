@@ -1299,14 +1299,12 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
     primary_provider = SimpleNamespace(
         chat=AsyncMock(
             return_value=LLMResponse(
-                content=json.dumps([
-                    "  Inspect\nlogs  ",
-                    "",
-                    "Add a regression test",
-                    "Add a regression test",
-                    42,
-                    "Ship the fix",
-                    "Ignored fourth",
+                content="\n".join([
+                    "SUGGESTION:   Inspect logs  ",
+                    "SUGGESTION: Add a regression test",
+                    "SUGGESTION: Add a regression test",
+                    "SUGGESTION: Ship the fix",
+                    "SUGGESTION: Ignored fourth",
                 ]),
                 usage={"prompt_tokens": 8, "completion_tokens": 3},
             )
@@ -1384,7 +1382,7 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
             "temperature": 0.3,
             "reasoning_effort": "none",
         }
-        assert call.args[0][1:] == [
+        assert call.args[0][:-1] == [
             {"role": "assistant", "content": "one"},
             {"role": "user", "content": "two"},
             {"role": "assistant", "content": "three"},
@@ -1392,6 +1390,8 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
             {"role": "assistant", "content": "five"},
             {"role": "user", "content": "six"},
         ]
+        assert call.args[0][-1]["role"] == "user"
+        assert "SUGGESTION:" in call.args[0][-1]["content"]
         usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
         assert usage["total_tokens"] == 11
         assert usage["requests_30d"] == 1
@@ -1406,7 +1406,12 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
         assert primary_provider.chat.await_count == 1
 
         primary_provider.chat.return_value = LLMResponse(
-            content=json.dumps({"suggestions": ["not an array"]}),
+            content=(
+                "SUGGESTION: First must not survive\n"
+                "SUGGESTION: Second must not survive\n"
+                "SUGGESTION: Third must not survive\n"
+                "SUGGESTION:Missing required space"
+            ),
             usage={"prompt_tokens": 2, "completion_tokens": 1},
         )
         malformed = await _webui_mutate(
@@ -1420,7 +1425,7 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
         assert usage["requests_30d"] == 2
 
         primary_provider.chat.return_value = LLMResponse(
-            content=json.dumps(["Never surface an error response"]),
+            content="SUGGESTION: Never surface an error response",
             finish_reason="error",
             usage={"prompt_tokens": 4, "completion_tokens": 2},
         )
@@ -1434,7 +1439,7 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
         assert usage["total_tokens"] == 20
         assert usage["requests_30d"] == 3
 
-        primary_provider.chat.return_value = LLMResponse(content="[]")
+        primary_provider.chat.return_value = LLMResponse(content="NONE")
         no_usage = await _webui_mutate(
             client,
             "follow_up_suggestions.generate",
@@ -1458,7 +1463,7 @@ async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_r
 
         async def slow_chat(*_args: Any, **_kwargs: Any) -> LLMResponse:
             await asyncio.sleep(1)
-            return LLMResponse(content="[]")
+            return LLMResponse(content="NONE")
 
         primary_provider.chat.side_effect = slow_chat
         monkeypatch.setattr(

@@ -1,7 +1,6 @@
-import json
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -17,18 +16,17 @@ async def test_generation_bounds_recent_messages_and_normalized_suggestions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     long_message = " \n" + "x" * 4_100 + "\n "
-    long_suggestion = "  Alpha \n Beta  " + "y" * 250
+    long_suggestion = "  Alpha \t Beta  " + "y" * 250
     provider = SimpleNamespace(
         chat=AsyncMock(
             return_value=LLMResponse(
-                content=json.dumps([
-                    "/restart",
-                    long_suggestion,
-                    long_suggestion + "different only after the limit",
-                    42,
-                    "Second",
-                    "Third",
-                    "Ignored fourth",
+                content="\n".join([
+                    "SUGGESTION: /restart",
+                    f"SUGGESTION: {long_suggestion}",
+                    f"SUGGESTION: {long_suggestion}different only after the limit",
+                    "SUGGESTION: Second",
+                    "SUGGESTION: Third",
+                    "SUGGESTION: Ignored fourth",
                 ])
             )
         )
@@ -63,7 +61,7 @@ async def test_generation_bounds_recent_messages_and_normalized_suggestions(
     )
 
     sent_messages = provider.chat.await_args.args[0]
-    assert [message["content"] for message in sent_messages[1:]] == [
+    assert [message["content"] for message in sent_messages[:-1]] == [
         "one",
         "two",
         "three",
@@ -71,8 +69,51 @@ async def test_generation_bounds_recent_messages_and_normalized_suggestions(
         "five",
         "x" * 4_000,
     ]
+    assert sent_messages[-1]["role"] == "user"
+    assert "SUGGESTION:" in sent_messages[-1]["content"]
     assert suggestions == [
         ("Alpha Beta " + "y" * 250)[:200],
         "Second",
         "Third",
     ]
+
+
+@pytest.mark.asyncio
+async def test_generation_places_format_request_after_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def respond(messages: list[dict[str, object]], **_kwargs: object) -> LLMResponse:
+        if "SUGGESTION:" in str(messages[-1]["content"]):
+            return LLMResponse(
+                content="SUGGESTION: Ask for an example\nSUGGESTION: Explain it simply"
+            )
+        return LLMResponse(content="A normal assistant reply instead of the line protocol")
+
+    provider = SimpleNamespace(
+        chat=AsyncMock(side_effect=respond)
+    )
+    record_usage = Mock()
+    monkeypatch.setattr(follow_up_suggestions, "record_response_token_usage", record_usage)
+    wth.remember_completed_websocket_turn_runtime(
+        "chat-ordering",
+        "turn-ordering",
+        LLMRuntime(
+            provider=cast(LLMProvider, provider),
+            model="test-model",
+            generation=GenerationSettings(),
+            context_window_tokens=100_000,
+        ),
+    )
+
+    suggestions = await follow_up_suggestions.generate_follow_up_suggestions(
+        config=Config.model_validate({"followUpSuggestions": {"enabled": True}}),
+        payload={
+            "chat_id": "chat-ordering",
+            "turn_id": "turn-ordering",
+            "messages": [{"role": "user", "content": "Explain this concept"}],
+        },
+    )
+
+    assert suggestions == ["Ask for an example", "Explain it simply"]
+    assert provider.chat.await_count == 1
+    assert record_usage.call_count == 1
