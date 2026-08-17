@@ -486,6 +486,26 @@ def test_lease_snapshot_prunes_a_reused_client_pid(tmp_path, monkeypatch):
     }
 
 
+def test_lease_snapshot_keeps_a_client_when_identity_probe_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    identity: str | None = "created-at"
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: identity)
+    client = GatewayClientLease(runtime, kind="tui", pid=12345, token="client")
+
+    client.acquire()
+    client.mark_ephemeral()
+    identity = None
+
+    snapshot = client.snapshot()
+
+    assert snapshot.auto_stop is True
+    assert snapshot.clients == 1
+
+
 async def test_client_monitor_stops_an_orphaned_on_demand_gateway(tmp_path):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     lease = GatewayClientLease(runtime, kind="gateway-monitor")
@@ -588,6 +608,17 @@ def test_windows_host_probe_stays_safe_when_target_platform_is_posix(monkeypatch
     assert process_is_running(54321, platform_name="Darwin") is False
 
 
+def test_posix_process_probe_treats_a_zombie_as_stopped(monkeypatch):
+    monkeypatch.setattr("nanobot.process_runtime._platform_name", lambda: "Darwin")
+    monkeypatch.setattr("nanobot.process_runtime.os.kill", lambda *_args: None)
+    monkeypatch.setattr(
+        "nanobot.process_runtime.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="Z+"),
+    )
+
+    assert process_is_running(12345, platform_name="Darwin") is False
+
+
 def test_windows_host_identity_stays_safe_when_target_platform_is_posix(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     monkeypatch.setattr("nanobot.process_runtime._platform_name", lambda: "Windows")
@@ -629,6 +660,52 @@ def test_status_clears_state_when_pid_identity_changes(tmp_path, monkeypatch):
     assert status.running is False
     assert status.reason == "stale_state"
     assert not runtime.paths.state_path.exists()
+
+
+def test_status_keeps_live_state_when_identity_probe_is_temporarily_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text(
+        '{"pid": 12345, "identity": "created-at"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: None)
+
+    status = runtime.status()
+
+    assert status.running is True
+    assert status.reason == "identity_unavailable"
+    assert runtime.paths.state_path.exists()
+
+
+def test_stop_refuses_to_signal_a_process_when_identity_cannot_be_verified(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text(
+        '{"pid": 12345, "identity": "created-at"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: None)
+    monkeypatch.setattr(
+        runtime,
+        "_terminate",
+        lambda *_args, **_kwargs: pytest.fail("an unverified PID must not be signalled"),
+    )
+
+    result = runtime.stop()
+
+    assert result.ok is False
+    assert result.message == "gateway_identity_unavailable"
+    assert result.status.running is True
+    assert runtime.paths.state_path.exists()
 
 
 def test_posix_process_identity_includes_start_time_and_accepts_legacy_state(
@@ -700,7 +777,7 @@ def test_stop_succeeds_when_process_exits_at_timeout_boundary(tmp_path, monkeypa
     statuses = iter([running, stopped])
     monkeypatch.setattr(runtime, "status", lambda **_kwargs: next(statuses))
     monkeypatch.setattr(runtime, "_read_state", lambda: {"pid": 12345, "identity": 12345})
-    monkeypatch.setattr(runtime, "_record_matches_process", lambda *_args: True)
+    monkeypatch.setattr(runtime, "_process_identity_match", lambda *_args: "match")
     monkeypatch.setattr(runtime, "_terminate", lambda *_args, **_kwargs: False)
 
     result = runtime.stop(timeout_s=0)

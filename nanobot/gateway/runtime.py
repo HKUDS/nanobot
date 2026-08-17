@@ -433,10 +433,14 @@ class GatewayClientLease:
             record = cast(dict[str, object], value)
             pid = record.get("pid")
             identity = record.get("identity")
+            if not isinstance(pid, int) or not self._process_is_running(pid):
+                stale.append(token)
+                continue
+            current_identity = self._process_identity(pid)
             if (
-                not isinstance(pid, int)
-                or not self._process_is_running(pid)
-                or (identity is not None and identity != self._process_identity(pid))
+                identity is not None
+                and current_identity is not None
+                and identity != current_identity
             ):
                 stale.append(token)
         for token in stale:

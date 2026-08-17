@@ -15,7 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, Literal, TypeVar, cast
 
 from filelock import FileLock
 
@@ -162,7 +162,14 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             return ProcessResult(False, self._message("not_running"), status)
 
         state = self._read_state()
-        if not self._record_matches_process(state, status.pid):
+        identity_match = self._process_identity_match(state, status.pid)
+        if identity_match == "unknown":
+            return ProcessResult(
+                False,
+                self._message("identity_unavailable"),
+                status,
+            )
+        if identity_match == "mismatch":
             self._clear_state()
             return ProcessResult(
                 False,
@@ -205,7 +212,8 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             )
         assert state is not None
 
-        if not self._is_pid_running(pid) or not self._record_matches_process(state, pid):
+        identity_match = self._process_identity_match(state, pid)
+        if not self._is_pid_running(pid) or identity_match == "mismatch":
             self._clear_state()
             return ProcessStatus(
                 running=False,
@@ -224,7 +232,9 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             started_at=_as_str(state.get("started_at")),
             port=_as_int(state.get("port")),
             command=tuple(cast(list[str], command)) if isinstance(command, list) else (),
-            reason=reason or "running",
+            reason=reason or (
+                "identity_unavailable" if identity_match == "unknown" else "running"
+            ),
         )
 
     def read_log_tail(self, *, tail: int = 200) -> list[str]:
@@ -389,18 +399,31 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         return None
 
     def _record_matches_process(self, state: dict[str, Any] | None, pid: int) -> bool:
+        return self._process_identity_match(state, pid) == "match"
+
+    def _process_identity_match(
+        self,
+        state: dict[str, Any] | None,
+        pid: int,
+    ) -> Literal["match", "mismatch", "unknown"]:
         if not state:
-            return False
+            return "mismatch"
         recorded = state.get("identity")
         if recorded is None:
-            return True
+            return "match"
         current = self._process_identity(pid)
+        if current is None:
+            return "unknown"
         if recorded == current:
-            return True
+            return "match"
         # Older POSIX state files stored only the process group id.
-        return isinstance(recorded, int) and isinstance(current, str) and current.startswith(
-            f"{recorded}:"
-        )
+        if (
+            isinstance(recorded, int)
+            and isinstance(current, str)
+            and current.startswith(f"{recorded}:")
+        ):
+            return "match"
+        return "mismatch"
 
     def _read_state(self) -> dict[str, Any] | None:
         try:
@@ -457,7 +480,33 @@ def process_is_running(pid: int, *, platform_name: str | None = None) -> bool:
         return True
     except OSError:
         return False
-    return True
+    return _posix_process_state(pid, platform_name=host_platform) != "Z"
+
+
+def _posix_process_state(pid: int, *, platform_name: str) -> str | None:
+    """Return the host process state when available; zombies are not live clients."""
+    if platform_name == "Linux":
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        closing_paren = stat.rfind(")")
+        fields = stat[closing_paren + 2 :].split() if closing_paren >= 0 else []
+        return fields[0] if fields else None
+    if platform_name == "Darwin":
+        try:
+            result = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(pid)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        value = getattr(result, "stdout", "").strip()
+        return value[:1].upper() or None
+    return None
 
 
 def _utc_now() -> str:
