@@ -711,6 +711,14 @@ export class NanobotTui {
   }
 
   async start(): Promise<void> {
+    // Network setup and small menu payloads do not depend on terminal colors.
+    // Start them while OSC theme detection is in flight instead of serializing
+    // up to one second of otherwise independent startup work.
+    this.host.reportState("unknown", "Connecting")
+    this.client.connect()
+    void this.loadCommands()
+    void this.loadMentions()
+    this.runtimeControls.preload()
     // OpenTUI learns the real terminal background through OSC 10/11. Wait for
     // that bounded probe before first paint, as OpenCode does, so a light
     // terminal does not briefly render the dark palette. The app already owns
@@ -720,10 +728,6 @@ export class NanobotTui {
     if (this.options.theme === "auto" && this.renderer.themeMode) {
       this.applyTheme(this.renderer.themeMode)
     }
-    this.host.reportState("unknown", "Connecting")
-    this.client.connect()
-    void this.loadCommands()
-    void this.loadMentions()
     this.renderer.start()
   }
 

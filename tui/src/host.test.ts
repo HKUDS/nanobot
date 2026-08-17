@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { createTuiHost, currentGitBranch } from "./host"
 
 async function settle(): Promise<void> {
-  await Bun.sleep(0)
+  await Bun.sleep(40)
   await Bun.sleep(0)
 }
 
@@ -74,9 +74,9 @@ describe("TUI host integration", () => {
     host.reportMetadata({ model: "gpt", branch: "" })
     await settle()
 
-    expect(commands).toHaveLength(2)
-    expect(commands[1]).toContain("--clear-token")
-    expect(commands[1]).toContain("branch")
-    expect(commands[1]).not.toContain("model=gpt")
+    expect(commands).toHaveLength(1)
+    expect(commands[0]).toContain("model=gpt")
+    expect(commands[0]).toContain("--clear-token")
+    expect(commands[0]).toContain("branch")
   })
 })

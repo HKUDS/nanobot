@@ -45,6 +45,11 @@ interface Activity {
 }
 
 const ACTIVITY_PREVIEW_LINES = 6
+// OpenTUI renders at 30 FPS. Re-parsing the entire Markdown buffer for every
+// provider token turns long answers into quadratic work without producing any
+// additional visible frames. Paint the first token immediately, then coalesce
+// subsequent deltas to the renderer cadence.
+const STREAM_FLUSH_MS = 32
 
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
@@ -64,6 +69,8 @@ export class Transcript {
   private nextId = 0
   private navigation: TranscriptNavigation = { awayFromBottom: false, unseenOutput: false }
   private navigationTimer: ReturnType<typeof setTimeout> | null = null
+  private pendingStream = ""
+  private streamTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -142,6 +149,8 @@ export class Transcript {
   reset(header: TranscriptHeader): void {
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.navigationTimer = null
+    this.clearStreamTimer()
+    this.pendingStream = ""
     for (const child of [...this.root.getChildren()]) {
       this.root.remove(child)
       child.destroyRecursively()
@@ -237,11 +246,18 @@ export class Transcript {
       const row = this.writeAssistant(markdown)
       this.live = { row, markdown, content: "" }
     }
-    this.live.content += delta
-    this.live.markdown.content = this.live.content
+    if (!this.live.content && !this.pendingStream) {
+      this.live.content = delta
+      this.live.markdown.content = delta
+      return
+    }
+    this.pendingStream += delta
+    if (this.streamTimer) return
+    this.streamTimer = setTimeout(() => this.flushStream(), STREAM_FLUSH_MS)
   }
 
   finishStream(fallback = ""): void {
+    this.flushStream()
     if (this.live) {
       const content = fallback || this.live.content
       // Finalize the retained Markdown node in place. This preserves scroll
@@ -256,6 +272,8 @@ export class Transcript {
 
   reconcileStream(content: string): void {
     if (!content || !this.live) return
+    this.clearStreamTimer()
+    this.pendingStream = ""
     this.live.content = content
     this.live.markdown.content = content
   }
@@ -303,11 +321,26 @@ export class Transcript {
 
   destroy(): void {
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
+    this.clearStreamTimer()
+    this.pendingStream = ""
     this.live = null
     this.activity = null
     this.frames.clear()
     this.userRows.clear()
     this.theme.syntax.destroy()
+  }
+
+  private flushStream(): void {
+    this.clearStreamTimer()
+    if (!this.live || !this.pendingStream) return
+    this.live.content += this.pendingStream
+    this.pendingStream = ""
+    this.live.markdown.content = this.live.content
+  }
+
+  private clearStreamTimer(): void {
+    if (this.streamTimer) clearTimeout(this.streamTimer)
+    this.streamTimer = null
   }
 
   private noteOutput(): void {

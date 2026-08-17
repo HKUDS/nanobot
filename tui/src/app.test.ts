@@ -651,17 +651,25 @@ describe("NanobotTui layout", () => {
     const original = globalThis.fetch
     const sent: string[] = []
     const scopes: WorkspaceScopePayload[] = []
+    let settingsRequests = 0
+    let workspaceRequests = 0
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input)
-      if (url.endsWith("/api/settings")) return new Response(JSON.stringify({
-        model_presets: [
-          { name: "default", model: "test/model" },
-          { name: "fast", model: "fast/model" },
-        ],
-      }))
-      if (url.endsWith("/api/workspaces")) return new Response(JSON.stringify({
-        controls: { can_use_full_access: true },
-      }))
+      if (url.endsWith("/api/settings")) {
+        settingsRequests += 1
+        return new Response(JSON.stringify({
+          model_presets: [
+            { name: "default", model: "test/model" },
+            { name: "fast", model: "fast/model" },
+          ],
+        }))
+      }
+      if (url.endsWith("/api/workspaces")) {
+        workspaceRequests += 1
+        return new Response(JSON.stringify({
+          controls: { can_use_full_access: true },
+        }))
+      }
       return new Response(JSON.stringify({ sessions: [] }))
     }) as typeof fetch
     setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
@@ -756,6 +764,8 @@ describe("NanobotTui layout", () => {
       await setup.mockMouse.click(ui.status.x, ui.status.y)
       expect(ui.runtimeControls.visible).toBe(false)
       expect(ui.composer.focused).toBe(true)
+      expect(settingsRequests).toBe(1)
+      expect(workspaceRequests).toBe(1)
 
       expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(true)
       app.accept({ event: "goal_status", chat_id: "chat", status: "idle" })
@@ -1475,7 +1485,7 @@ describe("NanobotTui layout", () => {
     expect(internals.palette.referenceBackground).toBe("#FAFAFA")
   })
 
-  test("waits for automatic terminal detection before connecting or painting", async () => {
+  test("overlaps automatic terminal detection with connection startup", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     let connected = false
     let resolveMode: (mode: "light") => void = () => undefined
@@ -1494,11 +1504,10 @@ describe("NanobotTui layout", () => {
 
     const starting = app.start()
     await Bun.sleep(1)
-    expect(connected).toBe(false)
+    expect(connected).toBe(true)
 
     resolveMode("light")
     await starting
-    expect(connected).toBe(true)
     expect((app as unknown as { palette: { referenceBackground: string } }).palette.referenceBackground).toBe("#FAFAFA")
   })
 
@@ -1583,6 +1592,28 @@ describe("NanobotTui layout", () => {
     expect(frame).toContain("final https://nanobot.test/signed/current tail")
     expect(frame).not.toContain("canonical https://nanobot.test/signed/current")
     expect(frame).not.toContain("draft signed://expired")
+  })
+
+  test("paints the first token immediately and coalesces the rest per frame", async () => {
+    setup = await createRenderer({ width: 80, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "delta", chat_id: "chat", text: "first" })
+    const transcript = (app as unknown as {
+      transcript: {
+        live: { markdown: { content: string; streaming: boolean } } | null
+      }
+    }).transcript
+    const markdown = transcript.live?.markdown
+    expect(markdown?.content).toBe("first")
+
+    for (let index = 0; index < 1_000; index += 1) {
+      app.accept({ event: "delta", chat_id: "chat", text: " token" })
+    }
+    expect(markdown?.content).toBe("first")
+
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    expect(markdown?.content).toBe(`first${" token".repeat(1_000)}`)
+    expect(markdown?.streaming).toBe(false)
   })
 
   test("copies full-screen selections through OSC 52", async () => {

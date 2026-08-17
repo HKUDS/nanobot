@@ -20,6 +20,8 @@ type Choice =
   | { kind: "model"; name: string; label: string; detail: string }
   | { kind: "access"; mode: "restricted" | "full"; label: string; detail: string }
 
+const CONTROLS_CACHE_MS = 10_000
+
 interface RuntimeControlsOptions {
   apiUrl: string
   apiToken: string
@@ -49,6 +51,7 @@ export class RuntimeControls {
   private modelPresets: Array<{ name: string; model: string }>
   private canUseFullAccess: boolean
   private controlsLoaded = false
+  private controlsLoadedAt = 0
   private controlsPromise: Promise<void> | null = null
   private scope: WorkspaceScopePayload
 
@@ -102,6 +105,11 @@ export class RuntimeControls {
 
   updateContext(text: string): void {
     this.contextText.content = text
+  }
+
+  /** Warm the small settings payload while the user is reading the first frame. */
+  preload(): void {
+    void this.load().catch(() => {})
   }
 
   updateWorkspaceScope(scope: WorkspaceScopePayload): void {
@@ -175,11 +183,14 @@ export class RuntimeControls {
   }
 
   private async load(force = false): Promise<void> {
-    if (force) this.controlsLoaded = false
+    if (force && Date.now() - this.controlsLoadedAt >= CONTROLS_CACHE_MS) {
+      this.controlsLoaded = false
+    }
     if (this.controlsLoaded) return
     if (this.controlsPromise) return this.controlsPromise
     if (!this.options.apiUrl || !this.options.apiToken) {
       this.controlsLoaded = true
+      this.controlsLoadedAt = Date.now()
       return
     }
     this.controlsPromise = (async () => {
@@ -197,6 +208,7 @@ export class RuntimeControls {
       this.modelPresets = [...presets.values()]
       this.canUseFullAccess = controls.canUseFullAccess
       this.controlsLoaded = true
+      this.controlsLoadedAt = Date.now()
     })().finally(() => { this.controlsPromise = null })
     return this.controlsPromise
   }

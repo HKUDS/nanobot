@@ -36,6 +36,7 @@ const AGENT = "nanobot"
 const LIFECYCLE_SOURCE = "nanobot:tui"
 const METADATA_SOURCE = "nanobot:tui:metadata"
 const METADATA_KEYS = ["model", "branch", "workspace", "task", "action"] as const
+const METADATA_FLUSH_MS = 32
 
 class StandaloneHost implements TuiHost {
   readonly hosted = false
@@ -52,6 +53,8 @@ class HerdrHost implements TuiHost {
   private lastState = ""
   private lastSession = ""
   private metadata: HostMetadata = {}
+  private readonly pendingMetadata = new Set<typeof METADATA_KEYS[number]>()
+  private metadataTimer: ReturnType<typeof setTimeout> | null = null
   private queue: Promise<void> = Promise.resolve()
 
   constructor(
@@ -66,6 +69,9 @@ class HerdrHost implements TuiHost {
     const fingerprint = `${state}\0${cleanMessage}\0${this.lastSession}`
     if (fingerprint === this.lastState) return
     this.lastState = fingerprint
+    // Preserve causal ordering when a semantic state transition follows a
+    // pending metadata snapshot; repeated working heartbeats still stay free.
+    this.flushMetadata()
     const args = [
       "pane", "report-agent", this.paneId,
       "--source", LIFECYCLE_SOURCE,
@@ -84,6 +90,7 @@ class HerdrHost implements TuiHost {
     if (!cleanSession || cleanSession === this.lastSession) return
     this.lastSession = cleanSession
     this.lastState = ""
+    this.flushMetadata()
     this.enqueue([
       "pane", "report-agent-session", this.paneId,
       "--source", LIFECYCLE_SOURCE,
@@ -95,14 +102,22 @@ class HerdrHost implements TuiHost {
 
   reportMetadata(next: HostMetadata): void {
     if (this.released) return
-    const changed: Array<[typeof METADATA_KEYS[number], string]> = []
     for (const key of METADATA_KEYS) {
+      if (!(key in next)) continue
       const value = normalize(next[key])
       if (value === normalize(this.metadata[key])) continue
-      changed.push([key, value])
+      this.pendingMetadata.add(key)
     }
-    if (!changed.length) return
+    if (!this.pendingMetadata.size) return
     this.metadata = { ...this.metadata, ...next }
+    if (this.metadataTimer) return
+    this.metadataTimer = setTimeout(() => this.flushMetadata(), METADATA_FLUSH_MS)
+  }
+
+  private flushMetadata(): void {
+    if (this.metadataTimer) clearTimeout(this.metadataTimer)
+    this.metadataTimer = null
+    if (!this.pendingMetadata.size) return
     const args = [
       "pane", "report-metadata", this.paneId,
       "--source", METADATA_SOURCE,
@@ -113,14 +128,17 @@ class HerdrHost implements TuiHost {
     const task = normalize(this.metadata.task)
     args.push(task ? "--title" : "--clear-title")
     if (task) args.push(task)
-    for (const [key, value] of changed) {
+    for (const key of this.pendingMetadata) {
+      const value = normalize(this.metadata[key])
       args.push(value ? "--token" : "--clear-token", value ? `${key}=${value}` : key)
     }
+    this.pendingMetadata.clear()
     this.enqueue(args)
   }
 
   release(): void {
     if (this.released) return
+    this.flushMetadata()
     this.released = true
     const clear = [
       "pane", "report-metadata", this.paneId,
