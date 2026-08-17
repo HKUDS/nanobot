@@ -142,12 +142,22 @@ A stable install must never combine Python from one version with a TUI from anot
 this order:
 
 1. Set the package version and publish the matching GitHub release tag (`vX.Y.Z`).
-2. Wait for `tui-release.yml` to upload every supported native TUI and checksum to that release.
-3. Only then publish the same `X.Y.Z` package to PyPI.
+2. Review the pinned Bun/OpenTUI licenses, source offer, and relinking materials for that tag.
+3. Manually run **Publish Terminal UI** for the exact tag and confirm the compliance review input.
+4. Wait for every platform archive and checksum to appear on the release, then publish the same
+   `X.Y.Z` package to PyPI.
 
 The wheel contains the built WebUI. The native TUI stays a platform-specific release sidecar so
-users download only the binary for their machine. Source checkouts use an editable Python install,
-run `tui/` with Bun, and rebuild stale `webui/` assets locally.
+users download only the archive for their machine. Each archive must contain the executable,
+target-specific third-party notices, project and runtime licenses, corresponding application
+source, a written source offer, relinking instructions, and a checksum manifest. Never upload a
+naked TUI executable. Source checkouts use an editable Python install, run `tui/` with Bun, and
+rebuild stale `webui/` assets locally.
+
+The confirmation is an operational commitment, not a cosmetic checkbox. Before accepting it,
+verify that the exact Bun/WebKit revisions remain retrievable and that the project can honor the
+archive's corresponding-source offer for its full stated period. Preserve published archives and
+their source materials.
 
 ## Questions?
 

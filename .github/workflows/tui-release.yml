@@ -1,14 +1,24 @@
 name: Publish Terminal UI
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example, v0.3.1)
+        required: true
+        type: string
+      compliance_reviewed:
+        description: Confirm notices, source offer, source archive, and relinking were reviewed
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: ${{ inputs.compliance_reviewed }}
     name: ${{ matrix.target }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -24,6 +34,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          gh release view "$TAG" >/dev/null
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$TAG")"
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -49,19 +72,25 @@ jobs:
           input_path: tui/dist/nanobot-tui-${{ matrix.target }}
           rcodesign_version: 0.29.0
 
-      - name: Refresh signed checksum
-        working-directory: tui/dist
-        shell: bash
+      - name: Build notices and release archive
+        working-directory: tui
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          asset="nanobot-tui-${TARGET}"
-          if [[ "$TARGET" == win32-* ]]; then asset="${asset}.exe"; fi
-          sha256sum "$asset" > "${asset}.sha256"
+          bun scripts/release-notices.ts "$TARGET"
+          python3 scripts/package-release.py "$TARGET"
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ matrix.target }}
         shell: bash
-        run: gh release upload "$TAG" tui/dist/nanobot-tui-* --clobber
+        run: |
+          gh release view "$TAG" >/dev/null
+          asset="nanobot-tui-${TARGET}"
+          if [[ "$TARGET" == win32-* ]]; then asset="${asset}.exe"; fi
+          gh release upload "$TAG" \
+            "tui/dist/${asset}.zip" \
+            "tui/dist/${asset}.zip.sha256" \
+            --clobber

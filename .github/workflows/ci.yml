@@ -243,6 +243,21 @@ jobs:
         working-directory: tui
         run: bun run build
 
+      - name: Verify licensed Linux release archive
+        if: runner.os == 'Linux'
+        working-directory: tui
+        run: |
+          bun scripts/release-notices.ts linux-x64
+          python3 scripts/package-release.py linux-x64
+
+      - name: Verify licensed Windows release archive
+        if: runner.os == 'Windows'
+        working-directory: tui
+        shell: pwsh
+        run: |
+          bun scripts/release-notices.ts win32-x64
+          python scripts/package-release.py win32-x64
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20

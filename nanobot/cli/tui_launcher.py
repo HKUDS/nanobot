@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import platform
@@ -12,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -37,6 +39,29 @@ class TuiUnavailableError(RuntimeError):
 
 class TuiSessionError(ValueError):
     """Raised when a session selector cannot be opened by the native TUI."""
+
+
+_TUI_RELEASE_FILES = (
+    "THIRD_PARTY_NOTICES.txt",
+    "RELINKING.md",
+    "SOURCE_OFFER.md",
+    "LICENSE",
+    "BUN-1.3.13-LICENSE.md",
+    "LGPL-2.0.txt",
+    "LGPL-2.1.txt",
+    "nanobot-tui-source.tar.gz",
+)
+_TUI_RELEASE_LIMITS = {
+    "THIRD_PARTY_NOTICES.txt": 4 * 1024 * 1024,
+    "RELINKING.md": 256 * 1024,
+    "SOURCE_OFFER.md": 256 * 1024,
+    "LICENSE": 256 * 1024,
+    "BUN-1.3.13-LICENSE.md": 1024 * 1024,
+    "LGPL-2.0.txt": 256 * 1024,
+    "LGPL-2.1.txt": 256 * 1024,
+    "nanobot-tui-source.tar.gz": 20 * 1024 * 1024,
+    "MANIFEST.sha256": 64 * 1024,
+}
 
 
 @dataclass(frozen=True)
@@ -139,14 +164,20 @@ def _resolve_tui_command() -> list[str]:
         return [str(downloaded)]
 
     raise TuiUnavailableError(
-        "this build does not include the native TUI; install Bun for a source checkout "
-        "or use `nanobot agent --classic`"
+        f"no native TUI archive is published for nanobot {__version__} on this platform; "
+        "current source installs must be editable and keep their checkout and Bun available, "
+        "while released packages need a matching GitHub release archive; use "
+        "`nanobot agent --classic` if intentional"
     )
 
 
 def _source_checkout_tui_dir() -> Path | None:
     """Return this checkout's TUI source, never a neighboring unrelated directory."""
-    project_root = Path(__file__).resolve().parents[2]
+    return _tui_source_dir(Path(__file__).resolve().parents[2])
+
+
+def _tui_source_dir(project_root: Path) -> Path | None:
+    project_root = project_root.resolve(strict=False)
     source_dir = project_root / "tui"
     if (project_root / "pyproject.toml").is_file() and (source_dir / "package.json").is_file():
         return source_dir
@@ -173,7 +204,7 @@ def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
 
 
 def _download_release_tui(asset: str) -> Path | None:
-    """Install the version-matched release sidecar into nanobot's data directory."""
+    """Install the complete, version-matched TUI release bundle."""
     if os.environ.get("NANOBOT_TUI_NO_DOWNLOAD") == "1":
         return None
     version = __version__.strip()
@@ -181,59 +212,139 @@ def _download_release_tui(asset: str) -> Path | None:
         return None
 
     target_dir = get_data_dir() / "bin" / "tui" / version
-    target = target_dir / asset
-    cached_checksum = target.with_name(f"{target.name}.sha256")
-    if target.is_file():
-        try:
-            expected = cached_checksum.read_text(encoding="utf-8").split()[0].lower()
-            actual = hashlib.sha256(target.read_bytes()).hexdigest()
-        except (OSError, IndexError):
-            expected = ""
-            actual = ""
-        if len(expected) == 64 and actual == expected:
-            if os.name != "nt":
-                try:
-                    target.chmod(0o755)
-                except OSError:
-                    return None
-            return target
-        try:
-            target.unlink(missing_ok=True)
-            cached_checksum.unlink(missing_ok=True)
-        except OSError:
-            return None
+    cached = _cached_release_tui(target_dir, asset)
+    if cached is not None:
+        return cached
 
     base = f"https://github.com/HKUDS/nanobot/releases/download/v{version}"
+    archive_name = f"{asset}.zip"
     try:
-        checksum = _read_release_asset(f"{base}/{asset}.sha256", max_bytes=1024).decode()
-        expected = checksum.split()[0].lower()
-        if len(expected) != 64:
+        checksum = _read_release_asset(f"{base}/{archive_name}.sha256", max_bytes=1024)
+        expected = _release_checksum(checksum, archive_name)
+        if expected is None:
             return None
-        binary = _read_release_asset(f"{base}/{asset}", max_bytes=150 * 1024 * 1024)
+        archive = _read_release_asset(f"{base}/{archive_name}", max_bytes=200 * 1024 * 1024)
     except (OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError):
         return None
-    if hashlib.sha256(binary).hexdigest() != expected:
-        raise TuiUnavailableError("downloaded TUI binary failed checksum verification")
+    if hashlib.sha256(archive).hexdigest() != expected:
+        raise TuiUnavailableError("downloaded TUI archive failed checksum verification")
+    files = _verified_release_archive(archive, asset)
 
-    temporary = target.with_suffix(f"{target.suffix}.tmp-{os.getpid()}")
-    temporary_checksum = cached_checksum.with_suffix(
-        f"{cached_checksum.suffix}.tmp-{os.getpid()}"
-    )
+    temporary: dict[str, Path] = {}
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
-        temporary.write_bytes(binary)
-        temporary_checksum.write_text(f"{expected}  {asset}\n", encoding="utf-8")
-        if os.name != "nt":
-            temporary.chmod(0o755)
-        temporary.replace(target)
-        temporary_checksum.replace(cached_checksum)
+        for name, content in files.items():
+            path = target_dir / name
+            pending = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+            pending.write_bytes(content)
+            if name == asset and os.name != "nt":
+                pending.chmod(0o755)
+            temporary[name] = pending
+        for name in _release_bundle_names(asset):
+            temporary[name].replace(target_dir / name)
     except OSError:
-        temporary.unlink(missing_ok=True)
-        temporary_checksum.unlink(missing_ok=True)
-        target.unlink(missing_ok=True)
-        cached_checksum.unlink(missing_ok=True)
+        for path in temporary.values():
+            path.unlink(missing_ok=True)
+        _clear_cached_release(target_dir, asset)
+        return None
+    return target_dir / asset
+
+
+def _release_bundle_names(asset: str) -> tuple[str, ...]:
+    return (asset, *_TUI_RELEASE_FILES, "MANIFEST.sha256")
+
+
+def _release_checksum(raw: bytes, archive_name: str) -> str | None:
+    try:
+        parts = raw.decode("utf-8").split()
+    except UnicodeDecodeError:
+        return None
+    if len(parts) != 2 or parts[1] != archive_name:
+        return None
+    digest = parts[0].lower()
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        return None
+    return digest
+
+
+def _release_manifest(raw: bytes, asset: str) -> dict[str, str]:
+    expected_names = set(_release_bundle_names(asset)[:-1])
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise TuiUnavailableError("TUI release manifest is not valid UTF-8") from exc
+    checksums: dict[str, str] = {}
+    for line in lines:
+        digest, separator, name = line.partition("  ")
+        digest = digest.lower()
+        if (
+            separator != "  "
+            or name not in expected_names
+            or name in checksums
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise TuiUnavailableError("TUI release manifest is malformed")
+        checksums[name] = digest
+    if set(checksums) != expected_names:
+        raise TuiUnavailableError("TUI release manifest is incomplete")
+    return checksums
+
+
+def _verified_release_archive(raw: bytes, asset: str) -> dict[str, bytes]:
+    expected_names = set(_release_bundle_names(asset))
+    files: dict[str, bytes] = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            entries = archive.infolist()
+            names = [entry.filename for entry in entries if not entry.is_dir()]
+            if len(names) != len(entries) or len(names) != len(set(names)):
+                raise TuiUnavailableError("TUI release archive contains invalid entries")
+            if set(names) != expected_names:
+                raise TuiUnavailableError("TUI release archive is incomplete")
+            for entry in entries:
+                limit = 150 * 1024 * 1024 if entry.filename == asset else _TUI_RELEASE_LIMITS[
+                    entry.filename
+                ]
+                if entry.file_size == 0 or entry.file_size > limit:
+                    raise TuiUnavailableError(
+                        f"TUI release file has an invalid size: {entry.filename}"
+                    )
+                files[entry.filename] = archive.read(entry)
+    except zipfile.BadZipFile as exc:
+        raise TuiUnavailableError("downloaded TUI archive is not a valid ZIP file") from exc
+
+    checksums = _release_manifest(files["MANIFEST.sha256"], asset)
+    for name, expected in checksums.items():
+        if hashlib.sha256(files[name]).hexdigest() != expected:
+            raise TuiUnavailableError(f"TUI release file failed verification: {name}")
+    return files
+
+
+def _cached_release_tui(target_dir: Path, asset: str) -> Path | None:
+    target = target_dir / asset
+    manifest = target_dir / "MANIFEST.sha256"
+    if not target.is_file() and not manifest.exists():
+        return None
+    try:
+        checksums = _release_manifest(manifest.read_bytes(), asset)
+        for name, expected in checksums.items():
+            if hashlib.sha256((target_dir / name).read_bytes()).hexdigest() != expected:
+                raise OSError("cached release checksum mismatch")
+        if os.name != "nt":
+            target.chmod(0o755)
+    except (OSError, TuiUnavailableError):
+        _clear_cached_release(target_dir, asset)
         return None
     return target
+
+
+def _clear_cached_release(target_dir: Path, asset: str) -> None:
+    for name in _release_bundle_names(asset):
+        try:
+            (target_dir / name).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _read_release_asset(url: str, *, max_bytes: int) -> bytes:
