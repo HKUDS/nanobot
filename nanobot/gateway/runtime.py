@@ -287,14 +287,24 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             lease.wait_for_shutdown()
             with self._transition_lock(), self._lifecycle_lock():
                 current = self.status()
-                if current.running and current.pid != pid:
+                # A Windows venv launcher stays alive as the managed Popen child
+                # while the real Python interpreter runs as its direct child.
+                # Let that interpreter adopt only its recorded background launch.
+                adopting_windows_launcher = (
+                    self.platform_name == "Windows"
+                    and current.running
+                    and current.launch_mode == "background"
+                    and current.pid == os.getppid()
+                )
+                if current.running and current.pid != pid and not adopting_windows_launcher:
                     raise GatewayAlreadyRunningError(current)
                 if lease._shutdown_pending_locked():
                     continue
                 state = self._read_state() or {}
                 launch_mode: GatewayLaunchMode = (
                     "background"
-                    if state.get("pid") == pid and state.get("launch_mode") == "background"
+                    if state.get("launch_mode") == "background"
+                    and (state.get("pid") == pid or adopting_windows_launcher)
                     else "foreground"
                 )
                 state.update(

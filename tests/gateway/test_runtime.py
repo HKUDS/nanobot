@@ -245,6 +245,33 @@ def test_foreground_gateway_claim_is_discoverable_and_released(tmp_path, monkeyp
     assert not runtime.paths.state_path.exists()
 
 
+def test_windows_gateway_adopts_its_managed_venv_launcher(tmp_path, monkeypatch):
+    launcher_pid = 12345
+    gateway_pid = 54321
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Windows")
+    monkeypatch.setattr("nanobot.gateway.runtime.os.getpid", lambda: gateway_pid)
+    monkeypatch.setattr("nanobot.gateway.runtime.os.getppid", lambda: launcher_pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: f"created-at:{pid}")
+    GatewayClientLease(runtime, kind="tui").mark_ephemeral()
+    runtime._write_state(
+        {
+            "pid": launcher_pid,
+            "identity": f"created-at:{launcher_pid}",
+            "launch_mode": "background",
+        }
+    )
+
+    with runtime.foreground_instance(GatewayStartOptions(port=18790)):
+        status = runtime.status()
+        assert status.running is True
+        assert status.pid == gateway_pid
+        assert status.launch_mode == "background"
+        assert status.lifetime == "on_demand"
+
+    assert not runtime.paths.state_path.exists()
+
+
 def test_explicit_foreground_gateway_clears_stale_auto_stop_state(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Darwin")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
