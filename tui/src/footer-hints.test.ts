@@ -29,7 +29,7 @@ describe("footerHints", () => {
     expect(active.chunks).toHaveLength(0)
   })
 
-  test("shows measured throughput, cache ratio, token counts, and TTFT", () => {
+  test("shows measured throughput, explicit token directions, and cache ratio", () => {
     const result = footerTelemetry({
       prompt_tokens: 1200,
       completion_tokens: 80,
@@ -41,8 +41,21 @@ describe("footerHints", () => {
     }, 120, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("50 tok/s · cache 75% · ↑1.2k ↓80 · TTFT 250ms")
+      .toBe("50 tok/s · 1.2K in · 80 out · 75% cached")
     expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
+  })
+
+  test("uses familiar compact units for large token counts", () => {
+    const result = footerTelemetry({
+      prompt_tokens: 4_500_000,
+      completion_tokens: 19_000,
+      cached_tokens: 3_600_000,
+      generation_ms: 135_714,
+      measured_completion_tokens: 19_000,
+    }, 120, theme)
+
+    expect(result.chunks.map(({ text }) => text).join(""))
+      .toBe("140 tok/s · 4.5M in · 19K out · 80% cached")
   })
 
   test("degrades telemetry instead of guessing missing provider metrics", () => {
@@ -53,7 +66,7 @@ describe("footerHints", () => {
     }, 60, theme)
     const unsupported = footerTelemetry({ prompt_tokens: 1000, completion_tokens: 20 }, 60, theme)
 
-    expect(compact.chunks.map(({ text }) => text).join("")).toBe("cache 0%")
+    expect(compact.chunks.map(({ text }) => text).join("")).toBe("0% cached")
     expect(unsupported.chunks).toHaveLength(0)
   })
 })

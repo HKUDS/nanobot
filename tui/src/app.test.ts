@@ -1381,8 +1381,9 @@ describe("NanobotTui layout", () => {
     const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
     expect(footer).toContain("Ready · 1.7s")
     expect(footer).toContain("50 tok/s")
-    expect(footer).toContain("cache 75%")
-    expect(footer).toContain("↑1.2k ↓80")
+    expect(footer).toContain("1.2K in · 80 out")
+    expect(footer).toContain("75% cached")
+    expect(footer).not.toContain("TTFT")
     expect(footer).not.toContain("enter send")
 
     app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden" })

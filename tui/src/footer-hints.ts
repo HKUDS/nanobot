@@ -1,6 +1,5 @@
 import { RGBA, StyledText, TextAttributes, type TextChunk } from "@opentui/core"
 
-import { formatTokenCount } from "./context-panel"
 import type { TokenUsage } from "./protocol"
 
 export interface FooterHint {
@@ -53,6 +52,14 @@ export function footerTelemetry(
     const estimated = (usage.estimated_tokens || 0) > 0 ? "~" : ""
     parts.push(`${estimated}${value} tok/s`)
   }
+  if (width >= 72) {
+    const prompt = usage.prompt_tokens
+    const completion = usage.completion_tokens
+    if (typeof prompt === "number" || typeof completion === "number") {
+      parts.push(`${formatTelemetryTokens(prompt || 0)} in`)
+      parts.push(`${formatTelemetryTokens(completion || 0)} out`)
+    }
+  }
   if (
     typeof usage.cached_tokens === "number"
     && typeof usage.prompt_tokens === "number"
@@ -61,24 +68,23 @@ export function footerTelemetry(
     const hitRate = Math.min(100, Math.max(0, Math.round(
       usage.cached_tokens * 100 / usage.prompt_tokens,
     )))
-    parts.push(`cache ${hitRate}%`)
-  }
-  if (width >= 72) {
-    const prompt = usage.prompt_tokens
-    const completion = usage.completion_tokens
-    if (typeof prompt === "number" || typeof completion === "number") {
-      parts.push(`↑${formatTokenCount(prompt || 0)} ↓${formatTokenCount(completion || 0)}`)
-    }
-  }
-  if (width >= 112 && typeof usage.ttft_ms === "number") {
-    const requests = Math.max(1, usage.timed_requests || 1)
-    const average = usage.ttft_ms / requests
-    parts.push(`TTFT ${average < 1000 ? `${Math.round(average)}ms` : `${(average / 1000).toFixed(1)}s`}`)
+    parts.push(`${hitRate}% cached`)
   }
   if (width >= 128 && typeof usage.cost_usd === "number" && usage.cost_usd > 0) {
     parts.push(`$${usage.cost_usd < 0.01 ? usage.cost_usd.toFixed(4) : usage.cost_usd.toFixed(2)}`)
   }
   return footerMetrics(parts, theme)
+}
+
+function formatTelemetryTokens(value: number): string {
+  const count = Math.max(0, value)
+  for (const [threshold, suffix] of [[1_000_000_000, "B"], [1_000_000, "M"], [1_000, "K"]] as const) {
+    if (count < threshold) continue
+    const scaled = count / threshold
+    const compact = scaled >= 10 ? Math.round(scaled) : Math.round(scaled * 10) / 10
+    return `${compact}${suffix}`
+  }
+  return String(Math.round(count))
 }
 
 function footerMetrics(parts: readonly string[], theme: FooterHintTheme): StyledText {
