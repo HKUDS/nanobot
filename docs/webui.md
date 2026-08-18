@@ -19,21 +19,24 @@ nanobot webui
 
 `nanobot webui` creates the config/workspace when needed, enables the local
 WebSocket channel after confirmation, generates a WebUI bootstrap secret when
-one is missing, starts the gateway, and opens the browser. With a fresh config,
+one is missing, starts or joins the same on-demand gateway used by the native
+TUI, and opens the browser. With a fresh config,
 it can open before a model is configured so you can finish setup in **Settings
 → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so
 it is not available from other devices on your LAN.
 
-Run it in the background when you do not want to keep a terminal open:
+After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
 
 ```bash
-nanobot webui --background
+nanobot gateway --background
 ```
 
-Complete first-time model setup in a foreground `nanobot webui` session before using
-`--background`.
+`nanobot webui --background` is retained only to print migration guidance. This keeps one
+unambiguous owner for persistent process lifecycle.
 
-Manage the background gateway with `nanobot gateway status`, `nanobot gateway
+Each foreground WebUI or TUI launcher releases only its own client. The last
+interactive launcher stops an on-demand gateway. `nanobot gateway --background` makes the
+gateway persistent; manage it with `nanobot gateway status`, `nanobot gateway
 logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
 
 Manual config still works. Same-machine localhost WebUI access can run without

@@ -589,6 +589,34 @@ export class NanobotClient {
     pending.state = "accepted";
   }
 
+  private recordCanonicalTurnOwnership(
+    ev: Extract<InboundEvent, { event: "message_accepted" | "user_message" }>,
+  ): void {
+    const activeTurnId = ev.active_turn_id;
+    if (!activeTurnId) return;
+
+    // Two clients can optimistically submit while the chat still looks idle.
+    // The gateway admits exactly one owner and classifies the other message as
+    // steering. Replace the local guess before its ACK can preserve the wrong
+    // run identity.
+    if (ev.turn_id && ev.turn_id !== activeTurnId) {
+      const pending = this.pendingMessageSends.get(this.runSendKey(ev.chat_id, ev.turn_id));
+      if (pending?.startsNewRun) this.settleRunTurn(ev.chat_id, ev.turn_id);
+    }
+    if (this.latestRunTurnIdByChatId.get(ev.chat_id) !== activeTurnId) {
+      this.advanceRunGeneration(ev.chat_id, activeTurnId);
+    }
+    if (typeof ev.started_at === "number") {
+      this.runStartedAtByTurnKey.set(
+        this.runSendKey(ev.chat_id, activeTurnId),
+        ev.started_at,
+      );
+      const previous = this.runStartedAtByChatId.get(ev.chat_id);
+      this.runStartedAtByChatId.set(ev.chat_id, ev.started_at);
+      if (previous !== ev.started_at) this.emitRunStatus(ev.chat_id, ev.started_at);
+    }
+  }
+
   private recordRunRejection(chatId: string, turnId?: string): void {
     if (!turnId) return;
     const rejectedLatest = this.latestRunTurnIdByChatId.get(chatId) === turnId;
@@ -1097,6 +1125,9 @@ export class NanobotClient {
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
+    if (parsed.event === "message_accepted" || parsed.event === "user_message") {
+      this.recordCanonicalTurnOwnership(parsed);
+    }
     if (parsed.event === "message_accepted") {
       this.recordRunAcceptance(parsed.chat_id, parsed.turn_id);
       if (!isSystemCommandTurnId(turnId)) {

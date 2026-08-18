@@ -98,16 +98,20 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
 def goal_state_ws_blob(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """JSON-safe snapshot for WebSocket ``goal_state`` events (one chat_id per frame)."""
     goal = parse_goal_state(_session_goal_raw(metadata)) if metadata else None
-    if isinstance(goal, dict) and goal.get("status") == "active":
+    if isinstance(goal, dict) and goal.get("status") in {"active", "blocked"}:
+        status = str(goal.get("status"))
         objective = str(goal.get("objective") or "").strip()
         if len(objective) > _MAX_OBJECTIVE_WS:
             objective = objective[:_MAX_OBJECTIVE_WS].rstrip() + "…"
         summary = str(goal.get("ui_summary") or "").strip()[:120]
-        blob: dict[str, Any] = {"active": True}
+        blob: dict[str, Any] = {"active": status == "active", "status": status}
         if summary:
             blob["ui_summary"] = summary
         if objective:
             blob["objective"] = objective
+        recap = str(goal.get("recap") or "").strip()[:240]
+        if recap:
+            blob["recap"] = recap
         return blob
     return {"active": False}
 

@@ -71,6 +71,35 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("reconciles simultaneous client submissions to the gateway-owned turn", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+
+    client.sendMessage("shared-chat", "from terminal B", undefined, {
+      turnId: "turn-b",
+    });
+    expect(client.getRunTurnId("shared-chat")).toBe("turn-b");
+
+    socket.fakeMessage({
+      event: "message_accepted",
+      chat_id: "shared-chat",
+      turn_id: "turn-b",
+      active_turn_id: "turn-a",
+      starts_turn: false,
+      started_at: 1_700_000_000,
+    });
+
+    expect(client.getRunTurnId("shared-chat")).toBe("turn-a");
+    expect(client.getRunStartedAt("shared-chat")).toBe(1_700_000_000);
+    expect(client.hasUnsettledRun("shared-chat")).toBe(true);
+  });
+
   it("correlates successful WebUI mutation replies by request id", async () => {
     const client = new NanobotClient({
       url: "ws://test",

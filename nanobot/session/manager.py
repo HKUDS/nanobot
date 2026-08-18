@@ -1800,6 +1800,10 @@ class SessionManager:
         """Read a session without populating the cache."""
         return cast(dict[str, Any] | None, self._store.read(key))
 
+    def read_session_snapshot(self, key: str) -> Session | None:
+        """Load a detached session snapshot without populating the runtime cache."""
+        return self._store.load(key)
+
     def read_session_metadata(self, key: str) -> dict[str, Any] | None:
         """Read session metadata without loading the transcript."""
         return cast(dict[str, Any] | None, self._store.read_metadata(key))

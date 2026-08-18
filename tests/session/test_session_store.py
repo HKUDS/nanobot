@@ -94,6 +94,17 @@ def test_manager_renames_model_preset_in_live_and_persisted_sessions(tmp_path) -
     )
 
 
+def test_read_session_snapshot_does_not_populate_runtime_cache(tmp_path) -> None:
+    stored = Session(key="websocket:context")
+    store = MagicMock(spec=SessionStore)
+    store.load.return_value = stored
+    manager = SessionManager(tmp_path, store=store)
+
+    assert manager.read_session_snapshot(stored.key) is stored
+    assert manager.get_cached(stored.key) is None
+    store.load.assert_called_once_with(stored.key)
+
+
 def test_manager_applies_file_cap_before_store_save(tmp_path) -> None:
     store = MagicMock(spec=SessionStore)
     archiver = MagicMock()

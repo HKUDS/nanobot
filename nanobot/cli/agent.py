@@ -47,8 +47,8 @@ console = Console()
 
 
 def agent(
-    message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
-    session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
+    message: str | None = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+    session_id: str | None = typer.Option(None, "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     markdown: bool = typer.Option(
@@ -61,14 +61,64 @@ def agent(
         "--logs/--no-logs",
         help="Show nanobot runtime logs during chat",
     ),
+    classic: bool = typer.Option(
+        False,
+        "--classic",
+        "--no-tui",
+        help="Use the classic Python prompt instead of the native terminal UI",
+    ),
+    theme: str = typer.Option(
+        "auto",
+        "--theme",
+        help="Terminal UI appearance: auto, dark, or light",
+    ),
 ):
-    """Interact with the agent directly."""
+    """Chat in the terminal or send one message non-interactively."""
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import make_provider
     from nanobot.providers.image_generation import image_gen_provider_configs
 
     runtime_config = _load_runtime_config(config, workspace)
+    theme = theme.strip().lower()
+    if theme not in {"auto", "dark", "light"}:
+        raise typer.BadParameter("must be auto, dark, or light", param_hint="--theme")
+    native_tui = message is None and not classic
+    if native_tui:
+        from nanobot.cli.tui_launcher import TuiSessionError, TuiUnavailableError, launch_tui
+        from nanobot.config.loader import get_config_path
+
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise typer.BadParameter(
+                "the native TUI requires an interactive terminal; use --message for "
+                "one-shot input or --classic for the legacy prompt",
+                param_hint="terminal",
+            )
+        if not markdown:
+            raise typer.BadParameter("--no-markdown requires --classic", param_hint="--no-markdown")
+        if logs:
+            raise typer.BadParameter("--logs requires --classic", param_hint="--logs")
+        try:
+            exit_code = launch_tui(
+                runtime_config,
+                config_path=get_config_path().resolve(strict=False),
+                workspace_override=workspace,
+                session_id=session_id,
+                theme=theme,
+            )
+        except TuiSessionError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--session") from exc
+        except TuiUnavailableError as exc:
+            console.print(f"[red]Native TUI unavailable: {exc}[/red]")
+            console.print("[dim]Use `nanobot agent --classic` only if you want the old prompt.[/dim]")
+            raise typer.Exit(1) from exc
+        else:
+            if exit_code:
+                raise typer.Exit(exit_code)
+            return
+
+    session_id = session_id or "cli:direct"
+
     try:
         provider = make_provider(runtime_config)
     except ValueError as exc:
@@ -157,7 +207,7 @@ def agent(
 
         return _cli_progress
 
-    if message:
+    if message is not None:
         # Single message mode — direct call, no bus needed
         async def run_once() -> None:
             try:
