@@ -32,6 +32,7 @@ from nanobot.cli.models import (
 )
 from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
 console = Console()
 
@@ -1593,7 +1594,6 @@ def _pause(message: str = "Press Enter to continue...") -> None:
 def _set_primary_quick_start_preset(config: Config, provider_name: str, model: str) -> None:
     """Store the primary preset used by Quick Start."""
     config.model_presets["primary"] = ModelPresetConfig(
-        label="Primary",
         model=model,
         provider=provider_name,
     )
@@ -1674,7 +1674,7 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
             login_oauth_interactive,
         )
     except ImportError:
-        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         return False
 
     try:

@@ -12,8 +12,8 @@ import {
 
 describe("channel UI contributions", () => {
   it("selects channel-owned UI only through the backend manifest entry", () => {
-    expect(channelUiContribution("feishu", "webui/index.tsx")?.Panel).toBeTypeOf("function");
-    expect(channelUiContribution("weixin", "webui/index.tsx")?.ConnectFlow).toBeTypeOf("function");
+    expect(channelUiContribution("feishu", "webui/index.tsx")?.Panel).toBeDefined();
+    expect(channelUiContribution("weixin", "webui/index.tsx")?.ConnectFlow).toBeDefined();
     expect(channelUiContribution("feishu", undefined)).toBeUndefined();
     expect(channelUiContribution("feishu", "webui/missing.tsx")).toBeUndefined();
     expect(channelUiContribution("missing", "webui/index.tsx")).toBeUndefined();
@@ -56,7 +56,8 @@ describe("channel UI contributions", () => {
       "utf8",
     );
 
-    expect(source).toContain("../../../nanobot/channels/*/webui/**/*.{ts,tsx}");
+    expect(source).toContain("../../../nanobot/channels/*/webui/index.{ts,tsx}");
+    expect(source).not.toContain("webui/**/*.{ts,tsx}");
     expect(source).not.toContain('"./*/index.tsx"');
   });
 

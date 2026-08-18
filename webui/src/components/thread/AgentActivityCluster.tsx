@@ -319,7 +319,7 @@ export function AgentActivityCluster({
     syncActivityScrollFade();
   }, [syncActivityScrollFade]);
 
-  if (!hasVisibleActivity) return null;
+  if (!hasVisibleActivity && !isTurnStreaming) return null;
 
   if (hasOnlyFileActivity) {
     return (
@@ -343,6 +343,7 @@ export function AgentActivityCluster({
         contentRef={activityContentRef}
         fadeTop={activityScrollFade.top}
         fadeBottom={activityScrollFade.bottom}
+        hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
         onScroll={onActivityScroll}
       >
@@ -382,7 +383,13 @@ function activityDurationMs(
   const timestamps = messages
     .map((message) => message.createdAt)
     .filter((value) => Number.isFinite(value));
-  if (!timestamps.length) return 0;
+  if (!timestamps.length) {
+    return active
+      && typeof activeStartedAtMs === "number"
+      && Number.isFinite(activeStartedAtMs)
+      ? Math.max(0, now - activeStartedAtMs)
+      : 0;
+  }
   const first = active && Number.isFinite(activeStartedAtMs)
     ? activeStartedAtMs!
     : Math.min(...timestamps);
@@ -1105,7 +1112,7 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
           style={{
@@ -1183,7 +1190,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
           style={{

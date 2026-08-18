@@ -51,6 +51,13 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        mark: "var(--radius-mark)",
+        compact: "var(--radius-compact)",
+        control: "var(--radius-control)",
+        floating: "var(--radius-floating)",
+        panel: "var(--radius-panel)",
+        modal: "var(--radius-modal)",
+        prominent: "var(--radius-prominent)",
       },
       colors: {
         background: "hsl(var(--background))",
@@ -89,6 +96,7 @@ export default {
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
+          selected: "hsl(var(--sidebar-selected))",
           accent: "hsl(var(--sidebar-accent))",
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",

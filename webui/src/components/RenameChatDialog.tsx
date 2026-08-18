@@ -44,7 +44,7 @@ export function RenameChatDialog({
     <Dialog open={open} onOpenChange={(next) => {
       if (!next) onCancel();
     }}>
-      <DialogContent className="max-w-sm p-5">
+      <DialogContent className="max-w-sm">
         <form
           className="grid gap-4"
           onSubmit={(event) => {
@@ -66,11 +66,16 @@ export function RenameChatDialog({
             autoFocus
             maxLength={160}
           />
-          <DialogFooter className="gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" onClick={onCancel}>
+          <DialogFooter>
+            <Button
+              className="min-w-20"
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+            >
               {t("deleteConfirm.cancel")}
             </Button>
-            <Button type="submit" disabled={!trimmed}>
+            <Button className="min-w-20" type="submit" disabled={!trimmed}>
               {t("chat.renameSave")}
             </Button>
           </DialogFooter>

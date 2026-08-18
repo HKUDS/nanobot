@@ -169,19 +169,6 @@ class TestDiffCommits:
         assert git_ready.diff_commits("deadbeef", "cafebabe") == ""
 
 
-class TestFindCommit:
-    def test_finds_by_prefix(self, git_ready):
-        ws = git_ready._workspace
-        (ws / "SOUL.md").write_text("v2", encoding="utf-8")
-        sha = git_ready.auto_commit("v2")
-        found = git_ready.find_commit(sha[:4])
-        assert found is not None
-        assert found.sha == sha
-
-    def test_returns_none_for_unknown(self, git_ready):
-        assert git_ready.find_commit("deadbeef") is None
-
-
 class TestShowCommitDiff:
     def test_returns_commit_with_diff(self, git_ready):
         ws = git_ready._workspace

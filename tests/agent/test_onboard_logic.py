@@ -1092,6 +1092,23 @@ class TestMainMenuUpdate:
         assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
         assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
 
+    def test_quick_start_openai_codex_reports_incomplete_installation(self, monkeypatch):
+        import oauth_cli_kit
+
+        messages: list[str] = []
+        monkeypatch.delattr(oauth_cli_kit, "get_token")
+        monkeypatch.setattr(
+            onboard_wizard.console,
+            "print",
+            lambda message, *args, **kwargs: messages.append(str(message)),
+        )
+
+        assert onboard_wizard._quick_start_oauth_login(Config(), "openai_codex") is False
+        assert messages == [
+            "[red]This nanobot installation is missing the required oauth-cli-kit package. "
+            "Reinstall or upgrade nanobot-ai using the same installation method.[/red]"
+        ]
+
     def test_quick_start_openai_codex_runs_interactive_login_for_bad_cached_token(
         self, monkeypatch
     ):

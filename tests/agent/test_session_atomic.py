@@ -4,6 +4,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+from filelock import Timeout
+
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.manager import Session, SessionManager
 
@@ -37,14 +40,23 @@ class TestAtomicSave:
         tmp_files = list(mgr.sessions_dir.glob("*.tmp"))
         assert tmp_files == []
 
-    def test_tmp_file_cleaned_up_on_write_failure(self, tmp_path: Path):
+    def test_unique_tmp_file_cleaned_up_on_write_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
         mgr = SessionManager(tmp_path)
         session = Session(key="test:fail")
         path = mgr._get_session_path("test:fail")
-        tmp_path_file = path.with_suffix(".jsonl.tmp")
+        stale_shared_tmp = path.with_suffix(".jsonl.tmp")
+        unique_tmp = path.with_name(f".{path.name}.save-failure.tmp")
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path_file.write_text("stale")
+        stale_shared_tmp.write_text("stale", encoding="utf-8")
+        monkeypatch.setattr(
+            "nanobot.session.manager.secrets.token_hex",
+            lambda _length: "save-failure",
+        )
 
         class BadMessage:
             def __init__(self, data):
@@ -64,13 +76,17 @@ class TestAtomicSave:
         ]
 
         import unittest.mock
-        with unittest.mock.patch("nanobot.session.manager.json.dumps", side_effect=failing_dumps):
-            try:
-                mgr.save(session)
-            except OSError:
-                pass
+        with (
+            unittest.mock.patch(
+                "nanobot.session.manager.json.dumps",
+                side_effect=failing_dumps,
+            ),
+            pytest.raises(OSError, match="simulated disk full"),
+        ):
+            mgr.save(session)
 
-        assert not tmp_path_file.exists()
+        assert not unique_tmp.exists()
+        assert stale_shared_tmp.read_text(encoding="utf-8") == "stale"
 
     def test_overwrite_preserves_latest_data(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)
@@ -101,6 +117,21 @@ class TestAtomicSave:
         assert len(loaded.messages) == 5
         for i in range(5):
             assert loaded.messages[i]["content"] == f"msg{i}"
+
+    def test_managers_for_same_directory_coordinate_saves(self, tmp_path: Path):
+        workspace = tmp_path / "workspace"
+        sessions_root = tmp_path / "runtime"
+        owner = SessionManager(workspace, sessions_root=sessions_root)
+        peer = SessionManager(workspace, sessions_root=sessions_root)
+        assert owner.sessions_dir == peer.sessions_dir
+
+        session = Session(key="test:peer-manager")
+        peer._jsonl_store._session_files_lock.timeout = 0
+        with owner.locked_session_files(), pytest.raises(Timeout):
+            peer.save(session)
+
+        peer.save(session)
+        assert peer._get_session_path(session.key).is_file()
 
     def test_provider_state_round_trips_in_private_record_only(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)

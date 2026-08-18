@@ -36,6 +36,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
@@ -43,7 +44,7 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
@@ -75,6 +76,7 @@ from nanobot.session.goal_state import (
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import (
+    SESSION_CACHE_MAX_SIZE,
     Session,
     SessionManager,
     replay_max_messages_for_context,
@@ -94,11 +96,9 @@ from nanobot.utils.runtime import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.mcp import MCPConnection
     from nanobot.config.schema import (
         ChannelsConfig,
         Config,
-        MCPServerConfig,
         ProviderConfig,
         ToolsConfig,
     )
@@ -163,6 +163,7 @@ class TurnContext:
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
+    usage: dict[str, int] = field(default_factory=dict)
 
     def require_runtime(self) -> LLMRuntime:
         """Return the runtime established by the BUILD stage."""
@@ -196,6 +197,11 @@ class AgentLoop:
     @property
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
+
+    @property
+    def last_usage(self) -> Mapping[str, int]:
+        """Latest aggregate usage exposed through the runtime-control snapshot."""
+        return self._last_usage
 
     @property
     def provider(self) -> LLMProvider:
@@ -265,7 +271,7 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        mcp_servers: dict[str, MCPServerConfig] | None = None,
+        tool_registry: ToolRegistry | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
@@ -372,11 +378,15 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
-        self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
-        self._file_state_store = FileStateStore()
+        self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
+        # SessionManager owns every durable deletion entrypoint, including the
+        # WebUI and fork rollback paths.  Observe that boundary once instead of
+        # duplicating cleanup in each consumer.
+        self.sessions.set_delete_observer(self._file_state_store.discard)
+        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
+        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
         self.subagents = SubagentManager(
@@ -393,13 +403,11 @@ class AgentLoop:
         )
         self._unified_session = unified_session
         self._running = False
-        self._mcp_servers = mcp_servers or {}
-        self._mcp_stacks: dict[str, MCPConnection] = {}
-        self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
+        self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._close_mcp_lock = asyncio.Lock()
+        self._close_lock = asyncio.Lock()
         self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -447,7 +455,6 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
-        self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -457,9 +464,14 @@ class AgentLoop:
         cls,
         config: Config,
         bus: MessageBus | None = None,
+        *,
+        tool_registry: ToolRegistry,
         **extra: Any,
     ) -> AgentLoop:
         """Create an AgentLoop from config with the common parameter set.
+
+        The tool registry is caller-owned so application composition can share
+        it with infrastructure such as an ``MCPProvider``.
 
         Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
         allowing callers to override or extend the standard config-derived
@@ -470,6 +482,12 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
+        if "session_manager" not in extra:
+            data_dir = config.runtime_data_dir
+            extra["session_manager"] = SessionManager(
+                config.workspace_path,
+                sessions_root=data_dir / "sessions" if data_dir is not None else None,
+            )
         provider = extra.pop("provider", None) or make_provider(config)
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
@@ -493,7 +511,6 @@ class AgentLoop:
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
@@ -508,6 +525,7 @@ class AgentLoop:
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            tool_registry=tool_registry,
             **extra,
         )
 
@@ -516,9 +534,15 @@ class AgentLoop:
         self.subagents.max_iterations = self.max_iterations
 
     def invalidate_runtime_config(self) -> None:
-        """Invalidate runtime config and notify clients to refresh its catalog."""
+        """Invalidate runtime config for lazy refresh at the next admission."""
         self.runtime_resolver.invalidate()
-        self._publish_runtime_selection(self.runtime_resolver.runtime)
+
+    def refresh_runtime_config(self) -> LLMRuntime:
+        """Refresh runtime config now and publish the canonical selection."""
+        self.runtime_resolver.invalidate()
+        runtime = self.runtime_resolver.admit()
+        self._publish_runtime_selection(runtime)
+        return runtime
 
     def runtime_for_session(
         self,
@@ -622,18 +646,17 @@ class AgentLoop:
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
 
-        # MyTool needs runtime state reference — manual registration
+        # MyTool receives only the explicit runtime-control capability.
         if self.tools_config.my.enable:
             self.tools.register(
-                MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
+                MyTool(
+                    runtime_control=AgentRuntimeControl(self),
+                    modify_allowed=self.tools_config.my.allow_set,
+                )
             )
             registered.append("my")
 
         logger.info("Registered {} tools: {}", len(registered), registered)
-
-    async def _connect_mcp(self) -> None:
-        """Connect configured MCP servers."""
-        await agent_context.connect_mcp(self, self.tools)
 
     def register_runtime_context_provider(
         self,
@@ -721,6 +744,7 @@ class AgentLoop:
             session_summary=ctx.pending_summary,
             workspace=scope.project_path,
             runtime_context_blocks=ctx.runtime_context_blocks,
+            include_memory=ctx.session.policy.persist,
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
@@ -778,17 +802,71 @@ class AgentLoop:
         dispatch_fn: Callable[[CommandContext], Awaitable[OutboundMessage | None]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
-        ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
-        result = await dispatch_fn(ctx)
-        if result:
-            await self.bus.publish_outbound(result)
+        async def dispatch_and_publish() -> None:
+            ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
+            result = await dispatch_fn(ctx)
+            if result:
+                await self.bus.publish_outbound(result)
+            else:
+                logger.warning("Command '{}' matched but dispatch returned None", raw)
+
+        # A shell command may run for up to the configured exec timeout. Keep
+        # the inbound consumer responsive when it runs beside an active turn.
+        if (msg.metadata or {}).get(INBOUND_META_USER_SHELL) is True:
+            self.schedule_background(dispatch_and_publish())
+            return
+        await dispatch_and_publish()
+
+    async def execute_user_shell_command(self, ctx: CommandContext) -> OutboundMessage:
+        """Execute one trusted user command with the active workspace policy."""
+        metadata = dict(ctx.msg.metadata or {})
+        tool = self.tools.get("exec")
+        if tool is None:
+            content = "Shell execution is disabled in this nanobot configuration."
         else:
-            logger.warning("Command '{}' matched but dispatch returned None", raw)
+            session = ctx.session or self.sessions.get_or_create(ctx.key)
+            scope = self.workspace_scopes.for_turn(
+                channel=ctx.msg.channel,
+                message_metadata=metadata,
+                session_metadata=session.metadata,
+            )
+            request_token = bind_request_context(RequestContext(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                message_id=metadata.get("message_id"),
+                session_key=ctx.key,
+                original_user_text=f"!{ctx.args.strip()}",
+                runtime=ctx.runtime,
+                metadata=metadata,
+                sender_id=ctx.msg.sender_id,
+                turn_id=metadata.get("webui_turn_id"),
+                workspace=scope.project_path,
+            ))
+            workspace_token = bind_workspace_scope(scope)
+            turn_scope_stack = ExitStack()
+            try:
+                for turn_scope in ctx.turn_scopes:
+                    turn_scope_stack.enter_context(turn_scope)
+                result = await tool.execute(
+                    command=ctx.args.strip(),
+                    working_dir=str(scope.project_path),
+                )
+                content = str(result)
+            finally:
+                turn_scope_stack.close()
+                reset_workspace_scope(workspace_token)
+                reset_request_context(request_token)
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata={**metadata, "render_as": "text"},
+        )
 
     async def _cancel_active_tasks(self, key: str) -> int:
-        """Cancel and await all active tasks and subagents for *key*.
+        """Cancel and await all active work for *key*.
 
-        Returns the total number of cancelled tasks + subagents.
+        Returns the total number of cancelled tasks, subagents, and exec sessions.
         """
         tasks = tuple(self._active_tasks.pop(key, set()))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
@@ -796,7 +874,22 @@ class AgentLoop:
             with suppress(asyncio.CancelledError, Exception):
                 await t
         sub_cancelled = await self.subagents.cancel_by_session(key)
-        return cancelled + sub_cancelled
+        exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
+        return cancelled + sub_cancelled + exec_cancelled
+
+    async def discard_session(self, key: str) -> None:
+        """Stop active work for *key* and forget its cached session."""
+        self._discarding_sessions.add(key)
+        try:
+            self.sessions.invalidate(key)
+            await self._cancel_active_tasks(key)
+        finally:
+            self.discard_session_file_state(key)
+            self._discarding_sessions.discard(key)
+
+    def discard_session_file_state(self, key: str) -> None:
+        """Forget ephemeral file-read state for a reset or removed session."""
+        self._file_state_store.discard(key)
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -1135,7 +1228,6 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         try:
-            await self._connect_mcp()
             logger.info("Agent loop started")
 
             while self._running:
@@ -1160,6 +1252,11 @@ class AgentLoop:
                 raw = msg.content.strip()
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
+                    continue
+                if (
+                    msg.require_existing_session
+                    and self.sessions.get_cached(effective_key) is None
+                ):
                     continue
                 if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
@@ -1221,8 +1318,7 @@ class AgentLoop:
                 active_tasks.add(task)
                 task.add_done_callback(active_tasks.discard)
         finally:
-            # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
-            await self.close_mcp()
+            await self.aclose()
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
@@ -1279,6 +1375,8 @@ class AgentLoop:
                     # _emit_checkpoint during tool execution; materializing
                     # it into session history now makes it visible in the
                     # next conversation turn.
+                    if session_key in self._discarding_sessions:
+                        raise
                     try:
                         key = self._effective_session_key(msg)
                         session = self.sessions.get_or_create(key)
@@ -1338,24 +1436,24 @@ class AgentLoop:
                 await delivery.idle()
                 await self._publish_next_deferred_automation_turn(session_key)
 
-    async def close_mcp(self) -> None:
-        """Stop active work, then close exec, subagent, and MCP resources.
+    async def aclose(self) -> None:
+        """Stop active work, then close resources owned by the agent loop.
 
         Resource teardown must still run if cancellation interrupts task draining.
         Gateway shutdown deliberately bounds this coroutine, so keeping the cleanup
         phase in ``finally`` prevents a timed-out background task from leaving
         subprocess transports alive after the event loop closes.
         """
-        # The agent loop closes itself from ``run()`` while gateway shutdown also
+        # The loop closes itself from ``run()`` while application shutdown also
         # performs a guaranteed final close. Serialize those owners so they cannot
-        # tear down the same subprocess transports concurrently.
-        close_lock = getattr(self, "_close_mcp_lock", None)
+        # tear down the same resources concurrently.
+        close_lock = getattr(self, "_close_lock", None)
         if close_lock is None:
-            close_lock = self._close_mcp_lock = asyncio.Lock()
+            close_lock = self._close_lock = asyncio.Lock()
         async with close_lock:
-            await self._close_mcp_unlocked()
+            await self._aclose_unlocked()
 
-    async def _close_mcp_unlocked(self) -> None:
+    async def _aclose_unlocked(self) -> None:
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
         active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
@@ -1378,7 +1476,6 @@ class AgentLoop:
         cleanup_steps = (
             self.subagents.close,
             self._exec_session_manager.close_all,
-            lambda: agent_context.close_mcp(self),
         )
         for cleanup in cleanup_steps:
             try:
@@ -1556,6 +1653,7 @@ class AgentLoop:
         had_injections: bool,
         streamed_content: bool,
         *,
+        log_content: bool = True,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
@@ -1564,8 +1662,11 @@ class AgentLoop:
             if not had_injections or stop_reason == "empty_final_response":
                 return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        if log_content:
+            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        else:
+            logger.info("Response to {}:{}: [content hidden]", msg.channel, msg.sender_id)
 
         event = None
         meta = dict(msg.metadata or {})
@@ -1594,17 +1695,33 @@ class AgentLoop:
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_paths)
             msg = ctx.msg
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        if ctx.session is None:
+            if msg.require_existing_session:
+                ctx.session = self.sessions.get_cached(ctx.session_key)
+                if ctx.session is None:
+                    raise RuntimeError("required session is not active")
+            else:
+                ctx.session = self.sessions.get_or_create(ctx.session_key)
+        session = ctx.session
+        ctx.ephemeral = ctx.ephemeral or not session.policy.persist
+        tools = ctx.tools or self.tools
+        if session.policy.disabled_tools:
+            restricted = ToolRegistry()
+            for name in tools.tool_names:
+                tool = tools.get(name)
+                if name not in session.policy.disabled_tools and tool:
+                    restricted.register(tool)
+            tools = restricted
+        ctx.tools = tools
+
         if ctx.kind is TurnKind.SYSTEM:
             logger.info("Processing system message from {}", msg.sender_id)
-        else:
+        elif session.policy.log_content:
+            preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        else:
+            logger.info("Processing message from {}:{}: [content hidden]", msg.channel, msg.sender_id)
 
-        # Session is already fetched by the caller (_process_message) but
-        # ensure it exists in case this handler is invoked independently.
-        if ctx.session is None:
-            ctx.session = self.sessions.get_or_create(ctx.session_key)
-        session = ctx.session
         self._remember_unified_session_route(
             session,
             msg,
@@ -1731,7 +1848,7 @@ class AgentLoop:
                 session.provider_state = None
                 self.sessions.save(session)
             ctx.input_persisted_early = True
-        ctx.delivery.record_runtime(runtime)
+        await ctx.delivery.runtime_admitted(runtime)
 
         ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:
@@ -1835,6 +1952,8 @@ class AgentLoop:
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
+        ctx.usage = dict(self._last_usage)
+        ctx.delivery.record_usage(ctx.usage)
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)
 
@@ -1860,6 +1979,8 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
+        if ctx.usage and not ctx.ephemeral:
+            session.metadata["_last_usage"] = dict(ctx.usage)
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
@@ -1907,6 +2028,7 @@ class AgentLoop:
             ctx.stop_reason,
             ctx.had_injections,
             ctx.streamed_content,
+            log_content=ctx.require_session().policy.log_content,
             turn_latency_ms=ctx.turn_latency_ms,
         )
         if ctx.ephemeral and ctx.outbound is not None:
@@ -2246,7 +2368,6 @@ class AgentLoop:
         """Process an external message directly and return the outbound payload."""
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
-        await self._connect_mcp()
         metadata: dict[str, Any] = {}
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True

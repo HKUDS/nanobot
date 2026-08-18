@@ -1,0 +1,1760 @@
+"""Model and provider settings domain logic.
+
+This module owns model/provider DTO construction, validation, configuration
+updates, model discovery, and OAuth workflows. It deliberately has no
+dependency on the WebSocket transport.
+"""
+
+# oauth-cli-kit does not publish type stubs.
+# pyright: reportMissingTypeStubs=false
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import os
+import re
+import secrets
+import time
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
+
+import httpx
+
+from nanobot.config.loader import resolve_config_env_vars
+from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
+from nanobot.providers.image_generation import get_image_gen_provider
+from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
+from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
+from nanobot.webui.settings_contracts import (
+    QueryParams,
+    SettingsRequest,
+    SettingsRouteResult,
+    WebUISettingsError,
+    parse_bool,
+    query_first,
+    query_first_alias,
+    query_has_alias,
+)
+
+if TYPE_CHECKING:
+    from nanobot.webui.settings_services import (
+        WebUIOAuthFlowRegistry,
+        WebUISettingsServices,
+    )
+
+OAuthStatusReader = Callable[[Any], dict[str, Any]]
+SettingsPayloadBuilder = Callable[..., dict[str, Any]]
+HttpGet = Callable[..., httpx.Response]
+SettingsOperation = Callable[..., dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ModelSettingsOperations:
+    update_agent: SettingsOperation
+    create_model: SettingsOperation
+    update_model: SettingsOperation
+    delete_model: SettingsOperation
+    migrate_models: SettingsOperation
+    update_call_order: SettingsOperation
+    update_provider: SettingsOperation
+    create_provider: SettingsOperation
+    provider_models: SettingsOperation
+    oauth_login: SettingsOperation
+    oauth_complete: SettingsOperation
+    oauth_logout: SettingsOperation
+    apply_image_runtime_change: Callable[
+        [dict[str, Any]],
+        Awaitable[tuple[dict[str, Any], bool]],
+    ]
+
+
+class ModelSettingsPayload(TypedDict):
+    agent: dict[str, Any]
+    model_presets: list[dict[str, Any]]
+    model_call_order: list[str]
+    model_call_order_editable: bool
+    providers: list[dict[str, Any]]
+
+
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
+_OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
+_WEBUI_OAUTH_TIMEOUT_S = 600
+_MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
+_ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_REDACTED_PROVIDER_SECRET = "••••••••"
+_PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
+_PROVIDER_SECRET_KEYS = frozenset({
+    "auth",
+    "authentication",
+    "authorization",
+    "bearer",
+    "cookie",
+    "credential",
+    "credentials",
+    "hmac",
+    "key",
+    "passphrase",
+    "passwd",
+    "proxyauthorization",
+    "setcookie",
+    "sig",
+    "signature",
+})
+_PROVIDER_SECRET_KEY_SUFFIXES = (
+    "accesskey",
+    "apikey",
+    "encryptionkey",
+    "password",
+    "privatekey",
+    "secret",
+    "secretkey",
+    "signingkey",
+    "subscriptionkey",
+    "token",
+)
+
+
+def _provider_json_setting(
+    query: QueryParams,
+    snake: str,
+    camel: str,
+) -> dict[str, Any] | None:
+    raw = (query_first_alias(query, snake, camel) or "").strip()
+    if not raw:
+        return None
+    try:
+        value: object = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise WebUISettingsError(f"{snake} must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise WebUISettingsError(f"{snake} must be a JSON object")
+    return cast(dict[str, Any], value) or None
+
+
+def _provider_setting_key_is_secret(key: str) -> bool:
+    compact = re.sub(r"[^a-z0-9]", "", key.lower())
+    return compact in _PROVIDER_SECRET_KEYS or compact.endswith(_PROVIDER_SECRET_KEY_SUFFIXES)
+
+
+def _redact_provider_secret_values(value: Any, *, secret: bool = False) -> Any:
+    if secret and value not in (None, ""):
+        return _REDACTED_PROVIDER_SECRET
+    if isinstance(value, dict):
+        value_mapping = cast(dict[str, Any], value)
+        return {
+            key: _redact_provider_secret_values(
+                item,
+                secret=_provider_setting_key_is_secret(key),
+            )
+            for key, item in value_mapping.items()
+        }
+    if isinstance(value, list):
+        return [_redact_provider_secret_values(item) for item in cast(list[Any], value)]
+    return value
+
+
+def _restore_redacted_provider_secret_values(
+    submitted: Any,
+    current: Any,
+    *,
+    secret: bool = False,
+) -> Any:
+    if secret and submitted == _REDACTED_PROVIDER_SECRET:
+        return current
+    if isinstance(submitted, dict):
+        submitted_mapping = cast(dict[str, Any], submitted)
+        current_mapping = cast(dict[str, Any], current) if isinstance(current, dict) else {}
+        return {
+            key: _restore_redacted_provider_secret_values(
+                item,
+                current_mapping.get(key),
+                secret=_provider_setting_key_is_secret(key),
+            )
+            for key, item in submitted_mapping.items()
+        }
+    if isinstance(submitted, list):
+        submitted_items = cast(list[Any], submitted)
+        current_items = cast(list[Any], current) if isinstance(current, list) else []
+        return [
+            _restore_redacted_provider_secret_values(
+                item,
+                current_items[index] if index < len(current_items) else None,
+            )
+            for index, item in enumerate(submitted_items)
+        ]
+    return submitted
+
+
+def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    string_fields = (
+        ("api_key", "apiKey"),
+        ("api_base", "apiBase"),
+        ("api_type", "apiType"),
+        ("proxy", "proxy"),
+        ("thinking_style", "thinkingStyle"),
+        ("region", "region"),
+        ("profile", "profile"),
+        ("display_name", "displayName"),
+    )
+    for snake, camel in string_fields:
+        if query_has_alias(query, snake, camel):
+            value = (query_first_alias(query, snake, camel) or "").strip()
+            updates[snake] = value or ("auto" if snake == "api_type" else None)
+
+    for snake, camel in (
+        ("extra_headers", "extraHeaders"),
+        ("extra_body", "extraBody"),
+        ("extra_query", "extraQuery"),
+    ):
+        if query_has_alias(query, snake, camel):
+            updates[snake] = _provider_json_setting(query, snake, camel)
+    return updates
+
+
+def _validated_provider_config(
+    provider_config: ProviderConfig | None,
+    updates: dict[str, Any],
+) -> ProviderConfig:
+    config_type = type(provider_config) if provider_config is not None else ProviderConfig
+    values = provider_config.model_dump(mode="python") if provider_config is not None else {}
+    if provider_config is not None:
+        for field in _PROVIDER_STRUCTURED_FIELDS:
+            if field in updates:
+                updates[field] = _restore_redacted_provider_secret_values(
+                    updates[field],
+                    getattr(provider_config, field),
+                )
+    values.update(updates)
+    try:
+        return config_type.model_validate(values)
+    except ValueError as exc:
+        errors_callback = getattr(exc, "errors", None)
+        errors: list[dict[str, Any]] = (
+            cast(Any, errors_callback)() if callable(errors_callback) else []
+        )
+        if errors:
+            error = errors[0]
+            field = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg", "invalid value"))
+            raise WebUISettingsError(f"{field}: {message}" if field else message) from exc
+        raise WebUISettingsError(str(exc)) from exc
+
+
+def mask_secret_hint(secret: str | None) -> str | None:
+    if not secret:
+        return None
+    if len(secret) <= 8:
+        return "••••"
+    return f"{secret[:4]}••••{secret[-4:]}"
+
+
+def _resolve_env_placeholders(value: str | None) -> str | None:
+    if not value:
+        return None
+    missing = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal missing
+        env_value = os.environ.get(match.group(1))
+        if env_value is None:
+            missing = True
+            return ""
+        return env_value
+
+    resolved = _ENV_REF_RE.sub(replace, value).strip()
+    if missing and not resolved:
+        return None
+    return resolved or None
+
+
+def provider_requires_api_key(spec: Any) -> bool:
+    if spec.name == "azure_openai":
+        return False
+    if spec.is_oauth:
+        return False
+    if spec.is_local or spec.is_direct:
+        return False
+    return True
+
+
+def provider_requires_api_base(spec: Any) -> bool:
+    if spec.name == "azure_openai":
+        return True
+    return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
+
+
+def oauth_provider_status(spec: Any) -> dict[str, Any]:
+    if not getattr(spec, "is_oauth", False):
+        return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+
+    if spec.name == "openai_codex":
+        try:
+            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.storage import FileTokenStorage
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).load()
+        expires_at = getattr(token, "expires", None) if token else None
+        now_ms = int(time.time() * 1000)
+        return {
+            "configured": bool(
+                token
+                and token.access
+                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
+            ),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": expires_at,
+            "login_supported": True,
+        }
+
+    if spec.name == "github_copilot":
+        try:
+            from nanobot.providers.github_copilot_provider import get_github_copilot_login_status
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = get_github_copilot_login_status()
+        return {
+            "configured": bool(token and token.access and token.expires > int(time.time() * 1000)),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": getattr(token, "expires", None) if token else None,
+            "login_supported": True,
+        }
+
+    if spec.name == "xai_grok":
+        try:
+            from nanobot.providers.xai_oauth import get_xai_oauth_login_status
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = get_xai_oauth_login_status()
+        expires_at = getattr(token, "expires", None) if token else None
+        now_ms = int(time.time() * 1000)
+        return {
+            "configured": bool(
+                token
+                and token.access
+                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
+            ),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": expires_at,
+            "login_supported": True,
+        }
+
+    return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+
+
+def provider_configured_for_settings(
+    spec: Any,
+    provider_config: Any,
+    oauth_status: OAuthStatusReader,
+) -> bool:
+    if spec.is_oauth:
+        return bool(oauth_status(spec)["configured"])
+    if provider_requires_api_base(spec):
+        return bool(provider_config.api_base)
+    if provider_requires_api_key(spec):
+        return bool(provider_config.api_key)
+    return bool(
+        provider_config.api_key
+        or provider_config.api_base
+        or getattr(provider_config, "region", None)
+        or getattr(provider_config, "profile", None)
+    )
+
+
+def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
+    model_extra = config.providers.model_extra or {}
+    return [
+        (name, provider_config)
+        for name, provider_config in model_extra.items()
+        if isinstance(provider_config, ProviderConfig)
+    ]
+
+
+def resolve_settings_provider(
+    config: Config,
+    provider_name: str,
+) -> tuple[Any, str, ProviderConfig] | None:
+    spec = find_by_name(provider_name)
+    if spec is not None:
+        provider_config = getattr(config.providers, spec.name, None)
+        if isinstance(provider_config, ProviderConfig):
+            return spec, spec.name, provider_config
+        return None
+
+    normalized = provider_name.replace("-", "_")
+    for extra_name, provider_config in _dynamic_provider_items(config):
+        if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
+            return (
+                create_dynamic_spec(
+                    extra_name,
+                    display_name=provider_config.display_name or "",
+                    thinking_style=provider_config.thinking_style or "",
+                ),
+                extra_name,
+                provider_config,
+            )
+    return None
+
+
+def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
+    fields: list[str] = []
+    if spec.backend in {"openai_compat", "anthropic"}:
+        fields.append("extra_headers")
+    if spec.backend in {"openai_compat", "bedrock", "openai_codex", "xai_grok"}:
+        fields.append("extra_body")
+    if spec.backend == "openai_compat":
+        fields.extend(("extra_query", "proxy"))
+    if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
+        fields.append("proxy")
+    if spec.name == "openai":
+        fields.append("api_type")
+    if spec.backend == "bedrock":
+        fields.extend(("region", "profile"))
+    if find_by_name(name) is None:
+        fields.append("thinking_style")
+    return fields
+
+
+def _provider_settings_row(
+    name: str,
+    spec: Any,
+    provider_config: ProviderConfig,
+    oauth_status_reader: OAuthStatusReader,
+) -> dict[str, Any]:
+    oauth_status = oauth_status_reader(spec) if spec.is_oauth else None
+    is_custom = find_by_name(name) is None
+    row = {
+        "name": name,
+        "label": spec.label,
+        "is_custom": is_custom,
+        "configured": (
+            bool(oauth_status["configured"])
+            if oauth_status is not None
+            else provider_configured_for_settings(spec, provider_config, oauth_status_reader)
+        ),
+        "auth_type": "oauth" if spec.is_oauth else "api_key",
+        "api_key_required": provider_requires_api_key(spec),
+        "api_key_hint": mask_secret_hint(provider_config.api_key),
+        "api_base": provider_config.api_base,
+        "default_api_base": spec.default_api_base or None,
+        "model_selectable": not spec.is_transcription_only,
+        "model_catalog": model_catalog_kind(spec),
+        "advanced_fields": _provider_advanced_field_names(name, spec),
+        "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
+        "extra_body": _redact_provider_secret_values(provider_config.extra_body),
+        "extra_query": _redact_provider_secret_values(provider_config.extra_query),
+        "thinking_style": provider_config.thinking_style,
+        "region": getattr(provider_config, "region", None),
+        "profile": getattr(provider_config, "profile", None),
+        "proxy": provider_config.proxy,
+    }
+    if oauth_status is not None:
+        row["oauth_account"] = oauth_status["account"]
+        row["oauth_expires_at"] = oauth_status["expires_at"]
+        row["oauth_login_supported"] = oauth_status["login_supported"]
+    if spec.name == "openai":
+        row["api_type"] = provider_config.api_type
+    return row
+
+
+def _provider_settings_rows(
+    config: Config,
+    selected_provider: str | None,
+    oauth_status: OAuthStatusReader,
+) -> list[dict[str, Any]]:
+    """Return one Settings row per provider family while preserving legacy configs."""
+    aliases: dict[str, list[Any]] = {}
+    for spec in PROVIDERS:
+        if spec.settings_alias_for:
+            aliases.setdefault(spec.settings_alias_for, []).append(spec)
+
+    rows: list[dict[str, Any]] = []
+    for canonical in PROVIDERS:
+        if canonical.settings_alias_for:
+            continue
+        candidates = [canonical, *aliases.get(canonical.name, [])]
+        chosen = next((spec for spec in candidates if spec.name == selected_provider), None)
+        if chosen is None:
+            chosen = next(
+                (
+                    spec
+                    for spec in candidates
+                    if (provider_config := getattr(config.providers, spec.name, None)) is not None
+                    and provider_configured_for_settings(spec, provider_config, oauth_status)
+                ),
+                canonical,
+            )
+        provider_config = getattr(config.providers, chosen.name, None)
+        if provider_config is None:
+            continue
+        row = _provider_settings_row(chosen.name, chosen, provider_config, oauth_status)
+        row["label"] = canonical.label
+        rows.append(row)
+    return rows
+
+
+def model_catalog_kind(spec: Any) -> str:
+    catalog = getattr(spec, "model_catalog", "auto")
+    if catalog != "auto":
+        return catalog
+    if spec.is_transcription_only or spec.is_oauth:
+        return "unsupported"
+    if spec.backend != "openai_compat" and spec.name != "minimax_anthropic":
+        return "unsupported"
+    if spec.is_local:
+        return "local"
+    if spec.is_direct:
+        return "custom"
+    if spec.is_gateway:
+        return "catalog"
+    return "official"
+
+
+def _model_id_from_row(row: Any) -> str | None:
+    if isinstance(row, str):
+        return row.strip() or None
+    if not isinstance(row, dict):
+        return None
+    row_mapping = cast(dict[str, Any], row)
+    for key in ("id", "name", "model"):
+        value = row_mapping.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _model_context_window(row: Any) -> int | None:
+    if not isinstance(row, dict):
+        return None
+    row_mapping = cast(dict[str, Any], row)
+    for key in (
+        "context_window",
+        "context_length",
+        "max_context_length",
+        "max_model_len",
+        "max_input_tokens",
+    ):
+        value = row_mapping.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, float) and value > 0:
+            return int(value)
+    return None
+
+
+def _model_row_payload(row: Any) -> dict[str, Any] | None:
+    model_id = _model_id_from_row(row)
+    if not model_id:
+        return None
+    label: str | None = None
+    description: str | None = None
+    owned_by: str | None = None
+    if isinstance(row, dict):
+        row_mapping = cast(dict[str, Any], row)
+        raw_label = row_mapping.get("display_name") or row_mapping.get("label") or row_mapping.get("name")
+        if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
+            label = raw_label.strip()
+        raw_description = row_mapping.get("description")
+        if isinstance(raw_description, str) and raw_description.strip():
+            description = raw_description.strip()
+        raw_owner = row_mapping.get("owned_by") or row_mapping.get("owner") or row_mapping.get("organization")
+        if isinstance(raw_owner, str) and raw_owner.strip():
+            owned_by = raw_owner.strip()
+    payload = {
+        "id": model_id,
+        "label": label,
+        "owned_by": owned_by,
+        "context_window": _model_context_window(row),
+    }
+    if description:
+        payload["description"] = description
+    return payload
+
+
+def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
+    raw_rows = cast(dict[str, Any], body).get("data") if isinstance(body, dict) else body
+    if not isinstance(raw_rows, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_row in cast(list[object], raw_rows):
+        row = _model_row_payload(raw_row)
+        if row is None or row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        rows.append(row)
+    return rows
+
+
+def provider_models_payload(
+    config: Config,
+    query: QueryParams,
+    *,
+    http_get: HttpGet,
+) -> dict[str, Any]:
+    """Fetch an advisory model list without mutating configuration."""
+    provider_name = (query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+
+    resolved_provider = resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+
+    catalog_kind = model_catalog_kind(spec)
+    base_payload: dict[str, Any] = {
+        "provider": provider_key,
+        "label": spec.label,
+        "catalog_kind": catalog_kind,
+        "models": [],
+        "model_count": 0,
+        "message": None,
+        "fetched_at": time.time(),
+    }
+    if catalog_kind == "unsupported":
+        return {
+            **base_payload,
+            "status": "unsupported",
+            "message": "Model list is not available for this provider. Type a model ID manually.",
+        }
+    if catalog_kind == "builtin":
+        rows = [
+            {
+                "id": model.id,
+                "label": model.label or None,
+                "description": model.description or None,
+                "owned_by": spec.label,
+                "context_window": model.context_window,
+            }
+            for model in spec.builtin_models
+        ]
+        return {
+            **base_payload,
+            "status": "available",
+            "models": rows,
+            "model_count": len(rows),
+        }
+
+    api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
+    if spec.name == "openai" and not api_base:
+        api_base = "https://api.openai.com/v1"
+    if not api_base:
+        return {
+            **base_payload,
+            "status": "missing_api_base",
+            "message": "Configure an API base URL to load models.",
+        }
+
+    api_key = _resolve_env_placeholders(provider_config.api_key)
+    if provider_requires_api_key(spec) and not api_key:
+        return {
+            **base_payload,
+            "status": "not_configured",
+            "message": "Configure this provider before loading models.",
+        }
+
+    headers = {"Accept": "application/json"}
+    if api_key:
+        if spec.name == "minimax_anthropic":
+            headers["X-Api-Key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+    models_url = f"{api_base.rstrip('/')}/models"
+    if spec.name == "minimax_anthropic" and not api_base.rstrip("/").endswith("/v1"):
+        models_url = f"{api_base.rstrip('/')}/v1/models"
+
+    try:
+        response = http_get(
+            models_url,
+            headers=headers,
+            timeout=10.0,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        rows = _extract_model_rows(response.json())
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in {401, 403}:
+            return {
+                **base_payload,
+                "status": "not_configured",
+                "message": "The provider rejected the configured credential.",
+            }
+        return {
+            **base_payload,
+            "status": "error",
+            "message": f"Model list request failed with HTTP {status}.",
+        }
+    except (httpx.HTTPError, ValueError) as exc:
+        return {
+            **base_payload,
+            "status": "error",
+            "message": f"Could not load models: {exc}",
+        }
+
+    return {
+        **base_payload,
+        "status": "available",
+        "models": rows,
+        "model_count": len(rows),
+    }
+
+
+def _parse_context_window_tokens(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise WebUISettingsError("context_window_tokens must be an integer") from None
+    if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
+        raise WebUISettingsError(
+            "context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576"
+        )
+    return parsed
+
+
+def _parse_positive_int(value: str | None, field: str) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise WebUISettingsError(f"{field} must be an integer") from None
+    if parsed <= 0:
+        raise WebUISettingsError(f"{field} must be greater than zero")
+    return parsed
+
+
+def _parse_temperature(value: str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise WebUISettingsError("temperature must be a number") from None
+    if not math.isfinite(parsed) or parsed < 0 or parsed > 2:
+        raise WebUISettingsError("temperature must be between 0 and 2")
+    return parsed
+
+
+def _model_configuration_slug(label: str) -> str:
+    normalized = _MODEL_CONFIGURATION_SLUG_RE.sub("-", label.strip().lower())
+    normalized = normalized.strip("-_")
+    if not normalized:
+        raise WebUISettingsError("configuration name is required")
+    if normalized == "default":
+        raise WebUISettingsError("configuration name is reserved")
+    if len(normalized) > 48:
+        normalized = normalized[:48].rstrip("-_")
+    return normalized
+
+
+def _model_configuration_name(value: str) -> str:
+    """Validate a user-facing preset name without inventing a second identity."""
+    name = value.strip()
+    if not name:
+        raise WebUISettingsError("configuration name is required")
+    if name.casefold() == "default":
+        raise WebUISettingsError("configuration name is reserved")
+    if len(name) > 48:
+        raise WebUISettingsError("configuration name must be 48 characters or fewer")
+    if not name.isprintable():
+        raise WebUISettingsError("configuration name contains unsupported characters")
+    return name
+
+
+def _model_configuration_name_exists(
+    config: Config,
+    name: str,
+    *,
+    exclude: str | None = None,
+) -> bool:
+    normalized = name.casefold()
+    return any(
+        existing != exclude and existing.casefold() == normalized
+        for existing in config.model_presets
+    )
+
+
+def _rename_model_configuration(config: Config, old_name: str, new_name: str) -> bool:
+    """Rename one preset and every config reference to it."""
+    if old_name == new_name:
+        return False
+    if _model_configuration_name_exists(config, new_name, exclude=old_name):
+        raise WebUISettingsError("configuration already exists", status=409)
+
+    config.model_presets = {
+        (new_name if name == old_name else name): preset
+        for name, preset in config.model_presets.items()
+    }
+    defaults = config.agents.defaults
+    if defaults.model_preset == old_name:
+        defaults.model_preset = new_name
+    defaults.fallback_models = [
+        new_name if fallback == old_name else fallback
+        for fallback in defaults.fallback_models
+    ]
+    if defaults.dream.model_override == old_name:
+        defaults.dream.model_override = new_name
+    return True
+
+
+def _custom_provider_key(config: Config, display_name: str) -> str:
+    slug = _MODEL_CONFIGURATION_SLUG_RE.sub("-", display_name.strip().lower()).strip("-_")
+    base = f"custom-{slug or 'provider'}"
+    if len(base) > 56:
+        base = base[:56].rstrip("-_")
+    existing = {
+        name.replace("_", "-").lower()
+        for name, _provider_config in _dynamic_provider_items(config)
+    }
+    candidate = base
+    suffix = 2
+    while candidate.replace("_", "-").lower() in existing or find_by_name(candidate):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _provider_display_name_exists(
+    config: Config,
+    display_name: str,
+    *,
+    exclude_key: str | None = None,
+) -> bool:
+    normalized = display_name.strip().casefold()
+    if any(spec.label.strip().casefold() == normalized for spec in PROVIDERS):
+        return True
+    for provider_key, provider_config in _dynamic_provider_items(config):
+        if provider_key == exclude_key:
+            continue
+        label = (
+            provider_config.display_name
+            or provider_key.replace("-", " ").replace("_", " ").title()
+        )
+        if label.strip().casefold() == normalized:
+            return True
+    return False
+
+
+def _unique_model_configuration_name(config: Config, label: str) -> str:
+    """Return a stable, unused preset name for a migrated model configuration."""
+    try:
+        base = _model_configuration_slug(label)
+    except WebUISettingsError:
+        base = "model"
+    candidate = base
+    suffix = 2
+    while _model_configuration_name_exists(config, candidate):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _model_configuration_label(model: str) -> str:
+    return model.rsplit("/", 1)[-1] or model
+
+
+def _model_call_order_state(config: Config) -> tuple[list[str], bool]:
+    defaults = config.agents.defaults
+    primary = defaults.model_preset
+    if not primary or primary == "default" or primary not in config.model_presets:
+        return [], False
+    order = [primary]
+    for fallback in defaults.fallback_models:
+        if not isinstance(fallback, str):
+            return [], False
+        order.append(fallback)
+    return order, True
+
+
+def _validate_configured_provider(
+    config: Config,
+    provider: str,
+    oauth_status: OAuthStatusReader,
+) -> None:
+    if provider == "auto":
+        return
+    resolved_provider = resolve_settings_provider(config, provider)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, _, provider_config = resolved_provider
+    if spec.is_transcription_only:
+        raise WebUISettingsError("provider does not support chat models")
+    if not provider_configured_for_settings(spec, provider_config, oauth_status):
+        raise WebUISettingsError("provider is not configured")
+
+
+_DEFAULT_REASONING_EFFORT_VALUES: tuple[str, ...] = ("", "low", "medium", "high")
+
+
+def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
+    """Return user-facing reasoning_effort options for this provider+model."""
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None:
+        return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+    model_lower = (model or "").lower()
+    if model_lower.rsplit("/", 1)[-1] == "kimi-k3":
+        return ["", "max"]
+
+    implicit = getattr(spec, "implicit_reasoning_models", ())
+    if implicit and any(pattern in model_lower for pattern in implicit):
+        return [""]
+
+    remap = getattr(spec, "reasoning_effort_remap", ())
+    if remap:
+        wire_values: list[str] = []
+        for _user_value, wire_value in remap:
+            if wire_value and wire_value != "none" and wire_value not in wire_values:
+                wire_values.append(wire_value)
+        return ["", *wire_values]
+
+    return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+
+def model_settings_payload(
+    config: Config,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> ModelSettingsPayload:
+    defaults = config.agents.defaults
+    active_preset_name = defaults.model_preset or "default"
+    effective_preset = config.resolve_preset()
+    provider_name = (
+        config.get_provider_name(effective_preset.model, preset=effective_preset)
+        or effective_preset.provider
+    )
+    provider = config.get_provider(effective_preset.model, preset=effective_preset)
+    selected_provider = provider_name
+    if effective_preset.provider != "auto":
+        spec = find_by_name(effective_preset.provider)
+        selected_provider = spec.name if spec else provider_name
+
+    providers = _provider_settings_rows(config, selected_provider, oauth_status)
+    for provider_key, provider_config in _dynamic_provider_items(config):
+        providers.append(
+            _provider_settings_row(
+                provider_key,
+                create_dynamic_spec(
+                    provider_key,
+                    display_name=provider_config.display_name or "",
+                    thinking_style=provider_config.thinking_style or "",
+                ),
+                provider_config,
+                oauth_status,
+            )
+        )
+
+    model_presets = [
+        {
+            "name": "default",
+            # Kept on the wire for older WebUI clients. It is no longer a
+            # separate product concept and always mirrors the canonical name.
+            "label": "Default",
+            "active": active_preset_name == "default",
+            "is_default": True,
+            "model": defaults.model,
+            "provider": defaults.provider,
+            "resolved_provider": config.get_provider_name(
+                defaults.model,
+                preset=config.resolve_default_preset(),
+            ),
+            "max_tokens": defaults.max_tokens,
+            "context_window_tokens": defaults.context_window_tokens,
+            "temperature": defaults.temperature,
+            "reasoning_effort": defaults.reasoning_effort,
+            "reasoning_effort_values": reasoning_effort_values_for(
+                config.get_provider_name(
+                    defaults.model,
+                    preset=config.resolve_default_preset(),
+                )
+                or defaults.provider,
+                defaults.model,
+            ),
+        }
+    ]
+    for name, preset in config.model_presets.items():
+        resolved_preset_provider = (
+            config.get_provider_name(preset.model, preset=preset) or preset.provider
+        )
+        model_presets.append(
+            {
+                "name": name,
+                "label": name,
+                "active": active_preset_name == name,
+                "is_default": False,
+                "model": preset.model,
+                "provider": preset.provider,
+                "resolved_provider": resolved_preset_provider,
+                "max_tokens": preset.max_tokens,
+                "context_window_tokens": preset.context_window_tokens,
+                "temperature": preset.temperature,
+                "reasoning_effort": preset.reasoning_effort,
+                "reasoning_effort_values": reasoning_effort_values_for(
+                    resolved_preset_provider,
+                    preset.model,
+                ),
+            }
+        )
+
+    model_call_order, model_call_order_editable = _model_call_order_state(config)
+    return {
+        "agent": {
+            "model": effective_preset.model,
+            "provider": selected_provider,
+            "resolved_provider": provider_name,
+            "has_api_key": bool(provider and provider.api_key),
+            "model_preset": active_preset_name,
+            "max_tokens": effective_preset.max_tokens,
+            "context_window_tokens": effective_preset.context_window_tokens,
+            "temperature": effective_preset.temperature,
+            "reasoning_effort": effective_preset.reasoning_effort,
+            "timezone": defaults.timezone,
+            "tool_hint_max_length": defaults.tool_hint_max_length,
+        },
+        "model_presets": model_presets,
+        "model_call_order": model_call_order,
+        "model_call_order_editable": model_call_order_editable,
+        "providers": providers,
+    }
+
+
+def update_agent_model_settings(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
+    defaults = config.agents.defaults
+    changed = False
+
+    if "model_preset" in query or "modelPreset" in query:
+        preset = (query_first_alias(query, "model_preset", "modelPreset") or "").strip()
+        preset_value = None if not preset or preset == "default" else preset
+        if preset_value is not None and preset_value not in config.model_presets:
+            raise WebUISettingsError("unknown model preset")
+        if defaults.model_preset != preset_value:
+            defaults.model_preset = preset_value
+            changed = True
+
+    model = query_first(query, "model")
+    if model is not None:
+        model = model.strip()
+        if not model:
+            raise WebUISettingsError("model is required")
+        if defaults.model != model:
+            defaults.model = model
+            changed = True
+
+    provider = query_first(query, "provider")
+    if provider is not None:
+        provider = provider.strip()
+        if not provider:
+            raise WebUISettingsError("provider is required")
+        _validate_configured_provider(config, provider, oauth_status)
+        if defaults.provider != provider:
+            defaults.provider = provider
+            changed = True
+
+    context_window_tokens = _parse_context_window_tokens(
+        query_first_alias(query, "context_window_tokens", "contextWindowTokens")
+    )
+    if (
+        context_window_tokens is not None
+        and defaults.context_window_tokens != context_window_tokens
+    ):
+        defaults.context_window_tokens = context_window_tokens
+        changed = True
+    return changed
+
+
+def create_model_configuration(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> str:
+    raw_name = query_first(query, "name")
+    legacy_label = query_first_alias(query, "label", "displayName")
+    model = (query_first(query, "model") or "").strip()
+    provider = (query_first(query, "provider") or "").strip()
+
+    if not model:
+        raise WebUISettingsError("model is required")
+    if not provider:
+        raise WebUISettingsError("provider is required")
+
+    # Old clients only sent `label`; preserve their slugging behaviour while
+    # new clients provide the one canonical, user-visible name directly.
+    name = (
+        _model_configuration_name(raw_name)
+        if raw_name is not None
+        else _model_configuration_slug(legacy_label or "")
+    )
+    if _model_configuration_name_exists(config, name):
+        raise WebUISettingsError("configuration already exists", status=409)
+    _validate_configured_provider(config, provider, oauth_status)
+
+    base = config.resolve_preset()
+    max_tokens = _parse_positive_int(
+        query_first_alias(query, "max_tokens", "maxTokens"),
+        "max_tokens",
+    )
+    context_window_tokens = _parse_positive_int(
+        query_first_alias(query, "context_window_tokens", "contextWindowTokens"),
+        "context_window_tokens",
+    )
+    temperature = _parse_temperature(query_first(query, "temperature"))
+    reasoning_effort = base.reasoning_effort
+    if "reasoning_effort" in query or "reasoningEffort" in query:
+        reasoning_effort = (
+            query_first_alias(query, "reasoning_effort", "reasoningEffort") or ""
+        ).strip() or None
+    config.model_presets[name] = ModelPresetConfig(
+        model=model,
+        provider=provider,
+        max_tokens=max_tokens if max_tokens is not None else base.max_tokens,
+        context_window_tokens=(
+            context_window_tokens
+            if context_window_tokens is not None
+            else base.context_window_tokens
+        ),
+        temperature=temperature if temperature is not None else base.temperature,
+        reasoning_effort=reasoning_effort,
+    )
+    return name
+
+
+def update_model_configuration(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
+    name = (query_first(query, "name") or "").strip()
+    if not name or name == "default":
+        raise WebUISettingsError("model configuration is required")
+
+    preset = config.model_presets.get(name)
+    if preset is None:
+        raise WebUISettingsError("unknown model configuration")
+
+    changed = False
+    new_name_value = query_first_alias(query, "new_name", "newName")
+    if new_name_value is not None:
+        new_name = _model_configuration_name(new_name_value)
+        changed = _rename_model_configuration(config, name, new_name) or changed
+        name = new_name
+        preset = config.model_presets[name]
+
+    model = query_first(query, "model")
+    if model is not None:
+        model = model.strip()
+        if not model:
+            raise WebUISettingsError("model is required")
+        if preset.model != model:
+            preset.model = model
+            changed = True
+
+    provider = query_first(query, "provider")
+    if provider is not None:
+        provider = provider.strip()
+        if not provider:
+            raise WebUISettingsError("provider is required")
+        _validate_configured_provider(config, provider, oauth_status)
+        if preset.provider != provider:
+            preset.provider = provider
+            changed = True
+
+    context_window_tokens = _parse_positive_int(
+        query_first_alias(query, "context_window_tokens", "contextWindowTokens"),
+        "context_window_tokens",
+    )
+    if (
+        context_window_tokens is not None
+        and preset.context_window_tokens != context_window_tokens
+    ):
+        preset.context_window_tokens = context_window_tokens
+        changed = True
+
+    max_tokens = _parse_positive_int(
+        query_first_alias(query, "max_tokens", "maxTokens"),
+        "max_tokens",
+    )
+    if max_tokens is not None and preset.max_tokens != max_tokens:
+        preset.max_tokens = max_tokens
+        changed = True
+
+    temperature = _parse_temperature(query_first(query, "temperature"))
+    if temperature is not None and preset.temperature != temperature:
+        preset.temperature = temperature
+        changed = True
+
+    if "reasoning_effort" in query or "reasoningEffort" in query:
+        reasoning_effort = (
+            query_first_alias(query, "reasoning_effort", "reasoningEffort") or ""
+        ).strip() or None
+        if preset.reasoning_effort != reasoning_effort:
+            preset.reasoning_effort = reasoning_effort
+            changed = True
+    return changed
+
+
+def update_model_call_order(config: Config, query: QueryParams) -> bool:
+    raw_order = query_first_alias(query, "order", "presetNames")
+    if raw_order is None:
+        raise WebUISettingsError("model call order is required")
+    try:
+        order: object = json.loads(raw_order)
+    except json.JSONDecodeError:
+        raise WebUISettingsError("model call order must be a JSON array") from None
+    if (
+        not isinstance(order, list)
+        or not order
+        or any(
+            not isinstance(name, str) or not name.strip()
+            for name in cast(list[object], order)
+        )
+    ):
+        raise WebUISettingsError("model call order must contain at least one preset")
+
+    normalized_order = [cast(str, name).strip() for name in cast(list[object], order)]
+    _, editable = _model_call_order_state(config)
+    if not editable:
+        raise WebUISettingsError(
+            "convert the existing model configuration to presets first",
+            status=409,
+        )
+    unknown = [name for name in normalized_order if name not in config.model_presets]
+    if unknown:
+        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
+
+    defaults = config.agents.defaults
+    fallback_models: list[FallbackCandidate] = list(normalized_order[1:])
+    changed = (
+        defaults.model_preset != normalized_order[0]
+        or defaults.fallback_models != fallback_models
+    )
+    if changed:
+        defaults.model_preset = normalized_order[0]
+        defaults.fallback_models = fallback_models
+    return changed
+
+
+def migrate_model_configurations(config: Config) -> bool:
+    """Materialize legacy primary/inline model settings as named presets."""
+    defaults = config.agents.defaults
+    primary = config.resolve_preset()
+    created: list[str] = []
+
+    if not defaults.model_preset or defaults.model_preset == "default":
+        label = _model_configuration_label(primary.model)
+        name = _unique_model_configuration_name(config, label)
+        config.model_presets[name] = ModelPresetConfig(
+            model=primary.model,
+            provider=primary.provider,
+            max_tokens=primary.max_tokens,
+            context_window_tokens=primary.context_window_tokens,
+            temperature=primary.temperature,
+            reasoning_effort=primary.reasoning_effort,
+        )
+        defaults.model_preset = name
+        created.append(name)
+
+    fallback_models: list[FallbackCandidate] = []
+    for fallback in defaults.fallback_models:
+        if isinstance(fallback, str):
+            fallback_models.append(fallback)
+            continue
+        label = _model_configuration_label(fallback.model)
+        name = _unique_model_configuration_name(config, label)
+        config.model_presets[name] = ModelPresetConfig(
+            model=fallback.model,
+            provider=fallback.provider,
+            max_tokens=(
+                fallback.max_tokens if fallback.max_tokens is not None else primary.max_tokens
+            ),
+            context_window_tokens=(
+                fallback.context_window_tokens
+                if fallback.context_window_tokens is not None
+                else primary.context_window_tokens
+            ),
+            temperature=(
+                fallback.temperature
+                if fallback.temperature is not None
+                else primary.temperature
+            ),
+            reasoning_effort=fallback.reasoning_effort,
+        )
+        fallback_models.append(name)
+        created.append(name)
+
+    if created:
+        defaults.fallback_models = fallback_models
+    return bool(created)
+
+
+def delete_model_configuration(config: Config, query: QueryParams) -> None:
+    name = (query_first(query, "name") or "").strip()
+    if not name or name == "default":
+        raise WebUISettingsError("model configuration is required")
+    if name not in config.model_presets:
+        raise WebUISettingsError("unknown model configuration")
+    defaults = config.agents.defaults
+    referenced = defaults.model_preset == name or any(
+        fallback == name for fallback in defaults.fallback_models
+    )
+    if referenced:
+        raise WebUISettingsError(
+            "remove the model preset from the call order first",
+            status=409,
+        )
+    del config.model_presets[name]
+
+
+def create_provider_settings(config: Config, query: QueryParams) -> str:
+    display_name = (query_first_alias(query, "name", "displayName") or "").strip()
+    if not display_name:
+        raise WebUISettingsError("provider name is required")
+    if len(display_name) > 80:
+        raise WebUISettingsError("provider name must be 80 characters or fewer")
+    updates = _provider_config_updates(query)
+    allowed = {
+        "api_key",
+        "api_base",
+        "proxy",
+        "extra_headers",
+        "extra_body",
+        "extra_query",
+        "thinking_style",
+        "display_name",
+    }
+    unsupported = set(updates) - allowed
+    if unsupported:
+        field = sorted(unsupported)[0]
+        raise WebUISettingsError(f"{field} is not supported for a custom provider")
+    api_base = str(updates.get("api_base") or "")
+    if not api_base:
+        raise WebUISettingsError("API base is required")
+    if _provider_display_name_exists(config, display_name):
+        raise WebUISettingsError("provider already exists", status=409)
+
+    provider_key = _custom_provider_key(config, display_name)
+    updates["display_name"] = display_name
+    updates["api_type"] = "auto"
+    provider_config = _validated_provider_config(None, updates)
+    setattr(config.providers, provider_key, provider_config)
+    return provider_key
+
+
+def update_provider_settings(
+    config: Config,
+    query: QueryParams,
+) -> tuple[bool, bool]:
+    provider_name = (query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+
+    resolved_provider = resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+    updates = _provider_config_updates(query)
+    if not spec.is_oauth and spec.name != "openai":
+        updates.pop("api_type", None)
+    if spec.is_oauth:
+        if spec.name not in _OAUTH_PROXY_PROVIDERS:
+            raise WebUISettingsError("unknown provider")
+        unsupported = set(updates) - {"proxy", "extra_body"}
+        if unsupported:
+            raise WebUISettingsError(
+                "OAuth provider only supports proxy and extra_body settings"
+            )
+    else:
+        allowed = {
+            "api_key",
+            "api_base",
+            *_provider_advanced_field_names(provider_key, spec),
+        }
+        if find_by_name(provider_key) is None:
+            allowed.add("display_name")
+        unsupported = set(updates) - allowed
+        if unsupported:
+            field = sorted(unsupported)[0]
+            raise WebUISettingsError(f"{field} is not supported for this provider")
+
+    if "display_name" in updates:
+        display_name = str(updates["display_name"] or "")
+        if not display_name:
+            raise WebUISettingsError("provider name is required")
+        if len(display_name) > 80:
+            raise WebUISettingsError("provider name must be 80 characters or fewer")
+        if _provider_display_name_exists(config, display_name, exclude_key=provider_key):
+            raise WebUISettingsError("provider already exists", status=409)
+
+    updated_provider_config = _validated_provider_config(provider_config, updates)
+    changed = updated_provider_config != provider_config
+    if changed:
+        setattr(config.providers, provider_key, updated_provider_config)
+    image_config = config.tools.image_generation
+    restart_required = (
+        changed
+        and image_config.enabled
+        and image_config.provider == provider_key
+        and get_image_gen_provider(provider_key) is not None
+    )
+    return changed, restart_required
+
+
+def login_oauth_provider(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry,
+    config_path: Path | None,
+    settings_payload: SettingsPayloadBuilder,
+) -> dict[str, Any]:
+    provider_name = (query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+    spec = find_by_name(provider_name)
+    if spec is None or not spec.is_oauth:
+        raise WebUISettingsError("unknown OAuth provider")
+
+    if spec.name == "openai_codex":
+        try:
+            from nanobot.providers.openai_codex_oauth import start_openai_codex_oauth_login
+        except ImportError:
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+
+        try:
+            proxy = resolve_config_env_vars(
+                config,
+                config_path=config_path,
+            ).providers.openai_codex.proxy or None
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc), status=400) from exc
+        remote_browser_value = query_first(query, "remote_browser")
+        remote_browser = (
+            parse_bool(remote_browser_value, "remote_browser")
+            if remote_browser_value is not None
+            else False
+        )
+        try:
+            flow = start_openai_codex_oauth_login(
+                proxy=proxy,
+                timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
+                open_browser=not remote_browser,
+            )
+        except Exception as exc:
+            raise WebUISettingsError(
+                f"OpenAI Codex OAuth login failed: {exc}",
+                status=502,
+            ) from exc
+        flow_id = secrets.token_urlsafe(24)
+        oauth_flows.register(spec.name, flow_id, flow)
+        return {
+            "status": "authorization_required",
+            "provider": spec.name,
+            "flow_id": flow_id,
+            "authorization_url": flow.authorization_url,
+            "expires_in": flow.remaining_seconds,
+            "completion_input": "callback_url",
+        }
+
+    if spec.name == "github_copilot":
+        try:
+            from nanobot.providers.github_copilot_provider import (
+                get_github_copilot_login_status,
+                login_github_copilot,
+            )
+        except ImportError:
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+
+        token = get_github_copilot_login_status()
+        if not token:
+            token = login_github_copilot(print_fn=lambda _message: None)
+        if not (token and token.access):
+            raise WebUISettingsError("OAuth login failed", status=401)
+        return settings_payload(config_path=config_path)
+
+    if spec.name == "xai_grok":
+        from nanobot.providers.xai_oauth import start_xai_oauth_login
+
+        try:
+            proxy = resolve_config_env_vars(
+                config,
+                config_path=config_path,
+            ).providers.xai_grok.proxy or None
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc), status=400) from exc
+        try:
+            flow = start_xai_oauth_login(
+                proxy=proxy,
+                timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
+            )
+        except Exception as exc:
+            raise WebUISettingsError(f"xAI OAuth login failed: {exc}", status=502) from exc
+        flow_id = secrets.token_urlsafe(24)
+        oauth_flows.register(spec.name, flow_id, flow)
+        return {
+            "status": "authorization_required",
+            "provider": spec.name,
+            "flow_id": flow_id,
+            "authorization_url": flow.authorization_url,
+            "expires_in": flow.remaining_seconds,
+            "completion_input": "authorization_code",
+        }
+
+    raise WebUISettingsError("OAuth login is not supported for this provider")
+
+
+def complete_oauth_provider(
+    query: QueryParams,
+    authorization_response: str | None = None,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry,
+    config_path: Path | None,
+    settings_payload: SettingsPayloadBuilder,
+) -> dict[str, Any]:
+    provider_name = (query_first(query, "provider") or "").strip()
+    flow_id = (query_first(query, "flow_id") or "").strip()
+    spec = find_by_name(provider_name)
+    if spec is None or spec.name not in {"openai_codex", "xai_grok"}:
+        raise WebUISettingsError("OAuth completion is not supported for this provider")
+    if not flow_id:
+        raise WebUISettingsError("flow_id is required")
+
+    flow = oauth_flows.get(spec.name, flow_id)
+    if flow is None:
+        raise WebUISettingsError(f"{spec.label} sign-in expired. Start again.", status=410)
+
+    try:
+        if spec.name == "openai_codex":
+            from nanobot.providers.openai_codex_oauth import (
+                OpenAICodexOAuthInputError,
+                complete_openai_codex_oauth_login,
+            )
+
+            try:
+                token = complete_openai_codex_oauth_login(flow, authorization_response)
+            except OpenAICodexOAuthInputError as exc:
+                raise WebUISettingsError(str(exc), status=400) from exc
+        else:
+            from nanobot.providers.xai_oauth import complete_xai_oauth_login
+
+            token = complete_xai_oauth_login(flow, authorization_response)
+    except WebUISettingsError:
+        raise
+    except Exception as exc:
+        oauth_flows.remove(spec.name, flow_id, flow)
+        raise WebUISettingsError(
+            f"{spec.label} OAuth login failed: {exc}",
+            status=502,
+        ) from exc
+    if token is None:
+        return {
+            "status": "pending",
+            "provider": spec.name,
+            "flow_id": flow_id,
+        }
+    oauth_flows.remove(spec.name, flow_id, flow, cancel=False)
+    if not token.access:
+        raise WebUISettingsError("OAuth login failed", status=401)
+    return settings_payload(config_path=config_path)
+
+
+def logout_oauth_provider(
+    query: QueryParams,
+    *,
+    oauth_flows: WebUIOAuthFlowRegistry,
+    config_path: Path | None,
+    settings_payload: SettingsPayloadBuilder,
+) -> dict[str, Any]:
+    provider_name = (query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+    spec = find_by_name(provider_name)
+    if spec is None or not spec.is_oauth:
+        raise WebUISettingsError("unknown OAuth provider")
+
+    if spec.name == "openai_codex":
+        try:
+            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.storage import FileTokenStorage
+        except ImportError:
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+        oauth_flows.clear(spec.name)
+        token_path = FileTokenStorage(
+            token_filename=OPENAI_CODEX_PROVIDER.token_filename
+        ).get_token_path()
+    elif spec.name == "github_copilot":
+        try:
+            from nanobot.providers.github_copilot_provider import get_storage
+        except ImportError:
+            raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+        token_path = get_storage().get_token_path()
+    elif spec.name == "xai_grok":
+        from nanobot.providers.xai_oauth import logout_xai_oauth
+
+        oauth_flows.clear(spec.name)
+        logout_xai_oauth()
+        return settings_payload(config_path=config_path)
+    else:
+        raise WebUISettingsError("OAuth logout is not supported for this provider")
+
+    for path in (token_path, token_path.with_suffix(".lock")):
+        with suppress(FileNotFoundError):
+            path.unlink()
+    return settings_payload(config_path=config_path)
+
+
+class ModelSettingsHandler:
+    """Handle model/provider commands after transport authentication and decoding."""
+
+    def __init__(self, settings: WebUISettingsServices, logger: Any) -> None:
+        self.settings = settings
+        self.logger = logger
+
+    def _refresh_runtime_config(self) -> None:
+        """Make a successful model-settings mutation visible to live clients now."""
+        if self.settings.refresh_runtime_config is not None:
+            self.settings.refresh_runtime_config()
+
+    async def handle(
+        self,
+        action: str,
+        request: SettingsRequest,
+        operations: ModelSettingsOperations,
+    ) -> SettingsRouteResult:
+        try:
+            if action == "agent-update":
+                payload = self.settings.mutate(operations.update_agent, request.query)
+                self._refresh_runtime_config()
+                return SettingsRouteResult.success(
+                    payload,
+                    decorate_restart=True,
+                    restart_section="runtime",
+                )
+
+            if action == "model-update":
+                payload = self.settings.mutate(
+                    operations.update_model,
+                    request.query,
+                    rename_model_preset=self.settings.rename_model_preset,
+                )
+                self._refresh_runtime_config()
+                return SettingsRouteResult.success(payload, decorate_restart=True)
+
+            mutation = {
+                "model-create": operations.create_model,
+                "model-delete": operations.delete_model,
+                "models-migrate": operations.migrate_models,
+                "call-order-update": operations.update_call_order,
+                "provider-create": operations.create_provider,
+            }.get(action)
+            if mutation is not None:
+                payload = self.settings.mutate(mutation, request.query)
+                self._refresh_runtime_config()
+                return SettingsRouteResult.success(payload, decorate_restart=True)
+
+            if action == "provider-update":
+                payload = self.settings.mutate(
+                    operations.update_provider,
+                    request.query,
+                )
+                payload, image_restart_cleared = await operations.apply_image_runtime_change(
+                    payload
+                )
+                self._refresh_runtime_config()
+                return SettingsRouteResult.success(
+                    payload,
+                    decorate_restart=True,
+                    restart_section="image",
+                    clear_restart_section=(
+                        "image" if image_restart_cleared else None
+                    ),
+                )
+
+            if action == "provider-models":
+                try:
+                    payload = await asyncio.to_thread(
+                        self.settings.read,
+                        operations.provider_models,
+                        request.query,
+                    )
+                except WebUISettingsError:
+                    raise
+                except Exception:
+                    self.logger.exception("failed to load provider model list")
+                    return SettingsRouteResult.failure(
+                        500,
+                        "failed to load provider model list",
+                    )
+                return SettingsRouteResult.success(payload)
+
+            if action == "oauth-login":
+                payload = await asyncio.to_thread(
+                    self.settings.read,
+                    operations.oauth_login,
+                    request.query,
+                    oauth_flows=self.settings.oauth_flows,
+                )
+            elif action == "oauth-complete":
+                raw_response = (request.payload or {}).get("authorization_response")
+                if raw_response is not None and not isinstance(raw_response, str):
+                    raise WebUISettingsError(
+                        "OAuth authorization response must be a string"
+                    )
+                payload = await asyncio.to_thread(
+                    self.settings.read,
+                    operations.oauth_complete,
+                    request.query,
+                    raw_response or None,
+                    oauth_flows=self.settings.oauth_flows,
+                )
+            elif action == "oauth-logout":
+                payload = await asyncio.to_thread(
+                    self.settings.read,
+                    operations.oauth_logout,
+                    request.query,
+                    oauth_flows=self.settings.oauth_flows,
+                )
+            else:
+                return SettingsRouteResult.failure(404, "unknown settings action")
+        except WebUISettingsError as exc:
+            return SettingsRouteResult.failure(exc.status, exc.message)
+
+        if payload.get("status") in {"authorization_required", "pending"}:
+            return SettingsRouteResult.success(payload)
+        return SettingsRouteResult.success(payload, decorate_restart=True)

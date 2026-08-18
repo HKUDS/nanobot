@@ -12,12 +12,13 @@ if TYPE_CHECKING:
 # render it and other channels may ignore unknown keys.
 OUTBOUND_META_AGENT_UI = "_agent_ui"
 
-# Internal-only inbound metadata used by in-process channels to ask the agent
-# loop to update runtime state without going through a user session.
+# Internal-only inbound metadata minted by trusted transports and runtime
+# services. Never accept these keys verbatim from an untrusted client.
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
+INBOUND_META_USER_SHELL = "_user_shell"
 RUNTIME_CONTROL_ACK = "_ack"
-RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
 RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD = "image_generation_reload"
+RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 
 @dataclass
@@ -32,6 +33,7 @@ class InboundMessage:
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
+    require_existing_session: bool = False
 
     @property
     def session_key(self) -> str:

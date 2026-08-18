@@ -1,13 +1,12 @@
-"""Tests for GitStore — line_ages() and core git operations."""
+"""Tests for GitStore core operations."""
 
 import subprocess
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from nanobot.utils.gitstore import GitStore, GitStoreError
+from nanobot.utils.gitstore import GitStore
 
 
 @pytest.fixture
@@ -16,89 +15,6 @@ def git(tmp_path):
     g = GitStore(tmp_path, tracked_files=["MEMORY.md", "SOUL.md"])
     g.init()
     return g
-
-
-class TestLineAges:
-    def test_returns_empty_when_not_initialized(self, tmp_path):
-        """line_ages should return [] if the git repo is not initialized."""
-        git = GitStore(tmp_path, tracked_files=["MEMORY.md"])
-        assert git.line_ages("MEMORY.md") == []
-
-    def test_returns_empty_for_missing_file(self, git):
-        """line_ages should return [] for a file that doesn't exist."""
-        assert git.line_ages("SOUL.md") == []
-
-    def test_returns_empty_for_empty_file(self, git, tmp_path):
-        """line_ages should return [] for an empty tracked file."""
-        (tmp_path / "SOUL.md").write_text("", encoding="utf-8")
-        git.auto_commit("empty soul")
-        assert git.line_ages("SOUL.md") == []
-
-    def test_one_age_per_line(self, git, tmp_path):
-        """line_ages should return one entry per line in the file."""
-        content = "# Memory\n\n## Section A\n- item 1\n"
-        (tmp_path / "MEMORY.md").write_text(content, encoding="utf-8")
-        git.auto_commit("initial")
-        ages = git.line_ages("MEMORY.md")
-        assert len(ages) == len(content.splitlines())
-
-    def test_fresh_lines_have_age_zero(self, git, tmp_path):
-        """Lines committed today should have age_days=0."""
-        (tmp_path / "MEMORY.md").write_text("## A\n- x\n", encoding="utf-8")
-        git.auto_commit("initial")
-        ages = git.line_ages("MEMORY.md")
-        assert all(a.age_days == 0 for a in ages)
-
-    def test_age_differentiates_across_days(self, git, tmp_path):
-        """Lines committed today should show correct age when 'now' is mocked forward."""
-        (tmp_path / "MEMORY.md").write_text("## A\n- x\n", encoding="utf-8")
-        git.auto_commit("initial")
-
-        future_now = datetime.now(tz=timezone.utc) + timedelta(days=30)
-        with patch("nanobot.utils.gitstore.datetime") as mock_dt:
-            mock_dt.now.return_value = future_now
-            mock_dt.fromtimestamp = datetime.fromtimestamp
-            ages = git.line_ages("MEMORY.md")
-
-        assert len(ages) == 2
-        assert all(a.age_days == 30 for a in ages)
-
-    def test_annotate_failure_is_explicit(self, git, tmp_path):
-        (tmp_path / "MEMORY.md").write_text("important\n", encoding="utf-8")
-        git.auto_commit("initial")
-
-        with patch("dulwich.porcelain.annotate", side_effect=OSError("broken repo")):
-            with pytest.raises(GitStoreError, match="annotation failed"):
-                git.line_ages("MEMORY.md")
-
-    def test_partial_edit_only_updates_changed_lines(self, git, tmp_path):
-        """Only modified lines should reflect the new commit's timestamp."""
-        now = datetime(2026, 5, 1, tzinfo=timezone.utc)
-        old = now - timedelta(days=30)
-
-        (tmp_path / "MEMORY.md").write_text(
-            "# Memory\n\n## A\n- old\n\n## B\n- keep\n", encoding="utf-8"
-        )
-        with patch("dulwich.worktree.time.time", return_value=old.timestamp()):
-            git.auto_commit("commit1")
-
-        # Only modify section A
-        (tmp_path / "MEMORY.md").write_text(
-            "# Memory\n\n## A\n- new\n\n## B\n- keep\n", encoding="utf-8"
-        )
-        with patch("dulwich.worktree.time.time", return_value=now.timestamp()):
-            git.auto_commit("commit2")
-
-        with patch("nanobot.utils.gitstore.datetime") as mock_dt:
-            mock_dt.now.return_value = now
-            mock_dt.fromtimestamp = datetime.fromtimestamp
-            ages = git.line_ages("MEMORY.md")
-
-        lines = (tmp_path / "MEMORY.md").read_text(encoding="utf-8").splitlines()
-        assert len(ages) == len(lines)
-        age_by_line = {line: age.age_days for line, age in zip(lines, ages, strict=True)}
-        assert age_by_line["- new"] == 0
-        assert age_by_line["- keep"] == 30
 
 
 class TestSummarizeWorkingTree:

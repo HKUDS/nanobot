@@ -203,7 +203,7 @@ export function PromptRail({
               aria-hidden
               data-testid={previewVisible ? "prompt-rail-preview" : undefined}
               className={cn(
-                "pointer-events-none absolute left-10 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-[20px] px-4 py-3 text-left",
+                "pointer-events-none absolute left-10 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-panel px-4 py-3 text-left",
                 floatingSurfaceElevationClassName,
                 "transition-[opacity,transform] duration-150",
                 previewVisible

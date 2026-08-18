@@ -148,9 +148,31 @@ class _FsTool(Tool):
         )
 
     def _resolve_read(self, path: str) -> Path:
+        plugin_skill_dirs: list[Path] = []
+        if self._workspace is not None:
+            from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
+
+            try:
+                access = current_tool_workspace(
+                    self._workspace,
+                    restrict_to_workspace=self._restrict_to_workspace,
+                    sandbox_restricts_workspace=self._sandbox_restricts_workspace,
+                )
+                if self._effective_allowed_root(access.allowed_root) is not None:
+                    candidate = Path(path).expanduser()
+                    if not candidate.is_absolute() and access.project_path is not None:
+                        candidate = access.project_path / candidate
+                    plugin_skill_dirs = list(
+                        enabled_agent_plugin_skill_dirs(
+                            Path(self._workspace),
+                            requested_path=candidate.resolve(strict=False),
+                        )
+                    )
+            except (OSError, RuntimeError):
+                pass
         return self._resolve_with_extra(
             path,
-            self._extra_read_allowed_dirs,
+            [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
             self._extra_read_allowed_files,
             include_media_dir=True,
             extra_files_require_allowed_root=True,
@@ -785,22 +807,6 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
     return best_ratio, best_start, best_window_lines, hints
 
 
-def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
-    """Locate old_text in content with a multi-level fallback chain:
-
-    1. Exact substring match
-    2. Line-trimmed sliding window (handles indentation differences)
-    3. Smart quote normalization (curly ↔ straight quotes)
-
-    Both inputs should use LF line endings (caller normalises CRLF).
-    Returns (matched_fragment, count) or (None, 0).
-    """
-    matches = _find_matches(content, old_text)
-    if not matches:
-        return None, 0
-    return matches[0].text, len(matches)
-
-
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to edit"),
@@ -843,7 +849,8 @@ class EditFileTool(_FsTool):
     def description(self) -> str:
         return (
             "Perform a small, exact replacement in one file by replacing "
-            "old_text with new_text. Use this for narrow text substitutions "
+            "old_text with new_text. When replacing text in an existing file, "
+            "old_text and new_text must be different. Use this for narrow text substitutions "
             "with old_text copied from read_file. For multi-file, structural, "
             "or generated code edits, prefer apply_patch. If old_text matches "
             "multiple times, provide more context or set occurrence, line_hint, "
@@ -878,9 +885,12 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
             fp = self._resolve_write(path)
+            file_exists = fp.exists()
+            if file_exists and old_text == new_text:
+                return ToolResult.error("Error: new_text must be different from old_text.")
 
             # Create-file semantics: old_text='' + file doesn't exist → create
-            if not fp.exists():
+            if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(new_text, encoding="utf-8")

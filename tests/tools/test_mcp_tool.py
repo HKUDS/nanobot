@@ -13,6 +13,7 @@ import pytest
 import nanobot.agent.tools.mcp as mcp_mod
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
+    MCPProvider,
     MCPResourceWrapper,
     MCPToolWrapper,
     _normalize_windows_stdio_command,
@@ -153,7 +154,7 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
 
 
 @pytest.mark.asyncio
-async def test_connect_missing_servers_propagates_external_cancellation(monkeypatch) -> None:
+async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch) -> None:
     started = asyncio.Event()
 
     async def connect_mcp_servers(_servers: dict, _registry: ToolRegistry) -> dict:
@@ -161,24 +162,82 @@ async def test_connect_missing_servers_propagates_external_cancellation(monkeypa
         await asyncio.sleep(60)
         return {}
 
-    class State:
-        pass
-
-    state = State()
-    state._mcp_closing = False
-    state._mcp_servers = {"test": MCPServerConfig(command="fake")}
-    state._mcp_stacks = {}
-    state._mcp_connecting = False
+    provider = MCPProvider(
+        {"test": MCPServerConfig(command="fake")},
+        ToolRegistry(),
+    )
     monkeypatch.setattr(mcp_mod, "connect_mcp_servers", connect_mcp_servers)
 
-    task = asyncio.create_task(mcp_mod.connect_missing_servers(state, ToolRegistry()))
+    task = asyncio.create_task(provider.connect())
     await asyncio.wait_for(started.wait(), timeout=1.0)
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert state._mcp_connecting is False
+    assert provider.connected_server_names == set()
+    assert provider.runtime_status() == {"test": "failed"}
+
+
+@pytest.mark.asyncio
+async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OAuthAuth(httpx.Auth):
+        def auth_flow(self, request: httpx.Request):
+            request.headers["Authorization"] = "Bearer saved-oauth-secret"
+            yield request
+
+    class AuthorizationRequiredError(RuntimeError):
+        pass
+
+    async def create_auth(_name: str, _url: str, _handlers=None) -> httpx.Auth:
+        return OAuthAuth()
+
+    @asynccontextmanager
+    async def rejected_streamable_http(url: str, http_client=None):
+        request = httpx.Request("POST", f"{url}?access_token=saved-oauth-secret")
+        response = httpx.Response(403, request=request)
+        raise httpx.HTTPStatusError(
+            "403 Forbidden for saved-oauth-secret",
+            request=request,
+            response=response,
+        )
+        yield object(), object(), object()
+
+    async def reachable(_url: str) -> bool:
+        return True
+
+    oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
+    oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
+    oauth_mod.create_mcp_oauth_auth = create_auth  # type: ignore[attr-defined]
+    oauth_mod.mcp_oauth_has_credentials = lambda _name, _url: True  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", reachable)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        rejected_streamable_http,
+    )
+
+    provider = MCPProvider(
+        {
+            "xmind": MCPServerConfig(
+            type="streamableHttp",
+            auth="oauth",
+            url="https://app.xmind.com/api/mcp",
+            )
+        },
+        ToolRegistry(),
+    )
+
+    await provider.connect()
+
+    snapshot = provider.runtime_status()
+    assert snapshot == {"xmind": "failed"}
+    assert "saved-oauth-secret" not in str(snapshot)
+    assert "app.xmind.com" not in str(snapshot)
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:
@@ -826,25 +885,59 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
 ) -> None:
     messages: list[str] = []
 
-    def _error(message: str, *args: object) -> None:
-        messages.append(message.format(*args))
-
     @asynccontextmanager
     async def _broken_stdio_client(_params: object):
         raise RuntimeError("Parse error: Unexpected token 'INFO' before JSON-RPC headers")
         yield  # pragma: no cover
 
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _broken_stdio_client)
-    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.exception", _error)
+    sink = mcp_mod.logger.add(
+        lambda message: messages.append(message.record["message"]), level="ERROR"
+    )
 
     registry = ToolRegistry()
-    stacks = await connect_mcp_servers({"gh": MCPServerConfig(command="github-mcp")}, registry)
+    try:
+        stacks = await connect_mcp_servers(
+            {"gh": MCPServerConfig(command="github-mcp")}, registry
+        )
+    finally:
+        mcp_mod.logger.remove(sink)
 
     assert stacks == {}
     assert messages
     assert "stdio protocol pollution" in messages[-1]
     assert "stdout" in messages[-1]
     assert "stderr" in messages[-1]
+
+
+def test_transient_connection_group_logs_brief_warning_and_debug_trace() -> None:
+    records: list[dict] = []
+    sink = mcp_mod.logger.add(lambda message: records.append(message.record), level="DEBUG")
+    error = ExceptionGroup("transport failed", [httpx.ConnectError("")])
+    try:
+        mcp_mod._log_mcp_connection_failure("notion", error)
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    warning = next(record for record in records if record["level"].name == "WARNING")
+    debug = next(record for record in records if record["level"].name == "DEBUG")
+    assert warning["exception"] is None
+    assert "transient connection failure" in warning["message"]
+    assert debug["exception"] is not None
+    assert not any(record["level"].name == "ERROR" for record in records)
+
+
+def test_unexpected_connection_failure_keeps_error_trace() -> None:
+    records: list[dict] = []
+    sink = mcp_mod.logger.add(lambda message: records.append(message.record), level="DEBUG")
+    try:
+        mcp_mod._log_mcp_connection_failure("notion", RuntimeError("boom"))
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    error = next(record for record in records if record["level"].name == "ERROR")
+    assert error["exception"] is not None
+    assert not any(record["level"].name == "WARNING" for record in records)
 
 
 @pytest.mark.asyncio
@@ -1082,10 +1175,22 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["exception", "cancellation"])
 async def test_connect_mcp_servers_one_failure_does_not_block_others(
     monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
 ) -> None:
-    sessions = {"good": _make_fake_session(["demo"])}
+    bad_session = _make_fake_session([])
+
+    async def _cancel_initialize() -> None:
+        raise asyncio.CancelledError("cancelled by SDK")
+
+    if failure_mode == "cancellation":
+        bad_session.initialize = _cancel_initialize
+    sessions = {
+        "bad": bad_session,
+        "good": _make_fake_session(["demo"]),
+    }
 
     class _SelectiveClientSession:
         def __init__(self, read: object, _write: object) -> None:
@@ -1099,7 +1204,7 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
     @asynccontextmanager
     async def _selective_stdio_client(params: object):
-        if params.command == "bad":
+        if params.command == "bad" and failure_mode == "exception":
             raise RuntimeError("boom")
         yield params.command, object()
 
@@ -1109,8 +1214,8 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
         {
-            "good": MCPServerConfig(command="good"),
             "bad": MCPServerConfig(command="bad"),
+            "good": MCPServerConfig(command="good"),
         },
         registry,
     )
@@ -1119,6 +1224,89 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
     assert registry.tool_names == ["mcp_good_demo"]
     assert set(stacks) == {"good"}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_propagates_external_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    closed = asyncio.Event()
+
+    @asynccontextmanager
+    async def _blocking_stdio_client(_params: object):
+        try:
+            started.set()
+            await asyncio.Event().wait()
+            yield object(), object()
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _blocking_stdio_client)
+
+    task = asyncio.create_task(
+        connect_mcp_servers({"slow": MCPServerConfig(command="slow")}, ToolRegistry())
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await asyncio.wait_for(closed.wait(), timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slow_started = asyncio.Event()
+    closed: list[str] = []
+    sessions = {"fast": _make_fake_session(["demo"])}
+
+    class _SelectiveClientSession:
+        def __init__(self, read: object, _write: object) -> None:
+            self._session = sessions[str(read)]
+
+        async def __aenter__(self) -> object:
+            return self._session
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    @asynccontextmanager
+    async def _selective_stdio_client(params: object):
+        command = str(params.command)
+        try:
+            if command == "slow":
+                slow_started.set()
+                await asyncio.Event().wait()
+            yield command, object()
+        finally:
+            closed.append(command)
+
+    monkeypatch.setattr(sys.modules["mcp"], "ClientSession", _SelectiveClientSession)
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _selective_stdio_client)
+
+    registry = ToolRegistry()
+    task = asyncio.create_task(
+        connect_mcp_servers(
+            {
+                "fast": MCPServerConfig(command="fast"),
+                "slow": MCPServerConfig(command="slow"),
+            },
+            registry,
+        )
+    )
+    await asyncio.wait_for(slow_started.wait(), timeout=1.0)
+    assert registry.tool_names == ["mcp_fast_demo"]
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert registry.tool_names == []
+    assert sorted(closed) == ["fast", "slow"]
 
 
 @pytest.mark.asyncio
@@ -1166,6 +1354,129 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     assert timeout.read == 30.0
     assert timeout.write == 30.0
     assert timeout.pool == 30.0
+
+
+@pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
+    transport: str,
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    oauth_auth = object()
+    oauth_handlers = object()
+    captured: dict[str, object] = {}
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    async def _create_auth(name: str, url: str, handlers: object) -> object:
+        captured.update(name=name, url=url, handlers=handlers)
+        return oauth_auth
+
+    oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
+    oauth_mod.MCPAuthorizationRequiredError = RuntimeError  # type: ignore[attr-defined]
+    oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self) -> object:
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            return False
+
+    @asynccontextmanager
+    async def _capturing_sse_client(
+        _url: str,
+        httpx_client_factory=None,
+        auth=None,
+    ):
+        captured["transport_auth"] = auth
+        yield object(), object()
+
+    @asynccontextmanager
+    async def _capturing_streamable_http_client(_url: str, http_client=None):
+        assert http_client is not None
+        yield object(), object(), object()
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _capturing_streamable_http_client,
+    )
+
+    url = "https://mcp.example.com/sse" if transport == "sse" else "https://mcp.example.com/mcp"
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"remote": MCPServerConfig(type=transport, url=url, auth="oauth")},
+        registry,
+        oauth_handlers={"remote": oauth_handlers},  # type: ignore[arg-type]
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert captured["name"] == "remote"
+    assert captured["url"] == url
+    assert captured["handlers"] is oauth_handlers
+    if transport == "sse":
+        assert captured["transport_auth"] is oauth_auth
+    else:
+        client_kwargs = captured["client_kwargs"]
+        assert isinstance(client_kwargs, dict)
+        assert client_kwargs["auth"] is oauth_auth
+        assert client_kwargs["event_hooks"] == {"request": [mcp_mod._validate_mcp_request_url]}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AuthorizationRequiredError(RuntimeError):
+        pass
+
+    async def _create_auth(*_args: object) -> object:
+        raise AuthorizationRequiredError
+
+    probe_called = False
+
+    async def _probe(_url: str) -> bool:
+        nonlocal probe_called
+        probe_called = True
+        return True
+
+    oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
+    oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
+    oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _probe)
+
+    stacks = await connect_mcp_servers(
+        {
+            "remote": MCPServerConfig(
+                type="streamableHttp",
+                url="https://mcp.example.com/mcp",
+                auth="oauth",
+            )
+        },
+        ToolRegistry(),
+    )
+
+    assert stacks == {}
+    assert not probe_called
 
 
 @pytest.mark.asyncio
@@ -1635,7 +1946,11 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     assert len(wrapper.name) == 64
     assert not wrapper.name.startswith(mcp_mod._tool_prefix(server_name))
 
-    mcp_mod._attach_reconnect_handlers(SimpleNamespace(), registry, {server_name})
+    provider = MCPProvider(
+        {server_name: MCPServerConfig(command="fake")},
+        registry,
+    )
+    provider._attach_reconnect_handlers({server_name})
     assert wrapper._reconnect is not None
     assert other_wrapper._reconnect is None
 

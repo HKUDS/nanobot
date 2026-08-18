@@ -2,26 +2,31 @@
 
 import base64
 import errno
+import hashlib
 import json
 import os
 import re
+import secrets
+import stat
 from collections import OrderedDict
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypedDict, cast
+from typing import Any, Callable, Collection, Generator, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
+from filelock import FileLock
 from loguru import logger
 
-from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.config.paths import get_legacy_sessions_dir, get_runtime_subdir
 from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -36,6 +41,7 @@ from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 FILE_MAX_MESSAGES = 2000
 SESSION_CACHE_MAX_SIZE = 128
 MIN_REPLAY_MAX_MESSAGES = 120
+MIN_COMPACTED_REPLAY_MESSAGES = 8
 REPLAY_TOKENS_PER_MESSAGE = 100
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
@@ -56,6 +62,12 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "title",
     "title_user_edited",
 }
+_WORKSPACE_STATE_DIR = ".nanobot"
+_WORKSPACE_ID_FILE = "workspace-id"
+_WORKSPACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_SESSION_MIGRATION_LOCK_TIMEOUT_SECONDS = 30
+_SESSION_FILES_LOCK_FILENAME = ".session-files.lock"
+_COPY_CHUNK_SIZE = 1024 * 1024
 
 
 def _json_object(value: object) -> dict[str, Any]:
@@ -146,6 +158,15 @@ class RetentionResult:
     already_consolidated_count: int
 
 
+@dataclass(frozen=True)
+class SessionPolicy:
+    """Runtime rules that do not belong in durable session data."""
+
+    persist: bool = True
+    log_content: bool = True
+    disabled_tools: frozenset[str] = frozenset()
+
+
 @dataclass
 class Session:
     """A conversation session."""
@@ -157,6 +178,7 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -191,19 +213,37 @@ class Session:
         extend_to_user: bool = False,
         include_runtime_context: bool = True,
     ) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input.
+        """Return recent replayable messages for LLM input.
 
         History is sliced by message count first (``max_messages``), then by
         token budget from the tail (``max_tokens``) when provided.
         """
-        unconsolidated = self.messages[self.last_consolidated:]
+        replay_start = self.last_consolidated
+        if replay_start:
+            # ``last_consolidated`` is archive progress, not a replay boundary.
+            # Keep a small raw suffix for continuity, extending back to the user
+            # that started an assistant/tool sequence when necessary.
+            recent_start = recent_message_start_index(
+                self.messages,
+                MIN_COMPACTED_REPLAY_MESSAGES,
+                extend_to_user=True,
+            )
+            replay_start = min(replay_start, recent_start)
+
+        replayable = self.messages[replay_start:]
         max_messages = max_messages if max_messages > 0 else FILE_MAX_MESSAGES
-        start_idx = recent_message_start_index(
-            unconsolidated,
-            max_messages,
-            extend_to_user=extend_to_user,
-        )
-        sliced = unconsolidated[start_idx:]
+        unarchived_count = len(self.messages) - self.last_consolidated
+        if replay_start < self.last_consolidated and unarchived_count < max_messages:
+            # The archived replay suffix can exceed the nominal count when one
+            # tool-heavy turn spans the boundary. Preserve that complete turn.
+            start_idx = 0
+        else:
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
+        sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive
         # assistant deliveries that the user may be replying to.
@@ -352,17 +392,24 @@ class Session:
 
         start_idx = max(0, len(self.messages) - max_messages)
         if extend_to_user:
-            start_idx = next(
+            recovered_user = next(
                 (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                start_idx,
+                None,
             )
+            if recovered_user is not None:
+                start_idx = recovered_user
+                if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
+                    start_idx -= 1
 
         retained = self.messages[start_idx:]
 
-        # Prefer starting at a user turn when one exists within the retained window.
+        # Prefer starting at a user turn (or its preceding _channel_delivery) when one exists within the retained window.
         first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
         if first_user is not None:
-            retained = retained[first_user:]
+            if first_user > 0 and retained[first_user - 1].get("_channel_delivery"):
+                retained = retained[first_user - 1:]
+            else:
+                retained = retained[first_user:]
         elif not extend_to_user:
             # If the hard-capped tail is assistant/tool-only, anchor to the
             # latest user in the full session and take a capped forward window.
@@ -427,13 +474,28 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
+        original_messages = self.messages
+        original_last_consolidated = self.last_consolidated
+        original_provider_state = self.provider_state
+        original_updated_at = self.updated_at
         result = self.retain_recent_legal_suffix(limit)
         if not result.dropped:
             return
 
         archive_chunk = result.dropped[result.already_consolidated_count:]
         if archive_chunk and on_archive:
-            on_archive(archive_chunk)
+            try:
+                on_archive(archive_chunk)
+            except BaseException:
+                # Retention runs before the archive callback so the callback can
+                # receive the exact dropped prefix. Restore the in-memory session
+                # if archival fails; otherwise a later save would persist the
+                # trimmed state and make that prefix impossible to retry.
+                self.messages = original_messages
+                self.last_consolidated = original_last_consolidated
+                self.provider_state = original_provider_state
+                self.updated_at = original_updated_at
+                raise
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,
@@ -467,6 +529,23 @@ class SessionInfo(TypedDict):
     path: str
 
 
+@dataclass(frozen=True)
+class _SessionFileSnapshot:
+    digest: str
+    size: int
+    mtime_ns: int
+    updated_at: float
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True)
+class SessionRestoreResult:
+    restored: int
+    unchanged: int
+    conflicts: tuple[Path, ...]
+
+
 class SessionStore(Protocol):
     def load(self, key: str) -> Session | None: ...
 
@@ -484,9 +563,455 @@ class SessionStore(Protocol):
 class JsonlSessionStore:
     """JSONL implementation of session persistence."""
 
-    def __init__(self, workspace: Path):
-        self.sessions_dir = ensure_dir(workspace / "sessions")
-        self.legacy_sessions_dir = get_legacy_sessions_dir()
+    def __init__(self, workspace: Path, *, sessions_root: Path | None = None):
+        canonical_workspace = Path(workspace).expanduser().resolve(strict=False)
+        ensure_dir(canonical_workspace)
+        root = (
+            Path(sessions_root).expanduser().resolve(strict=False)
+            if sessions_root is not None
+            else get_runtime_subdir("sessions").resolve(strict=False)
+        )
+        if root == canonical_workspace or root.is_relative_to(canonical_workspace):
+            raise RuntimeError(
+                "session storage must be outside the agent workspace; "
+                "move --config outside --workspace or choose a nested workspace directory"
+            )
+        ensure_dir(root)
+        with suppress(OSError):
+            os.chmod(root, 0o700)
+        self.workspace = canonical_workspace
+        self._migration_lock = FileLock(
+            str(root / ".workspace-migration.lock"),
+            timeout=_SESSION_MIGRATION_LOCK_TIMEOUT_SECONDS,
+        )
+        with self._migration_lock:
+            workspace_id = self._load_or_create_workspace_id(canonical_workspace, root)
+            workspace_id = self._claim_workspace_namespace(
+                root,
+                canonical_workspace,
+                workspace_id,
+            )
+            self.sessions_dir = ensure_dir(root / workspace_id)
+            self.legacy_sessions_dir = get_legacy_sessions_dir()
+            self._session_files_lock = FileLock(
+                str(self.sessions_dir / _SESSION_FILES_LOCK_FILENAME)
+            )
+            with self._session_files_lock:
+                self._migrate_from_workspace(canonical_workspace)
+
+    @contextmanager
+    def locked_session_files(self) -> Generator[Path, None, None]:
+        """Guard direct access to canonical session files in this directory."""
+        with self._session_files_lock:
+            yield self.sessions_dir
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        with suppress(PermissionError, NotImplementedError):
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            except OSError as exc:
+                if exc.errno != errno.EINVAL:
+                    raise
+            finally:
+                os.close(fd)
+
+    @classmethod
+    def _write_text_atomic(cls, path: Path, content: str, *, mode: int = 0o600) -> None:
+        tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        try:
+            with open(tmp, "x", encoding="utf-8") as handle:
+                os.chmod(tmp, mode)
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+            cls._fsync_directory(path.parent)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    @classmethod
+    def _read_workspace_id(cls, marker: Path) -> str:
+        if marker.is_symlink():
+            raise RuntimeError(f"workspace identity marker must not be a symlink: {marker}")
+        value = marker.read_text(encoding="utf-8").strip()
+        if not _WORKSPACE_ID_RE.fullmatch(value):
+            raise RuntimeError(
+                f"workspace identity marker is invalid: {marker}; "
+                "restore its original 32-character identifier before starting nanobot"
+            )
+        return value
+
+    @staticmethod
+    def _workspace_id_path(workspace: Path) -> Path:
+        state_dir = workspace / _WORKSPACE_STATE_DIR
+        if state_dir.is_symlink():
+            raise RuntimeError(f"workspace state directory must not be a symlink: {state_dir}")
+        ensure_dir(state_dir)
+        return state_dir / _WORKSPACE_ID_FILE
+
+    @classmethod
+    def _find_workspace_namespace(cls, workspace: Path, root: Path) -> str | None:
+        """Recover an identity marker removed by cleanup at the same workspace path."""
+        matches: list[str] = []
+        for sessions_dir in root.iterdir():
+            if (
+                not _WORKSPACE_ID_RE.fullmatch(sessions_dir.name)
+                or sessions_dir.is_symlink()
+                or not sessions_dir.is_dir()
+            ):
+                continue
+            marker = sessions_dir / ".workspace"
+            if marker.is_symlink() or not marker.is_file():
+                continue
+            try:
+                recorded = Path(marker.read_text(encoding="utf-8").strip()).expanduser()
+                recorded = recorded.resolve(strict=False)
+                same_workspace = recorded == workspace or (
+                    recorded.exists() and recorded.samefile(workspace)
+                )
+            except (OSError, UnicodeError, ValueError):
+                continue
+            if same_workspace:
+                matches.append(sessions_dir.name)
+        if len(matches) > 1:
+            raise RuntimeError(
+                f"multiple session namespaces claim workspace {workspace}; "
+                "remove the stale namespace marker before starting nanobot"
+            )
+        return matches[0] if matches else None
+
+    @classmethod
+    def _load_or_create_workspace_id(cls, workspace: Path, root: Path) -> str:
+        marker = cls._workspace_id_path(workspace)
+        if marker.exists() or marker.is_symlink():
+            return cls._read_workspace_id(marker)
+
+        recovered = cls._find_workspace_namespace(workspace, root)
+        if recovered is not None:
+            cls._write_text_atomic(marker, f"{recovered}\n")
+            return recovered
+
+        workspace_id = secrets.token_hex(16)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(marker, flags, 0o600)
+        except FileExistsError:
+            return cls._read_workspace_id(marker)
+        try:
+            payload = f"{workspace_id}\n".encode("ascii")
+            view = memoryview(payload)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            os.fsync(fd)
+        except BaseException:
+            with suppress(OSError):
+                marker.unlink()
+            raise
+        finally:
+            os.close(fd)
+        cls._fsync_directory(marker.parent)
+        return workspace_id
+
+    @classmethod
+    def _replace_workspace_id(cls, workspace: Path, workspace_id: str) -> None:
+        cls._write_text_atomic(cls._workspace_id_path(workspace), f"{workspace_id}\n")
+
+    @classmethod
+    def _write_workspace_marker(cls, sessions_dir: Path, workspace: Path) -> None:
+        cls._write_text_atomic(sessions_dir / ".workspace", f"{workspace}\n")
+
+    @classmethod
+    def _claim_workspace_namespace(
+        cls,
+        root: Path,
+        workspace: Path,
+        workspace_id: str,
+    ) -> str:
+        """Bind a stable workspace ID, rotating copied live workspaces apart."""
+        for _attempt in range(3):
+            sessions_dir = root / workspace_id
+            marker = sessions_dir / ".workspace"
+            if sessions_dir.is_symlink():
+                raise RuntimeError(f"session namespace must not be a symlink: {sessions_dir}")
+            if not sessions_dir.exists():
+                ensure_dir(sessions_dir)
+                cls._write_workspace_marker(sessions_dir, workspace)
+                return workspace_id
+            if marker.is_symlink():
+                raise RuntimeError(f"session workspace marker must not be a symlink: {marker}")
+            if not marker.exists():
+                if any(sessions_dir.iterdir()):
+                    raise RuntimeError(
+                        f"session namespace has data but no workspace marker: {sessions_dir}"
+                    )
+                cls._write_workspace_marker(sessions_dir, workspace)
+                return workspace_id
+
+            recorded_text = marker.read_text(encoding="utf-8").strip()
+            if not recorded_text:
+                raise RuntimeError(f"session workspace marker is empty: {marker}")
+            recorded = Path(recorded_text).expanduser().resolve(strict=False)
+            if recorded == workspace:
+                return workspace_id
+            try:
+                same_workspace = recorded.exists() and recorded.samefile(workspace)
+            except OSError:
+                same_workspace = False
+            if same_workspace:
+                cls._write_workspace_marker(sessions_dir, workspace)
+                return workspace_id
+            if not recorded.exists():
+                # The identity marker travelled with a renamed or moved workspace.
+                cls._write_workspace_marker(sessions_dir, workspace)
+                return workspace_id
+
+            # Both paths exist and are different: this is a copy, not a move.
+            workspace_id = secrets.token_hex(16)
+            cls._replace_workspace_id(workspace, workspace_id)
+
+        raise RuntimeError(f"could not allocate an isolated session namespace for {workspace}")
+
+    @staticmethod
+    def _session_file_snapshot(path: Path) -> _SessionFileSnapshot | None:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(path, flags)
+        except OSError:
+            return None
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                return None
+            digest = hashlib.sha256()
+            saw_record = False
+            updated_at: float | None = None
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                for raw_line in handle:
+                    digest.update(raw_line)
+                    if not raw_line.strip():
+                        continue
+                    value: object = json.loads(raw_line.decode("utf-8"))
+                    data = _json_object(value)
+                    saw_record = True
+                    if data.get("_type") == "metadata":
+                        raw_updated_at = cast(object, data.get("updated_at"))
+                        if isinstance(raw_updated_at, str) and raw_updated_at:
+                            updated_at = datetime.fromisoformat(raw_updated_at).timestamp()
+            after = os.fstat(fd)
+            if (
+                not saw_record
+                or before.st_dev != after.st_dev
+                or before.st_ino != after.st_ino
+                or before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+            ):
+                return None
+            return _SessionFileSnapshot(
+                digest=digest.hexdigest(),
+                size=after.st_size,
+                mtime_ns=after.st_mtime_ns,
+                updated_at=(updated_at if updated_at is not None else after.st_mtime_ns / 1e9),
+                device=after.st_dev,
+                inode=after.st_ino,
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+            return None
+        finally:
+            os.close(fd)
+
+    @classmethod
+    def _prepare_copy(
+        cls,
+        src: Path,
+        dst_dir: Path,
+        snapshot: _SessionFileSnapshot,
+    ) -> Path:
+        tmp = dst_dir / f".{src.name}.{secrets.token_hex(8)}.tmp"
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        src_fd = os.open(src, flags)
+        try:
+            before = os.fstat(src_fd)
+            if (
+                before.st_dev != snapshot.device
+                or before.st_ino != snapshot.inode
+                or before.st_size != snapshot.size
+                or before.st_mtime_ns != snapshot.mtime_ns
+            ):
+                raise OSError("session source changed before migration")
+            digest = hashlib.sha256()
+            size = 0
+            with os.fdopen(src_fd, "rb", closefd=False) as source, open(tmp, "xb") as target:
+                os.chmod(tmp, 0o600)
+                while chunk := source.read(_COPY_CHUNK_SIZE):
+                    digest.update(chunk)
+                    size += len(chunk)
+                    target.write(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            after = os.fstat(src_fd)
+            if (
+                digest.hexdigest() != snapshot.digest
+                or size != snapshot.size
+                or after.st_dev != snapshot.device
+                or after.st_ino != snapshot.inode
+                or after.st_size != snapshot.size
+                or after.st_mtime_ns != snapshot.mtime_ns
+            ):
+                raise OSError("session source changed during migration")
+            return tmp
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        finally:
+            os.close(src_fd)
+
+    @classmethod
+    def _install_snapshot(
+        cls,
+        src: Path,
+        dst: Path,
+        snapshot: _SessionFileSnapshot,
+    ) -> None:
+        tmp = cls._prepare_copy(src, dst.parent, snapshot)
+        try:
+            os.replace(tmp, dst)
+            cls._fsync_directory(dst.parent)
+            installed = cls._session_file_snapshot(dst)
+            if installed is None or installed.digest != snapshot.digest:
+                raise OSError(f"session migration verification failed: {dst}")
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _archive_conflict(
+        self,
+        src: Path,
+        snapshot: _SessionFileSnapshot,
+        label: str,
+    ) -> Path:
+        conflict_dir = ensure_dir(self.sessions_dir / ".migration-conflicts")
+        conflict = conflict_dir / (
+            f"{src.stem}.{label}.{snapshot.digest[:12]}.{secrets.token_hex(4)}.jsonl"
+        )
+        self._install_snapshot(src, conflict, snapshot)
+        return conflict
+
+    @classmethod
+    def _remove_migrated_source(
+        cls,
+        src: Path,
+        snapshot: _SessionFileSnapshot,
+    ) -> bool:
+        try:
+            current = src.stat(follow_symlinks=False)
+            if (
+                current.st_dev != snapshot.device
+                or current.st_ino != snapshot.inode
+                or current.st_size != snapshot.size
+                or current.st_mtime_ns != snapshot.mtime_ns
+            ):
+                return False
+            src.unlink()
+            cls._fsync_directory(src.parent)
+            return True
+        except OSError:
+            return False
+
+    def _migrate_from_workspace(self, workspace: Path) -> None:
+        """Durably copy legacy sessions out of the workspace, then remove the source."""
+        old_dir = workspace / "sessions"
+        if old_dir.is_symlink() or not old_dir.is_dir():
+            if old_dir.is_symlink():
+                logger.warning("Skipping symlinked legacy sessions directory: {}", old_dir)
+            return
+        for src in old_dir.glob("*.jsonl"):
+            if src.is_symlink() or not src.is_file():
+                logger.warning("Skipping unsafe legacy session file: {}", src)
+                continue
+            dst = self.sessions_dir / src.name
+            source_snapshot = self._session_file_snapshot(src)
+            if source_snapshot is None:
+                logger.warning("Skipping invalid or changing legacy session file: {}", src)
+                continue
+            try:
+                destination_snapshot = self._session_file_snapshot(dst) if dst.exists() else None
+                if dst.exists() and destination_snapshot is None:
+                    logger.warning(
+                        "Keeping legacy session because destination is invalid: {}",
+                        dst,
+                    )
+                    continue
+
+                if destination_snapshot is None:
+                    self._install_snapshot(src, dst, source_snapshot)
+                elif destination_snapshot.digest == source_snapshot.digest:
+                    pass
+                elif source_snapshot.updated_at > destination_snapshot.updated_at:
+                    archived = self._archive_conflict(dst, destination_snapshot, "destination")
+                    self._install_snapshot(src, dst, source_snapshot)
+                    logger.warning("Archived older session migration conflict at {}", archived)
+                else:
+                    archived = self._archive_conflict(src, source_snapshot, "workspace")
+                    logger.warning("Archived older session migration conflict at {}", archived)
+
+                installed = self._session_file_snapshot(dst)
+                if installed is None:
+                    raise OSError(f"session migration destination is unreadable: {dst}")
+                selected_digest = (
+                    source_snapshot.digest
+                    if destination_snapshot is None
+                    or source_snapshot.updated_at > destination_snapshot.updated_at
+                    else destination_snapshot.digest
+                )
+                if installed.digest != selected_digest:
+                    raise OSError(f"session migration selected unexpected data: {dst}")
+                if not self._remove_migrated_source(src, source_snapshot):
+                    logger.warning(
+                        "Session migrated but legacy source changed or could not be removed: {}",
+                        src,
+                    )
+            except OSError as exc:
+                logger.warning("Failed to migrate session {}: {}", src, exc)
+
+    def restore_to_workspace(self) -> SessionRestoreResult:
+        """Copy canonical sessions back for an explicit downgrade or rollback."""
+        restored = 0
+        unchanged = 0
+        conflicts: list[Path] = []
+        old_dir = self.workspace / "sessions"
+        if old_dir.is_symlink():
+            raise RuntimeError(f"refusing to restore into symlinked sessions directory: {old_dir}")
+        ensure_dir(old_dir)
+
+        with self._migration_lock, self._session_files_lock:
+            for src in self.sessions_dir.glob("*.jsonl"):
+                if self.session_key_from_path(src) is None:
+                    continue
+                source_snapshot = self._session_file_snapshot(src)
+                if source_snapshot is None:
+                    conflicts.append(src)
+                    continue
+                dst = old_dir / src.name
+                if dst.exists():
+                    destination_snapshot = self._session_file_snapshot(dst)
+                    if (
+                        destination_snapshot is not None
+                        and destination_snapshot.digest == source_snapshot.digest
+                    ):
+                        unchanged += 1
+                    else:
+                        conflicts.append(dst)
+                    continue
+                self._install_snapshot(src, dst, source_snapshot)
+                restored += 1
+        return SessionRestoreResult(
+            restored=restored,
+            unchanged=unchanged,
+            conflicts=tuple(conflicts),
+        )
 
     @staticmethod
     def safe_key(key: str) -> str:
@@ -523,6 +1048,10 @@ class JsonlSessionStore:
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def load(self, key: str) -> Session | None:
+        with self._session_files_lock:
+            return self._load_unlocked(key)
+
+    def _load_unlocked(self, key: str) -> Session | None:
         path = self.get_session_path(key)
         if not path.exists():
             return None
@@ -588,7 +1117,7 @@ class JsonlSessionStore:
             )
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
-            repaired = self.repair(key)
+            repaired = self._repair_unlocked(key)
             if repaired is not None:
                 logger.info(
                     "Recovered session {} from corrupt file ({} messages)",
@@ -598,6 +1127,10 @@ class JsonlSessionStore:
             return repaired
 
     def repair(self, key: str, *, path: Path | None = None) -> Session | None:
+        with self._session_files_lock:
+            return self._repair_unlocked(key, path=path)
+
+    def _repair_unlocked(self, key: str, *, path: Path | None = None) -> Session | None:
         if path is None:
             path = self.get_session_path(key)
         if not path.exists():
@@ -690,11 +1223,15 @@ class JsonlSessionStore:
         }
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
+        with self._session_files_lock:
+            self._save_unlocked(session, fsync=fsync)
+
+    def _save_unlocked(self, session: Session, *, fsync: bool = False) -> None:
         path = self.get_session_path(session.key)
-        tmp_path = path.with_suffix(".jsonl.tmp")
+        tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
 
         try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            with open(tmp_path, "x", encoding="utf-8") as f:
                 metadata_line = {
                     "_type": "metadata",
                     "key": session.key,
@@ -728,11 +1265,14 @@ class JsonlSessionStore:
                             raise
                     finally:
                         os.close(fd)
-        except BaseException:
+        finally:
             tmp_path.unlink(missing_ok=True)
-            raise
 
     def delete(self, key: str) -> bool:
+        with self._session_files_lock:
+            return self._delete_unlocked(key)
+
+    def _delete_unlocked(self, key: str) -> bool:
         paths = [
             self.get_session_path(key),
             self.get_legacy_lossy_path(key),
@@ -750,6 +1290,10 @@ class JsonlSessionStore:
         return deleted
 
     def read(self, key: str) -> SessionPayload | None:
+        with self._session_files_lock:
+            return self._read_unlocked(key)
+
+    def _read_unlocked(self, key: str) -> SessionPayload | None:
         path = self.get_session_path(key)
         if not path.exists():
             return None
@@ -799,13 +1343,17 @@ class JsonlSessionStore:
             }
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session {}: {}", key, e)
-            repaired = self.repair(key, path=path)
+            repaired = self._repair_unlocked(key, path=path)
             if repaired is not None:
                 logger.info("Recovered read-only session view {} from corrupt file", key)
                 return self.session_payload(repaired)
             return None
 
     def read_metadata(self, key: str) -> SessionMetadataPayload | None:
+        with self._session_files_lock:
+            return self._read_metadata_unlocked(key)
+
+    def _read_metadata_unlocked(self, key: str) -> SessionMetadataPayload | None:
         path = self.get_session_path(key)
         if not path.exists():
             return None
@@ -840,7 +1388,7 @@ class JsonlSessionStore:
             return None
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session metadata {}: {}", key, e)
-            repaired = self.repair(key, path=path)
+            repaired = self._repair_unlocked(key, path=path)
             if repaired is not None:
                 logger.info("Recovered read-only session metadata {} from corrupt file", key)
                 return {
@@ -852,6 +1400,10 @@ class JsonlSessionStore:
             return None
 
     def list_sessions(self) -> list[SessionInfo]:
+        with self._session_files_lock:
+            return self._list_sessions_unlocked()
+
+    def _list_sessions_unlocked(self) -> list[SessionInfo]:
         sessions: list[SessionInfo] = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
@@ -929,7 +1481,7 @@ class JsonlSessionStore:
             except FileNotFoundError:
                 continue
             except _SESSION_DATA_ERRORS:
-                repaired = self.repair(storage_key, path=path)
+                repaired = self._repair_unlocked(storage_key, path=path)
                 if repaired is not None:
                     sessions.append(
                         {
@@ -955,9 +1507,15 @@ class JsonlSessionStore:
 class SessionManager:
     """Manage session identity, caching, retention, and persistence."""
 
-    def __init__(self, workspace: Path, *, store: SessionStore | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        *,
+        store: SessionStore | None = None,
+        sessions_root: Path | None = None,
+    ):
         self.workspace = workspace
-        self._jsonl_store = JsonlSessionStore(workspace)
+        self._jsonl_store = JsonlSessionStore(workspace, sessions_root=sessions_root)
         self._store: SessionStore = store if store is not None else self._jsonl_store
         self.sessions_dir = self._jsonl_store.sessions_dir
         self.legacy_sessions_dir = self._jsonl_store.legacy_sessions_dir
@@ -966,6 +1524,7 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._file_cap_archiver: Callable[..., None] | None = None
+        self._delete_observer: Callable[[str], None] | None = None
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -994,6 +1553,10 @@ class SessionManager:
     def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
         """Archive unconsolidated overflow whenever a session is persisted."""
         self._file_cap_archiver = archiver
+
+    def set_delete_observer(self, observer: Callable[[str], None]) -> None:
+        """Observe explicit session deletion for process-local state cleanup."""
+        self._delete_observer = observer
 
     @staticmethod
     def safe_key(key: str) -> str:
@@ -1032,6 +1595,12 @@ class SessionManager:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self._jsonl_store.get_legacy_session_path(key)
 
+    @contextmanager
+    def locked_session_files(self) -> Generator[Path, None, None]:
+        """Guard exceptional direct access to canonical JSONL files."""
+        with self._jsonl_store.locked_session_files() as sessions_dir:
+            yield sessions_dir
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
@@ -1053,6 +1622,24 @@ class SessionManager:
         self._remember(session)
         return session
 
+    def get_or_create_transient(
+        self,
+        key: str,
+        *,
+        disabled_tools: Collection[str] = (),
+    ) -> Session:
+        """Return a fresh, non-persistent session without loading history."""
+        policy = SessionPolicy(
+            persist=False,
+            log_content=False,
+            disabled_tools=frozenset(disabled_tools),
+        )
+        session = self.get_cached(key)
+        if session is None or session.policy != policy:
+            session = Session(key=key, policy=policy)
+            self._remember(session)
+        return session
+
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
 
@@ -1060,12 +1647,11 @@ class SessionManager:
         """Attempt to recover a session from a corrupt JSONL file."""
         return self._jsonl_store.repair(key, path=path)
 
-    @staticmethod
-    def _session_payload(session: Session) -> SessionPayload:
-        return JsonlSessionStore.session_payload(session)
-
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
+        if not session.policy.persist:
+            return
+
         archiver = self._file_cap_archiver
         if archiver is not None:
             session.enforce_file_cap(
@@ -1077,6 +1663,47 @@ class SessionManager:
 
         self._store.save(session, fsync=fsync)
         self._remember(session)
+
+    def rename_model_preset(self, old_name: str, new_name: str) -> int:
+        """Rename a session-scoped model preset across durable and live sessions."""
+        if old_name == new_name:
+            return 0
+
+        cached = dict(self._overflow_cache.items())
+        cached.update(self._cache)
+        keys = set(cached)
+        keys.update(item["key"] for item in self._store.list_sessions())
+
+        changed: list[Session] = []
+        try:
+            for key in sorted(keys):
+                session = cached.get(key) or self._load(key)
+                if (
+                    session is None
+                    or session.metadata.get(SESSION_MODEL_PRESET_METADATA_KEY) != old_name
+                ):
+                    continue
+                session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = new_name
+                changed.append(session)
+                if session.policy.persist:
+                    self.save(session, fsync=True)
+                else:
+                    self._remember(session)
+        except BaseException:
+            for session in reversed(changed):
+                session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = old_name
+                try:
+                    if session.policy.persist:
+                        self.save(session, fsync=True)
+                    else:
+                        self._remember(session)
+                except Exception:
+                    logger.exception(
+                        "Failed to roll back model preset rename for session {}",
+                        session.key,
+                    )
+            raise
+        return len(changed)
 
     def flush_all(self) -> int:
         """Re-save every cached session with fsync for durable shutdown.
@@ -1104,7 +1731,14 @@ class SessionManager:
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
         self.invalidate(key)
-        return self._store.delete(key)
+        deleted = self._store.delete(key)
+        if self._delete_observer is not None:
+            self._delete_observer(key)
+        return deleted
+
+    def restore_sessions_to_workspace(self) -> SessionRestoreResult:
+        """Restore session files to the pre-relocation path for an explicit rollback."""
+        return self._jsonl_store.restore_to_workspace()
 
     def fork_session_before_user_index(
         self,
@@ -1165,6 +1799,10 @@ class SessionManager:
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""
         return cast(dict[str, Any] | None, self._store.read(key))
+
+    def read_session_snapshot(self, key: str) -> Session | None:
+        """Load a detached session snapshot without populating the runtime cache."""
+        return self._store.load(key)
 
     def read_session_metadata(self, key: str) -> dict[str, Any] | None:
         """Read session metadata without loading the transcript."""

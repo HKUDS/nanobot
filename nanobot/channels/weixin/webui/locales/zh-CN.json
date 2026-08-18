@@ -21,7 +21,21 @@
       "token": {
         "label": "令牌",
         "placeholder": "二维码登录后自动保存"
-      }
+      },
+      "sendProgress": { "label": "发送进度消息" },
+      "sendToolHints": { "label": "发送工具提示" },
+      "streaming": { "label": "使用流式 API" },
+      "replyProgressMessages": { "label": "发送结构化进度" },
+      "replyProgressMaxMessages": { "label": "结构化进度消息上限" },
+      "contextMessageBudget": { "label": "上下文消息预算" },
+      "blockStreaming": { "label": "分块发送回复" },
+      "blockStreamingMinChars": { "label": "最小分块字符数" },
+      "blockStreamingMaxMessages": { "label": "分块消息上限" },
+      "baseUrl": { "label": "API 地址" },
+      "cdnBaseUrl": { "label": "CDN 地址" },
+      "routeTag": { "label": "路由标签" },
+      "stateDir": { "label": "状态目录" },
+      "pollTimeout": { "label": "轮询超时" }
     }
   },
   "custom": {
@@ -31,6 +45,13 @@
     "waiting": "正在等待微信扫码...",
     "connected": "微信已连接。",
     "stopped": "微信登录已停止。",
-    "connecting": "正在连接..."
+    "connecting": "正在连接...",
+    "verifyTitle": "需要验证",
+    "verifyDescription": "输入手机微信中显示的数字以继续。",
+    "verifyMismatch": "验证码不匹配，请输入微信中显示的新数字。",
+    "expired": "微信登录已过期，请重新扫码连接。",
+    "failed": "无法连接微信，请重试。",
+    "verifyPlaceholder": "验证码",
+    "verifySubmit": "验证"
   }
 }

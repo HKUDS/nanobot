@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +41,14 @@ class SessionTurnStarted:
 
 
 @dataclass(frozen=True)
+class TurnRuntimeAdmitted:
+    """The immutable model runtime selected for one admitted turn."""
+
+    context: RuntimeEventContext
+    runtime: LLMRuntime
+
+
+@dataclass(frozen=True)
 class TurnRunStatusChanged:
     """Visible run status changed for a turn."""
 
@@ -56,6 +64,7 @@ class TurnCompleted:
     context: RuntimeEventContext
     latency_ms: int | None = None
     runtime: LLMRuntime | None = None
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -85,6 +94,7 @@ class RuntimeModelChanged:
 
 RuntimeEvent = (
     SessionTurnStarted
+    | TurnRuntimeAdmitted
     | SessionTurnPersisted
     | TurnRunStatusChanged
     | TurnCompleted
@@ -93,6 +103,7 @@ RuntimeEvent = (
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
+    | type[TurnRuntimeAdmitted]
     | type[SessionTurnPersisted]
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
@@ -159,6 +170,7 @@ class RuntimeEventPublisher:
         self.bus = bus or RuntimeEventBus()
         self._turn_latency_ms: dict[str, int] = {}
         self._turn_runtime: dict[str, LLMRuntime] = {}
+        self._turn_usage: dict[str, dict[str, int]] = {}
 
     @staticmethod
     def _context(
@@ -184,9 +196,17 @@ class RuntimeEventPublisher:
         if latency_ms is not None:
             self._turn_latency_ms[session_key] = int(latency_ms)
 
+    def record_turn_usage(self, session_key: str, usage: Mapping[str, int]) -> None:
+        self._turn_usage[session_key] = {
+            key: int(value)
+            for key, value in usage.items()
+            if type(value) is int and value >= 0
+        }
+
     def clear_turn(self, session_key: str) -> None:
         self._turn_latency_ms.pop(session_key, None)
         self._turn_runtime.pop(session_key, None)
+        self._turn_usage.pop(session_key, None)
 
     async def session_turn_started(
         self,
@@ -201,6 +221,26 @@ class RuntimeEventPublisher:
                     session_key=session_key,
                     metadata=msg.metadata,
                 )
+            )
+        )
+
+    async def turn_runtime_admitted(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        runtime: LLMRuntime,
+    ) -> None:
+        """Record and publish the runtime selected for one turn."""
+        self.record_turn_runtime(session_key, runtime)
+        await self.bus.publish(
+            TurnRuntimeAdmitted(
+                context=self._context(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    session_key=session_key,
+                    metadata=msg.metadata,
+                ),
+                runtime=runtime,
             )
         )
 
@@ -265,6 +305,7 @@ class RuntimeEventPublisher:
                 ),
                 latency_ms=self._turn_latency_ms.pop(session_key, None),
                 runtime=self._turn_runtime.pop(session_key, None),
+                usage=self._turn_usage.pop(session_key, {}),
             )
         )
 

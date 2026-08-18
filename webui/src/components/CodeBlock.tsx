@@ -202,7 +202,7 @@ export function CodeBlock({
     <div
       className={cn(
         "not-prose relative overflow-hidden",
-        hasChrome && "rounded-[18px] bg-secondary/70",
+        hasChrome && "rounded-floating bg-secondary/70",
         className,
       )}
       data-language={language || t("code.fallbackLanguage")}

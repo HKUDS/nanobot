@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 _SKIP_MODULES = frozenset({
     "base", "schema", "registry", "context", "loader", "config",
-    "file_state", "sandbox", "mcp", "__init__", "runtime_state",
+    "file_state", "sandbox", "mcp", "__init__", "runtime_control",
 })
 
 

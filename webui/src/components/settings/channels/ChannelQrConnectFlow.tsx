@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import { Check, Loader2, Network, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -14,6 +14,7 @@ import type {
   ChannelConnectPayload,
   NanobotFeaturesPayload,
 } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelQrConnectLabels = {
   qrAlt: string;
@@ -34,8 +35,15 @@ export type ChannelConnectStartOptions = {
   force?: boolean;
 };
 
+export type ChannelQrConnectPendingContext = {
+  connect: ChannelConnectPayload;
+  busy: boolean;
+  poll: (
+    params?: Readonly<Record<string, string>>,
+  ) => Promise<ChannelConnectPayload | null>;
+};
+
 export function ChannelQrConnectFlow({
-  token,
   channelName,
   startOptions = {},
   idleLabel,
@@ -43,6 +51,10 @@ export function ChannelQrConnectFlow({
   forceOnRepeat = false,
   labels,
   onFeaturesUpdate,
+  pausePolling,
+  renderPending,
+  resolveMessage,
+  suppressSucceeded = false,
 }: {
   token: string;
   channelName: string;
@@ -52,7 +64,12 @@ export function ChannelQrConnectFlow({
   forceOnRepeat?: boolean;
   labels: ChannelQrConnectLabels;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  pausePolling?: (payload: ChannelConnectPayload) => boolean;
+  renderPending?: (context: ChannelQrConnectPendingContext) => ReactNode;
+  resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
+  suppressSucceeded?: boolean;
 }) {
+  const { client } = useClient();
   const pageVisible = usePageVisibility();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -62,8 +79,6 @@ export function ChannelQrConnectFlow({
   const [error, setError] = useState<string | null>(null);
   const [handledRequestId, setHandledRequestId] = useState(0);
   const pollInFlight = useRef(false);
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
   const startDomain = startOptions.domain;
   const startInstanceId = startOptions.instanceId;
   const startMode = startOptions.mode;
@@ -72,6 +87,10 @@ export function ChannelQrConnectFlow({
   const pending = connect?.status === "pending";
   const succeeded = connect?.status === "succeeded";
   const canStart = !pending && !busy;
+  const pollingPaused = Boolean(connect && pausePolling?.(connect));
+  const displayMessage = connect
+    ? resolveMessage?.(connect) ?? connect.message
+    : undefined;
 
   useEffect(() => {
     if (!connect?.qr_url) {
@@ -96,16 +115,22 @@ export function ChannelQrConnectFlow({
   }, [connect?.qr_url]);
 
   useEffect(() => {
-    if (!connect?.session_id || connect.status !== "pending" || !pageVisible) return;
+    if (
+      !connect?.session_id
+      || connect.status !== "pending"
+      || pollingPaused
+      || !pageVisible
+    ) return;
     let cancelled = false;
+    const sessionId = connect.session_id;
     const poll = async () => {
       if (pollInFlight.current) return;
       pollInFlight.current = true;
       try {
         const payload = await pollChannelConnect(
-          tokenRef.current,
+          client,
           channelName,
-          connect.session_id,
+          sessionId,
         );
         if (cancelled) return;
         setConnect((current) => ({
@@ -137,18 +162,20 @@ export function ChannelQrConnectFlow({
     };
   }, [
     channelName,
+    client,
     connect?.interval_ms,
     connect?.session_id,
     connect?.status,
     onFeaturesUpdate,
     pageVisible,
+    pollingPaused,
   ]);
 
   const start = useCallback(async (force = false) => {
     setBusy(true);
     setError(null);
     try {
-      const payload = await startChannelConnect(tokenRef.current, channelName, {
+      const payload = await startChannelConnect(client, channelName, {
         domain: startDomain,
         instanceId: startInstanceId,
         mode: startMode,
@@ -160,7 +187,7 @@ export function ChannelQrConnectFlow({
     } finally {
       setBusy(false);
     }
-  }, [channelName, startDomain, startForce, startInstanceId, startMode]);
+  }, [channelName, client, startDomain, startForce, startInstanceId, startMode]);
 
   useEffect(() => {
     if (!connectRequestId || connectRequestId === handledRequestId) return;
@@ -176,7 +203,7 @@ export function ChannelQrConnectFlow({
     setBusy(true);
     try {
       const payload = await cancelChannelConnect(
-        tokenRef.current,
+        client,
         channelName,
         connect.session_id,
       );
@@ -188,11 +215,44 @@ export function ChannelQrConnectFlow({
     }
   };
 
+  const submitPoll = async (
+    params: Readonly<Record<string, string>> = {},
+  ): Promise<ChannelConnectPayload | null> => {
+    if (!connect?.session_id) return null;
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = await pollChannelConnect(
+        client,
+        channelName,
+        connect.session_id,
+        params,
+      );
+      setConnect((current) => ({
+        ...(current ?? payload),
+        ...payload,
+        qr_url: payload.qr_url ?? current?.qr_url,
+      }));
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
+      if (payload.status !== "pending") {
+        setError(null);
+      }
+      return payload;
+    } catch (err) {
+      setError((err as Error).message);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="mt-3 space-y-3">
       {pending ? (
-        <div className="grid gap-4 rounded-[14px] border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
-          <div className="grid h-[196px] w-[196px] place-items-center rounded-[14px] border border-border/60 bg-background">
+        <div className="grid gap-4 rounded-control border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
+          <div className="grid h-[196px] w-[196px] place-items-center rounded-control border border-border/60 bg-background">
             {qrDataUrl ? (
               <img
                 src={qrDataUrl}
@@ -210,10 +270,12 @@ export function ChannelQrConnectFlow({
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
               {labels.scanDescription}
             </p>
-            <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              {labels.waiting}
-            </div>
+            {renderPending?.({ connect, busy, poll: submitPoll }) ?? (
+              <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                {labels.waiting}
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap justify-end gap-2">
               <Button
                 type="button"
@@ -230,21 +292,21 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      {succeeded ? (
-        <div className="flex items-center gap-2 rounded-[12px] border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
+      {succeeded && !suppressSucceeded ? (
+        <div className="flex items-center gap-2 rounded-control border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
           <Check className="h-3.5 w-3.5" aria-hidden />
-          {connect.message ?? labels.connected}
+          {displayMessage ?? labels.connected}
         </div>
       ) : null}
 
       {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
-        <div className="rounded-[12px] border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
-          {connect.message || labels.stopped}
+        <div className="rounded-control border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+          {displayMessage || labels.stopped}
         </div>
       ) : null}
 
       {error ? (
-        <div className="rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="rounded-control border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
           {error}
         </div>
       ) : null}

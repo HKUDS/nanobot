@@ -13,7 +13,7 @@ import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -32,7 +32,6 @@ from nanobot.webui.http_utils import (
 
 MediaDirProvider = Callable[[str | None], Path]
 SignedMediaPath = Callable[[Path], dict[str, str] | None]
-SignedMediaUrl = Callable[[Path], str | None]
 
 
 def b64url_encode(data: bytes) -> str:
@@ -188,37 +187,6 @@ def signed_media_attachments(
         name = att.get("name") or path.name
         out.append({"kind": media_attachment_kind(name), "url": url, "name": name})
     return out
-
-
-def attach_signed_media_urls(
-    payload: dict[str, Any],
-    *,
-    sign_path: SignedMediaUrl,
-) -> None:
-    """Replace raw media path lists in a WebUI session payload with signed URLs."""
-    messages = payload.get("messages")
-    if not isinstance(messages, list):
-        return
-    raw_messages = cast(list[Any], messages)
-    for msg in raw_messages:
-        if not isinstance(msg, dict):
-            continue
-        message = cast(dict[str, Any], msg)
-        media = message.get("media")
-        if not isinstance(media, list) or not media:
-            continue
-        media_entries = cast(list[Any], media)
-        urls: list[dict[str, str]] = []
-        for entry in media_entries:
-            if not isinstance(entry, str) or not entry:
-                continue
-            signed = sign_path(Path(entry))
-            if signed is None:
-                continue
-            urls.append({"url": signed, "name": Path(entry).name})
-        if urls:
-            message["media_urls"] = urls
-        message.pop("media", None)
 
 
 def serve_signed_media(

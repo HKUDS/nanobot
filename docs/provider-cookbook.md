@@ -71,7 +71,6 @@ This recipe applies when one API key routes many hosted model families.
   },
   "modelPresets": {
     "primary": {
-      "label": "Primary",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
@@ -113,7 +112,6 @@ OpenCode Zen:
   },
   "modelPresets": {
     "primary": {
-      "label": "OpenCode Zen",
       "provider": "opencode_zen",
       "model": "opencode/deepseek-v4-pro",
       "maxTokens": 4096,
@@ -140,7 +138,6 @@ OpenCode Go:
   },
   "modelPresets": {
     "primary": {
-      "label": "OpenCode Go",
       "provider": "opencode_go",
       "model": "opencode-go/deepseek-v4-flash",
       "maxTokens": 4096,
@@ -182,7 +179,6 @@ This recipe applies when you have an OpenAI API key and want to call OpenAI dire
   },
   "modelPresets": {
     "primary": {
-      "label": "OpenAI",
       "provider": "openai",
       "model": "gpt-5",
       "maxTokens": 4096,
@@ -219,7 +215,6 @@ This recipe applies when your key comes from Anthropic and your model name is an
   },
   "modelPresets": {
     "primary": {
-      "label": "Anthropic",
       "provider": "anthropic",
       "model": "claude-sonnet-4-5",
       "maxTokens": 4096,
@@ -255,7 +250,6 @@ If you use an Anthropic-compatible proxy, keep the preset provider as `anthropic
   },
   "modelPresets": {
     "primary": {
-      "label": "Anthropic proxy",
       "provider": "anthropic",
       "model": "claude-sonnet-4-5",
       "maxTokens": 4096,
@@ -286,7 +280,6 @@ This recipe applies when your key comes from Kimi's Coding Plan endpoint. Nanobo
   },
   "modelPresets": {
     "kimiCoding": {
-      "label": "Kimi Coding",
       "provider": "kimi_coding",
       "model": "kimi-for-coding",
       "maxTokens": 4096,
@@ -324,7 +317,6 @@ This recipe applies to an OpenAI-compatible service that is not a named nanobot 
   },
   "modelPresets": {
     "primary": {
-      "label": "Custom",
       "provider": "custom",
       "model": "provider-model-name",
       "maxTokens": 4096,
@@ -364,7 +356,6 @@ For multiple custom endpoints, do not overload the single `custom` block. Name e
   },
   "modelPresets": {
     "work": {
-      "label": "Work proxy",
       "provider": "workProxy",
       "model": "gpt-4o-mini",
       "maxTokens": 4096,
@@ -372,7 +363,6 @@ For multiple custom endpoints, do not overload the single `custom` block. Name e
       "temperature": 0.1
     },
     "lab": {
-      "label": "Lab local",
       "provider": "lab-local",
       "model": "served-model-name",
       "maxTokens": 4096,
@@ -408,7 +398,6 @@ ollama pull llama3.2
   },
   "modelPresets": {
     "local": {
-      "label": "Local",
       "provider": "ollama",
       "model": "llama3.2",
       "maxTokens": 2048,
@@ -453,7 +442,6 @@ This recipe applies when a local server exposes an OpenAI-compatible `/v1` API.
   },
   "modelPresets": {
     "local": {
-      "label": "Local",
       "provider": "vllm",
       "model": "served-model-name",
       "maxTokens": 4096,
@@ -480,7 +468,6 @@ For LM Studio, use its local base URL and provider name:
   },
   "modelPresets": {
     "local": {
-      "label": "LM Studio",
       "provider": "lm_studio",
       "model": "local-model",
       "maxTokens": 2048,
@@ -505,7 +492,6 @@ This recipe applies when one provider sometimes rate-limits, one model is expens
 {
   "modelPresets": {
     "fast": {
-      "label": "Fast",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
@@ -513,7 +499,6 @@ This recipe applies when one provider sometimes rate-limits, one model is expens
       "temperature": 0.1
     },
     "deep": {
-      "label": "Deep",
       "provider": "anthropic",
       "model": "claude-sonnet-4-5",
       "maxTokens": 4096,
@@ -521,7 +506,6 @@ This recipe applies when one provider sometimes rate-limits, one model is expens
       "temperature": 0.1
     },
     "local": {
-      "label": "Local",
       "provider": "ollama",
       "model": "llama3.2",
       "maxTokens": 2048,
@@ -549,7 +533,7 @@ This recipe applies after the agent works and you want observability for OpenAI-
 Install the optional package in the same Python environment that runs nanobot:
 
 ```bash
-python -m pip install langfuse
+nanobot plugins enable langfuse
 ```
 
 Set the environment variables before starting nanobot:
@@ -580,14 +564,12 @@ Use this after you have more than one preset and are chatting through a supporte
 {
   "modelPresets": {
     "fast": {
-      "label": "Fast",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536
     },
     "local": {
-      "label": "Local",
       "provider": "ollama",
       "model": "llama3.2",
       "maxTokens": 2048,

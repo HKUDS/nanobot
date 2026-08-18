@@ -75,6 +75,18 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.apps.description",
   "settings.apps.caption",
   "settings.apps.restartRequired",
+  "settings.mcp.connectingAccount",
+  "settings.mcp.continueSignIn",
+  "settings.mcp.preparingSignIn",
+  "settings.mcp.openSignInToContinue",
+  "settings.mcp.finishSignInInBrowser",
+  "settings.mcp.finishingConnection",
+  "settings.mcp.activatingTools",
+  "settings.mcp.connected",
+  "settings.mcp.connectionFailed",
+  "settings.mcp.connectionCancelled",
+  "settings.mcp.reloadFailed",
+  "settings.mcp.oauthFailed",
   "settings.skills.views",
   "settings.skills.installedTab",
   "settings.skills.discoverTab",
@@ -257,6 +269,22 @@ const LOCALIZED_NEW_SURFACE_KEYS = [
   "chat.groups.yesterday",
   "chat.groups.earlier",
   "chat.groups.archived",
+  "workbench.tabAria",
+  "workbench.panesInTab",
+  "workbench.collapseTabGroup",
+  "workbench.expandTabGroup",
+  "workbench.dropPane",
+  "workbench.createGroup",
+  "workbench.moveTo",
+  "workbench.renameGroupTitle",
+  "workbench.renameGroupDescription",
+  "workbench.renameGroupPlaceholder",
+  "workbench.dissolveTab",
+  "workbench.deleteConversations",
+  "workbench.paneLimit",
+  "workbench.paneActions",
+  "workbench.detachPane",
+  "workbench.composerAria",
   "thread.promptNavigator.railAria",
   "thread.composer.mentions.cliTitle",
   "thread.composer.mentions.mcpTitle",
@@ -568,6 +596,18 @@ describe("webui i18n", () => {
     expect(settings.skills.marketplaceProviderAll).toBe("全部");
     expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");
     expect(settings.skills.marketplaceTrendingTitle).toBe("各市场热门技能");
+  });
+
+  it("keeps the Simplified Chinese group workflow localized", () => {
+    const workbench = resources["zh-CN"].common.workbench;
+
+    expect(workbench.tabAria).toBe("分组：{{title}}");
+    expect(workbench.createGroup).toBe("创建分组");
+    expect(workbench.renameGroupTitle).toBe("重命名分组");
+    expect(workbench.renameGroupDescription).toBe("为这个分组命名。");
+    expect(workbench.renameGroupPlaceholder).toBe("分组名称");
+    expect(workbench.moveTo).toBe("移动到");
+    expect(workbench.detachPane).toBe("移出");
   });
 
   it("keeps Indonesian and Vietnamese settings free of copied Spanish help text", () => {

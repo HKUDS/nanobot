@@ -17,6 +17,7 @@ from nanobot.channels.weixin.runtime import (
     ITEM_TEXT,
     MESSAGE_TYPE_BOT,
     WEIXIN_CHANNEL_VERSION,
+    WeixinAuthError,
     WeixinChannel,
     WeixinConfig,
     _decrypt_aes_ecb,
@@ -67,11 +68,11 @@ def test_make_headers_includes_route_tag_when_configured() -> None:
     assert headers["Authorization"] == "Bearer token"
     assert headers["SKRouteTag"] == "123"
     assert headers["iLink-App-Id"] == "bot"
-    assert headers["iLink-App-ClientVersion"] == str((2 << 16) | (1 << 8) | 1)
+    assert headers["iLink-App-ClientVersion"] == str((2 << 16) | (4 << 8) | 6)
 
 
 def test_channel_version_matches_reference_plugin_version() -> None:
-    assert WEIXIN_CHANNEL_VERSION == "2.1.1"
+    assert WEIXIN_CHANNEL_VERSION == "2.4.6"
 
 
 def test_save_and_load_state_persists_context_tokens(tmp_path) -> None:
@@ -159,6 +160,29 @@ def test_save_state_persists_explicit_config_token_over_stale_state(tmp_path) ->
     assert saved["get_updates_buf"] == "current-cursor"
 
 
+def test_save_state_preserves_qr_replacement_of_configured_token(tmp_path) -> None:
+    config = WeixinConfig(
+        enabled=True,
+        allow_from=["*"],
+        token="configured-token",
+        state_dir=str(tmp_path),
+    )
+    old_runtime = WeixinChannel(config, MessageBus())
+    old_runtime._token = "configured-token"
+
+    replacement = WeixinChannel(config, MessageBus())
+    replacement.connect_commit_account(
+        token="replacement-token",
+        base_url="https://new.example",
+    )
+
+    old_runtime._save_state()
+
+    saved = json.loads((tmp_path / "account.json").read_text())
+    assert saved["token"] == "replacement-token"
+    assert saved["base_url"] == "https://new.example"
+
+
 def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_path) -> None:
     channel = WeixinChannel(
         WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
@@ -170,6 +194,86 @@ def test_save_state_with_empty_runtime_token_preserves_persisted_account(tmp_pat
     channel._save_state()
 
     assert json.loads((tmp_path / "account.json").read_text()) == persisted
+
+
+@pytest.mark.asyncio
+async def test_login_force_ignores_persisted_account_through_qr_flow(tmp_path) -> None:
+    persisted = {
+        "token": "persisted-token",
+        "get_updates_buf": "persisted-cursor",
+        "context_tokens": {"wx-user": "ctx-persisted"},
+        "typing_tickets": {"wx-user": {"ticket": "ticket-persisted"}},
+        "base_url": "https://persisted.example",
+    }
+    channel = WeixinChannel(
+        WeixinConfig(
+            enabled=True,
+            allow_from=["*"],
+            token="configured-token",
+            state_dir=str(tmp_path),
+        ),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(
+        json.dumps(persisted),
+        encoding="utf-8",
+    )
+    channel._print_qr_code = lambda _url: None
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"qrcode": "qr-1", "qrcode_img_content": "url-1"},
+            {"qrcode": "qr-2", "qrcode_img_content": "url-2"},
+        ]
+    )
+    channel._api_get_with_base = AsyncMock(
+        side_effect=[
+            {"status": "expired"},
+            {"status": "binded_redirect"},
+        ]
+    )
+
+    ok = await channel.login(force=True)
+
+    assert ok is False
+    assert [call.args[1]["local_token_list"] for call in channel._api_post.await_args_list] == [
+        [],
+        [],
+    ]
+    assert channel._token == ""
+    assert channel._get_updates_buf == ""
+    assert channel._context_tokens == {}
+    assert channel._typing_tickets == {}
+    assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
+    assert json.loads((tmp_path / "account.json").read_text()) == persisted
+
+
+@pytest.mark.asyncio
+async def test_login_without_force_reuses_persisted_account(tmp_path) -> None:
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    (tmp_path / "account.json").write_text(
+        json.dumps(
+            {
+                "token": "persisted-token",
+                "get_updates_buf": "persisted-cursor",
+                "context_tokens": {"wx-user": "ctx-persisted"},
+                "base_url": "https://persisted.example",
+            }
+        ),
+        encoding="utf-8",
+    )
+    channel._qr_login = AsyncMock(return_value=False)
+
+    ok = await channel.login(force=False)
+
+    assert ok is True
+    channel._qr_login.assert_not_awaited()
+    assert channel._token == "persisted-token"
+    assert channel._get_updates_buf == "persisted-cursor"
+    assert channel._context_tokens == {"wx-user": "ctx-persisted"}
+    assert channel.config.base_url == "https://persisted.example"
 
 
 @pytest.mark.asyncio
@@ -442,15 +546,15 @@ async def test_send_without_context_token_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_raises_when_session_is_paused() -> None:
+async def test_send_raises_when_authentication_is_required() -> None:
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
     channel._context_tokens["wx-user"] = "ctx-2"
-    channel._pause_session(60)
+    channel._auth_required = True
     channel._send_text = AsyncMock()
 
-    with pytest.raises(RuntimeError, match="session paused"):
+    with pytest.raises(WeixinAuthError, match="bot token is stale"):
         await channel.send(
             type("Msg", (), {"chat_id": "wx-user", "content": "pong", "media": [], "metadata": {}})()
         )
@@ -525,20 +629,21 @@ async def test_send_still_sends_text_when_typing_ticket_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_poll_once_pauses_session_on_expired_errcode() -> None:
+async def test_poll_once_requires_login_on_stale_token() -> None:
     channel, _bus = _make_channel()
     channel._client = SimpleNamespace(timeout=None)
     channel._token = "token"
     channel._api_post = AsyncMock(return_value={"ret": 0, "errcode": -14, "errmsg": "expired"})
 
-    await channel._poll_once()
+    with pytest.raises(WeixinAuthError, match="no replacement credentials"):
+        await channel._poll_once()
 
-    assert channel._session_pause_remaining_s() > 0
+    assert channel._auth_required is True
 
 
 @pytest.mark.asyncio
-async def test_poll_once_reloads_refreshed_state_after_session_pause(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+async def test_poll_once_reloads_refreshed_state_after_stale_token(
+    tmp_path,
 ) -> None:
     channel = WeixinChannel(
         WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
@@ -550,8 +655,13 @@ async def test_poll_once_reloads_refreshed_state_after_session_pause(
         json.dumps({"token": "new-token", "base_url": "https://new.example"}),
         encoding="utf-8",
     )
-    channel._session_pause_until = time.time() + 10
-    monkeypatch.setattr(weixin_mod.asyncio, "sleep", AsyncMock())
+    channel._client = object()
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"ret": 0, "errcode": -14, "errmsg": "stale"},
+            {"ret": 0},
+        ]
+    )
 
     await channel._poll_once()
 
@@ -560,8 +670,8 @@ async def test_poll_once_reloads_refreshed_state_after_session_pause(
 
 
 @pytest.mark.asyncio
-async def test_poll_once_keeps_explicit_token_after_session_pause(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+async def test_poll_once_keeps_explicit_token_and_requires_login(
+    tmp_path,
 ) -> None:
     channel = WeixinChannel(
         WeixinConfig(
@@ -577,13 +687,121 @@ async def test_poll_once_keeps_explicit_token_after_session_pause(
         json.dumps({"token": "stale-token", "base_url": "https://stale.example"}),
         encoding="utf-8",
     )
-    channel._session_pause_until = time.time() + 10
-    monkeypatch.setattr(weixin_mod.asyncio, "sleep", AsyncMock())
+    channel._client = object()
+    channel._api_post = AsyncMock(
+        return_value={"ret": 0, "errcode": -14, "errmsg": "stale"}
+    )
 
-    await channel._poll_once()
+    with pytest.raises(WeixinAuthError, match="no replacement credentials"):
+        await channel._poll_once()
 
     assert channel._token == "configured-token"
     assert channel.config.base_url == "https://ilinkai.weixin.qq.com"
+
+
+@pytest.mark.asyncio
+async def test_poll_once_loads_qr_replacement_for_configured_token(tmp_path) -> None:
+    config = WeixinConfig(
+        enabled=True,
+        allow_from=["*"],
+        token="configured-token",
+        state_dir=str(tmp_path),
+    )
+    replacement = WeixinChannel(config, MessageBus())
+    replacement.connect_commit_account(
+        token="replacement-token",
+        base_url="https://new.example",
+    )
+
+    channel = WeixinChannel(config, MessageBus())
+    channel._token = "configured-token"
+    channel._client = object()
+    channel._api_post = AsyncMock(
+        side_effect=[
+            {"ret": 0, "errcode": -14, "errmsg": "stale"},
+            {"ret": 0},
+        ]
+    )
+
+    await channel._poll_once()
+
+    assert channel._token == "replacement-token"
+    assert channel.config.base_url == "https://new.example"
+
+
+@pytest.mark.asyncio
+async def test_start_uses_qr_replacement_for_configured_token(tmp_path) -> None:
+    config = WeixinConfig(
+        enabled=True,
+        allow_from=["*"],
+        token="configured-token",
+        state_dir=str(tmp_path),
+    )
+    connector = WeixinChannel(config, MessageBus())
+    connector.connect_commit_account(
+        token="replacement-token",
+        base_url="https://new.example",
+    )
+
+    channel = WeixinChannel(config, MessageBus())
+    observed_tokens: list[str] = []
+
+    async def stop_after_first_poll() -> None:
+        observed_tokens.append(channel._token)
+        channel._running = False
+
+    channel._notify_lifecycle = AsyncMock()  # type: ignore[method-assign]
+    channel._poll_once = stop_after_first_poll  # type: ignore[method-assign]
+
+    await channel.start()
+    await channel.stop()
+
+    assert observed_tokens == ["replacement-token"]
+    assert channel.config.base_url == "https://new.example"
+
+
+@pytest.mark.asyncio
+async def test_manager_surfaces_actionable_weixin_auth_error_without_traceback(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels import manager as manager_mod
+
+    channel = WeixinChannel(
+        WeixinConfig(enabled=True, allow_from=["*"], state_dir=str(tmp_path)),
+        MessageBus(),
+    )
+    channel.start = AsyncMock(  # type: ignore[method-assign]
+        side_effect=WeixinAuthError(
+            "getupdates",
+            errcode=-14,
+            errmsg="stale",
+        )
+    )
+    errors: list[str] = []
+    tracebacks: list[str] = []
+    monkeypatch.setattr(
+        manager_mod.logger,
+        "error",
+        lambda message, *args: errors.append(message.format(*args)),
+    )
+    monkeypatch.setattr(
+        manager_mod.logger,
+        "exception",
+        lambda message, *args: tracebacks.append(message.format(*args)),
+    )
+    manager = manager_mod.ChannelManager.__new__(manager_mod.ChannelManager)
+    manager._channel_errors = {}
+
+    await manager._start_channel("weixin", channel)
+
+    assert manager._channel_errors["weixin"] == (
+        "WeChat login expired. Scan again to reconnect."
+    )
+    assert errors == [
+        "Failed to start channel weixin: WeChat login expired. Scan again to reconnect."
+    ]
+    assert tracebacks == []
 
 
 @pytest.mark.asyncio
@@ -592,9 +810,9 @@ async def test_qr_login_refreshes_expired_qr_and_then_succeeds(
 ) -> None:
     channel, _bus = _make_channel()
     channel._running = True
-    channel._save_state = lambda: None
+    channel._save_state = lambda **_kwargs: None
     channel._print_qr_code = lambda url: None
-    channel._api_get = AsyncMock(
+    channel._api_post = AsyncMock(
         side_effect=[
             {"qrcode": "qr-1", "qrcode_img_content": "url-1"},
             {"qrcode": "qr-2", "qrcode_img_content": "url-2"},
@@ -627,7 +845,7 @@ async def test_qr_login_returns_false_after_too_many_expired_qr_codes(
     channel, _bus = _make_channel()
     channel._running = True
     channel._print_qr_code = lambda url: None
-    channel._api_get = AsyncMock(
+    channel._api_post = AsyncMock(
         side_effect=[
             {"qrcode": "qr-1", "qrcode_img_content": "url-1"},
             {"qrcode": "qr-2", "qrcode_img_content": "url-2"},
@@ -655,7 +873,7 @@ async def test_qr_login_switches_polling_base_url_on_redirect_status(
 ) -> None:
     channel, _bus = _make_channel()
     channel._running = True
-    channel._save_state = lambda: None
+    channel._save_state = lambda **_kwargs: None
     channel._print_qr_code = lambda url: None
     channel._fetch_qr_code = AsyncMock(return_value=("qr-1", "url-1"))
 
@@ -689,7 +907,7 @@ async def test_qr_login_redirect_without_host_keeps_current_polling_base_url(
 ) -> None:
     channel, _bus = _make_channel()
     channel._running = True
-    channel._save_state = lambda: None
+    channel._save_state = lambda **_kwargs: None
     channel._print_qr_code = lambda url: None
     channel._fetch_qr_code = AsyncMock(return_value=("qr-1", "url-1"))
 
@@ -723,7 +941,7 @@ async def test_qr_login_resets_redirect_base_url_after_qr_refresh(
 ) -> None:
     channel, _bus = _make_channel()
     channel._running = True
-    channel._save_state = lambda: None
+    channel._save_state = lambda **_kwargs: None
     channel._print_qr_code = lambda url: None
     channel._fetch_qr_code = AsyncMock(side_effect=[("qr-1", "url-1"), ("qr-2", "url-2")])
 
@@ -1015,7 +1233,7 @@ async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers(
 ) -> None:
     channel, _bus = _make_channel()
     channel._running = True
-    channel._save_state = lambda: None
+    channel._save_state = lambda **_kwargs: None
     channel._print_qr_code = lambda url: None
     channel._fetch_qr_code = AsyncMock(return_value=("qr-1", "url-1"))
 
@@ -1045,7 +1263,7 @@ async def test_qr_login_treats_5xx_gateway_response_error_as_wait_and_recovers(
 ) -> None:
     channel, _bus = _make_channel()
     channel._running = True
-    channel._save_state = lambda: None
+    channel._save_state = lambda **_kwargs: None
     channel._print_qr_code = lambda url: None
     channel._fetch_qr_code = AsyncMock(return_value=("qr-1", "url-1"))
 
@@ -1078,6 +1296,32 @@ def test_decrypt_aes_ecb_strips_valid_pkcs7_padding() -> None:
     decrypted = _decrypt_aes_ecb(ciphertext, key_b64)
 
     assert decrypted == plaintext
+
+
+def test_missing_aes_dependency_recommends_weixin_plugin(monkeypatch) -> None:
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith(("Crypto", "cryptography")):
+            raise ImportError("missing AES dependency")
+        return real_import(name, *args, **kwargs)
+
+    warnings: list[str] = []
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    monkeypatch.setattr(
+        weixin_mod.logger,
+        "warning",
+        lambda message, *args: warnings.append(message.format(*args)),
+    )
+    key_b64 = "MDEyMzQ1Njc4OWFiY2RlZg=="
+    data = b"unencrypted media"
+
+    assert _encrypt_aes_ecb(data, key_b64) == data
+    assert _decrypt_aes_ecb(data, key_b64) == data
+    assert warnings == [
+        "Cannot encrypt media. Run `nanobot plugins enable weixin` to install WeChat support.",
+        "Cannot decrypt media. Run `nanobot plugins enable weixin` to install WeChat support.",
+    ]
 
 
 class _DummyDownloadResponse:
@@ -1412,7 +1656,7 @@ async def test_send_text_raises_on_api_error() -> None:
         return_value={"errcode": -14, "errmsg": "session expired"}
     )
 
-    with pytest.raises(RuntimeError, match="WeChat send text error.*-14"):
+    with pytest.raises(WeixinAuthError, match="WeChat sendmessage failed.*errcode=-14"):
         await channel._send_text("wx-user", "hello", "ctx-expired")
 
     channel._api_post.assert_awaited_once()
@@ -1445,7 +1689,7 @@ async def test_send_text_raises_on_nonzero_ret_even_when_errcode_zero() -> None:
         return_value={"ret": -100, "errcode": 0, "errmsg": "internal error"}
     )
 
-    with pytest.raises(RuntimeError, match="WeChat send text error.*ret=-100.*errcode=0"):
+    with pytest.raises(RuntimeError, match="WeChat sendmessage failed.*ret=-100.*errcode=0"):
         await channel._send_text("wx-user", "hello", "ctx-ok")
 
     channel._api_post.assert_awaited_once()

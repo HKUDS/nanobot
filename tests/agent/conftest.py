@@ -46,7 +46,6 @@ def make_loop(
     context_window_tokens: int = 128_000,
     session_ttl_minutes: int = 0,
     unified_session: bool = False,
-    mcp_servers: dict | None = None,
     tools_config=None,
     model_presets: dict | None = None,
     hooks: list | None = None,
@@ -72,8 +71,6 @@ def make_loop(
         session_ttl_minutes=session_ttl_minutes,
         unified_session=unified_session,
     )
-    if mcp_servers is not None:
-        kwargs["mcp_servers"] = mcp_servers
     if tools_config is not None:
         kwargs["tools_config"] = tools_config
     if model_presets is not None:

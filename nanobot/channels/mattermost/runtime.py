@@ -658,11 +658,6 @@ class MattermostChannel(BaseChannel):
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
 
-    async def _api_put(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
-        resp = await self._require_http_client().put(path, json=json_data)
-        resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
-
     async def _create_post(
         self,
         channel_id: str,
@@ -680,9 +675,6 @@ class MattermostChannel(BaseChannel):
         if file_ids:
             body["file_ids"] = file_ids
         return await self._api_post("/api/v4/posts", body)
-
-    async def _edit_post(self, post_id: str, message: str) -> dict[str, Any]:
-        return await self._api_put(f"/api/v4/posts/{post_id}", {"id": post_id, "message": message})
 
     async def _upload_file(self, channel_id: str, file_path: str) -> str | None:
         path = Path(file_path)

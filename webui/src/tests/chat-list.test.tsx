@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
-import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
+import { readDraggedSession, SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -18,48 +18,191 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
   };
 }
 
-function rect({
-  left,
-  top,
-  width,
-  height,
-}: {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}): DOMRect {
+function rect(top: number): DOMRect {
   return {
-    x: left,
+    x: 0,
     y: top,
-    left,
+    width: 240,
+    height: 32,
     top,
-    width,
-    height,
-    right: left + width,
-    bottom: top + height,
+    right: 240,
+    bottom: top + 32,
+    left: 0,
     toJSON: () => ({}),
-  } as DOMRect;
+  };
 }
 
 describe("ChatList", () => {
+  const originalAnimate = HTMLElement.prototype.animate;
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
   afterEach(() => {
+    HTMLElement.prototype.animate = originalAnimate;
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it("exposes chats as drag sources", () => {
+  it("opens a conversation's existing actions from the row context menu", async () => {
+    const onTogglePin = vi.fn();
+    render(
+      <ChatList
+        sessions={[session({ chatId: "review", title: "Review the patch" })]}
+        activeKey="websocket:review"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={onTogglePin}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: "Review the patch" })
+      .closest("[data-chat-row]")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
+
+    expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
+  });
+
+  it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
+    render(
+      <ChatList
+        sessions={[session({ chatId: "root", title: "Root topic" })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
+      .toHaveAttribute("draggable", "false");
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("draggable", "false");
+    const pane = screen.getByRole("button", { name: "Research pane" });
+    expect(pane).toHaveAttribute("draggable", "true");
     const dataTransfer = {
-      effectAllowed: "",
+      effectAllowed: "none",
       setData: vi.fn(),
-    };
+      getData: vi.fn(() => ""),
+      types: [],
+    } as unknown as DataTransfer;
+    fireEvent.dragStart(pane, { dataTransfer });
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      SESSION_DRAG_TYPE,
+      "websocket:child",
+    );
+    expect(readDraggedSession(dataTransfer)).toBe("websocket:child");
+    fireEvent.dragEnd(pane, { dataTransfer });
+    expect(readDraggedSession(dataTransfer)).toBeNull();
+    expect(document.querySelector("[data-pane-drag-overlay]")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-pane-snap-slot]")).not.toBeInTheDocument();
+  });
+
+  it("opens grouped pane and tab actions from their context menus", async () => {
+    const onRequestRename = vi.fn();
+    const onDissolveTab = vi.fn();
+    render(
+      <ChatList
+        sessions={[session({ chatId: "root", title: "Root topic" })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={onRequestRename}
+        onToggleArchive={vi.fn()}
+        onDissolveTab={onDissolveTab}
+      />,
+    );
+
+    const paneRow = screen.getByRole("button", { name: "Research pane" })
+      .closest("[data-sidebar-pane]")!;
+    fireEvent.contextMenu(paneRow);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
+
+    const tabRow = screen.getByRole("button", { name: "Group: Root topic" })
+      .closest("[data-workbench-tab]")!;
+    fireEvent.contextMenu(tabRow);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Dissolve group" }));
+    expect(onDissolveTab).toHaveBeenCalledWith("websocket:root");
+  });
+
+  it("creates a visible tab in place and only moves panes into visible tabs", async () => {
+    const onAttachPane = vi.fn();
+    const onCreateTab = vi.fn();
     render(
       <ChatList
         sessions={[
-          session({ chatId: "active", title: "Active chat" }),
-          session({ chatId: "reference", title: "Reference chat" }),
+          session({ chatId: "solo", title: "Solo pane" }),
+          session({ chatId: "target", title: "Target pane" }),
+          session({ key: "tab:existing", chatId: "group", title: "Existing group" }),
+          session({ key: "tab:fine", chatId: "fine-group", title: "Fine group" }),
         ]}
-        activeKey="websocket:active"
+        activeKey="websocket:solo"
+        paneGroups={{
+          "websocket:solo": {
+            tabKey: "tab:solo",
+            title: "Solo pane",
+            activePaneKey: "websocket:solo",
+            visible: false,
+            panes: [{ key: "websocket:solo", chatId: "solo", title: "Solo pane" }],
+          },
+          "websocket:target": {
+            tabKey: "tab:target",
+            title: "Target pane",
+            activePaneKey: "websocket:target",
+            visible: false,
+            panes: [{ key: "websocket:target", chatId: "target", title: "Target pane" }],
+          },
+          "tab:existing": {
+            tabKey: "tab:existing",
+            title: "Existing group",
+            activePaneKey: "websocket:group-a",
+            visible: true,
+            panes: [
+              { key: "websocket:group-a", chatId: "group-a", title: "Group A" },
+              { key: "websocket:group-b", chatId: "group-b", title: "Group B" },
+              { key: "websocket:group-c", chatId: "group-c", title: "Group C" },
+              { key: "websocket:group-d", chatId: "group-d", title: "Group D" },
+            ],
+          },
+          "tab:fine": {
+            tabKey: "tab:fine",
+            title: "Fine group",
+            activePaneKey: "websocket:fine",
+            visible: true,
+            panes: [{ key: "websocket:fine", chatId: "fine", title: "Fine pane" }],
+          },
+        }}
+        onCreateTab={onCreateTab}
+        onAttachPane={onAttachPane}
         onSelect={vi.fn()}
         onRequestDelete={vi.fn()}
         onTogglePin={vi.fn()}
@@ -68,88 +211,568 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Active chat" }))
-      .toHaveAttribute("draggable", "true");
-    const reference = screen.getByRole("button", { name: "Reference chat" });
-    expect(reference).toHaveAttribute("draggable", "true");
+    expect(screen.queryByRole("button", { name: "Group: Solo pane" }))
+      .not.toBeInTheDocument();
+    expect(screen.getAllByText("Solo pane")).toHaveLength(1);
+    expect(screen.queryByRole("list", { name: "Panes in Solo pane" }))
+      .not.toBeInTheDocument();
 
-    fireEvent.dragStart(reference, { dataTransfer });
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for Solo pane",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Create group" }));
+    expect(onCreateTab).toHaveBeenCalledWith("websocket:solo");
 
-    expect(dataTransfer.setData).toHaveBeenCalledWith(
-      SESSION_DRAG_TYPE,
-      "websocket:reference",
-    );
-    fireEvent.dragEnd(reference, { dataTransfer });
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for Solo pane",
+    }), { button: 0, ctrlKey: false });
+    const moveTo = await screen.findByRole("menuitem", { name: "Move to" });
+    fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
+    expect(screen.queryByRole("menuitem", { name: "Target pane" }))
+      .not.toBeInTheDocument();
+    const fullTarget = await screen.findByRole("menuitem", {
+      name: "Existing group · 4/4",
+    });
+    expect(fullTarget).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(fullTarget);
+    expect(onAttachPane).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fine group · 1/4" }));
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:fine");
   });
 
-  it("reorders chats around a Codex-style insertion line", () => {
-    const onReorderSessions = vi.fn();
-    const sessions = [
-      session({ chatId: "alpha", title: "Alpha" }),
-      session({ chatId: "bravo", title: "Bravo" }),
-      session({ chatId: "charlie", title: "Charlie" }),
-      session({ chatId: "old-a", title: "Old A" }),
-      session({ chatId: "old-b", title: "Old B" }),
-    ];
-    const { rerender } = render(
+  it("moves a dragged topic directly into a visible group", () => {
+    const onAttachPane = vi.fn();
+    render(
       <ChatList
-        sessions={sessions}
-        activeKey={null}
-        onSelect={vi.fn()}
-        onRequestDelete={vi.fn()}
-        onTogglePin={vi.fn()}
-        onRequestRename={vi.fn()}
-        onToggleArchive={vi.fn()}
-        onReorderSessions={onReorderSessions}
-        archivedKeys={["websocket:old-a", "websocket:old-b"]}
-        sessionOrder={sessions.map((item) => item.key)}
-      />,
-    );
-    const dataTransfer = {
-      effectAllowed: "",
-      dropEffect: "",
-      setData: vi.fn(),
-    };
-    fireEvent.dragStart(screen.getByRole("button", { name: "Alpha" }), { dataTransfer });
-    const charlieRow = screen.getByRole("button", { name: "Charlie" }).closest("li")!;
-    fireEvent.dragOver(charlieRow, { clientY: 1, dataTransfer });
-    expect(charlieRow.querySelector("[data-session-drop-edge='after']"))
-      .toBeInTheDocument();
-    fireEvent.drop(charlieRow, { clientY: 1, dataTransfer });
-
-    expect(onReorderSessions).toHaveBeenCalledWith([
-      "websocket:bravo",
-      "websocket:charlie",
-      "websocket:alpha",
-      "websocket:old-a",
-      "websocket:old-b",
-    ]);
-
-    rerender(
-      <ChatList
-        sessions={sessions}
-        activeKey={null}
-        onSelect={vi.fn()}
-        onRequestDelete={vi.fn()}
-        onTogglePin={vi.fn()}
-        onRequestRename={vi.fn()}
-        onToggleArchive={vi.fn()}
-        onReorderSessions={onReorderSessions}
-        archivedKeys={["websocket:old-a", "websocket:old-b"]}
-        sessionOrder={[
-          "websocket:bravo",
-          "websocket:charlie",
-          "websocket:alpha",
-          "websocket:old-a",
-          "websocket:old-b",
+        sessions={[
+          session({ chatId: "solo", title: "Solo topic" }),
+          session({ chatId: "target", title: "Target group" }),
+          session({ chatId: "full", title: "Full group" }),
         ]}
-        sort="manual"
+        activeKey="websocket:solo"
+        paneGroups={{
+          "websocket:solo": {
+            tabKey: "tab:solo",
+            title: "Solo topic",
+            activePaneKey: "websocket:solo",
+            visible: false,
+            panes: [{ key: "websocket:solo", chatId: "solo", title: "Solo topic" }],
+          },
+          "websocket:target": {
+            tabKey: "tab:target",
+            title: "Target group",
+            activePaneKey: "websocket:target",
+            visible: true,
+            panes: [{ key: "websocket:target", chatId: "target", title: "Target pane" }],
+          },
+          "websocket:full": {
+            tabKey: "tab:full",
+            title: "Full group",
+            activePaneKey: "websocket:full-1",
+            visible: true,
+            panes: [1, 2, 3, 4].map((index) => ({
+              key: `websocket:full-${index}`,
+              chatId: `full-${index}`,
+              title: `Full pane ${index}`,
+            })),
+          },
+        }}
+        onAttachPane={onAttachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
       />,
     );
-    const section = screen.getByRole("region", { name: "Topics" });
-    const text = section.textContent ?? "";
-    expect(text.indexOf("Bravo")).toBeLessThan(text.indexOf("Charlie"));
-    expect(text.indexOf("Charlie")).toBeLessThan(text.indexOf("Alpha"));
+
+    const values = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn((type: string, value: string) => values.set(type, value)),
+      getData: vi.fn((type: string) => values.get(type) ?? ""),
+      types: [SESSION_DRAG_TYPE],
+    } as unknown as DataTransfer;
+    const source = screen.getByRole("button", { name: "Solo topic" });
+    expect(source).toHaveAttribute("draggable", "true");
+    const targetGroup = screen.getByRole("button", { name: "Group: Target group" })
+      .closest("[data-sidebar-tab-group]")!;
+    const targetSurface = targetGroup.querySelector("[data-workbench-tab-surface]")!;
+    const fullGroup = screen.getByRole("button", { name: "Group: Full group" })
+      .closest("[data-sidebar-tab-group]")!;
+    const fullSurface = fullGroup.querySelector("[data-workbench-tab-surface]")!;
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(fullSurface, { dataTransfer });
+    fireEvent.dragOver(fullSurface, { dataTransfer });
+    fireEvent.drop(fullSurface, { dataTransfer });
+
+    expect(fullGroup).not.toHaveAttribute("data-pane-drop-target");
+    expect(onAttachPane).not.toHaveBeenCalled();
+
+    fireEvent.dragEnter(targetSurface, { dataTransfer });
+    fireEvent.dragOver(targetSurface, { dataTransfer });
+
+    expect(targetGroup).toHaveAttribute("data-pane-drop-target", "true");
+    expect(targetSurface).toHaveClass("ring-2", "ring-primary/35");
+
+    fireEvent.drop(targetSurface, { dataTransfer });
+
+    expect(onAttachPane).toHaveBeenCalledOnce();
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:target");
+    expect(targetGroup).not.toHaveAttribute("data-pane-drop-target");
+  });
+
+  it("detaches a grouped pane when it is dropped back into the standalone list", () => {
+    const onDetachPane = vi.fn();
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "solo", title: "Solo topic" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "tab:root",
+            title: "Root group",
+            activePaneKey: "websocket:child",
+            visible: true,
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+          "websocket:solo": {
+            tabKey: "tab:solo",
+            title: "Solo topic",
+            activePaneKey: "websocket:solo",
+            visible: false,
+            panes: [{ key: "websocket:solo", chatId: "solo", title: "Solo topic" }],
+          },
+        }}
+        onDetachPane={onDetachPane}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const values = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn((type: string, value: string) => values.set(type, value)),
+      getData: vi.fn((type: string) => values.get(type) ?? ""),
+      types: [SESSION_DRAG_TYPE],
+    } as unknown as DataTransfer;
+    const source = screen.getByRole("button", { name: "Research pane" });
+    expect(source).toHaveAttribute("aria-current", "true");
+    expect(source).toHaveAttribute("draggable", "true");
+    const sourceSurface = screen.getByRole("button", { name: "Group: Root topic" })
+      .closest("[data-workbench-tab-surface]")!;
+    const standaloneList = document.querySelector("[data-chat-list-content]")!;
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(sourceSurface, { dataTransfer });
+    fireEvent.drop(sourceSurface, { dataTransfer });
+    expect(onDetachPane).not.toHaveBeenCalled();
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragEnter(standaloneList, { dataTransfer });
+    fireEvent.dragOver(standaloneList, { dataTransfer });
+    expect(standaloneList).toHaveAttribute("data-pane-detach-target", "true");
+    expect(standaloneList).toHaveClass("ring-1", "ring-primary/25");
+
+    fireEvent.drop(standaloneList, { dataTransfer });
+    expect(onDetachPane).toHaveBeenCalledOnce();
+    expect(onDetachPane).toHaveBeenCalledWith("tab:root", "websocket:child");
+    expect(standaloneList).not.toHaveAttribute("data-pane-detach-target");
+  });
+
+  it("shows every tab's pane membership in a sidebar tab group", async () => {
+    const onSelect = vi.fn();
+    const onSelectPane = vi.fn();
+    const onDetachPane = vi.fn();
+    const onDissolveTab = vi.fn();
+    const onRequestRename = vi.fn();
+    const onAttachPane = vi.fn();
+
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "target", title: "Target tab" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:child",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+          "websocket:target": {
+            tabKey: "websocket:target",
+            title: "Target tab",
+            activePaneKey: "websocket:target-child",
+            panes: [
+              { key: "websocket:target", chatId: "target", title: "Target tab" },
+              {
+                key: "websocket:target-child",
+                chatId: "target-child",
+                title: "Target research",
+              },
+            ],
+          },
+        }}
+        onSelect={onSelect}
+        onSelectPane={onSelectPane}
+        onDetachPane={onDetachPane}
+        onDissolveTab={onDissolveTab}
+        onAttachPane={onAttachPane}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={onRequestRename}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const child = screen.getByRole("button", { name: "Research pane" });
+    expect(child.closest("[data-sidebar-pane]"))
+      .toHaveAttribute("data-sidebar-pane", "websocket:child");
+    expect(child).toHaveAttribute("aria-current", "true");
+    const targetTabRow = screen.getByRole("button", { name: "Group: Target tab" })
+      .closest("li")!;
+    const targetChild = within(targetTabRow).getByRole("button", {
+      name: "Target research",
+    });
+    expect(targetChild.closest("[data-sidebar-pane]"))
+      .toHaveAttribute("data-sidebar-pane", "websocket:target-child");
+    expect(targetChild).not.toHaveAttribute("aria-current");
+    fireEvent.click(targetChild);
+    expect(onSelectPane).toHaveBeenCalledWith(
+      "websocket:target",
+      "websocket:target-child",
+    );
+    fireEvent.click(child);
+    expect(onSelectPane).toHaveBeenCalledWith("websocket:root", "websocket:child");
+
+    fireEvent.click(screen.getByRole("button", { name: "Root topic" }));
+    expect(onSelectPane).toHaveBeenCalledWith("websocket:root", "websocket:root");
+    expect(onSelect).not.toHaveBeenCalled();
+
+    onSelectPane.mockClear();
+    const rootTab = screen.getByRole("button", { name: "Group: Root topic" });
+    fireEvent.click(rootTab);
+    expect(onSelectPane).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(rootTab).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(rootTab);
+    expect(rootTab).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for Root topic",
+    }), { button: 0, ctrlKey: false });
+    expect(await screen.findByRole("menuitem", { name: "Dissolve group" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete all chats" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Select" }))
+      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Dissolve group" }));
+    expect(onDissolveTab).toHaveBeenCalledWith("websocket:root");
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Research pane pane actions",
+    }), { button: 0, ctrlKey: false });
+    const moveTo = await screen.findByRole("menuitem", { name: "Move to" });
+    fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Target tab · 2/4" }));
+    expect(onAttachPane).toHaveBeenCalledWith("websocket:child", "websocket:target");
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Research pane pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", {
+      name: "Remove",
+    }));
+    expect(onDetachPane).toHaveBeenCalledWith("websocket:root", "websocket:child");
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Root topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    expect(screen.getByRole("menuitem", { name: "Move to" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove" }))
+      .toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(child).toHaveAttribute("draggable", "true");
+    expect(screen.getByRole("button", { name: "Group: Target tab" }))
+      .toHaveAttribute("draggable", "false");
+  });
+
+  it("collapses a multi-pane tab into one Chrome-style group header", () => {
+    render(
+      <ChatList
+        sessions={[session({
+          chatId: "root",
+          title: "Root topic",
+          workspaceScope: {
+            project_path: "/Users/me/nanobot",
+            project_name: "nanobot",
+            access_mode: "restricted",
+          },
+        })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:child",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onSelectPane={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const tabButton = screen.getByRole("button", { name: "Group: Root topic" });
+    const tabGroup = tabButton.closest("[data-sidebar-tab-group]")!;
+    const tabHeader = tabButton.closest("[data-workbench-tab]")!;
+    const tabSurface = tabButton.closest("[data-workbench-tab-surface]")!;
+    expect(tabGroup).toHaveAttribute("data-sidebar-tab-group", "true");
+    expect(tabHeader).not.toHaveAttribute("data-chat-row");
+    expect(tabHeader).not.toHaveAttribute("data-sidebar-pane");
+    expect(tabButton).not.toHaveAttribute("aria-current");
+    expect(tabButton.querySelector(".lucide-folder-tree")).toBeInTheDocument();
+    const paneList = within(tabGroup).getByRole("list", { name: "Panes in Root topic" });
+    expect(tabSurface).toContainElement(paneList);
+    const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
+    expect(activePane).toHaveAttribute("aria-current", "true");
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-control");
+    expect(activePane.querySelector("[data-sidebar-selection-track]"))
+      .toHaveAttribute("data-active", "true");
+    expect(screen.getByRole("button", {
+      name: "Research pane pane actions",
+    })).toHaveClass("opacity-0");
+    expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
+      .not.toHaveAttribute("aria-current");
+    expect(tabGroup).not.toHaveTextContent("2/4");
+    expect(paneList).toHaveClass(
+      "rounded-es-[14px]",
+      "border-s-2",
+      "border-sidebar-foreground/25",
+    );
+
+    const collapse = within(tabGroup).getByRole("button", {
+      name: "Collapse panes in Root topic",
+    });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(collapse);
+
+    expect(tabGroup).toHaveAttribute("data-pane-group-collapsed", "true");
+    expect(within(tabGroup).queryByRole("button", { name: "Research pane" }))
+      .not.toBeInTheDocument();
+    expect(within(tabGroup).getByRole("button", {
+      name: "Expand panes in Root topic",
+    })).toHaveAttribute("aria-expanded", "false");
+    expect(within(tabGroup).getByRole("button", { name: "Group: Root topic" }))
+      .not.toHaveAttribute("aria-current");
+
+    fireEvent.click(within(tabGroup).getByRole("button", {
+      name: "Expand panes in Root topic",
+    }));
+    expect(within(tabGroup).getByRole("button", { name: "Research pane" }))
+      .toBeInTheDocument();
+    expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
+      .toBeInTheDocument();
+  });
+
+  it("selects a whole tab or individual panes for one bulk delete", async () => {
+    const onRequestDeleteMany = vi.fn();
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "root", title: "Root topic" }),
+          session({ chatId: "target", title: "Target tab" }),
+        ]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onRequestDeleteMany={onRequestDeleteMany}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Root topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Research pane" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Target tab" }));
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByTestId("delete-selection-bar")).getByRole("button", {
+      name: "Delete",
+    }));
+
+    expect(onRequestDeleteMany).toHaveBeenCalledWith([
+      { key: "websocket:root", label: "Root topic" },
+      { key: "websocket:child", label: "Research pane" },
+      { key: "websocket:target", label: "Target tab" },
+    ]);
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+  });
+
+  it("selects a contiguous session range with Shift-click", async () => {
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "first", title: "First topic" }),
+          session({ chatId: "second", title: "Second topic" }),
+          session({ chatId: "third", title: "Third topic" }),
+          session({ chatId: "fourth", title: "Fourth topic" }),
+        ]}
+        activeKey="websocket:first"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for First topic",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Fourth topic" }), {
+      shiftKey: true,
+    });
+
+    expect(screen.getByText("4 selected")).toBeInTheDocument();
+    for (const title of ["First topic", "Second topic", "Third topic", "Fourth topic"]) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    }
+  });
+
+  it("includes every pane when a Shift-click range ends on a grouped tab", async () => {
+    render(
+      <ChatList
+        sessions={[
+          session({ chatId: "first", title: "First topic" }),
+          session({ chatId: "root", title: "Root topic" }),
+        ]}
+        activeKey="websocket:first"
+        paneGroups={{
+          "websocket:root": {
+            tabKey: "websocket:root",
+            title: "Root topic",
+            activePaneKey: "websocket:root",
+            panes: [
+              { key: "websocket:root", chatId: "root", title: "Root topic" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Topic actions for First topic",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }), {
+      shiftKey: true,
+    });
+
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Root topic" }))
+      .toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Research pane" }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows temporary chats separately and lets the user reopen or close them", async () => {
+    const temporarySession = session({
+      key: "temporary:temporary-one",
+      chatId: "temporary-one",
+      preview: "hi",
+    });
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <ChatList
+        sessions={[]}
+        temporarySessions={[temporarySession]}
+        activeKey={null}
+        onSelect={onSelect}
+        onCloseTemporaryChat={onClose}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const section = screen.getByRole("region", { name: "Temporary chats" });
+    fireEvent.click(within(section).getByRole("button", { name: "hi" }));
+    expect(onSelect).toHaveBeenCalledWith("temporary:temporary-one");
+
+    fireEvent.click(within(section).getByRole("button", {
+      name: "Close temporary chat: hi",
+    }));
+    expect(onClose).toHaveBeenCalledWith("temporary:temporary-one");
   });
 
   it("orders chats by latest session activity by default", () => {
@@ -213,10 +836,13 @@ describe("ChatList", () => {
     );
 
     const pinnedSection = screen.getByRole("region", { name: "Pinned" });
-    expect(within(pinnedSection).getByTitle("Pinned")).toBeInTheDocument();
     expect(
-      within(screen.getByRole("region", { name: "Earlier" })).queryByTitle("Pinned"),
-    ).not.toBeInTheDocument();
+      within(pinnedSection)
+        .getByText("Pinned chat")
+        .closest("[data-chat-row]")
+        ?.querySelector("[data-sidebar-pinned-indicator]"),
+    ).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-sidebar-pinned-indicator]")).toHaveLength(1);
   });
 
   it("groups WebUI chats by workspace project while preserving in-project sorting and activity", () => {
@@ -270,8 +896,16 @@ describe("ChatList", () => {
 
     const nanobotSection = screen.getByRole("region", { name: "nanobot" });
     const nanobotText = nanobotSection.textContent ?? "";
+    const projectSurface = nanobotSection.querySelector(
+      "[data-sidebar-project-surface]",
+    );
 
     expect(screen.getByRole("region", { name: "nanobot-bench" })).toBeInTheDocument();
+    expect(projectSurface).toHaveClass(
+      "rounded-es-[16px]",
+      "border-s-2",
+      "border-sidebar-foreground/10",
+    );
     expect(within(nanobotSection).getByText("Alpha task")).toBeInTheDocument();
     expect(within(nanobotSection).getByText("Zeta task")).toBeInTheDocument();
     expect(nanobotText.indexOf("Alpha task")).toBeLessThan(nanobotText.indexOf("Zeta task"));
@@ -326,40 +960,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("positions one background highlight and resets it across hidden targets", () => {
-    let revealFrame: FrameRequestCallback | null = null;
-    let resizeObserverCallback: ResizeObserverCallback | null = null;
-    let activeTargetVisible = true;
-    class MockResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeObserverCallback = callback;
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-    vi.stubGlobal("ResizeObserver", MockResizeObserver);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      revealFrame = callback;
-      return 1;
-    });
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.hasAttribute("data-chat-list-content")) {
-          return rect({ left: 0, top: 0, width: 300, height: 200 });
-        }
-        if (this.getAttribute("data-chat-row") === "websocket:active") {
-          return activeTargetVisible
-            ? rect({ left: 8, top: 12, width: 284, height: 32 })
-            : rect({ left: 0, top: 0, width: 0, height: 0 });
-        }
-        if (this.getAttribute("data-chat-row") === "websocket:inactive") {
-          return rect({ left: 8, top: 48, width: 284, height: 40 });
-        }
-        return rect({ left: 0, top: 0, width: 0, height: 0 });
-      },
-    );
+  it("grows and retracts the row-owned selection track", () => {
     const props = {
       sessions: [
         session({ chatId: "active", title: "Active topic" }),
@@ -379,45 +980,10 @@ describe("ChatList", () => {
       />,
     );
 
-    const highlight = screen.getByTestId("sessions-selection-highlight");
-    expect(highlight).toHaveClass(
-      "bg-sidebar-foreground/[0.055]",
-      "transition-[transform,width,height]",
-      "motion-reduce:transition-none",
-    );
-    expect(screen.queryByTestId("sessions-selection-highlight-surface"))
-      .not.toBeInTheDocument();
-    expect(resizeObserverCallback).not.toBeNull();
-
-    const activeButton = screen.getByTitle("Active topic");
+    const activeButton = screen.getByRole("button", { name: "Active topic" });
     expect(activeButton).toHaveAttribute("aria-current", "page");
-    expect(activeButton.parentElement).toHaveClass("transition-[color]");
-    expect(activeButton.parentElement).not.toHaveClass("transition-colors");
-    expect(activeButton.parentElement).not.toHaveClass(
-      "bg-sidebar-accent",
-      "shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
-    );
-    expect(highlight).toHaveClass(
-      "transition-[transform,width,height]",
-      "motion-reduce:transition-none",
-    );
-    expect(highlight).toHaveStyle(
-      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
-    );
-
-    revealFrame?.(0);
-    expect(highlight.style.transitionProperty).toBe("");
-
-    activeTargetVisible = false;
-    resizeObserverCallback?.([], {} as ResizeObserver);
-    expect(highlight).toHaveStyle("opacity: 0");
-
-    activeTargetVisible = true;
-    resizeObserverCallback?.([], {} as ResizeObserver);
-    expect(highlight).toHaveStyle(
-      "width: 284px; height: 32px; transform: translate3d(8px, 12px, 0); opacity: 1; transition-property: none",
-    );
-    revealFrame?.(0);
+    expect(activeButton.querySelector("[data-sidebar-selection-track]"))
+      .toHaveClass("origin-left", "scale-x-100", "transition-transform", "bg-current");
 
     rerender(
       <ChatList
@@ -426,14 +992,49 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.getByTitle("Active topic")).not.toHaveAttribute("aria-current");
-    expect(screen.getByTitle("Inactive topic")).toHaveAttribute("aria-current", "page");
-    expect(highlight).toHaveStyle(
-      "width: 284px; height: 40px; transform: translate3d(8px, 48px, 0)",
-    );
+    expect(screen.getByRole("button", { name: "Active topic" }))
+      .not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "Inactive topic" }))
+      .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Active topic" })
+      .querySelector("[data-sidebar-selection-track]"))
+      .toHaveClass("scale-x-0");
+    expect(screen.getByRole("button", { name: "Inactive topic" })
+      .querySelector("[data-sidebar-selection-track]"))
+      .toHaveClass("scale-x-100");
+  });
 
-    rerender(<ChatList {...props} activeKey={null} />);
-    expect(highlight).toHaveStyle("opacity: 0");
+  it("restores collapsed tabs from the local UI preference", () => {
+    const props = {
+      sessions: [session({ chatId: "root", title: "Root topic" })],
+      activeKey: "websocket:root",
+      paneGroups: {
+        "websocket:root": {
+          tabKey: "websocket:root",
+          title: "Root topic",
+          activePaneKey: "websocket:root",
+          panes: [
+            { key: "websocket:root", chatId: "root", title: "Root topic" },
+            { key: "websocket:child", chatId: "child", title: "Research pane" },
+          ],
+        },
+      },
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+    };
+    const firstRender = render(<ChatList {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
+    expect(screen.queryByRole("button", { name: "Research pane" })).not.toBeInTheDocument();
+    firstRender.unmount();
+
+    render(<ChatList {...props} />);
+    expect(screen.getByRole("button", { name: "Group: Root topic" }))
+      .toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Research pane" })).not.toBeInTheDocument();
   });
 
   it("can collapse a project group and keeps project rename separate from chat titles", async () => {
@@ -475,19 +1076,109 @@ describe("ChatList", () => {
     expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/nanobot");
     expect(within(projectSection).queryByText("Alpha task")).not.toBeInTheDocument();
 
-    fireEvent.click(
-      within(projectSection).getByRole("button", { name: "Start a new topic in Photos" }),
-    );
+    const projectButton = within(projectSection).getByRole("button", { name: "Photos" });
+    fireEvent.contextMenu(projectButton);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New topic" }));
     expect(onNewChatInProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
     expect(onToggleGroup).toHaveBeenCalledTimes(1);
 
-    fireEvent.pointerDown(
-      within(projectSection).getByLabelText("Topic actions for Photos"),
-      { button: 0 },
-    );
+    fireEvent.contextMenu(projectButton);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 
     expect(onRequestRenameProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
+  });
+
+  it("animates project disclosure and surrounding layout like tab groups", () => {
+    let collapsed = false;
+    const onToggleGroup = vi.fn();
+    const animate = vi.fn(() => ({
+      addEventListener: vi.fn(),
+      cancel: vi.fn(),
+    }) as unknown as Animation);
+    HTMLElement.prototype.animate = animate;
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const followsCollapsedProject = this.textContent?.includes("Beta") ?? false;
+      return rect(followsCollapsedProject ? (collapsed ? 64 : 160) : 0);
+    };
+    const sessions = [
+      session({
+        chatId: "alpha",
+        title: "Alpha task",
+        workspaceScope: {
+          project_path: "/Users/me/alpha",
+          project_name: "Alpha project",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "beta",
+        title: "Beta task",
+        workspaceScope: {
+          project_path: "/Users/me/beta",
+          project_name: "Beta project",
+          access_mode: "restricted",
+        },
+      }),
+    ];
+    const props = {
+      sessions,
+      activeKey: "websocket:alpha",
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onRequestRenameProject: vi.fn(),
+      onToggleArchive: vi.fn(),
+      onToggleGroup,
+    };
+
+    const { rerender } = render(
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/alpha": false }} />,
+    );
+
+    const projectButton = screen.getByRole("button", { name: "Alpha project" });
+    const disclosureButton = screen.getByRole("button", {
+      name: "Projects: Alpha project",
+    });
+    expect(projectButton).toHaveAttribute("aria-expanded", "true");
+    expect(disclosureButton).toHaveAttribute("aria-expanded", "true");
+    const expandedIcon = disclosureButton
+      .querySelector("[data-sidebar-project-disclosure-icon]");
+    expect(expandedIcon).toHaveClass(
+      "transition-transform",
+      "duration-200",
+      "ease-out",
+      "motion-reduce:transition-none",
+    );
+    expect(expandedIcon).not.toHaveClass("rotate-90");
+    expect(screen.getByRole("button", { name: "Topic actions for Alpha project" })
+      .compareDocumentPosition(disclosureButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+
+    fireEvent.click(disclosureButton);
+    expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/alpha");
+    collapsed = true;
+    rerender(
+      <ChatList {...props} collapsedGroups={{ "project:/Users/me/alpha": true }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Projects: Alpha project" })
+      .querySelector("[data-sidebar-project-disclosure-icon]"))
+      .toHaveClass("rotate-90");
+    expect(projectButton).toHaveAttribute("aria-expanded", "false");
+    expect(animate).toHaveBeenCalledWith(
+      [
+        { transform: "translateY(96px)" },
+        { transform: "translateY(0)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    );
+    expect(screen.getByRole("button", { name: "Beta project" })
+      .closest("[data-sidebar-group-header]"))
+      .toHaveAttribute("data-sidebar-group-header", "project:/Users/me/beta");
   });
 
   it("hides the updated dot for the active chat", () => {

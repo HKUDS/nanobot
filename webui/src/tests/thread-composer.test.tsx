@@ -307,9 +307,9 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
 }
 
 const MODEL_PRESETS = [
-  { name: "kimi", label: "Kimi", provider: "moonshot" },
-  { name: "dflash", label: "DFlash", provider: "deepseek" },
-  { name: "dspro", label: "DS Pro", provider: "deepseek" },
+  { name: "kimi", provider: "moonshot" },
+  { name: "dflash", provider: "deepseek" },
+  { name: "dspro", provider: "deepseek" },
 ];
 
 function renderPresetComposer(variant: "thread" | "hero" = "thread") {
@@ -317,7 +317,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
   render(
     <ThreadComposer
       onSend={vi.fn()}
-      modelLabel="Kimi"
+      modelLabel="kimi"
       modelPreset="kimi"
       modelProvider="moonshot"
       modelPresets={MODEL_PRESETS}
@@ -327,7 +327,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
     />,
   );
   return {
-    badge: screen.getByRole("spinbutton", { name: "Kimi" }),
+    badge: screen.getByRole("spinbutton", { name: "kimi" }),
     onPresetChange,
   };
 }
@@ -350,6 +350,30 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("locks an async send and keeps the draft when it is rejected", async () => {
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveSend = resolve;
+    }));
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this pending draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => resolveSend(false));
+
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue("keep this pending draft");
+  });
+
   it("dismisses the touch keyboard after a successful send", async () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: query === "(hover: none) and (pointer: coarse)",
@@ -530,7 +554,7 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
-    expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
+    expect(input.parentElement?.parentElement?.className).toContain("rounded-panel");
     expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
     expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
@@ -580,7 +604,7 @@ describe("ThreadComposer", () => {
     expect(Array.from(pills).every((pill) => pill.querySelector("img"))).toBe(true);
     expect(Array.from(badge.querySelectorAll("img")).every((image) => !image.draggable)).toBe(true);
     const centeredPill = track.querySelector<HTMLElement>("[data-preset-offset='0']");
-    expect(centeredPill).toHaveTextContent("Kimi");
+    expect(centeredPill).toHaveTextContent("kimi");
     expect(centeredPill).toHaveStyle({ transform: "scale(1.0800)" });
     expect(
       track.querySelector<HTMLElement>("[data-preset-offset='1']"),
@@ -591,13 +615,13 @@ describe("ThreadComposer", () => {
       pointerId: 7,
       pointerType: "mouse",
     });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("Kimi");
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("kimi");
     fireEvent.pointerMove(badge, {
       clientY: 123,
       pointerId: 7,
       pointerType: "mouse",
     });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("DS Pro");
+    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("dspro");
     fireEvent.pointerUp(badge, {
       clientY: 123,
       pointerId: 7,
@@ -649,6 +673,49 @@ describe("ThreadComposer", () => {
     ));
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("hello voice"));
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("explains the HTTPS requirement for voice input on an insecure origin", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", false);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText(
+        "Chrome and other browsers block microphone access on remote HTTP pages for security. "
+          + "Open this WebUI over HTTPS to use voice input.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("max-h-24");
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("keeps the unsupported-browser error for secure origins without recording support", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("MediaRecorder", undefined);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText("Voice input is not supported in this browser."),
+    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it("converts voice recordings to wav for Xiaomi MiMo transcription", async () => {
@@ -1070,6 +1137,85 @@ describe("ThreadComposer", () => {
     }));
   });
 
+  it.each([
+    ["Windows", "D:\\Users\\test\\.nanobot\\workspace", "D:\\path\\to\\project"],
+    ["macOS", "/Users/test/.nanobot/workspace", "/Users/name/project"],
+    ["Linux", "/home/test/.nanobot/workspace", "/home/name/project"],
+  ])("uses a %s path example for the project picker", async (_, projectPath, placeholder) => {
+    const user = userEvent.setup();
+    const defaultScope = {
+      project_path: projectPath,
+      project_name: "workspace",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByLabelText("Paste path")).toHaveAttribute("placeholder", placeholder);
+  });
+
+  it("slides project controls closed without offering a compact replacement", () => {
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    const composer = (workspaceControlsHidden: boolean) => (
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceControlsHidden={workspaceControlsHidden}
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />
+    );
+    const { container, rerender } = render(composer(false));
+    const drawer = container.querySelector("[data-composer-workspace-drawer]");
+
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(drawer).not.toHaveAttribute("aria-hidden");
+    expect(container.querySelector("[data-composer-workspace-compact]")).not.toBeInTheDocument();
+
+    rerender(composer(true));
+
+    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "closed");
+    expect(drawer).toHaveAttribute("aria-hidden", "true");
+    expect(within(drawer as HTMLElement).getByRole("button", {
+      hidden: true,
+      name: "Choose project",
+    })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Choose project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Workspace access mode: Full Access",
+    })).not.toBeInTheDocument();
+
+    rerender(composer(false));
+
+    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
+    expect(drawer).toHaveAttribute("data-state", "open");
+    expect(within(drawer as HTMLElement).getByRole("button", {
+      name: "Choose project",
+    })).toBeEnabled();
+  });
+
   it("uses the native folder picker for project selection on native host", async () => {
     const onWorkspaceScopeChange = vi.fn();
     const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
@@ -1114,6 +1260,45 @@ describe("ThreadComposer", () => {
     }));
   });
 
+  it("uses the gateway folder picker for a locally hosted WebUI", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    const pickFolder = vi.fn().mockResolvedValue("/Users/test/gateway-project");
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{
+          can_change_project: true,
+          can_use_full_access: true,
+          can_pick_folder: true,
+        }}
+        onPickWorkspaceFolder={pickFolder}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+
+    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Paste path")).not.toBeInTheDocument();
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/Users/test/gateway-project",
+      project_name: "gateway-project",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+  });
+
   it("uses the web path menu when no native host picker is available", async () => {
     const user = userEvent.setup();
     const defaultScope = {
@@ -1141,54 +1326,21 @@ describe("ThreadComposer", () => {
     expect(screen.getByLabelText("Paste path")).toBeInTheDocument();
   });
 
-  it("shows turn run timer when runStartedAt is set", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date((1_000 + 125) * 1000));
-
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        runStartedAt={1000}
-      />,
-    );
-
-    const status = screen.getByRole("status");
-    expect(status).toHaveTextContent(/Running/);
-    expect(status).toHaveTextContent(/2:05/);
-    expect(status).toHaveClass("composer-status-drawer-content");
-    expect(status.closest("[data-composer-status-drawer]")).toHaveAttribute(
-      "data-state",
-      "open",
-    );
-    expect(status.querySelector(".run-pulse-icon")).not.toBeNull();
-
-    vi.useRealTimers();
-  });
-
-  it("opens and closes the run timer through one persistent drawer", () => {
+  it("closes the sustained goal through its existing drawer", () => {
     const { container, rerender } = render(
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Type your message..."
-        runStartedAt={null}
+        goalState={{
+          active: true,
+          objective: "Ship the release",
+          ui_summary: "Preparing release",
+        }}
       />,
     );
 
     const drawer = container.querySelector("[data-composer-status-drawer]");
     expect(drawer).not.toBeNull();
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-
-    rerender(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        runStartedAt={Math.floor(Date.now() / 1000)}
-      />,
-    );
-
-    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
     expect(drawer).toHaveAttribute("data-state", "open");
     expect(drawer).not.toHaveAttribute("aria-hidden");
     const status = screen.getByRole("status");
@@ -1198,7 +1350,7 @@ describe("ThreadComposer", () => {
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Type your message..."
-        runStartedAt={null}
+        goalState={{ active: false }}
       />,
     );
 
@@ -1207,6 +1359,9 @@ describe("ThreadComposer", () => {
     expect(drawer).toHaveAttribute("aria-hidden", "true");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(drawer?.querySelector('[role="status"]')).toBe(status);
+
+    fireEvent.transitionEnd(drawer as Element, { propertyName: "grid-template-rows" });
+    expect(container.querySelector("[data-composer-status-drawer]")).toBeNull();
   });
 
   it("opens an upward anchored goal panel with markdown content when expand is clicked", async () => {
@@ -1652,7 +1807,7 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("rejects session drops that are unavailable to the composer", () => {
+  it("rejects self-session drops that are unavailable to the composer", () => {
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -2886,6 +3041,50 @@ describe("ThreadComposer", () => {
     await waitFor(() => {
       expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps temporary chat guidance in memory only", async () => {
+    const onSend = vi.fn();
+    const view = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey={null}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "do not persist this" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByText("do not persist this")).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(
+        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
+      ),
+    ).toBeNull();
+
+    view.unmount();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey={null}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("do not persist this")).not.toBeInTheDocument();
+    });
+    expect(
+      window.localStorage.getItem(
+        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
+      ),
+    ).toBeNull();
   });
 
 });

@@ -1074,9 +1074,8 @@ async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path)
     """User turns that attach images must record the media paths alongside
     the text so the webui can rehydrate previews on session replay.
 
-    This is the producer half of the signed-media-URL round-trip: paths are
-    stored here, then :meth:`WebSocketChannel._augment_media_urls` maps them
-    onto signed URLs on the way out.
+    The WebUI transcript replay can use these paths to restore attachment
+    previews when it backfills from canonical session history.
     """
     img_a = tmp_path / "uuid-1.png"
     img_a.write_bytes(_PNG_1X1)
@@ -1520,13 +1519,11 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
 @pytest.mark.asyncio
 async def test_process_direct_rejects_reserved_system_channel(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop._connect_mcp = AsyncMock()  # type: ignore[method-assign]
     loop._process_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     with pytest.raises(ValueError, match="reserved for internal messages"):
         await loop.process_direct("external input", channel="system")
 
-    loop._connect_mcp.assert_not_awaited()
     loop._process_message.assert_not_awaited()
 
 
@@ -1535,7 +1532,6 @@ async def test_process_direct_skip_user_persist_does_not_save_retry_user(
     tmp_path: Path,
 ) -> None:
     loop = _make_full_loop(tmp_path)
-    loop._connect_mcp = AsyncMock()
     session = loop.sessions.get_or_create("api:default")
     session.add_message("user", "hello")
     session.add_message("assistant", "previous empty-response attempt")
@@ -1821,6 +1817,33 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
         },
         {"role": "assistant", "content": "done"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        loop._last_usage = {"prompt_tokens": 64, "completion_tokens": 9}
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="usage", content="hello")
+    )
+
+    loop.sessions.invalidate("cli:usage")
+    assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == {
+        "prompt_tokens": 64,
+        "completion_tokens": 9,
+    }
 
 
 @pytest.mark.asyncio

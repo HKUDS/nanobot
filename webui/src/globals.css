@@ -33,9 +33,23 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 17 88% 32%;
+    --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
+    /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
+    --radius-mark: 0.25rem;
+    --radius-compact: 0.5rem;
+    --radius-control: 0.75rem;
+    --radius-floating: 1.125rem;
+    --radius-panel: 1.375rem;
+    --radius-modal: 1.375rem;
+    --radius-prominent: 1.75rem;
+    --radius-pill: 9999px;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-selected: 40 1% 89.4%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 40 8% 90.5%;
@@ -67,8 +81,13 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 32 98% 73%;
+    --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
+    --sidebar-selected: 0 0% 29.8%;
     --sidebar-accent: var(--background);
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: var(--border);
@@ -111,7 +130,7 @@
 
   *::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
-    border-radius: 9999px;
+    border-radius: var(--radius-pill);
   }
 
   *::-webkit-scrollbar-thumb:hover {
@@ -235,10 +254,6 @@
     height: 0;
   }
 
-  .shadow-inner-right {
-    box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
-  }
-
   /* Keep the outer document rhythm clean at message boundaries. */
   .markdown-content > :first-child {
     @apply mt-0;
@@ -338,7 +353,6 @@
       animation: none;
       content: "";
     }
-    .markdown-content-streaming > :last-child::after,
     .streaming-text-fallback::after {
       animation: none;
     }
@@ -356,6 +370,9 @@
   }
   .thread-layout[data-layout="thread"] {
     grid-template-rows: minmax(0, 1fr) auto 0fr;
+  }
+  .thread-layout[data-layout="external"] {
+    grid-template-rows: minmax(0, 1fr);
   }
   @media (min-width: 640px) {
     .thread-layout[data-layout="hero"] {
@@ -435,49 +452,40 @@
     opacity: 1;
     transform: translateY(0);
   }
-  @keyframes run-pulse-dot {
-    0%,
-    100% {
-      transform: scale(0.9);
-      opacity: 0.76;
-    }
-    50% {
-      transform: scale(1.08);
-      opacity: 1;
-    }
-  }
-  @keyframes run-pulse-ring {
-    0% {
-      transform: scale(0.42);
-      opacity: 0.34;
-    }
-    100% {
-      transform: scale(1.28);
-      opacity: 0;
-    }
-  }
-  .run-pulse-icon {
-    color: hsl(204 82% 46%);
-  }
-  .run-pulse-icon__ring,
-  .run-pulse-icon__dot {
-    display: block;
-    border-radius: 999px;
+  .composer-workspace-drawer {
+    --composer-workspace-drawer-duration: 220ms;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
     pointer-events: none;
   }
-  .run-pulse-icon__ring {
-    position: absolute;
-    height: 12px;
-    width: 12px;
-    background: hsl(204 82% 46% / 0.22);
-    animation: run-pulse-ring 1.55s ease-out infinite;
+  .composer-workspace-drawer[data-state="open"] {
+    --composer-workspace-drawer-duration: 240ms;
+
+    grid-template-rows: 1fr;
+    opacity: 1;
+    pointer-events: auto;
   }
-  .run-pulse-icon__dot {
-    height: 6px;
-    width: 6px;
-    background: currentColor;
-    box-shadow: 0 0 0 1px hsl(204 82% 46% / 0.14);
-    animation: run-pulse-dot 1.55s ease-in-out infinite;
+  .composer-workspace-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .composer-workspace-drawer {
+      transition:
+        grid-template-rows var(--composer-workspace-drawer-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    }
+    .composer-workspace-drawer-content {
+      transform: translateY(-6px);
+      transition: transform var(--composer-workspace-drawer-duration)
+        cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+      transform: translateY(0);
+    }
   }
   @keyframes queued-prompt-row-enter {
     0% {
@@ -509,21 +517,13 @@
     .thread-layout {
       transition-duration: 0.01ms;
     }
-    .run-pulse-icon,
-    .run-pulse-icon * {
-      animation: none;
-    }
-    .run-pulse-icon__ring {
-      opacity: 0.18;
-      transform: scale(1);
-    }
-    .run-pulse-icon__dot {
-      opacity: 1;
-      transform: scale(1);
-    }
     .queued-prompt-row {
       animation: none;
     }
+  }
+
+  .workbench-pane {
+    transform-origin: top left;
   }
 
   /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
@@ -565,52 +565,6 @@
     }
   }
 
-  @keyframes cli-app-linked-sheen {
-    0% {
-      transform: translateX(-140%) skewX(-14deg);
-      opacity: 0;
-    }
-    18% {
-      opacity: 0.7;
-    }
-    72%,
-    100% {
-      transform: translateX(140%) skewX(-14deg);
-      opacity: 0;
-    }
-  }
-  .cli-app-linked-chip::after {
-    content: "";
-    position: absolute;
-    inset: -1px;
-    pointer-events: none;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      hsl(var(--foreground) / 0.14) 46%,
-      hsl(var(--background) / 0.7) 50%,
-      hsl(var(--foreground) / 0.12) 54%,
-      transparent 100%
-    );
-    animation: cli-app-linked-sheen 1.25s ease-out 1;
-  }
-  .dark .cli-app-linked-chip::after {
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      hsl(var(--foreground) / 0.12) 46%,
-      hsl(var(--background) / 0.5) 50%,
-      hsl(var(--foreground) / 0.1) 54%,
-      transparent 100%
-    );
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .cli-app-linked-chip::after {
-      animation: none;
-      content: none;
-    }
-  }
-
   /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;
@@ -622,7 +576,7 @@
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted-foreground) / 0.4);
-    border-radius: 9999px;
+    border-radius: var(--radius-pill);
   }
   .scrollbar-track-transparent {
     scrollbar-gutter: stable;
@@ -679,34 +633,6 @@
   .thread-viewport {
     container-name: thread-viewport;
     container-type: inline-size;
-  }
-
-  /* Soften only the activity edges that have clipped content beyond them. */
-  .activity-scroll-fade[data-fade-top="true"][data-fade-bottom="false"] {
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px);
-    mask-image: linear-gradient(to bottom, transparent, #000 14px);
-  }
-
-  .activity-scroll-fade[data-fade-top="false"][data-fade-bottom="true"] {
-    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
-    mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
-  }
-
-  .activity-scroll-fade[data-fade-top="true"][data-fade-bottom="true"] {
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      #000 14px,
-      #000 calc(100% - 14px),
-      transparent
-    );
-    mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      #000 14px,
-      #000 calc(100% - 14px),
-      transparent
-    );
   }
 
   @supports (content-visibility: auto) {
@@ -768,6 +694,21 @@
 .thread-composer-model-badge:not([data-switching="true"]):active
   > .composer-model-pill {
   transform: scale(0.98);
+}
+
+@keyframes preset-name-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  35% {
+    transform: translateX(-2px);
+  }
+
+  70% {
+    transform: translateX(2px);
+  }
 }
 
 @keyframes composer-model-pill-viewport-enter {
@@ -892,5 +833,11 @@
     min-width: 2rem;
     height: 2rem;
     min-height: 2rem;
+  }
+}
+@media (forced-colors: active) {
+  [data-workbench-move-handle]:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
   }
 }

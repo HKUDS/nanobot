@@ -78,7 +78,7 @@ export function FileReferenceChip({
                 "text-sky-600 transition-colors hover:text-sky-700",
                 "dark:text-sky-300 dark:hover:text-sky-200",
                 interactive && [
-                  "cursor-pointer rounded-[5px]",
+                  "cursor-pointer rounded-compact",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45",
                 ],
               )}
@@ -110,7 +110,7 @@ export function FileReferenceChip({
           sideOffset={8}
           collisionPadding={12}
           className={cn(
-            "max-w-[min(38rem,calc(100vw-2rem))] rounded-[10px]",
+            "max-w-[min(38rem,calc(100vw-2rem))] rounded-control",
             "px-2.5 py-1.5",
             "break-all font-mono text-[11px] leading-snug text-popover-foreground",
           )}

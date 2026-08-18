@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from nanobot.providers.base import ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.registry import ProviderSpec
 
 GEMINI_EXTRA = {"google": {"thought_signature": "sig-abc-123"}}
 
@@ -243,3 +244,251 @@ def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     sanitized = provider._sanitize_messages(messages)
 
     assert sanitized[1]["tool_calls"][0]["extra_content"] == GEMINI_EXTRA
+
+
+# ── Replay to Gemini: preserve or backfill thought signatures ─────────
+
+def _gemini_provider() -> OpenAICompatProvider:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        return OpenAICompatProvider(
+            spec=ProviderSpec(
+                name="gemini", keywords=("gemini",), env_key="GEMINI_API_KEY"
+            )
+        )
+
+
+def _tool_call(tc_id: str, name: str, *, signed: bool = False) -> dict:
+    tc: dict = {
+        "id": tc_id,
+        "type": "function",
+        "function": {"name": name, "arguments": "{}"},
+    }
+    if signed:
+        tc["extra_content"] = GEMINI_EXTRA
+    return tc
+
+
+def test_gemini_backfills_unsigned_tool_calls_and_keeps_results() -> None:
+    """Cross-provider history stays intact and receives the documented fallback."""
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "check the sensor"},
+        {
+            "role": "assistant",
+            "content": "On it.",
+            "tool_calls": [_tool_call("default_api:exec", "exec")],
+        },
+        {"role": "tool", "content": "done", "tool_call_id": "default_api:exec"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert [m["role"] for m in sanitized] == ["user", "assistant", "tool", "user"]
+    call = sanitized[1]["tool_calls"][0]
+    assert call["extra_content"]["google"]["thought_signature"] == (
+        "skip_thought_signature_validator"
+    )
+    assert sanitized[2]["tool_call_id"] == call["id"]
+    assert sanitized[2]["content"] == "done"
+
+
+def test_gemini_preserves_parallel_calls_when_only_first_is_signed() -> None:
+    """Gemini signs only the first native parallel call; all calls must replay."""
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "do both"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                _tool_call("call_signed", "read_file", signed=True),
+                _tool_call("default_api:exec", "exec"),
+            ],
+        },
+        {"role": "tool", "content": "file contents", "tool_call_id": "call_signed"},
+        {"role": "tool", "content": "done", "tool_call_id": "default_api:exec"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert [m["role"] for m in sanitized] == [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "user",
+    ]
+    calls = sanitized[1]["tool_calls"]
+    assert len(calls) == 2
+    assert calls[0]["extra_content"] == GEMINI_EXTRA
+    assert sanitized[2]["tool_call_id"] == calls[0]["id"]
+    assert sanitized[2]["content"] == "file contents"
+    assert "extra_content" not in calls[1]
+    assert sanitized[3]["tool_call_id"] == calls[1]["id"]
+    assert sanitized[3]["content"] == "done"
+
+
+def test_gemini_backfills_only_first_cross_provider_parallel_call() -> None:
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "do both"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                _tool_call("call_1", "read_file"),
+                _tool_call("call_2", "exec"),
+            ],
+        },
+        {"role": "tool", "content": "file contents", "tool_call_id": "call_1"},
+        {"role": "tool", "content": "done", "tool_call_id": "call_2"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    calls = sanitized[1]["tool_calls"]
+    assert len(calls) == 2
+    assert calls[0]["extra_content"]["google"]["thought_signature"] == (
+        "skip_thought_signature_validator"
+    )
+    assert "extra_content" not in calls[1]
+    assert [message["content"] for message in sanitized[2:]] == ["file contents", "done"]
+
+
+def test_gemini_requires_signature_on_first_parallel_call() -> None:
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "do both"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                _tool_call("call_1", "read_file"),
+                _tool_call("call_2", "exec", signed=True),
+            ],
+        },
+        {"role": "tool", "content": "contents", "tool_call_id": "call_1"},
+        {"role": "tool", "content": "done", "tool_call_id": "call_2"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    calls = sanitized[1]["tool_calls"]
+    assert calls[0]["extra_content"]["google"]["thought_signature"] == (
+        "skip_thought_signature_validator"
+    )
+    assert calls[1]["extra_content"] == GEMINI_EXTRA
+
+
+def test_gemini_replay_preserves_signed_tool_calls() -> None:
+    """A pure Gemini-origin history replays unchanged (signature intact)."""
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [_tool_call("call_1", "get_weather", signed=True)],
+        },
+        {"role": "tool", "content": "sunny", "tool_call_id": "call_1"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert [m["role"] for m in sanitized] == ["user", "assistant", "tool", "user"]
+    calls = sanitized[1]["tool_calls"]
+    assert len(calls) == 1
+    assert calls[0]["extra_content"] == GEMINI_EXTRA
+    assert sanitized[2]["tool_call_id"] == calls[0]["id"]
+
+
+def test_non_gemini_provider_keeps_unsigned_tool_calls() -> None:
+    """The filter is Gemini-scoped: other providers still replay unsigned calls."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [_tool_call("default_api:exec", "exec")],
+        },
+        {"role": "tool", "content": "done", "tool_call_id": "default_api:exec"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert len(sanitized[1]["tool_calls"]) == 1
+    assert sanitized[2]["role"] == "tool"
+    assert sanitized[2]["tool_call_id"] == sanitized[1]["tool_calls"][0]["id"]
+
+
+def test_gemini_drops_malformed_tool_call_entries_without_crashing() -> None:
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": None, "tool_calls": [None]},
+        {"role": "user", "content": "continue"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert not any(message.get("tool_calls") for message in sanitized)
+
+
+def test_gemini_matches_duplicate_tool_ids_by_call_instance() -> None:
+    provider = _gemini_provider()
+    messages = [
+        {"role": "user", "content": "old request"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [_tool_call("reused", "old_tool")],
+        },
+        {"role": "tool", "content": "old result", "tool_call_id": "reused"},
+        {"role": "user", "content": "new request"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [_tool_call("reused", "new_tool", signed=True)],
+        },
+        {"role": "tool", "content": "new result", "tool_call_id": "reused"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert any(message.get("content") == "old result" for message in sanitized)
+    assert any(message.get("content") == "new result" for message in sanitized)
+    calls = [
+        call
+        for message in sanitized
+        for call in message.get("tool_calls", [])
+    ]
+    assert len(calls) == 2
+    assert calls[0]["function"]["name"] == "old_tool"
+    assert calls[0]["extra_content"]["google"]["thought_signature"] == (
+        "skip_thought_signature_validator"
+    )
+    assert calls[1]["function"]["name"] == "new_tool"
+
+
+def test_gemini_backfill_does_not_mutate_caller_history() -> None:
+    provider = _gemini_provider()
+    call = _tool_call("call_1", "read_file")
+    messages = [
+        {"role": "user", "content": "read it"},
+        {"role": "assistant", "content": None, "tool_calls": [call]},
+        {"role": "tool", "content": "contents", "tool_call_id": "call_1"},
+    ]
+
+    sanitized = provider._sanitize_messages(messages)
+
+    assert "extra_content" not in call
+    assert sanitized[1]["tool_calls"][0]["extra_content"]["google"][
+        "thought_signature"
+    ] == "skip_thought_signature_validator"

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
@@ -36,6 +36,8 @@ CommandLifecycle = Literal[
     "agent_turn",
     "agent_turn_with_args",
 ]
+
+USER_SHELL_COMMAND = "/__shell"
 
 
 @dataclass(frozen=True)
@@ -302,6 +304,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
+    loop.discard_session_file_state(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated:]
     runtime = None
@@ -374,16 +377,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
-    parts = args.split()
-    if len(parts) != 1:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: `/model [preset]`",
-            metadata=metadata,
-        )
-
-    name = parts[0]
+    name = args
     try:
         runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:
@@ -490,7 +484,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()
-            prune_dream_sessions(loop.sessions.sessions_dir)
+            prune_dream_sessions(loop.sessions)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
@@ -1007,6 +1001,30 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
+    """Run a trusted local ``!command`` through nanobot's exec policy."""
+    metadata = dict(ctx.msg.metadata or {})
+    if (
+        ctx.msg.channel != "websocket"
+        or metadata.get("webui") is not True
+        or metadata.get(INBOUND_META_USER_SHELL) is not True
+    ):
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Shell commands are only available from a trusted local client.",
+            metadata={**metadata, "render_as": "text"},
+        )
+    if not ctx.args.strip():
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Type a command after `!`, for example `!pwd`.",
+            metadata={**metadata, "render_as": "text"},
+        )
+    return await ctx.loop.execute_user_shell_command(ctx)
+
+
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = ["🐈 nanobot commands:"]
@@ -1046,3 +1064,5 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
+    router.exact(USER_SHELL_COMMAND, cmd_user_shell)
+    router.prefix(f"{USER_SHELL_COMMAND} ", cmd_user_shell)

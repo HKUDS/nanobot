@@ -130,6 +130,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,
+      manifest: "asset-manifest.json",
       sourcemap: false,
       rollupOptions: {
         output: {
@@ -161,6 +162,18 @@ export default defineConfig(({ mode }) => {
       environment: "happy-dom",
       globals: true,
       setupFiles: ["./src/tests/setup.ts"],
+      coverage: {
+        provider: "v8",
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: ["src/tests/**", "src/**/*.d.ts"],
+        reporter: ["text", "json-summary"],
+        thresholds: {
+          statements: 85,
+          branches: 80,
+          functions: 80,
+          lines: 85,
+        },
+      },
     },
   };
 });

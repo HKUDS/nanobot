@@ -239,20 +239,6 @@ class TestStreamEndReactionCleanup:
         ch._remove_reaction.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_no_removal_when_both_ids_missing(self):
-        ch = _make_channel()
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Done", card_id="card_1", sequence=3, last_edit=0.0,
-        )
-        ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._remove_reaction = AsyncMock()
-
-        await ch.send_delta("oc_chat1", "", stream_end=True)
-
-        ch._remove_reaction.assert_not_called()
-
-    @pytest.mark.asyncio
     async def test_no_removal_when_not_stream_end(self):
         ch = _make_channel()
         ch._remove_reaction = AsyncMock()

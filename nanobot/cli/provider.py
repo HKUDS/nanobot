@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 
 from nanobot import __logo__
+from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
@@ -74,7 +75,7 @@ def _required_module_attribute(module_name: str, attribute: str) -> object:
 
 
 def _load_openai_oauth_client() -> tuple[_GetOAuthToken, _LoginOAuthInteractive]:
-    """Load the optional untyped OAuth client behind a typed boundary."""
+    """Load the untyped OAuth client behind a typed boundary."""
     return (
         cast(_GetOAuthToken, _required_module_attribute("oauth_cli_kit", "get_token")),
         cast(
@@ -85,7 +86,7 @@ def _load_openai_oauth_client() -> tuple[_GetOAuthToken, _LoginOAuthInteractive]
 
 
 def _load_openai_oauth_storage() -> tuple[_OAuthProviderConfig, _FileTokenStorageFactory]:
-    """Load the optional untyped OAuth storage API behind a typed boundary."""
+    """Load the untyped OAuth storage API behind a typed boundary."""
     return (
         cast(
             _OAuthProviderConfig,
@@ -241,7 +242,7 @@ def _login_openai_codex() -> None:
             f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]"
         )
     except ImportError:
-        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         raise typer.Exit(1)
 
 
@@ -250,7 +251,7 @@ def _logout_openai_codex() -> None:
     try:
         provider_config, storage_factory = _load_openai_oauth_storage()
     except ImportError:
-        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         raise typer.Exit(1)
 
     storage = storage_factory(token_filename=provider_config.token_filename)
@@ -309,7 +310,7 @@ def _logout_github_copilot() -> None:
     try:
         from nanobot.providers.github_copilot_provider import get_storage
     except ImportError:
-        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         raise typer.Exit(1)
 
     storage = get_storage()
