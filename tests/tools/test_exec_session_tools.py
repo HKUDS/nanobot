@@ -420,7 +420,8 @@ def test_write_stdin_accepts_max_output_tokens_alias(tmp_path):
         sid = _session_id(initial)
         poll = await stdin_tool.execute(
             session_id=sid,
-            yield_time_ms=500,
+            wait_for="\n",
+            wait_timeout_ms=10000,
             max_output_tokens=1000,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
