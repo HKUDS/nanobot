@@ -42,6 +42,65 @@ def _make_loop(*, tools_config=None):
     return loop, bus
 
 
+class TestActiveTaskTracking:
+    @pytest.mark.asyncio
+    async def test_completed_task_removes_empty_session_group(self):
+        loop, _bus = _make_loop()
+        release = asyncio.Event()
+        task = asyncio.create_task(release.wait())
+
+        loop._track_active_task("test:c1", task)
+        release.set()
+        await task
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+
+    @pytest.mark.asyncio
+    async def test_session_group_remains_until_last_task_completes(self):
+        loop, _bus = _make_loop()
+        releases = [asyncio.Event(), asyncio.Event()]
+        tasks = [asyncio.create_task(release.wait()) for release in releases]
+        for task in tasks:
+            loop._track_active_task("test:c1", task)
+
+        releases[0].set()
+        await tasks[0]
+        await asyncio.sleep(0)
+
+        assert loop._active_tasks["test:c1"] == {tasks[1]}
+
+        releases[1].set()
+        await tasks[1]
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+
+    @pytest.mark.asyncio
+    async def test_old_callback_preserves_replacement_session_group(self):
+        loop, _bus = _make_loop()
+        old_release = asyncio.Event()
+        new_release = asyncio.Event()
+        old_task = asyncio.create_task(old_release.wait())
+        new_task = asyncio.create_task(new_release.wait())
+
+        loop._track_active_task("test:c1", old_task)
+        loop._active_tasks.pop("test:c1")
+        loop._track_active_task("test:c1", new_task)
+
+        old_release.set()
+        await old_task
+        await asyncio.sleep(0)
+
+        assert loop._active_tasks["test:c1"] == {new_task}
+
+        new_release.set()
+        await new_task
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+
+
 class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
