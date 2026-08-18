@@ -2123,18 +2123,14 @@ async def _dashscope_images_from_payload(
     them as base64 data URLs.
     """
     images: list[str] = []
-    output = payload.get("output") if isinstance(payload, dict) else None
-    if not isinstance(output, dict):
+    output = _as_json_object(payload.get("output"))
+    if output is None:
         return images
-    for choice in output.get("choices") or []:
-        if not isinstance(choice, dict):
+    for choice in _as_json_objects(output.get("choices")):
+        message = _as_json_object(choice.get("message"))
+        if message is None:
             continue
-        message = choice.get("message") if isinstance(choice, dict) else None
-        if not isinstance(message, dict):
-            continue
-        for item in message.get("content") or []:
-            if not isinstance(item, dict):
-                continue
+        for item in _as_json_objects(message.get("content")):
             url = item.get("image")
             if isinstance(url, str) and url:
                 if url.startswith("data:image/"):
