@@ -1350,7 +1350,7 @@ describe("NanobotTui layout", () => {
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
   })
 
-  test("uses a quiet surface instead of a boxed composer", async () => {
+  test("distinguishes the composer with a quiet focus edge", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     const app = NanobotTui.mount(
       setup.renderer,
@@ -1362,14 +1362,20 @@ describe("NanobotTui layout", () => {
       ready: boolean
       composerFrame: {
         border: boolean | string[]
+        borderColor: { toInts(): number[] }
         backgroundColor: { toInts(): number[] }
       }
-      composer: { backgroundColor: { toInts(): number[] } }
+      composer: {
+        backgroundColor: { toInts(): number[] }
+        placeholderColor: { toInts(): number[] }
+      }
     }
 
-    expect(internals.composerFrame.border).toBeFalse()
+    expect(internals.composerFrame.border).toEqual(["left"])
+    expect(internals.composerFrame.borderColor.toInts().slice(0, 3)).toEqual([185, 77, 11])
     expect(internals.composerFrame.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(internals.composer.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
+    expect(internals.composer.placeholderColor.toInts().slice(0, 3)).toEqual([111, 111, 120])
 
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => internals.ready)
@@ -1377,7 +1383,9 @@ describe("NanobotTui layout", () => {
 
     const composerLine = setup.captureCharFrame().split("\n")
       .find((line) => line.includes("Ask nanobot anything")) || ""
-    expect(composerLine).not.toContain("│")
+    expect(composerLine).toContain("│")
+    expect(composerLine).not.toContain("┌")
+    expect(composerLine).not.toContain("┐")
   })
 
   test("uses asymmetric roles instead of chat bubbles", async () => {
@@ -1664,6 +1672,23 @@ describe("NanobotTui layout", () => {
 
     await setup.mockMouse.click(status.x, status.y)
     expect(setup.renderer.getSelection()).toBeNull()
+  })
+
+  test("returns text input focus when other TUI content is clicked", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      status: TextRenderable
+    }
+    app.accept({ event: "delta", chat_id: "chat", text: "clickable answer" })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    await setup.flush()
+
+    ui.composer.blur()
+    await setup.mockMouse.click(ui.status.x, ui.status.y)
+
+    expect(ui.composer.focused).toBe(true)
   })
 
   test("animates one stable status line while the agent works", async () => {

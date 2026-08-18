@@ -511,6 +511,7 @@ export class NanobotTui {
       backgroundColor: RGBA.defaultBackground(),
       onMouseDown: (event) => {
         if (event.button !== 0) return
+        if (!this.diffViewer.visible) this.composer.focus()
         // Runtime pickers are transient popovers. A primary click anywhere
         // outside their trigger or body dismisses them; hide() restores the
         // composer focus through the shared visibility callback.
@@ -602,7 +603,8 @@ export class NanobotTui {
       width: "100%",
       minHeight: 1,
       flexShrink: 0,
-      border: false,
+      border: ["left"],
+      borderColor: this.palette.accent,
       paddingLeft: 1,
       paddingRight: 1,
       backgroundColor: composerSurface,
@@ -614,7 +616,7 @@ export class NanobotTui {
       maxHeight: 8,
       wrapMode: "word",
       placeholder: COMPOSER_PLACEHOLDER,
-      placeholderColor: this.palette.faint,
+      placeholderColor: this.palette.muted,
       textColor: this.palette.text,
       focusedTextColor: this.palette.text,
       backgroundColor: composerSurface,
@@ -1693,8 +1695,10 @@ export class NanobotTui {
   private updateComposerAppearance(): void {
     const surface = this.composerSurface()
     this.composerFrame.backgroundColor = surface
+    this.composerFrame.borderColor = this.palette.accent
     this.composer.backgroundColor = surface
     this.composer.focusedBackgroundColor = surface
+    this.composer.placeholderColor = this.palette.muted
   }
 
   private syncComposerPlaceholder(): void {
