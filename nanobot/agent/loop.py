@@ -14,6 +14,7 @@ from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar, cast
 
@@ -866,6 +867,22 @@ class AgentLoop:
             metadata={**metadata, "render_as": "text"},
         )
 
+    def _track_active_task(self, key: str, task: asyncio.Task[Any]) -> None:
+        """Track active session work until its task group becomes empty."""
+        tasks = self._active_tasks.setdefault(key, set())
+        tasks.add(task)
+        task.add_done_callback(partial(self._active_task_done, key, tasks))
+
+    def _active_task_done(
+        self,
+        key: str,
+        tasks: set[asyncio.Task[Any]],
+        task: asyncio.Task[Any],
+    ) -> None:
+        tasks.discard(task)
+        if not tasks and self._active_tasks.get(key) is tasks:
+            self._active_tasks.pop(key, None)
+
     async def _cancel_active_tasks(self, key: str) -> int:
         """Cancel and await all active work for *key*.
 
@@ -1319,9 +1336,7 @@ class AgentLoop:
                 # Compute the effective session key before dispatching
                 # This ensures /stop command can find tasks correctly when unified session is enabled
                 task = asyncio.create_task(self._dispatch(msg))
-                active_tasks = self._active_tasks.setdefault(effective_key, set())
-                active_tasks.add(task)
-                task.add_done_callback(active_tasks.discard)
+                self._track_active_task(effective_key, task)
         finally:
             await self.aclose()
 
