@@ -10,7 +10,13 @@ def _assert_openai_compat_timeout(timeout) -> None:
 
 
 async def test_openai_compat_provider_defers_sdk_client_until_first_use() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
+    with (
+        patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai,
+        patch(
+            "nanobot.providers.openai_compat_provider._legacy_socks_env_proxy",
+            return_value=(False, None),
+        ),
+    ):
         provider = OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
         mock_async_openai.assert_not_called()
         await provider._ensure_client()

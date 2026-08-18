@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
+from urllib.request import getproxies, proxy_bypass
 
 from loguru import logger
 from pydantic.alias_generators import to_snake
@@ -57,6 +58,48 @@ if TYPE_CHECKING:
 AsyncOpenAI: Any = None
 
 _GEMINI_SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
+_PROXY_ENV_KEYS = (
+    "ALL_PROXY",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "all_proxy",
+    "https_proxy",
+    "http_proxy",
+)
+
+
+def _normalize_proxy_url(proxy: str) -> str:
+    """Normalize proxy URL aliases accepted by common proxy clients."""
+    value = proxy.strip()
+    scheme, separator, remainder = value.partition("://")
+    if separator and scheme.lower() == "socks":
+        return f"socks5://{remainder}"
+    return value
+
+
+def _legacy_socks_env_proxy(api_base: str | None) -> tuple[bool, str | None]:
+    """Resolve env proxy settings when a legacy ``socks://`` URL is present.
+
+    httpx rejects the generic ``socks://`` alias while many desktop proxy
+    applications export it.  Creating an explicit client avoids the SDK
+    parsing the invalid alias, while still preferring the scheme-specific
+    HTTP(S) proxy and respecting ``NO_PROXY`` for the provider endpoint.
+    """
+    if not any(
+        (value := os.environ.get(key))
+        and value.strip().lower().startswith("socks://")
+        for key in _PROXY_ENV_KEYS
+    ):
+        return False, None
+
+    parsed = urlparse(api_base or "https://api.openai.com")
+    if parsed.hostname and proxy_bypass(parsed.hostname):
+        return True, None
+
+    proxies = getproxies()
+    scheme = parsed.scheme.lower() or "https"
+    proxy = proxies.get(scheme) or proxies.get("all")
+    return True, _normalize_proxy_url(proxy) if proxy else None
 
 
 def _is_hosted_web_search_type(value: object) -> bool:
@@ -554,7 +597,7 @@ class OpenAICompatProvider(LLMProvider):
         if self._proxy:
             http_client = httpx.AsyncClient(
                 timeout=timeout_s,
-                proxy=self._proxy,
+                proxy=_normalize_proxy_url(self._proxy),
                 trust_env=False,
                 follow_redirects=True,
             )
@@ -579,9 +622,18 @@ class OpenAICompatProvider(LLMProvider):
                 timeout=timeout_s,
                 transport=httpx.AsyncHTTPTransport(proxy=None, limits=_local_limits),
             )
-        # else: http_client stays None → SDK creates DefaultAsyncHttpxClient
-        # which already reads proxy env vars via trust_env=True, has proper
-        # connection limits, and follows redirects.
+        else:
+            has_legacy_socks_env, env_proxy = _legacy_socks_env_proxy(self._effective_base)
+            if has_legacy_socks_env:
+                http_client = httpx.AsyncClient(
+                    timeout=timeout_s,
+                    proxy=env_proxy,
+                    trust_env=False,
+                    follow_redirects=True,
+                )
+        # When http_client stays None, the SDK creates DefaultAsyncHttpxClient,
+        # which reads normal proxy env vars via trust_env=True and supplies its
+        # own connection limits and redirect handling.
         self._client = AsyncOpenAI(
             api_key=self._api_key_for_client,
             base_url=self._effective_base,
