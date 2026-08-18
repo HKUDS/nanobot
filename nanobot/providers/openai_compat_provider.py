@@ -388,6 +388,75 @@ def _is_local_endpoint(
     return addr.is_loopback or addr.is_private
 
 
+def _normalize_socks_proxy_url(url: str) -> str:
+    """Normalize the legacy ``socks://`` proxy alias to ``socks5://``.
+
+    httpx only accepts http/https/socks5/socks5h proxy schemes; ``socks://``
+    is a common alias exported by proxy tools (e.g. via ``ALL_PROXY``) but is
+    rejected outright, raising ``ValueError`` during client construction.
+    """
+    if url.lower().startswith("socks://"):
+        return "socks5://" + url[len("socks://") :]
+    return url
+
+
+def _no_proxy_matches(host: str, no_proxy: str) -> bool:
+    """Return True when ``host`` is covered by a NO_PROXY-style pattern list."""
+    host = host.lower()
+    for pattern in no_proxy.split(","):
+        pattern = pattern.strip().lower().lstrip(".")
+        if not pattern:
+            continue
+        if pattern == "*" or host == pattern or host.endswith(f".{pattern}"):
+            return True
+    return False
+
+
+def _env_first(*names: str) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
+def _resolve_legacy_proxy_env(api_base: str | None) -> str | None:
+    """Resolve a proxy URL from the environment when it uses the legacy
+    ``socks://`` alias.
+
+    httpx parses the full proxy environment (HTTP_PROXY/HTTPS_PROXY/
+    ALL_PROXY) eagerly when building its default client, so an invalid
+    ``ALL_PROXY=socks://...`` breaks client construction even when a valid
+    scheme-specific proxy is also set. When that alias is present, this
+    resolves the proxy nanobot should actually use: the endpoint's
+    scheme-specific ``HTTP_PROXY``/``HTTPS_PROXY``, falling back to a
+    normalized ``ALL_PROXY``, and honoring ``NO_PROXY``.
+
+    Returns ``None`` when the environment doesn't use the legacy alias, in
+    which case httpx's normal env-trusting behavior should apply unchanged.
+    Returns ``""`` when the legacy alias is present but no proxy should be
+    used for this request (host excluded via NO_PROXY, or no proxy is
+    configured for the endpoint's scheme).
+    """
+    http_proxy = _env_first("HTTP_PROXY", "http_proxy")
+    https_proxy = _env_first("HTTPS_PROXY", "https_proxy")
+    all_proxy = _env_first("ALL_PROXY", "all_proxy")
+    if not any(
+        (value or "").lower().startswith("socks://") for value in (http_proxy, https_proxy, all_proxy)
+    ):
+        return None
+
+    host = urlparse(api_base).hostname if api_base else None
+    no_proxy = _env_first("NO_PROXY", "no_proxy")
+    if host and no_proxy and _no_proxy_matches(host, no_proxy):
+        return ""
+
+    scheme = urlparse(api_base).scheme if api_base else "https"
+    scoped = http_proxy if scheme == "http" else https_proxy
+    chosen = scoped or all_proxy
+    return _normalize_socks_proxy_url(chosen) if chosen else ""
+
+
 def _is_direct_openai_base(api_base: str | None) -> bool:
     """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
     if not api_base:
@@ -554,7 +623,7 @@ class OpenAICompatProvider(LLMProvider):
         if self._proxy:
             http_client = httpx.AsyncClient(
                 timeout=timeout_s,
-                proxy=self._proxy,
+                proxy=_normalize_socks_proxy_url(self._proxy),
                 trust_env=False,
                 follow_redirects=True,
             )
@@ -579,6 +648,20 @@ class OpenAICompatProvider(LLMProvider):
                 timeout=timeout_s,
                 transport=httpx.AsyncHTTPTransport(proxy=None, limits=_local_limits),
             )
+        else:
+            # httpx eagerly parses the whole proxy environment at client
+            # construction time, so a legacy ALL_PROXY=socks:// alias would
+            # crash construction even when HTTPS_PROXY is a valid scheme.
+            # Build an explicit client ourselves in that case; otherwise let
+            # the SDK's DefaultAsyncHttpxClient trust the environment as usual.
+            legacy_proxy = _resolve_legacy_proxy_env(self._effective_base)
+            if legacy_proxy is not None:
+                http_client = httpx.AsyncClient(
+                    timeout=timeout_s,
+                    proxy=legacy_proxy or None,
+                    trust_env=False,
+                    follow_redirects=True,
+                )
         # else: http_client stays None → SDK creates DefaultAsyncHttpxClient
         # which already reads proxy env vars via trust_env=True, has proper
         # connection limits, and follows redirects.
