@@ -285,7 +285,7 @@ def test_interactive_agent_does_not_silently_fall_back(
     assert exc_info.value.exit_code == 1
     assert output == [
         "[red]Native TUI unavailable: missing sidecar[/red]",
-        "[dim]Use `nanobot agent --classic` only if you want the old prompt.[/dim]",
+        "[dim]Use `nanobot agent --classic` only if you want the compatibility prompt.[/dim]",
     ]
 
 
