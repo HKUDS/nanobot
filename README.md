@@ -77,7 +77,12 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 
 Pick **one** install method:
 
-Prerequisites: Python 3.11 or newer. Git is only needed for a source install. Published packages already include the WebUI; a current-source install needs `bun` or `npm` to build it.
+| Track | Install with | Update with | What runs |
+|---|---|---|---|
+| Stable | installer, `uv`, or pip | the same package tool | one released Python/WebUI/TUI version |
+| Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
+
+Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI and fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
 
 If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
 
@@ -97,7 +102,7 @@ irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | i
 
 The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
 
-To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
+To preview the plan without changing your environment, pass `--dry-run`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
@@ -105,16 +110,6 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
-```
-
-To install the current `main` branch instead, pass `--dev`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
-```
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
 ```
 
 If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
@@ -135,15 +130,27 @@ If pip reports `externally-managed-environment` on macOS or Linux, use the one-c
 
 **Install from source**
 
-`bun` or `npm` must be available. From an activated virtual environment:
+Clone the repository and install it in editable mode. Bun is required because the source
+checkout runs the matching TUI directly instead of downloading an older release binary.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
-python -m pip install .
+python -m venv .venv
 ```
 
-On Windows, if pip reports that it cannot launch `npm`, run `cd webui`, `npm.cmd install --package-lock=false`, `npm.cmd run build`, and `cd ..` in order, then retry the install. Contributors who need an editable checkout should follow [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`webui/README.md`](./webui/README.md).
+Activate it with `source .venv/bin/activate` on macOS/Linux or
+`.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
+
+```bash
+python -m pip install -e .
+```
+
+After that, the normal commands are identical to a stable install. `nanobot agent` runs the TUI
+from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later
+`git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun
+`python -m pip install -e .` when Python dependencies change. Contributors should also read
+[`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 Verify the install:
 
@@ -161,7 +168,7 @@ If `nanobot` is not on `PATH`, invoke it through the method that installed it: r
 nanobot webui
 ```
 
-This is the recommended first run. The launcher creates the config and workspace when needed, safely enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). A fresh install can open before a model is configured, so setup continues in the browser instead of beginning in a JSON file. The first-run WebUI binds to localhost by default and is not exposed to your LAN.
+This is the recommended first run. The launcher creates the config and workspace when needed, safely enables the local WebSocket channel after confirmation, starts or joins the shared local gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). A fresh install can open before a model is configured, so setup continues in the browser instead of beginning in a JSON file. The first-run WebUI binds to localhost by default and is not exposed to your LAN.
 
 **Your first three steps**
 
@@ -174,10 +181,10 @@ Any normal reply means the provider, model, workspace, and browser gateway are w
 **Keep nanobot running after you close the terminal**
 
 ```bash
-nanobot webui --background
+nanobot gateway --background
 ```
 
-This starts the same full gateway as `nanobot webui`, opens the browser, and leaves channels and automations running after the launcher exits. Complete first-time model setup with foreground `nanobot webui` before switching to background mode.
+This is the only command that promotes the shared gateway to persistent background mode. It leaves channels and automations running after every local TUI and WebUI launcher exits. Complete first-time model setup with `nanobot webui` before switching to background mode; open the same localhost WebUI again afterward.
 
 ```bash
 nanobot gateway status
@@ -202,7 +209,7 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 nanobot agent
 ```
 
-This opens an interactive terminal chat with the same configured model, workspace, and tools while keeping its own CLI session history. It does not open a browser or keep chat channels and automations running after you exit. Type `exit` or press `Ctrl+C` when you are done.
+This opens the native terminal client with the same configured model, workspace, tools, streaming protocol, and session engine as the WebUI. Use `/sessions` to switch saved conversations, `/new-chat` to preserve this conversation and start another one, `/branch` to fork from a completed reply, `/context` to inspect the compacted summary and raw message suffix available to the agent, or `/diff` to review the latest turn's file changes. Type `@` to mention an installed app, configured MCP server, or saved session. While nanobot is working, `Enter` steers the current turn, `Tab` queues a visible follow-up for the next turn, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) returns the latest queued message for editing. Press `Shift+Enter` to add a newline; `Ctrl+J` is the universal fallback for terminals that cannot distinguish modified Enter keys. Use `PageUp` at the top to load earlier transcript pages. The next launch returns to your last session unless `--session` selects another WebSocket session; use `--classic` to resume a session from another channel. The existing nanobot `/new` command keeps its original behavior: it resets the current chat. `nanobot agent` and `nanobot webui` share one on-demand local gateway: either command can start it, each launcher releases only its own client, and the last interactive launcher to exit stops it. Use `nanobot gateway --background` when the gateway must stay alive with no local clients. Type `exit` or press `Ctrl+C` when you are done. Use `nanobot agent --classic` for the legacy Python prompt.
 
 For one request and an immediate exit, use:
 

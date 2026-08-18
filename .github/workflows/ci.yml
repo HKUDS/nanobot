@@ -96,8 +96,9 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Keep each test file in one worker while using both hosted-runner cores.
-            pytest_args: "-n 2 --dist loadfile"
+            # Real PowerShell/process-tree tests run serially below. Keep
+            # them out of xdist so workers never share a Windows console.
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/tools/test_exec_platform.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -147,6 +148,13 @@ jobs:
           ${{ matrix.pytest_args }}
           --durations=25 --durations-min=1.0
 
+      - name: Run Windows process compatibility tests
+        if: runner.os == 'Windows'
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/tools/test_exec_platform.py
+          --durations=25 --durations-min=1.0
+
   webui:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -178,6 +186,77 @@ jobs:
       - name: Build WebUI
         working-directory: webui
         run: bun run build
+
+  tui:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Terminal UI
+            os: ubuntu-latest
+          - name: Terminal UI (Windows)
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Install TUI dependencies
+        working-directory: tui
+        run: bun install --frozen-lockfile
+
+      - name: Check TUI
+        working-directory: tui
+        run: bun run check
+
+      - name: Test TUI
+        working-directory: tui
+        run: bun run test
+
+      - name: Test TUI in a real pseudo-terminal
+        if: runner.os != 'Windows'
+        working-directory: tui
+        run: python3 scripts/pty_smoke.py
+
+      - name: Set up Python for ConPTY smoke test
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Test TUI in a real ConPTY terminal
+        if: runner.os == 'Windows'
+        working-directory: tui
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pywinpty==3.0.5
+          python scripts/conpty_smoke.py
+
+      - name: Build TUI
+        working-directory: tui
+        run: bun run build
+
+      - name: Verify licensed Linux release archive
+        if: runner.os == 'Linux'
+        working-directory: tui
+        run: |
+          bun scripts/release-notices.ts linux-x64
+          python3 scripts/package-release.py linux-x64
+
+      - name: Verify licensed Windows release archive
+        if: runner.os == 'Windows'
+        working-directory: tui
+        shell: pwsh
+        run: |
+          bun scripts/release-notices.ts win32-x64
+          python scripts/package-release.py win32-x64
 
   docker:
     runs-on: ubuntu-latest

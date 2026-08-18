@@ -32,6 +32,7 @@ from nanobot.cli.webui_support import (
 )
 from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.gateway.runtime import GatewayInstance
 from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
@@ -298,6 +299,7 @@ def _run_gateway(
     health_server_enabled: bool = True,
     unconfigured_provider_error: str | None = None,
     webui_dev_server: WebUIDevServer | None = None,
+    gateway_instance: GatewayInstance | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
@@ -387,19 +389,20 @@ def _run_gateway(
             raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
 
-    # Self-heal the gateway state file with the current PID after any restart.
+    # Use the same runtime identity for foreground and managed gateway processes.
     from nanobot.config.loader import get_config_path
-    from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths
-
-    config_path = str(get_config_path().resolve(strict=False))
-    GatewayRuntime.refresh_state_pid(
-        paths=GatewayRuntimePaths.for_instance(
-            workspace=str(config.workspace_path)
-            if not is_default_workspace(config.workspace_path)
-            else None,
-            config_path=config_path,
-        )
+    from nanobot.gateway.runtime import (
+        GatewayClientLease,
+        GatewayRuntime,
+        monitor_gateway_clients,
     )
+
+    instance = gateway_instance or GatewayInstance.resolve(
+        config_path=get_config_path(),
+    )
+    config_path = str(instance.config_path)
+    gateway_runtime = GatewayRuntime(paths=instance.paths)
+    gateway_start_options = instance.start_options(port=port)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -864,6 +867,14 @@ def _run_gateway(
                 finally:
                     await mcp_provider.aclose()
 
+            async def _monitor_local_clients() -> None:
+                orphaned = await monitor_gateway_clients(
+                    GatewayClientLease(gateway_runtime, kind="gateway-monitor"),
+                    shutdown_event,
+                )
+                if orphaned:
+                    logger.info("Last local client disappeared; stopping on-demand gateway")
+
             tasks = [
                 asyncio.create_task(
                     watch_config_file(
@@ -881,6 +892,10 @@ def _run_gateway(
                         is_channel_enabled=lambda name: channels.get_channel(name) is not None,
                     ),
                     name="nanobot-local-triggers",
+                ),
+                asyncio.create_task(
+                    _monitor_local_clients(),
+                    name="nanobot-gateway-client-monitor",
                 ),
             ]
             if health_server_enabled:
@@ -946,4 +961,5 @@ def _run_gateway(
             finally:
                 restore_shutdown_handlers()
 
-    asyncio.run(run())
+    with gateway_runtime.foreground_instance(gateway_start_options):
+        asyncio.run(run())

@@ -44,7 +44,7 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
@@ -163,6 +163,7 @@ class TurnContext:
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
+    usage: dict[str, int] = field(default_factory=dict)
 
     def require_runtime(self) -> LLMRuntime:
         """Return the runtime established by the BUILD stage."""
@@ -801,12 +802,66 @@ class AgentLoop:
         dispatch_fn: Callable[[CommandContext], Awaitable[OutboundMessage | None]],
     ) -> None:
         """Dispatch a command directly from the run() loop and publish the result."""
-        ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
-        result = await dispatch_fn(ctx)
-        if result:
-            await self.bus.publish_outbound(result)
+        async def dispatch_and_publish() -> None:
+            ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
+            result = await dispatch_fn(ctx)
+            if result:
+                await self.bus.publish_outbound(result)
+            else:
+                logger.warning("Command '{}' matched but dispatch returned None", raw)
+
+        # A shell command may run for up to the configured exec timeout. Keep
+        # the inbound consumer responsive when it runs beside an active turn.
+        if (msg.metadata or {}).get(INBOUND_META_USER_SHELL) is True:
+            self.schedule_background(dispatch_and_publish())
+            return
+        await dispatch_and_publish()
+
+    async def execute_user_shell_command(self, ctx: CommandContext) -> OutboundMessage:
+        """Execute one trusted user command with the active workspace policy."""
+        metadata = dict(ctx.msg.metadata or {})
+        tool = self.tools.get("exec")
+        if tool is None:
+            content = "Shell execution is disabled in this nanobot configuration."
         else:
-            logger.warning("Command '{}' matched but dispatch returned None", raw)
+            session = ctx.session or self.sessions.get_or_create(ctx.key)
+            scope = self.workspace_scopes.for_turn(
+                channel=ctx.msg.channel,
+                message_metadata=metadata,
+                session_metadata=session.metadata,
+            )
+            request_token = bind_request_context(RequestContext(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                message_id=metadata.get("message_id"),
+                session_key=ctx.key,
+                original_user_text=f"!{ctx.args.strip()}",
+                runtime=ctx.runtime,
+                metadata=metadata,
+                sender_id=ctx.msg.sender_id,
+                turn_id=metadata.get("webui_turn_id"),
+                workspace=scope.project_path,
+            ))
+            workspace_token = bind_workspace_scope(scope)
+            turn_scope_stack = ExitStack()
+            try:
+                for turn_scope in ctx.turn_scopes:
+                    turn_scope_stack.enter_context(turn_scope)
+                result = await tool.execute(
+                    command=ctx.args.strip(),
+                    working_dir=str(scope.project_path),
+                )
+                content = str(result)
+            finally:
+                turn_scope_stack.close()
+                reset_workspace_scope(workspace_token)
+                reset_request_context(request_token)
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata={**metadata, "render_as": "text"},
+        )
 
     async def _cancel_active_tasks(self, key: str) -> int:
         """Cancel and await all active work for *key*.
@@ -1897,6 +1952,8 @@ class AgentLoop:
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
+        ctx.usage = dict(self._last_usage)
+        ctx.delivery.record_usage(ctx.usage)
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)
 
@@ -1922,6 +1979,8 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
+        if ctx.usage and not ctx.ephemeral:
+            session.metadata["_last_usage"] = dict(ctx.usage)
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,

@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from rich.console import Console
 
 from nanobot.cli import terminal as cli_terminal
-from nanobot.cli.gateway_runtime import _run_gateway
 from nanobot.cli.runtime_config import (
     _load_runtime_config,
     _print_config_error,
@@ -27,7 +26,6 @@ from nanobot.cli.webui_support import (
     _open_webui_browser,
     _prepare_webui_bundle_for_gateway,
     _print_foreground_port_conflict,
-    _print_webui_foreground_lifecycle,
     _resolve_webui_config_path,
     _run_quick_start_for_webui,
     _tcp_endpoint_reachable,
@@ -84,7 +82,7 @@ def webui(
     background: bool = typer.Option(
         False,
         "--background",
-        help="Keep the gateway running after this command exits",
+        help="Deprecated; use `nanobot gateway --background`",
     ),
     dev: bool = typer.Option(
         False,
@@ -101,13 +99,31 @@ def webui(
 ) -> None:
     """Prepare the local WebUI, start the gateway, and open the browser workbench."""
     from nanobot.config.loader import resolve_config_env_vars, save_config
-    from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+    from nanobot.gateway import (
+        GatewayClientLease,
+        GatewayInstance,
+        GatewayRuntime,
+    )
 
     cli_terminal._ensure_interactive_tty_mode()
-    if dev and background:
-        console.print("[red]Error: --dev cannot be combined with --background.[/red]")
-        raise typer.Exit(1)
     config_path = _resolve_webui_config_path(config)
+    if background:
+        import shlex
+
+        command = ["nanobot", "gateway", "--background", "--config", str(config_path)]
+        if workspace:
+            command.extend(
+                ["--workspace", str(Path(workspace).expanduser().resolve(strict=False))]
+            )
+        console.print(
+            "[red]`nanobot webui --background` no longer owns gateway lifecycle.[/red]"
+        )
+        console.print("Start the persistent gateway explicitly, then open the WebUI:")
+        console.print("  [cyan]" + " ".join(shlex.quote(part) for part in command) + "[/cyan]")
+        console.print(
+            "  [cyan]nanobot webui --config " + shlex.quote(str(config_path)) + "[/cyan]"
+        )
+        raise typer.Exit(1)
     created_config = not config_path.exists()
     if created_config:
         console.print(f"[yellow]No config found at {config_path}.[/yellow]")
@@ -131,12 +147,6 @@ def webui(
     if settings_setup_error:
         console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
         console.print("Configure a provider and model in WebUI Settings → Models.")
-        if background:
-            console.print(
-                "[red]First-time WebUI setup must run in the foreground. "
-                "Run `nanobot webui` without --background.[/red]"
-            )
-            raise typer.Exit(1)
     elif provider_error:
         console.print(f"[dim]Provider check: {provider_error}[/dim]")
         setup_config = _run_quick_start_for_webui(
@@ -207,25 +217,21 @@ def webui(
             )
 
     webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
-
-    config_arg = str(config_path)
-    workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-    runtime = GatewayRuntime(
-        paths=GatewayRuntimePaths.for_instance(
-            data_dir=config_path.parent,
-            workspace=workspace_arg,
-            config_path=config_arg,
-        )
-    )
-    start_options = GatewayStartOptions(
-        port=effective_gateway_port,
-        workspace=workspace_arg,
-        config_path=config_arg,
+    _prepare_webui_bundle_for_gateway(
+        runtime_config,
+        mode="skip" if dev else webui_bundle_mode,
     )
 
-    if background:
-        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
-        result = runtime.start_background(start_options)
+    instance = GatewayInstance.resolve(
+        config_path=config_path,
+        workspace=workspace,
+    )
+    runtime = GatewayRuntime(paths=instance.paths)
+    start_options = instance.start_options(port=effective_gateway_port)
+
+    def ensure_shared_gateway(*, client_lease: GatewayClientLease) -> None:
+        """Start or refresh the one managed gateway shared by local clients."""
+        result = client_lease.ensure_on_demand_gateway(start_options)
         restarted = False
         restart_attempted = False
         if not result.ok and result.message == "gateway_already_running" and changed_webui:
@@ -244,6 +250,8 @@ def webui(
             console.print("[green]Gateway started in the background.[/green]")
         else:
             console.print("[yellow]Gateway is already running in the background.[/yellow]")
+
+    def print_shared_gateway_controls() -> None:
         console.print(
             "Manage this instance: "
             f"[cyan]{_gateway_instance_command('status', config_path=config_path, workspace=workspace)}[/cyan]"
@@ -257,54 +265,71 @@ def webui(
             "Stop nanobot: "
             f"[cyan]{_gateway_instance_command('stop', config_path=config_path, workspace=workspace)}[/cyan]"
         )
-        if not no_open:
-            _open_webui_browser(webui_url)
-        return
 
     gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
     webui_ready = _webui_endpoint_reachable(webui_url)
     if gateway_ready and webui_ready:
-        console.print("[yellow]Gateway is already running; attaching to the existing WebUI.[/yellow]")
-        if not dev:
-            console.print(
-                "Restart the gateway if you need it to pick up local source changes: "
-                f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
-            )
-            if not no_open:
-                _open_webui_browser(webui_url, wait=False)
-            if runtime.status().running:
-                _attach_to_background_gateway(runtime)
-            else:
-                console.print(
-                    "[yellow]This gateway is controlled by another foreground command. "
-                    "Stop it from that terminal.[/yellow]"
-                )
-            return
-
+        lease = GatewayClientLease(runtime, kind="webui")
+        lease.acquire()
         try:
-            assert dev_browser_url is not None
-            with run_webui_dev_server(
-                target_url=webui_dev_proxy_target(webui_url),
-                browser_url=dev_browser_url,
-                output=lambda message: console.print(f"[green]✓[/green] {message}"),
-            ) as dev_server:
+            if changed_webui and runtime.status().running:
+                ensure_shared_gateway(client_lease=lease)
+                gateway_ready = _gateway_health_ready(
+                    runtime_config.gateway.host,
+                    effective_gateway_port,
+                )
+                webui_ready = _webui_endpoint_reachable(webui_url)
+                if not gateway_ready or not webui_ready:
+                    console.print("[red]Gateway did not become ready after the config update.[/red]")
+                    raise typer.Exit(1)
+            console.print(
+                "[yellow]Gateway is already running; attaching to the existing WebUI.[/yellow]"
+            )
+            if not dev:
+                console.print(
+                    "Restart the gateway if you need it to pick up local source changes: "
+                    f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
+                )
                 if not no_open:
-                    _open_webui_browser(dev_browser_url, wait=False)
+                    _open_webui_browser(webui_url, wait=False)
                 if runtime.status().running:
-                    _attach_to_background_gateway(
-                        runtime,
-                        poll_hook=dev_server.ensure_running,
-                    )
+                    _attach_to_background_gateway(runtime)
                 else:
-                    _wait_with_existing_foreground_gateway(
-                        runtime_config.gateway.host,
-                        effective_gateway_port,
-                        dev_server,
+                    console.print(
+                        "[yellow]This gateway is controlled by another foreground command. "
+                        "Stop it from that terminal.[/yellow]"
                     )
-        except WebUIDevError as exc:
-            console.print(f"[red]Error: {exc}[/red]")
-            raise typer.Exit(1) from exc
-        return
+                return
+
+            try:
+                assert dev_browser_url is not None
+                with run_webui_dev_server(
+                    target_url=webui_dev_proxy_target(webui_url),
+                    browser_url=dev_browser_url,
+                    output=lambda message: console.print(f"[green]✓[/green] {message}"),
+                ) as dev_server:
+                    if not no_open:
+                        _open_webui_browser(dev_browser_url, wait=False)
+                    if runtime.status().running:
+                        _attach_to_background_gateway(
+                            runtime,
+                            poll_hook=dev_server.ensure_running,
+                        )
+                    else:
+                        _wait_with_existing_foreground_gateway(
+                            runtime_config.gateway.host,
+                            effective_gateway_port,
+                            dev_server,
+                        )
+            except WebUIDevError as exc:
+                console.print(f"[red]Error: {exc}[/red]")
+                raise typer.Exit(1) from exc
+            return
+        finally:
+            if lease.release():
+                console.print(
+                    "[dim]Last local client exited; the on-demand gateway was stopped.[/dim]"
+                )
 
     gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
         _host_for_local_browser(runtime_config.gateway.host),
@@ -319,34 +344,33 @@ def webui(
         )
         raise typer.Exit(1)
 
-    _print_webui_foreground_lifecycle(attached=False)
-    if dev_browser_url:
-        dev_proxy_target = webui_dev_proxy_target(webui_url)
-        try:
-            with run_webui_dev_server(
-                target_url=dev_proxy_target,
-                browser_url=dev_browser_url,
-                output=lambda message: console.print(f"[green]✓[/green] {message}"),
-            ) as dev_server:
-                _run_gateway(
-                    runtime_config,
-                    port=effective_gateway_port,
-                    open_browser_url=None if no_open else dev_browser_url,
-                    open_browser_ready_url=f"{dev_proxy_target}/webui/bootstrap",
-                    webui_static_dist=False,
-                    webui_bundle_mode="skip",
-                    unconfigured_provider_error=settings_setup_error,
-                    webui_dev_server=dev_server,
-                )
-        except WebUIDevError as exc:
-            console.print(f"[red]Error: {exc}[/red]")
-            raise typer.Exit(1) from exc
-        return
+    lease = GatewayClientLease(runtime, kind="webui")
+    lease.acquire()
+    try:
+        ensure_shared_gateway(client_lease=lease)
+        print_shared_gateway_controls()
+        if dev_browser_url:
+            dev_proxy_target = webui_dev_proxy_target(webui_url)
+            try:
+                with run_webui_dev_server(
+                    target_url=dev_proxy_target,
+                    browser_url=dev_browser_url,
+                    output=lambda message: console.print(f"[green]✓[/green] {message}"),
+                ) as dev_server:
+                    if not no_open:
+                        _open_webui_browser(dev_browser_url)
+                    _attach_to_background_gateway(
+                        runtime,
+                        poll_hook=dev_server.ensure_running,
+                    )
+            except WebUIDevError as exc:
+                console.print(f"[red]Error: {exc}[/red]")
+                raise typer.Exit(1) from exc
+            return
 
-    _run_gateway(
-        runtime_config,
-        port=effective_gateway_port,
-        open_browser_url=None if no_open else webui_url,
-        webui_bundle_mode=webui_bundle_mode,
-        unconfigured_provider_error=settings_setup_error,
-    )
+        if not no_open:
+            _open_webui_browser(webui_url)
+        _attach_to_background_gateway(runtime)
+    finally:
+        if lease.release():
+            console.print("[dim]Last local client exited; the on-demand gateway was stopped.[/dim]")

@@ -1820,6 +1820,33 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
 
 
 @pytest.mark.asyncio
+async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        loop._last_usage = {"prompt_tokens": 64, "completion_tokens": 9}
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="usage", content="hello")
+    )
+
+    loop.sessions.invalidate("cli:usage")
+    assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == {
+        "prompt_tokens": 64,
+        "completion_tokens": 9,
+    }
+
+
+@pytest.mark.asyncio
 async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]

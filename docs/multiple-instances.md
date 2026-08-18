@@ -52,7 +52,7 @@ nanobot webui -c ~/.nanobot-telegram/config.json
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
 
-> `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
+> Interactive `nanobot agent` and `nanobot webui` commands with the same `--config` and explicit `--workspace` selectors share one gateway instance. Different selectors produce isolated runtime state and processes. The one-shot and `--classic` agent paths remain direct local executions.
 
 | Component | Resolved From | Example |
 |-----------|---------------|---------|

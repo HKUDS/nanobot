@@ -97,6 +97,7 @@ from nanobot.webui.session_automations import (
     session_automation_jobs,
     session_automations_payload,
 )
+from nanobot.webui.session_context import session_context_payload
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
@@ -678,6 +679,10 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_webui_thread_get(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/context$", got)
+        if m:
+            return await self._handle_session_context_get(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
             return self._handle_file_preview(request, m.group(1))
@@ -691,6 +696,24 @@ class GatewayHTTPHandler:
             return self._handle_session_delete(request, m.group(1))
 
         return None
+
+    async def _handle_session_context_get(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        session = await asyncio.to_thread(
+            self.session_manager.read_session_snapshot,
+            decoded_key,
+        )
+        if session is None:
+            return _http_error(404, "session not found")
+        return _http_json_response(session_context_payload(session))
 
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

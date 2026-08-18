@@ -258,6 +258,12 @@ class LLMResponse:
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
+    # Locally measured streaming telemetry. ``generation_ms`` excludes time to
+    # first token and provider retry gaps; ``ttft_ms`` measures the first
+    # streamed reasoning/content delta from request start. They stay separate
+    # from provider usage because providers do not report these consistently.
+    generation_ms: int | None = None
+    ttft_ms: int | None = None
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking

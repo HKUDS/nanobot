@@ -88,11 +88,20 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 |---|---|
 | `nanobot agent -m "Hello!"` | Send one message and exit |
 | `nanobot agent` | Start interactive terminal chat |
-| `nanobot agent --session <id>` | Use a specific session key |
+| `nanobot agent --session <id>` | Use a WebSocket session key; add `--classic` for another channel |
 | `nanobot agent --workspace <path>` | Override workspace |
 | `nanobot agent --config <path>` | Use a specific config file |
-| `nanobot agent --no-markdown` | Print plain text instead of Rich-rendered Markdown |
-| `nanobot agent --logs` | Show runtime logs while chatting |
+| `nanobot agent --classic` | Use the classic Python prompt instead of the native terminal UI |
+| `nanobot agent --theme auto\|dark\|light` | Auto-detect the terminal appearance or force a TUI palette |
+| `nanobot agent --no-markdown` | Use the classic prompt and print plain text instead of Markdown |
+| `nanobot agent --logs` | Use the classic prompt and show runtime logs while chatting |
+
+Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved
+conversation, and `/context` explains the compacted summary and raw session suffix available to
+the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff`
+opens the latest turn's file changes as a full-screen unified diff.
+`PageUp` loads older transcript pages when you reach the top. The default
+launch returns to the last attached TUI session; `--session` selects a specific session instead.
 
 ## Session Storage and Rollback
 
@@ -112,7 +121,15 @@ nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bo
 The command never deletes the external store and refuses to overwrite a different existing
 workspace file. Back up both the config directory and workspace before changing versions.
 
-In interactive mode, `Enter` sends the current message. Press `Alt+Enter` to add a newline before sending.
+Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. Only an explicit `nanobot gateway --background` promotes it to persistent mode. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
+
+The default `--theme auto` mode probes the terminal's real foreground and background colors before first paint and follows supported live appearance changes. Use `--theme light` or `--theme dark` when a terminal or multiplexer does not report its colors reliably. The model preset and workspace access labels above the composer can be clicked to open their selectors; arrow keys, `Enter`, and `Esc` provide the same controls without a mouse. Access changes still pass through the gateway's local-trust and active-turn policy checks.
+
+`Enter` sends the current message. While a turn is active, `Enter` steers it immediately, `Tab` queues a visible follow-up for the next turn, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) returns the latest queued message to the composer. Press `Shift+Enter` to add a newline; `Ctrl+J` is the universal fallback when a terminal cannot distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable. Use `Up`/`Down` at the composer edge to recall prompts from the current saved session. Large pastes appear as a compact placeholder in the composer but are sent unchanged. Type `/` to discover nanobot commands and terminal navigation in one palette, or type `@` to complete installed apps, configured MCP servers, and saved sessions. Use the arrow keys to choose an item and `Tab` to complete it. `/sessions` opens a searchable conversation picker, `/new-chat` preserves the current conversation and starts another one, and `/branch` forks from a completed reply. `/diff` opens a read-only unified diff for the newest turn; use `Left`/`Right` to switch edits and `Esc` to close it. The core `/new` command retains its cross-channel behavior and resets the current chat. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. When you leave the bottom, the TUI shows a scrollbar and a `Ctrl+End` hint until you return. The footer reports provider token/cache usage when available. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
+
+Packaged releases fetch a version-matched, checksummed terminal archive for macOS (Apple Silicon and Intel), Linux (x64 and ARM64), or Windows x64 on first use. The cache keeps the executable together with its licenses, third-party notices, source offer, relinking instructions, and corresponding TUI source. Windows ARM64 currently falls back to the classic prompt because the Bun runtime disables the FFI required by OpenTUI on that platform. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A local source install requires Bun and runs its own `tui/` source while the original checkout remains available; it never silently falls back to a release binary.
+
+Non-interactive input/output, `--logs`, and `--no-markdown` automatically retain the classic prompt so existing scripts and diagnostic workflows do not acquire terminal control sequences or silently ignore their options.
 
 Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
@@ -121,7 +138,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Command | Description |
 |---|---|
 | `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, and open `http://127.0.0.1:8765` |
-| `nanobot webui --background` | Start or reuse a background gateway, then open the WebUI |
+| `nanobot webui --background` | Deprecated; prints the equivalent explicit `nanobot gateway --background` command and exits |
 | `nanobot webui --dev` | Start the gateway and Vite together at `http://127.0.0.1:5173`, with live frontend updates |
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
 | `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
@@ -130,9 +147,12 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow and cannot be combined with `--background`.
+`--dev` is a foreground source-checkout workflow. Persistent gateway lifecycle is deliberately
+owned only by `nanobot gateway --background`; `nanobot webui --background` prints migration
+guidance instead of silently changing process ownership.
 It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured
-WebSocket channel port, and stops Vite together with the foreground gateway.
+WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops
+only when no other interactive client still holds it.
 
 ## Gateway
 
@@ -146,7 +166,7 @@ WebSocket channel port, and stops Vite together with the foreground gateway.
 | `nanobot gateway --workspace <path>` | Override workspace |
 | `nanobot gateway --config <path>` | Use a specific config file |
 | `nanobot gateway --background` | Start the gateway as a background process |
-| `nanobot gateway status` | Show the recorded background gateway PID, state file, and log file |
+| `nanobot gateway status` | Show PID, foreground/background launch mode, explicit/on-demand lifetime, live client count, state, and logs |
 | `nanobot gateway logs --no-follow` | Print recent background gateway logs and exit |
 | `nanobot gateway logs` | Follow background gateway logs |
 | `nanobot gateway restart` | Restart the recorded background gateway with the current config |

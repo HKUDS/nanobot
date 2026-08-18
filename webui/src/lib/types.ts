@@ -279,8 +279,10 @@ export interface AgentUIBlob {
 /** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
 export interface GoalStateWsPayload {
   active: boolean;
+  status?: "active" | "blocked";
   ui_summary?: string;
   objective?: string;
+  recap?: string;
 }
 
 export interface ToolProgressEvent {
@@ -1207,7 +1209,27 @@ export interface InboundTurnMetadata {
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string; temporary?: boolean }
-  | { event: "message_accepted"; chat_id: string; turn_id: string }
+  | {
+      event: "message_accepted";
+      chat_id: string;
+      turn_id: string;
+      starts_turn?: boolean;
+      active_turn_id?: string;
+      started_at?: number;
+    }
+  | {
+      event: "user_message";
+      chat_id: string;
+      text: string;
+      turn_id?: string;
+      active_turn_id?: string;
+      starts_turn: boolean;
+      started_at?: number;
+      media_urls?: UIMediaAttachment[];
+      cli_apps?: UICliAppAttachment[];
+      mcp_presets?: UIMcpPresetAttachment[];
+      session_mentions?: SessionMention[];
+    }
   | ({
       event: "message";
       chat_id: string;

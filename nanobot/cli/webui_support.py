@@ -24,6 +24,7 @@ from nanobot.webui.build import (
     BuildMode,
     WebUIBuildError,
     ensure_webui_bundle,
+    inspect_webui_bundle,
 )
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ __all__ = [
     "_validate_gateway_startup",
     "_warn_webui_bind_scope",
     "_webui_browser_url",
+    "webui_bootstrap_secret",
     "_webui_build_mode_for_interactive",
     "_webui_channel_enabled",
     "_webui_display_url",
@@ -190,6 +192,11 @@ def _prepare_webui_bundle_for_gateway(
         return typer.confirm(message, default=True)
 
     try:
+        # A source checkout is the development product. Every gateway entrypoint
+        # keeps its browser client in lockstep with Python; only Vite mode skips
+        # the production bundle intentionally.
+        if mode != "skip" and inspect_webui_bundle().source_available:
+            mode = "auto"
         ensure_webui_bundle(
             mode=mode,
             confirm=_confirm if mode == "prompt" else None,
@@ -224,7 +231,8 @@ def _gateway_health_bind_note(host: str) -> str:
     return "" if is_loopback_host(host) else f" [dim](listening on {host})[/dim]"
 
 
-def _webui_bootstrap_secret(config: Config) -> str:
+def webui_bootstrap_secret(config: Config) -> str:
+    """Return the shared local bootstrap credential for WebUI protocol clients."""
     ws_cfg = _webui_config_dict(config)
     return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
 
@@ -236,7 +244,7 @@ def _webui_browser_url(config: Config) -> str:
     host = _host_for_local_browser(str(ws_cfg.get("host") or "127.0.0.1"))
     port = int(ws_cfg.get("port") or 8765)
     base_url = f"http://{host}:{port}"
-    secret = _webui_bootstrap_secret(config)
+    secret = webui_bootstrap_secret(config)
     if not secret:
         return base_url
     return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"
@@ -382,16 +390,26 @@ def _print_foreground_port_conflict(
     gateway_host: str,
     gateway_port: int,
 ) -> None:
-    console.print(
-        "[red]Error: nanobot cannot start because one of its local ports is already in use.[/red]"
-    )
-    console.print(f"  WebUI: [cyan]{webui_url}[/cyan]")
+    gateway_running = _gateway_health_ready(gateway_host, gateway_port)
+    if gateway_running:
+        console.print(
+            "[yellow]A nanobot gateway is already running for this local instance.[/yellow]"
+        )
+    else:
+        console.print(
+            "[red]Error: nanobot cannot start because one of its local ports "
+            "is already in use.[/red]"
+        )
+    console.print(f"  WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
     console.print(
         f"  Gateway health: "
         f"[cyan]http://{_host_for_local_browser(gateway_host)}:{gateway_port}/health[/cyan]"
     )
     console.print()
-    console.print("If this is an existing nanobot instance, use it or stop it first:")
+    if gateway_running:
+        console.print("Use the existing instance, or stop it first:")
+    else:
+        console.print("If this is an existing nanobot instance, use it or stop it first:")
     console.print("  [cyan]nanobot gateway status[/cyan]")
     console.print("  [cyan]nanobot gateway stop[/cyan]")
     console.print(
@@ -418,33 +436,31 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     """Explain how the browser and gateway lifecycles differ."""
     console.print()
     if attached:
-        console.print("[green]nanobot is attached to the existing gateway.[/green]")
+        console.print("[green]WebUI is attached to the shared gateway.[/green]")
     else:
-        console.print("[green]nanobot is running in this terminal.[/green]")
+        console.print("[green]WebUI is attached to the shared gateway.[/green]")
     console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
-    console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
+    console.print(
+        "[dim]Press Ctrl+C to detach; the gateway stops only when the last local client exits.[/dim]"
+    )
 
 
 def _attach_to_background_gateway(
     runtime: "GatewayRuntime",
     *,
     poll_hook: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Keep a foreground WebUI command attached to a managed gateway."""
+    """Keep a WebUI launcher attached without taking ownership of the gateway."""
     _print_webui_foreground_lifecycle(attached=True)
     try:
         while runtime.status().running:
             if poll_hook is not None:
                 poll_hook()
-            time.sleep(0.5)
+            sleep(0.5)
     except KeyboardInterrupt:
-        console.print("\n[yellow]Stopping nanobot...[/yellow]")
-        result = runtime.stop()
-        if result.ok or result.message == "gateway_not_running":
-            console.print("[green]Gateway stopped.[/green]")
-            return
-        console.print(f"[red]Gateway could not be stopped: {result.message}[/red]")
-        raise typer.Exit(1)
+        console.print("\n[yellow]WebUI launcher detached.[/yellow]")
+        return
 
     console.print("[yellow]Gateway stopped.[/yellow]")
 

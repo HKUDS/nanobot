@@ -1869,6 +1869,56 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("projects a user turn submitted from another attached client exactly once", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-shared", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    const event: InboundEvent = {
+      event: "user_message",
+      chat_id: "chat-shared",
+      text: "hello from terminal A",
+      turn_id: "remote-turn",
+      active_turn_id: "remote-turn",
+      starts_turn: true,
+      started_at: 1_700_000_000,
+      media_urls: [{ kind: "file", url: "/api/media/sig/report", name: "report.pdf" }],
+      cli_apps: [{ name: "drawio", display_name: "Draw.io" }],
+      mcp_presets: [{ name: "github", display_name: "GitHub" }],
+      session_mentions: [{
+        name: "pricing",
+        session_key: "websocket:pricing",
+        title: "Pricing",
+      }],
+    };
+
+    act(() => {
+      fake.emit("chat-shared", event);
+      fake.emit("chat-shared", event);
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: "hello from terminal A",
+        turnId: "remote-turn",
+        deliveryStatus: "accepted",
+        createdAt: expect.any(Number),
+        media: [{ kind: "file", url: "/api/media/sig/report", name: "report.pdf" }],
+        cliApps: [{ name: "drawio", display_name: "Draw.io" }],
+        mcpPresets: [{ name: "github", display_name: "GitHub" }],
+        sessionMentions: [{
+          name: "pricing",
+          session_key: "websocket:pricing",
+          title: "Pricing",
+        }],
+      }),
+    ]);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.runStartedAt).toBe(1_700_000_000);
+  });
+
   it("marks only the optimistic turn named by a correlated rejection as failed", () => {
     const fake = fakeClient();
     const { result } = renderHook(

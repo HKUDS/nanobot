@@ -559,6 +559,7 @@ class WebuiTurnCoordinator:
                 event=TurnModelUpdatedEvent(
                     model=event.runtime.model,
                     model_preset=event.runtime.model_preset,
+                    context_window_tokens=event.runtime.context_window_tokens,
                 ),
                 metadata=event.context.metadata,
             )
@@ -572,6 +573,10 @@ class WebuiTurnCoordinator:
             msg,
             session_key=event.context.session_key,
             latency_ms=event.latency_ms,
+            usage=event.usage,
+            context_window_tokens=(
+                event.runtime.context_window_tokens if event.runtime is not None else None
+            ),
         )
         self._schedule_title_update_from_event(event)
 
@@ -619,6 +624,8 @@ class WebuiTurnCoordinator:
         *,
         session_key: str,
         latency_ms: int | None,
+        usage: dict[str, int] | None = None,
+        context_window_tokens: int | None = None,
     ) -> None:
         if msg.channel != "websocket":
             return
@@ -631,6 +638,8 @@ class WebuiTurnCoordinator:
                 event=TurnEndEvent(
                     latency_ms=latency_ms,
                     goal_state=goal_state_ws_blob(session.metadata),
+                    usage=usage or None,
+                    context_window_tokens=context_window_tokens,
                 ),
                 metadata=msg.metadata,
             )

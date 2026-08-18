@@ -709,6 +709,37 @@ export function useNanobotStream(
         setMessages((prev) => transitionTurnDelivery(prev, turnId, "accepted"));
       }
       if (ev.event === "message_accepted") return;
+      if (ev.event === "user_message") {
+        setMessages((prev) => {
+          if (ev.turn_id && prev.some((message) => (
+            message.role === "user" && message.turnId === ev.turn_id
+          ))) return prev;
+          return [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "user",
+              content: ev.text,
+              ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
+              turnPhase: "user",
+              turnSeq: 0,
+              deliveryStatus: "accepted",
+              createdAt: Date.now(),
+              ...(ev.media_urls?.length ? { media: ev.media_urls } : {}),
+              ...(ev.cli_apps?.length ? { cliApps: ev.cli_apps } : {}),
+              ...(ev.mcp_presets?.length ? { mcpPresets: ev.mcp_presets } : {}),
+              ...(ev.session_mentions?.length
+                ? { sessionMentions: ev.session_mentions }
+                : {}),
+            },
+          ];
+        });
+        if (ev.active_turn_id || ev.starts_turn) {
+          setIsStreaming(true);
+          if (typeof ev.started_at === "number") setRunStartedAt(ev.started_at);
+        }
+        return;
+      }
       const sideChannelEvent = isSideChannelEvent(ev);
       if (
         streamEndTimerRef.current !== null
