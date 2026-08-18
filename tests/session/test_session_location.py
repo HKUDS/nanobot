@@ -192,17 +192,17 @@ def test_copied_workspace_gets_isolated_session_identity(tmp_path: Path) -> None
 def test_equivalent_workspace_paths_share_one_store(tmp_path: Path) -> None:
     real_workspace = tmp_path / "real_ws"
     real_workspace.mkdir()
-    link_workspace = tmp_path / "link_ws"
-    link_workspace.symlink_to(real_workspace, target_is_directory=True)
+    equivalent_workspace = real_workspace / ".." / real_workspace.name
 
-    # Save via the real path, then read via a symlink to the same directory.
+    # Save via the canonical path, then read via a lexical alias to the same directory.
     manager = SessionManager(workspace=real_workspace)
     session = manager.get_or_create("telegram:1")
     session.add_message("user", "via-real")
     manager.save(session)
 
-    via_link = SessionManager(workspace=link_workspace).get_or_create("telegram:1")
-    assert via_link.messages[-1]["content"] == "via-real"
+    via_equivalent = SessionManager(workspace=equivalent_workspace)
+    assert via_equivalent.sessions_dir == manager.sessions_dir
+    assert via_equivalent.get_or_create("telegram:1").messages[-1]["content"] == "via-real"
 
 
 def test_legacy_in_workspace_sessions_are_migrated(tmp_path: Path) -> None:

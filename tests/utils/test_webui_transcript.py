@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import nanobot.webui.transcript as transcript_module
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+from nanobot.session.session_messages import (
+    SESSION_MESSAGE_METADATA_KEY,
+    SESSION_REPLY_TIMEOUT_METADATA_KEY,
+)
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_fork_marker,
@@ -35,6 +39,34 @@ def test_append_stamps_created_at_ms(tmp_path, monkeypatch) -> None:
 
     lines = read_transcript_lines(key)
     assert lines[0]["created_at_ms"] == 1_700_000_000_000
+
+
+def test_session_input_splits_active_assistant_stream() -> None:
+    lines = [
+        {"event": "delta", "text": "First"},
+        {
+            "event": "user",
+            "text": "Peer input",
+            "session_message": {
+                "direction": "incoming",
+                "message_id": "message-1",
+                "session": {"id": "handle-1", "name": "jules", "color_slot": 1},
+            },
+        },
+        {"event": "delta", "text": "Tail"},
+        {"event": "stream_end"},
+        {"event": "delta", "text": "Second"},
+        {"event": "turn_end"},
+    ]
+
+    messages = replay_transcript_to_ui_messages(lines)
+
+    assert [(message["role"], message["content"]) for message in messages] == [
+        ("assistant", "First"),
+        ("user", "Peer input"),
+        ("assistant", "Tail"),
+        ("assistant", "Second"),
+    ]
 
 
 def _force_small_transcript_budget(monkeypatch, *, limit: int = 520, target: int = 260) -> None:
@@ -353,6 +385,33 @@ def test_write_session_messages_as_transcript_builds_canonical_prefix(
     ]
     msgs = replay_transcript_to_ui_messages(lines)
     assert [m["content"] for m in msgs] == ["round1", "answer1"]
+
+
+def test_write_session_messages_as_transcript_hides_empty_session_reply_timeout_input(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+
+    write_session_messages_as_transcript(
+        "websocket:fork",
+        [
+            {
+                "role": "user",
+                "content": "",
+                SESSION_REPLY_TIMEOUT_METADATA_KEY: {"private": True},
+            },
+            {"role": "assistant", "content": "No follow-up needed."},
+        ],
+    )
+
+    assert read_transcript_lines("websocket:fork") == [
+        {
+            "event": "message",
+            "chat_id": "fork",
+            "text": "No follow-up needed.",
+        }
+    ]
 
 
 def test_direct_transcript_replay_generates_stable_message_ids() -> None:
@@ -846,6 +905,64 @@ def test_build_response_restores_session_users_for_legacy_transcript(
         ("user", "prompt two"),
         ("assistant", "assistant two"),
     ]
+
+
+def test_build_response_restores_session_source_from_session_history(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:reviewer"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "reviewer",
+            "text": "Review complete",
+            "source": {"kind": "session", "label": "@lead"},
+        },
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "reviewer"})
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {
+                "role": "user",
+                "content": "Review this change",
+                SESSION_MESSAGE_METADATA_KEY: {
+                    "message_id": "handle-message-1",
+                    "created_at_ms": 1,
+                    "expect_reply": True,
+                    "source": {
+                        "name": "lead",
+                        "session_key": "websocket:lead",
+                        "handle_id": "handle_0123456789abcdef0123456789abcdef",
+                        "color_slot": 3,
+                    },
+                    "target": {
+                        "name": "reviewer",
+                        "session_key": key,
+                    },
+                },
+            },
+            {"role": "assistant", "content": "Review complete"},
+        ],
+    )
+
+    assert out is not None
+    session_input, answer = out["messages"]
+    assert session_input["content"] == "Review this change"
+    assert session_input["sessionMessage"] == {
+        "direction": "incoming",
+        "message_id": "handle-message-1",
+        "session": {
+                "id": "handle_0123456789abcdef0123456789abcdef",
+                "name": "lead",
+                "color_slot": 3,
+            },
+    }
+    assert answer["source"] == {"kind": "session", "label": "@lead"}
 
 
 def test_complete_transcript_does_not_load_session_messages(tmp_path, monkeypatch) -> None:

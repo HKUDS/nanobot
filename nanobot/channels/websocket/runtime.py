@@ -33,6 +33,7 @@ from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     ProgressEvent,
     RuntimeModelUpdatedEvent,
+    SessionMessageInputEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
@@ -86,6 +87,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.session_access import (
+    SessionHandleMention,
     SessionMention,
     WebuiSessionAccess,
     session_mentions_runtime_context,
@@ -1195,9 +1197,11 @@ class WebSocketChannel(BaseChannel):
             if mcp_presets:
                 metadata["mcp_presets"] = mcp_presets
             session_mentions: list[SessionMention] = []
+            session_handles: list[SessionHandleMention] = []
             if (
                 trusted_webui
                 and self._session_access is not None
+                and temporary_policy is None
             ):
                 session_mentions = await asyncio.to_thread(
                     self._session_access.normalize_mentions,
@@ -1206,6 +1210,15 @@ class WebSocketChannel(BaseChannel):
                 )
                 if session_mentions:
                     metadata["session_mentions"] = session_mentions
+                raw_session_handles = envelope.get("session_handles")
+                if raw_session_handles is not None:
+                    session_handles = await asyncio.to_thread(
+                        self._session_access.normalize_session_handles,
+                        raw_session_handles,
+                        source_session_key=f"{self.name}:{cid}",
+                    )
+                if session_handles:
+                    metadata["session_handles"] = session_handles
             metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._workspaces.persist_scope(cid, scope)
             is_webui = metadata.get("webui") is True
@@ -1231,6 +1244,7 @@ class WebSocketChannel(BaseChannel):
                         cli_apps=cli_apps or None,
                         mcp_presets=mcp_presets or None,
                         session_mentions=session_mentions or None,
+                        session_handles=session_handles or None,
                     )
                 if trusted_webui:
                     context_blocks: list[RuntimeContextBlock] = []
@@ -1239,9 +1253,9 @@ class WebSocketChannel(BaseChannel):
                     })
                     if quote is not None:
                         context_blocks.append(quote)
-                    session_context = session_mentions_runtime_context(session_mentions)
-                    if session_context is not None:
-                        context_blocks.append(session_context)
+                    reference_context = session_mentions_runtime_context(session_mentions)
+                    if reference_context is not None:
+                        context_blocks.append(reference_context)
                     if context_blocks:
                         metadata[RUNTIME_CONTEXT_INPUT_META] = context_blocks
                 await self._handle_message(
@@ -1259,7 +1273,7 @@ class WebSocketChannel(BaseChannel):
                     require_existing_session=(
                         temporary_policy.require_existing_session
                         if temporary_policy is not None
-                        else False
+                        else is_webui
                     ),
                 )
                 accepted = True
@@ -1668,6 +1682,7 @@ class WebSocketChannel(BaseChannel):
             if isinstance(
                 event,
                 ProgressEvent
+                | SessionMessageInputEvent
                 | TurnEndEvent
                 | SessionUpdatedEvent
                 | GoalStatusEvent
@@ -1683,6 +1698,16 @@ class WebSocketChannel(BaseChannel):
                     model_name=event.model,
                     model_preset=event.model_preset,
                     context_window_tokens=event.context_window_tokens,
+                )
+            return
+        if isinstance(event, SessionMessageInputEvent):
+            if conns:
+                await self.send_session_message_input(
+                    msg.chat_id,
+                    content=event.content,
+                    created_at_ms=event.created_at_ms,
+                    session_message=event.session_message,
+                    metadata=msg.metadata,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -2038,6 +2063,34 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" session_updated ")
+
+    async def send_session_message_input(
+        self,
+        chat_id: str,
+        *,
+        content: str,
+        created_at_ms: int,
+        session_message: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Project a session message before the target model starts responding."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "session_message",
+            "chat_id": chat_id,
+            "text": content,
+            "created_at_ms": created_at_ms,
+            "session_message": session_message,
+            "turn_phase": "user",
+        }
+        turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
+        if isinstance(turn_id, str) and turn_id:
+            body["turn_id"] = turn_id
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" session_message ")
 
     async def send_runtime_model_updated(
         self,

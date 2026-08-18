@@ -16,6 +16,7 @@ import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
+import { SessionHandleHighlight, sessionHandleColor } from "@/components/CliAppMentionText";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
@@ -34,6 +35,7 @@ import { inferMediaKind } from "@/lib/media";
 import { browserSafeFaviconUrls } from "@/lib/provider-brand";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
+import type { SessionHandle } from "@/lib/types";
 
 import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
@@ -44,11 +46,13 @@ interface MarkdownTextRendererProps {
   highlightCode?: boolean;
   streaming?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  sessionHandles?: SessionHandle[];
 }
 
 type MarkdownAstNode = {
   type: string;
   value?: string;
+  url?: string;
   children?: MarkdownAstNode[];
   data?: {
     hName?: string;
@@ -277,7 +281,108 @@ function remarkCjkStrongBoundaries() {
   };
 }
 
-const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
+const SESSION_HANDLE_PATTERN = /@([\p{L}\p{N}_-]+)/gu;
+const SESSION_HANDLE_SKIP_NODES = new Set([
+  "code",
+  "html",
+  "inlineCode",
+  "inlineMath",
+  "link",
+  "linkReference",
+  "math",
+]);
+const VOID_HTML_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+const RAW_HTML_TAG_PATTERN = /<\s*(\/?)\s*([a-z][\w:-]*)(?:\s[^<>]*?)?(\/?)\s*>/giu;
+
+function normalizeSessionHandle(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase();
+}
+
+function sessionHandleNodes(
+  value: string,
+  handlesByName: ReadonlyMap<string, SessionHandle>,
+): MarkdownAstNode[] | null {
+  const replacement: MarkdownAstNode[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(SESSION_HANDLE_PATTERN)) {
+    const start = match.index;
+    const previous = start > 0 ? value[start - 1] : "";
+    if (previous && /[\p{L}\p{N}_@-]/u.test(previous)) continue;
+    const handle = handlesByName.get(normalizeSessionHandle(match[1]));
+    if (!handle) continue;
+    if (start > cursor) replacement.push(safeText(value.slice(cursor, start)));
+    replacement.push({
+      type: "link",
+      url: `#session-handle/${encodeURIComponent(handle.session_key)}`,
+      children: [safeText(match[0])],
+    });
+    cursor = start + match[0].length;
+  }
+  if (cursor === 0) return null;
+  if (cursor < value.length) replacement.push(safeText(value.slice(cursor)));
+  return replacement;
+}
+
+function rawHtmlNestingDelta(value: string | undefined): number {
+  if (!value) return 0;
+  let delta = 0;
+  for (const match of value.matchAll(RAW_HTML_TAG_PATTERN)) {
+    const closing = match[1] === "/";
+    const tagName = match[2].toLowerCase();
+    const selfClosing = match[3] === "/" || VOID_HTML_TAGS.has(tagName);
+    if (closing) delta -= 1;
+    else if (!selfClosing) delta += 1;
+  }
+  return delta;
+}
+
+function transformKnownSessionHandles(
+  node: MarkdownAstNode,
+  handlesByName: ReadonlyMap<string, SessionHandle>,
+): void {
+  if (
+    !node.children
+    || SESSION_HANDLE_SKIP_NODES.has(node.type)
+    || node.type.startsWith("nanobotSafeHtml")
+  ) return;
+  let rawHtmlDepth = 0;
+  node.children = node.children.flatMap((child) => {
+    if (child.type === "html") {
+      rawHtmlDepth = Math.max(0, rawHtmlDepth + rawHtmlNestingDelta(child.value));
+      return [child];
+    }
+    if (rawHtmlDepth > 0) return [child];
+    if (child.type !== "text" || !child.value?.includes("@")) {
+      transformKnownSessionHandles(child, handlesByName);
+      return [child];
+    }
+    return sessionHandleNodes(child.value, handlesByName) ?? [child];
+  });
+}
+
+function remarkKnownSessionHandles({ handles }: { handles: SessionHandle[] }) {
+  const handlesByName = new Map(
+    handles.map((handle) => [normalizeSessionHandle(handle.name), handle]),
+  );
+  return (tree: MarkdownAstNode) => transformKnownSessionHandles(tree, handlesByName);
+}
+
+const baseRemarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkBreaks,
   remarkGfm,
   [remarkMath, { singleDollarTextMath: false }],
@@ -517,8 +622,22 @@ export default function MarkdownTextRenderer({
   highlightCode = true,
   streaming = false,
   onOpenFilePreview,
+  sessionHandles = [],
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
+  const handlesBySessionKey = useMemo(
+    () => new Map(sessionHandles.map((handle) => [handle.session_key, handle])),
+    [sessionHandles],
+  );
+  const remarkPlugins = useMemo(
+    () => sessionHandles.length > 0
+      ? [
+          ...baseRemarkPlugins,
+          [remarkKnownSessionHandles, { handles: sessionHandles }],
+        ] as NonNullable<StreamdownProps["remarkPlugins"]>
+      : baseRemarkPlugins,
+    [sessionHandles],
+  );
   const components = useMemo<Components>(
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
@@ -611,6 +730,30 @@ export default function MarkdownTextRenderer({
         }
         if (href === "streamdown:incomplete-link") {
           return <>{markdownChildren}</>;
+        }
+        if (href.startsWith("#session-handle/")) {
+          let handle: SessionHandle | undefined;
+          try {
+            handle = handlesBySessionKey.get(decodeURIComponent(href.slice("#session-handle/".length)));
+          } catch {
+            handle = undefined;
+          }
+          if (!handle) return <>{markdownChildren}</>;
+          const color = sessionHandleColor(handle.color_slot);
+          return (
+            <a
+              href={`#/chat/${encodeURIComponent(handle.session_key)}`}
+              className="rounded-sm no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              style={{ textDecorationColor: color }}
+            >
+              <SessionHandleHighlight
+                handle={handle}
+                testId={`message-handle-mention-${handle.name}`}
+              >
+                {markdownChildren}
+              </SessionHandleHighlight>
+            </a>
+          );
         }
         const sessionHref = sessionReferenceHref(href);
         if (sessionHref) {
@@ -790,7 +933,7 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview, t],
+    [highlightCode, onOpenFilePreview, handlesBySessionKey, t],
   );
 
   return (

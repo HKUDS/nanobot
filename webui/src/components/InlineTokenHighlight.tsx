@@ -13,7 +13,7 @@ export function InlineTokenHighlight({
 }: {
   children: ReactNode;
   className?: string;
-  color: string;
+  color?: string;
   testId?: string;
   title?: string;
 }) {
@@ -25,7 +25,7 @@ export function InlineTokenHighlight({
         "relative inline font-[550] transition-colors duration-150",
         className,
       )}
-      style={{ color }}
+      style={color ? { color } : undefined}
     >
       {children}
     </span>

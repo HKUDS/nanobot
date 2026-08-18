@@ -16,6 +16,21 @@ async def test_message_tool_returns_error_when_no_target_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_tool_preserves_legacy_positional_channel_arguments() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def send(message: OutboundMessage) -> None:
+        sent.append(message)
+
+    tool = MessageTool(send_callback=send)
+    await tool.execute("hello", "telegram", "chat-1")
+
+    assert [(message.channel, message.chat_id, message.content) for message in sent] == [
+        ("telegram", "chat-1", "hello")
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "bad",
     [

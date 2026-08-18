@@ -38,6 +38,7 @@ class SessionTurnStarted:
     """A user/system turn has loaded its session and is about to build context."""
 
     context: RuntimeEventContext
+    content: str = ""
 
 
 @dataclass(frozen=True)
@@ -220,7 +221,8 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
-                )
+                ),
+                content=msg.content,
             )
         )
 

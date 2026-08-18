@@ -28,6 +28,53 @@ describe("MarkdownTextRenderer", () => {
     );
   });
 
+  it("highlights only known handle handles in prose with their identity color", () => {
+    render(
+      <MarkdownTextRenderer
+        sessionHandles={[{
+          id: "handle-jules",
+          name: "jules",
+          session_key: "websocket:jules",
+          color_slot: 0,
+        }]}
+      >
+        {"已直接回复 @jules；未知 @ghost；邮箱 hello@jules.test；代码 `@jules`。"}
+      </MarkdownTextRenderer>,
+    );
+
+    const mention = screen.getByTestId("message-handle-mention-jules");
+    expect(mention).toHaveTextContent("@jules");
+    expect(mention).toHaveClass("text-foreground");
+    expect(mention.parentElement?.getAttribute("style"))
+      .toContain("var(--session-handle-0)");
+    expect(mention.closest("a")).toHaveAttribute(
+      "href",
+      "#/chat/websocket%3Ajules",
+    );
+    expect(screen.getByText("@jules", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText(/未知 @ghost/)).toBeInTheDocument();
+    expect(screen.getByText(/hello@jules\.test/)).toBeInTheDocument();
+    expect(screen.getAllByText("@jules")).toHaveLength(2);
+  });
+
+  it("does not highlight handle handles inside raw or normalized HTML", () => {
+    render(
+      <MarkdownTextRenderer
+        sessionHandles={[{
+          id: "handle-jules",
+          name: "jules",
+          session_key: "websocket:jules",
+          color_slot: 0,
+        }]}
+      >
+        {"<code>@jules</code> <span>@jules</span> <mark>@jules</mark> outside @jules"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.getAllByTestId("message-handle-mention-jules")).toHaveLength(1);
+    expect(screen.getByTestId("message-handle-mention-jules")).toHaveTextContent("@jules");
+  });
+
   it("does not link non-WebUI session references", () => {
     const { container } = render(
       <MarkdownTextRenderer>

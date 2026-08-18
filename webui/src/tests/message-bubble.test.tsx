@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import type {
   CliAppInfo,
@@ -593,11 +594,11 @@ describe("MessageBubble", () => {
     expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
   });
 
-  it("renders persisted session mentions inside sent user messages", () => {
+  it("renders new # session references as links", () => {
     const message: UIMessage = {
       id: "u-session",
       role: "user",
-      content: "Use @收费设计 as context",
+      content: "Use #收费设计",
       createdAt: Date.now(),
       sessionMentions: [{
         name: "收费设计",
@@ -608,13 +609,113 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    const token = screen.getByTestId("message-session-mention-收费设计");
-    expect(token).toHaveTextContent("@收费设计");
+    const token = screen.getByTestId("message-session-reference-收费设计");
+    expect(token).toHaveTextContent("#收费设计");
     expect(token).toHaveAttribute("title", "Session: 收费设计");
     expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Apricing");
-    expect(token.closest("a")?.getAttribute("style")).toContain(
-      "text-decoration-color: var(--inline-token-highlight)",
+  });
+
+  it("prefers legacy @ session metadata over a same-name catalog capability", () => {
+    const message: UIMessage = {
+      id: "u-legacy-session",
+      role: "user",
+      content: "Review @zoom",
+      createdAt: Date.now(),
+      sessionMentions: [{
+        name: "zoom",
+        session_key: "websocket:zoom-notes",
+        title: "Zoom notes",
+      }],
+    };
+
+    render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+
+    const token = screen.getByTestId("message-session-reference-zoom");
+    expect(token).toHaveTextContent("@zoom");
+    expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Azoom-notes");
+    expect(screen.queryByTestId("message-cli-mention-zoom")).not.toBeInTheDocument();
+  });
+
+  it("keeps a new # reference distinct from a structured same-name capability", () => {
+    const message: UIMessage = {
+      id: "u-session-and-cli",
+      role: "user",
+      content: "Compare #zoom with @zoom",
+      createdAt: Date.now(),
+      sessionMentions: [{
+        name: "zoom",
+        session_key: "websocket:zoom-notes",
+        title: "Zoom notes",
+      }],
+      cliApps: [{ name: "zoom" }],
+    };
+
+    render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+
+    expect(screen.getByTestId("message-session-reference-zoom")).toHaveTextContent("#zoom");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+  });
+
+  it("renders incoming handle input as assistant markdown with session provenance", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+    const message: UIMessage = {
+      id: "handle-input-1",
+      role: "user",
+      content: "**Please verify** the release notes.",
+      createdAt: Date.now(),
+      sessionMessage: {
+        direction: "incoming",
+        message_id: "handle-message-1",
+        session: {
+          id: "handle_reviewer",
+          name: "reviewer",
+          color_slot: 4,
+          session_key: "websocket:reviewer",
+        },
+      },
+    };
+
+    const { container } = render(
+      <MessageBubble message={message} sessionDirectory={[message.sessionMessage!.session]} />,
     );
+
+    const sessionMessage = container.querySelector('[data-handle-message="incoming"]');
+    expect(sessionMessage).toHaveClass("w-full");
+    expect(screen.getByText("Please verify").tagName).toBe("STRONG");
+    const sessionLink = screen.getByRole("link", { name: "@reviewer" });
+    expect(sessionLink).toHaveAttribute("href", "#/chat/websocket%3Areviewer");
+    const sessionRange = sessionMessage?.querySelector("[data-handle-message-body]");
+    expect(sessionRange).toHaveClass("border-s-2", "rounded-es-[16px]", "ps-2.5");
+    expect(sessionRange?.getAttribute("style")).toContain("var(--session-handle-4)");
+  });
+
+  it("renders provenance for a deleted handle as plain text", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+    const message: UIMessage = {
+      id: "handle-input-deleted",
+      role: "user",
+      content: "This message remains in history.",
+      createdAt: Date.now(),
+      sessionMessage: {
+        direction: "incoming",
+        message_id: "handle-message-deleted",
+        session: {
+          id: "handle_deleted",
+          name: "noah",
+          color_slot: 2,
+          session_key: "websocket:noah",
+        },
+      },
+    };
+
+    render(<MessageBubble message={message} sessionDirectory={[]} />);
+
+    expect(screen.getByText("@noah")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "@noah" })).not.toBeInTheDocument();
   });
 
   it("copies completed assistant replies from the action row", async () => {

@@ -23,6 +23,7 @@ describe("generic tool activity semantics", () => {
     ['generate_image({"prompt":"private launch art"})', "Generated image", ""],
     ['spawn({"label":"Research competitors","task":"private task"})', "Delegated task", "Research competitors"],
     ['message({"channel":"telegram","content":"private message"})', "Sent message", "telegram"],
+    ['send_session_message({"to":"@reviewer","content":"private message","expect_reply":true})', "Asked", "@reviewer"],
     ['my({"action":"check","key":"context_window_tokens"})', "Checked agent settings", "context_window_tokens"],
     ['my({"action":"set","key":"model","value":"private-model"})', "Updated agent settings", "model"],
     ['cron({"action":"add","name":"Daily digest","message":"private prompt"})', "Scheduled automation", "Daily digest"],
@@ -38,6 +39,60 @@ describe("generic tool activity semantics", () => {
     expect(presentation.label).toBe(label);
     expect(presentation.detail).toBe(detail);
     expect(`${presentation.label} ${presentation.detail}`).not.toMatch(/[{}]|private|tool-results/);
+  });
+
+  it("renders a handle target once and uses plural copy for grouped messages", () => {
+    const first = parseGenericToolTrace(
+      'send_session_message({"to":"@kai","content":"first","expect_reply":false})',
+    )!;
+    const second = parseGenericToolTrace(
+      'send_session_message({"to":"@mira","content":"second","expect_reply":false})',
+    )!;
+
+    const single = describeGenericToolRun([{ trace: first, status: "done" }]);
+    expect([single.label, single.detail].filter(Boolean).join(" ")).toBe("Sent to @kai");
+
+    const grouped = describeGenericToolRun([
+      { trace: first, status: "done" },
+      { trace: second, status: "done" },
+    ]);
+    expect(grouped).toMatchObject({
+      label: "Sent messages",
+      detail: "",
+      aside: "2 messages",
+    });
+  });
+
+  it.each([
+    [true, "running", "Asking"],
+    [true, "done", "Asked"],
+    [false, "running", "Sending to"],
+    [false, "done", "Sent to"],
+    [false, "error", "Could not reach"],
+  ] as const)(
+    "describes expect_reply=%s handle activity while %s",
+    (expectReply, status, label) => {
+      const presentation = describeRun(
+        `send_session_message({"to":"@kai","content":"private","expect_reply":${expectReply}})`,
+        status,
+      );
+      expect(presentation).toMatchObject({ label, detail: "@kai" });
+    },
+  );
+
+  it.each([
+    ["true", "Asked"],
+    ["1", "Asked"],
+    ["yes", "Asked"],
+    ["false", "Sent to"],
+    ["0", "Sent to"],
+    ["no", "Sent to"],
+  ])("matches backend boolean casting for expect_reply=%s", (expectReply, label) => {
+    const presentation = describeRun(
+      `send_session_message({"to":"@kai","content":"private","expect_reply":"${expectReply}"})`,
+      "done",
+    );
+    expect(presentation).toMatchObject({ label, detail: "@kai" });
   });
 
   it.each([

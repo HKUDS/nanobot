@@ -4,6 +4,7 @@ import asyncio
 import json
 import random
 import socket
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -23,6 +24,10 @@ from nanobot.optional_features import InstallResult
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.session_handles import (
+    SessionHandleDirectory,
+    SessionHandleSnapshot,
+)
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
@@ -158,6 +163,8 @@ def bus() -> MagicMock:
 def _seed_session(workspace: Path, key: str = "websocket:test") -> SessionManager:
     sm = SessionManager(workspace)
     s = Session(key=key)
+    if key.startswith("websocket:"):
+        s.metadata["webui"] = True
     s.add_message("user", "hi")
     s.add_message("assistant", "hello back")
     sm.save(s)
@@ -168,6 +175,8 @@ def _seed_many(workspace: Path, keys: list[str]) -> SessionManager:
     sm = SessionManager(workspace)
     for k in keys:
         s = Session(key=k)
+        if k.startswith("websocket:"):
+            s.metadata["webui"] = True
         s.add_message("user", f"hi from {k}")
         sm.save(s)
     return sm
@@ -307,6 +316,11 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
         {"event": "message", "chat_id": "restored-history", "text": "original answer"},
     )
     assert not sm._get_session_path(key).exists()
+    directory = SessionHandleDirectory(sm)
+    directory.ensure_snapshot_many([
+        SessionHandleSnapshot(session_key=key, workspace=sm.workspace)
+    ])
+    assert directory.store_path.exists()
 
     port = _free_port()
     channel = _ch(bus, session_manager=sm, port=port)
@@ -323,8 +337,12 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
         )
 
         assert listing.status_code == 200
-        assert [row["key"] for row in listing.json()["sessions"]] == [key]
-        assert listing.json()["sessions"][0]["preview"] == "original question"
+        [row] = listing.json()["sessions"]
+        assert row["key"] == key
+        assert row["preview"] == "original question"
+        assert "handle" not in row
+        stored = json.loads(directory.store_path.read_text(encoding="utf-8"))
+        assert all(handle["session_key"] != key for handle in stored["handles"])
         assert thread.status_code == 200
         assert [message["content"] for message in thread.json()["messages"]] == [
             "original question",
@@ -2237,6 +2255,24 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         )
         assert rows["websocket:beta"]["workspace_scope"]["access_mode"] == "restricted"
         assert all(not any(key.startswith("_") for key in row) for row in sessions)
+        assert all(set(row["handle"]) == {
+            "id",
+            "name",
+            "color_slot",
+        } for row in sessions)
+
+        refreshed = await _http_get(
+            "http://127.0.0.1:29906/api/sessions", headers=auth
+        )
+        assert refreshed.status_code == 200
+        refreshed_handles = {
+            row["key"]: row["handle"]
+            for row in refreshed.json()["sessions"]
+        }
+        assert refreshed_handles == {
+            row["key"]: row["handle"]
+            for row in sessions
+        }
     finally:
         await channel.stop()
         await server_task
@@ -2297,6 +2333,8 @@ async def test_session_delete_removes_file(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
+    directory = SessionHandleDirectory(sm)
+    identity = directory.ensure_many(["websocket:doomed"])["websocket:doomed"]
     from nanobot.webui.transcript import append_transcript_object
 
     append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
@@ -2307,6 +2345,7 @@ async def test_session_delete_removes_file(
         assert path.exists()
         webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
         assert webui_path.is_file()
+
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -2316,6 +2355,11 @@ async def test_session_delete_removes_file(
         assert resp.json()["deleted"] is True
         assert not path.exists()
         assert not webui_path.exists()
+        stored = json.loads(directory.store_path.read_text(encoding="utf-8"))
+        assert all(
+            row["id"] != identity.id
+            for row in stored["handles"]
+        )
     finally:
         await channel.stop()
         await server_task
@@ -2337,6 +2381,10 @@ async def test_session_delete_removes_transcript_without_canonical_file(
     assert not sm._get_session_path(key).exists()
     webui_path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
     assert webui_path.is_file()
+    directory = SessionHandleDirectory(sm)
+    identity = directory.ensure_snapshot_many([
+        SessionHandleSnapshot(session_key=key, workspace=sm.workspace)
+    ])[key]
 
     channel = _ch(bus, session_manager=sm, port=_free_port())
     server_task = asyncio.create_task(channel.start())
@@ -2350,6 +2398,77 @@ async def test_session_delete_removes_transcript_without_canonical_file(
         assert response.status_code == 200
         assert response.json()["deleted"] is True
         assert not webui_path.exists()
+        stored = json.loads(directory.store_path.read_text(encoding="utf-8"))
+        assert all(row["id"] != identity.id for row in stored["handles"])
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_cannot_remove_recreated_session_identity(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui import ws_http as ws_http_module
+    from nanobot.webui.transcript import append_transcript_object
+
+    key = "websocket:delete-recreate"
+    sm = _seed_session(tmp_path / "workspace", key=key)
+    directory = SessionHandleDirectory(sm)
+    directory.ensure_many([key])
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "delete-recreate", "text": "old transcript"},
+    )
+    original_delete_webui_thread = ws_http_module.delete_webui_thread
+    recreate_started = threading.Event()
+    recreate_finished = threading.Event()
+    recreated_identities = []
+    recreate_errors: list[BaseException] = []
+    recreate_threads: list[threading.Thread] = []
+
+    def recreate() -> None:
+        recreate_started.set()
+        try:
+            with sm.locked_session_files():
+                replacement = Session(key=key)
+                replacement.metadata["webui"] = True
+                replacement.add_message("user", "replacement")
+                sm.save(replacement)
+                recreated_identities.append(directory.ensure_many([key])[key])
+        except BaseException as exc:
+            recreate_errors.append(exc)
+        finally:
+            recreate_finished.set()
+
+    def delete_transcript_while_recreate_waits(session_key: str) -> bool:
+        thread = threading.Thread(target=recreate, daemon=True)
+        recreate_threads.append(thread)
+        thread.start()
+        assert recreate_started.wait(timeout=1)
+        time.sleep(0.05)
+        assert not recreate_finished.is_set()
+        return original_delete_webui_thread(session_key)
+
+    monkeypatch.setattr(
+        ws_http_module,
+        "delete_webui_thread",
+        delete_transcript_while_recreate_waits,
+    )
+    channel = _ch(bus, session_manager=sm, port=_free_port())
+    server_task = asyncio.create_task(channel.start())
+    try:
+        response = await _webui_mutate(channel, "session.delete", {"key": key})
+
+        assert response.status_code == 200
+        assert response.json()["deleted"] is True
+        assert recreate_threads
+        await asyncio.to_thread(recreate_threads[0].join, 1)
+        assert not recreate_threads[0].is_alive()
+        assert recreate_errors == []
+        [recreated] = recreated_identities
+        assert directory.handle_for_session(key) == recreated
+        assert sm._get_session_path(key).is_file()
     finally:
         await channel.stop()
         await server_task

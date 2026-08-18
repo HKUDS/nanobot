@@ -28,6 +28,7 @@ from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     ProgressEvent,
     RuntimeModelUpdatedEvent,
+    SessionMessageInputEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
@@ -539,7 +540,7 @@ async def test_temporary_looking_id_does_not_define_session_policy(bus, tmp_path
     )
 
     inbound = bus.publish_inbound.await_args.args[0]
-    assert inbound.require_existing_session is False
+    assert inbound.require_existing_session is True
     assert inbound.session_key_override is None
     session = sessions.get_cached("websocket:temporary-looking-but-persistent")
     assert session is not None
@@ -2063,6 +2064,57 @@ def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
         "model_preset": "Deep Research",
         "usage": {"prompt_tokens": 120, "completion_tokens": 8},
     }
+
+
+@pytest.mark.asyncio
+async def test_send_projects_session_message_only_to_the_target_chat() -> None:
+    bus = MessageBus()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    target = AsyncMock()
+    other = AsyncMock()
+    channel._attach(target, "target")
+    channel._attach(other, "other")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="target",
+        content="Review this now.",
+        metadata={WEBUI_TURN_METADATA_KEY: "session-message-turn-1"},
+        event=SessionMessageInputEvent(
+            content="Review this now.",
+            created_at_ms=1234,
+            session_message={
+                "direction": "incoming",
+                "message_id": "session-message-1",
+                "session": {
+                    "id": "handle_11111111111111111111111111111111",
+                    "name": "kai",
+                    "session_key": "websocket:source",
+                    "color_slot": 2,
+                },
+            },
+        ),
+    ))
+
+    assert json.loads(target.send.await_args.args[0]) == {
+        "event": "session_message",
+        "chat_id": "target",
+        "text": "Review this now.",
+        "created_at_ms": 1234,
+        "session_message": {
+            "direction": "incoming",
+            "message_id": "session-message-1",
+            "session": {
+                "id": "handle_11111111111111111111111111111111",
+                "name": "kai",
+                "session_key": "websocket:source",
+                "color_slot": 2,
+            },
+        },
+        "turn_phase": "user",
+        "turn_id": "session-message-turn-1",
+    }
+    other.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4919,7 +4971,7 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
-def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
+def test_sessions_list_includes_active_run_started_at(monkeypatch, tmp_path: Path) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
@@ -4927,7 +4979,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     from nanobot.webui import ws_http as ws_http_module
 
     bus = MagicMock()
-    session_manager = MagicMock()
+    session_manager = SessionManager(tmp_path / "sessions")
     sessions = [
         {
             "key": "websocket:chat-1",
@@ -4936,6 +4988,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "title": "Running",
             "preview": "work",
             "model_preset": "fast",
+            "_persisted_webui": True,
             "path": "/private/path",
         },
         {
@@ -4963,8 +5016,13 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
     workspace_scope = body["sessions"][0].pop("workspace_scope")
+    handle = body["sessions"][0].pop("handle")
     assert workspace_scope["project_path"] == str(channel.gateway.media.workspace_path)
     assert workspace_scope["access_mode"] in {"restricted", "full"}
+    assert handle["id"].startswith("handle_")
+    assert handle["name"].isascii()
+    assert handle["name"].islower()
+    assert 0 <= handle["color_slot"] < 8
     assert body["sessions"] == [
         {
             "key": "websocket:chat-1",

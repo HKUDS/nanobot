@@ -1,8 +1,13 @@
 """Tests for SessionManager.delete_session and read_session_file."""
 
 from pathlib import Path
+from threading import Event, Thread
 
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import (
+    SESSION_MODEL_PRESET_METADATA_KEY,
+    Session,
+    SessionManager,
+)
 
 
 def _seed(workspace: Path, key: str = "telegram:abc") -> SessionManager:
@@ -27,6 +32,85 @@ def test_delete_session_removes_file_and_invalidates_cache(tmp_path: Path) -> No
     # Subsequent get_or_create returns a fresh, empty Session (no stale cache).
     fresh = sm.get_or_create("telegram:abc")
     assert fresh.messages == []
+
+
+def test_deleted_session_object_cannot_recreate_file(tmp_path: Path) -> None:
+    sm = _seed(tmp_path, "websocket:abc")
+    stale = sm.get_or_create("websocket:abc")
+
+    assert sm.delete_session(stale.key) is True
+    stale.add_message("assistant", "late result")
+    sm.save(stale)
+
+    assert sm.read_session_metadata(stale.key) is None
+
+
+def test_delete_is_atomic_with_existing_session_load(tmp_path: Path) -> None:
+    sm = _seed(tmp_path, "websocket:abc")
+    sm.invalidate("websocket:abc")
+    loaded = Event()
+    release = Event()
+    deleted = Event()
+    original_load = sm._load
+
+    def paused_load(key: str) -> Session | None:
+        session = original_load(key)
+        loaded.set()
+        assert release.wait(timeout=2)
+        return session
+
+    sm._load = paused_load  # type: ignore[method-assign]
+    load_thread = Thread(target=sm.get_existing, args=("websocket:abc",))
+    delete_thread = Thread(
+        target=lambda: (sm.delete_session("websocket:abc"), deleted.set()),
+    )
+    load_thread.start()
+    assert loaded.wait(timeout=2)
+    delete_thread.start()
+    assert not deleted.wait(timeout=0.05)
+    release.set()
+    load_thread.join(timeout=2)
+    delete_thread.join(timeout=2)
+
+    assert not load_thread.is_alive()
+    assert not delete_thread.is_alive()
+    assert sm.read_session_metadata("websocket:abc") is None
+    assert sm.get_cached("websocket:abc") is None
+
+
+def test_delete_is_atomic_with_model_preset_rename(tmp_path: Path) -> None:
+    sm = _seed(tmp_path, "websocket:abc")
+    session = sm.get_or_create("websocket:abc")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "old"
+    sm.save(session)
+    sm.invalidate(session.key)
+    loaded = Event()
+    release = Event()
+    deleted = Event()
+    original_load = sm._load
+
+    def paused_load(key: str) -> Session | None:
+        candidate = original_load(key)
+        loaded.set()
+        assert release.wait(timeout=2)
+        return candidate
+
+    sm._load = paused_load  # type: ignore[method-assign]
+    rename_thread = Thread(target=sm.rename_model_preset, args=("old", "new"))
+    delete_thread = Thread(
+        target=lambda: (sm.delete_session("websocket:abc"), deleted.set()),
+    )
+    rename_thread.start()
+    assert loaded.wait(timeout=2)
+    delete_thread.start()
+    assert not deleted.wait(timeout=0.05)
+    release.set()
+    rename_thread.join(timeout=2)
+    delete_thread.join(timeout=2)
+
+    assert not rename_thread.is_alive()
+    assert not delete_thread.is_alive()
+    assert sm.read_session_metadata("websocket:abc") is None
 
 
 def test_delete_session_returns_false_when_missing(tmp_path: Path) -> None:

@@ -19,10 +19,12 @@ from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
 )
-from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
+from nanobot.session.session_handles import SessionHandleDirectory, SessionHandleSnapshot
 from nanobot.webui.gateway_services import build_gateway_services
+from nanobot.webui.transcript import append_transcript_object, read_transcript_lines
 
 
 def _tiny_png_data_url() -> str:
@@ -232,39 +234,176 @@ async def test_message_forwards_normalized_cli_app_attachments() -> None:
 
 
 @pytest.mark.asyncio
-async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> None:
+async def test_webui_message_preserves_verified_session_handles_in_focused_chat(tmp_path) -> None:
     manager = SessionManager(tmp_path)
+    current = manager.get_or_create("websocket:current")
+    current.metadata.update({
+        "title": "Current",
+        "webui": True,
+        WORKSPACE_SCOPE_METADATA_KEY: {
+            "project_path": str(Path.cwd().resolve()),
+            "access_mode": "full",
+        },
+    })
+    manager.save(current)
     target = manager.get_or_create("websocket:pricing")
-    target.metadata.update({"title": "Pricing", "title_user_edited": True})
+    target.metadata.update({
+        "title": "Pricing",
+        "title_user_edited": True,
+        "webui": True,
+        WORKSPACE_SCOPE_METADATA_KEY: {
+            "project_path": str(Path.cwd().resolve()),
+            "access_mode": "full",
+        },
+    })
     target.add_message("user", "Discuss cloud storage")
     manager.save(target)
+    directory = SessionHandleDirectory(manager)
+    handles = directory.ensure_many(["websocket:current", "websocket:pricing"])
+    target_identity = handles["websocket:pricing"]
     channel = _make_channel(manager)
     mock_conn = AsyncMock()
     channel._webui_connections.add(mock_conn)
     envelope = {
         "type": "message",
         "chat_id": "current",
-        "content": "Use @pricing",
+        "content": f"@{target_identity.name} review the launch plan",
         "webui": True,
-        "session_mentions": [{
-            "name": "pricing",
+        "session_handles": [{
+            "id": target_identity.id,
+            "name": target_identity.name,
             "session_key": "websocket:pricing",
             "title": "Untrusted title",
+            "color_slot": (target_identity.color_slot + 1) % 8,
         }],
     }
 
     await channel._dispatch_envelope(mock_conn, "client-1", envelope)
 
     channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.call_args.kwargs["chat_id"] == "current"
+    assert channel._handle_message.call_args.kwargs["content"] == (
+        f"@{target_identity.name} review the launch plan"
+    )
     metadata = channel._handle_message.call_args.kwargs["metadata"]
-    assert metadata["session_mentions"] == [{
-        "name": "pricing",
+    assert metadata["session_handles"] == [{
+        "id": target_identity.id,
+        "name": target_identity.name,
         "session_key": "websocket:pricing",
-        "title": "Pricing",
+        "color_slot": target_identity.color_slot,
     }]
-    [block] = metadata[RUNTIME_CONTEXT_INPUT_META]
-    assert block.source == "session_mentions"
-    assert "websocket:pricing" in block.content
+
+
+@pytest.mark.asyncio
+async def test_new_webui_chat_can_structurally_mention_its_own_identity(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    manager = SessionManager(tmp_path)
+    channel = _make_channel(manager)
+    mock_conn = AsyncMock()
+    channel._webui_connections.add(mock_conn)
+
+    await channel._dispatch_envelope(
+        mock_conn,
+        "client-1",
+        {"type": "new_chat"},
+    )
+
+    events = [json.loads(call.args[0]) for call in mock_conn.send.await_args_list]
+    chat_id = next(event["chat_id"] for event in events if event["event"] == "attached")
+    target_key = f"websocket:{chat_id}"
+    target_identity = SessionHandleDirectory(manager).ensure_many([target_key])[target_key]
+    mock_conn.send.reset_mock()
+
+    await channel._dispatch_envelope(
+        mock_conn,
+        "client-1",
+        {
+            "type": "message",
+            "chat_id": chat_id,
+            "content": f"@{target_identity.name} hello",
+            "webui": True,
+            "turn_id": "turn-self-mention-new-chat",
+            "session_handles": [{
+                **target_identity.public_payload(),
+                "session_key": target_key,
+            }],
+        },
+    )
+
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.call_args.kwargs["content"] == (
+        f"@{target_identity.name} hello"
+    )
+    assert channel._handle_message.call_args.kwargs["metadata"]["session_handles"] == [{
+        **target_identity.public_payload(),
+        "session_key": target_key,
+    }]
+    assert read_transcript_lines(target_key)[-1]["text"] == (
+        f"@{target_identity.name} hello"
+    )
+    assert json.loads(mock_conn.send.await_args.args[0]) == {
+        "event": "message_accepted",
+        "chat_id": chat_id,
+        "turn_id": "turn-self-mention-new-chat",
+        "starts_turn": True,
+        "active_turn_id": "turn-self-mention-new-chat",
+        "started_at": wth.websocket_turn_wall_started_at(chat_id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_transcript_backed_webui_chat_preserves_its_visible_identity_mention(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    manager = SessionManager(tmp_path / "sessions")
+    target_key = "websocket:transcript-only"
+    append_transcript_object(
+        target_key,
+        {"event": "message", "chat_id": "transcript-only", "text": "Earlier reply"},
+    )
+    target_identity = SessionHandleDirectory(manager).ensure_snapshot_many([
+        SessionHandleSnapshot(
+            session_key=target_key,
+            workspace=Path.cwd().resolve(),
+        )
+    ])[target_key]
+    channel = _make_channel(manager)
+    mock_conn = AsyncMock()
+    channel._webui_connections.add(mock_conn)
+
+    await channel._dispatch_envelope(
+        mock_conn,
+        "client-1",
+        {
+            "type": "message",
+            "chat_id": "transcript-only",
+            "content": f"@{target_identity.name} hello",
+            "webui": True,
+            "turn_id": "turn-self-mention-transcript",
+            "session_handles": [{
+                **target_identity.public_payload(),
+                "session_key": target_key,
+            }],
+        },
+    )
+
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.call_args.kwargs["content"] == (
+        f"@{target_identity.name} hello"
+    )
+    assert json.loads(mock_conn.send.await_args.args[0]) == {
+        "event": "message_accepted",
+        "chat_id": "transcript-only",
+        "turn_id": "turn-self-mention-transcript",
+        "starts_turn": True,
+        "active_turn_id": "turn-self-mention-transcript",
+        "started_at": wth.websocket_turn_wall_started_at("transcript-only"),
+    }
 
 
 @pytest.mark.asyncio

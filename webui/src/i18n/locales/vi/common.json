@@ -1166,7 +1166,6 @@
       "placeholderStreaming": "Mô hình đang trả lời…",
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
-      "runRuntimeTitle": "Đang chạy · {{elapsed}}",
       "goalStateStrip": "Mục tiêu · {{label}}",
       "goalStateFallback": "Mục tiêu",
       "goalStateExpandAria": "Xem đầy đủ mục tiêu",
@@ -1326,9 +1325,7 @@
         "cliDescription": "Dùng @{{name}} như ứng dụng CLI cục bộ",
         "mcpDescription": "Dùng @{{name}} như máy chủ MCP",
         "cliTitle": "Ứng dụng CLI: {{name}}",
-        "mcpTitle": "Máy chủ MCP: {{name}}",
-        "sessionBadge": "Cuộc trò chuyện Nanobot",
-        "sessionDescription": "Tham chiếu @{{name}} như cuộc trò chuyện trước"
+        "mcpTitle": "Máy chủ MCP: {{name}}"
       },
       "workspace": {
         "accessAria": "Chế độ truy cập không gian làm việc",

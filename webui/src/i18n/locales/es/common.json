@@ -1167,7 +1167,6 @@
       "placeholderStreaming": "El modelo está respondiendo…",
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
-      "runRuntimeTitle": "En ejecución · {{elapsed}}",
       "goalStateStrip": "Objetivo · {{label}}",
       "goalStateFallback": "Objetivo",
       "goalStateExpandAria": "Ver objetivo completo",
@@ -1327,9 +1326,7 @@
         "cliDescription": "Usar @{{name}} como aplicación CLI local",
         "mcpDescription": "Usar @{{name}} como servidor MCP",
         "cliTitle": "Aplicación CLI: {{name}}",
-        "mcpTitle": "Servidor MCP: {{name}}",
-        "sessionBadge": "Conversación de Nanobot",
-        "sessionDescription": "Referenciar @{{name}} como chat anterior"
+        "mcpTitle": "Servidor MCP: {{name}}"
       },
       "workspace": {
         "accessAria": "Modo de acceso al espacio de trabajo",

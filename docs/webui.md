@@ -79,7 +79,7 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
-| Composer | Send text, images, voice input, slash commands, and `@` mentions for topics, Apps, or MCP presets |
+| Composer | Send text, images, voice input, slash commands, `@` addresses, and `#` conversation references |
 | Channels | Connect and validate chat platforms, install their optional support, and manage saved channel setup |
 | Apps | Install, test, update, and use local CLI App adapters and MCP presets |
 | Skills | Inspect and manage installed skills, or discover skills from supported marketplaces |
@@ -173,14 +173,21 @@ clients.
 ## Composer
 
 The composer supports plain messages, image attachments, voice input when
-transcription is configured, slash commands, and `@` mentions for installed Apps
-or MCP presets. Select another topic from the `@` menu to attach a stable
-reference, or drag that topic from the sidebar into the composer. Plain text
-that happens to start with `@` does not attach history.
-Restricted chats offer topics from the same project, while Full Access chats can
-reference any WebUI topic. Nanobot reads a referenced topic only when its history
-is relevant and can link it in the response. The model badge shows the current
-model or preset and links back to model settings when setup is incomplete.
+transcription is configured, slash commands, and two kinds of structured names:
+
+- Use `@` to address an installed App, an MCP preset, or another persisted WebUI
+  session. Sessions have globally unique, stable handles such as `@mira`;
+  titles are not part of a handle or the model context. Selecting a session handle
+  lets the current agent send that session an asynchronous message. Agents can also
+  discover handles with `list_sessions` and communicate with `send_session_message`.
+- Use `#` to reference another conversation's history. Select it from the menu or
+  drag it from the sidebar. Nanobot reads the referenced history only when it is
+  relevant.
+
+Select a menu item to create either binding. Typing the same text without selecting
+it remains plain text. Temporary chats cannot address other sessions or attach persisted
+conversation history. The model badge shows the current model or preset and links
+to model settings when setup is incomplete.
 
 For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)

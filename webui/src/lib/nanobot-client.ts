@@ -5,6 +5,7 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   OutboundMedia,
+  SessionHandle,
   SessionMention,
   SidebarStatePayload,
   GoalStateWsPayload,
@@ -195,7 +196,7 @@ export class NanobotClient {
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
-  /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
+  /** Per-chat run projection, started optimistically and reconciled by lifecycle events. */
   private runStartedAtByChatId = new Map<string, number>();
   /** Per-turn clocks let a rejected newer turn fall back without borrowing its timer. */
   private runStartedAtByTurnKey = new Map<string, number>();
@@ -537,6 +538,14 @@ export class NanobotClient {
     }
   }
 
+  private startRunLocally(chatId: string, turnId: string): void {
+    const startedAt = Date.now() / 1000;
+    this.runStartedAtByTurnKey.set(this.runSendKey(chatId, turnId), startedAt);
+    const previous = this.runStartedAtByChatId.get(chatId);
+    this.runStartedAtByChatId.set(chatId, startedAt);
+    if (previous !== startedAt) this.emitRunStatus(chatId, startedAt);
+  }
+
   private settleRunTurn(chatId: string, turnId?: string): void {
     if (!turnId) return;
     this.clearPendingMessageSend(chatId, turnId);
@@ -716,7 +725,7 @@ export class NanobotClient {
     }
   }
 
-  private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
+  private recordRunStatus(chatId: string, ev: InboundEvent): void {
     if (ev.event === "turn_end") {
       this.recordRunCompletion(chatId, ev.turn_id);
       return;
@@ -967,6 +976,7 @@ export class NanobotClient {
       cliApps?: OutboundCliAppMention[];
       mcpPresets?: OutboundMcpPresetMention[];
       sessionMentions?: SessionMention[];
+      sessionHandles?: SessionHandle[];
       quotedContext?: string;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
@@ -986,6 +996,9 @@ export class NanobotClient {
       ...(options?.sessionMentions?.length
         ? { session_mentions: options.sessionMentions }
         : {}),
+      ...(options?.sessionHandles?.length
+        ? { session_handles: options.sessionHandles }
+        : {}),
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
@@ -1004,7 +1017,10 @@ export class NanobotClient {
     }
     if (options?.turnId && !isSystemCommandTurnId(options.turnId)) {
       const startsNewRun = options.startsNewRun !== false;
-      if (startsNewRun) this.advanceRunGeneration(chatId, options.turnId);
+      if (startsNewRun) {
+        this.advanceRunGeneration(chatId, options.turnId);
+        this.startRunLocally(chatId, options.turnId);
+      }
       this.trackPendingMessageSend(chatId, options.turnId, startsNewRun);
     }
     this.queueSend(frame);
@@ -1240,7 +1256,7 @@ export class NanobotClient {
     if (chatId) {
       if (this.isCanonicalCompletedTurnEvent(chatId, parsed)) return;
       const supersededRunCompletion = this.isSupersededRunCompletion(chatId, parsed);
-      this.recordGoalStatusForRunStrip(chatId, parsed);
+      this.recordRunStatus(chatId, parsed);
       if (supersededRunCompletion) return;
       this.recordGoalStateSnapshot(chatId, parsed);
       this.dispatch(chatId, parsed);

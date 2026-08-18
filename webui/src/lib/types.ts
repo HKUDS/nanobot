@@ -66,6 +66,8 @@ export interface UIMessage {
   mcpPresets?: UIMcpPresetAttachment[];
   /** Persisted sessions explicitly referenced by this user turn. */
   sessionMentions?: SessionMention[];
+  /** Active session handles structurally selected by this user turn. */
+  sessionHandles?: SessionHandle[];
   /** Assistant turn: accumulated model reasoning / thinking text. Built up
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
@@ -79,6 +81,8 @@ export interface UIMessage {
   completedAt?: number;
   /** Lightweight provenance for proactive assistant messages. */
   source?: UIMessageSource;
+  /** Structured provenance for a message delivered by another session. */
+  sessionMessage?: UISessionMessage;
   /** Stable protocol metadata for grouping all activity emitted by one user turn. */
   turnId?: string;
   turnPhase?: UITurnPhase;
@@ -110,11 +114,29 @@ export interface UIMcpPresetAttachment {
 }
 
 export interface SessionMention {
-  /** Text token inserted in the composer, without the leading @. */
+  /** Text token inserted in the composer, without the leading #. */
   name: string;
   /** Stable persisted-session identifier used by read_session. */
   session_key: string;
   title: string;
+}
+
+/** Exact public handle DTO returned by the session-list endpoint. */
+export interface SessionListHandle {
+  id: string;
+  name: string;
+  color_slot: number;
+}
+
+/** Public session handle enriched with its UI navigation target. */
+export interface SessionHandle extends SessionListHandle {
+  session_key: string;
+}
+
+export interface UISessionMessage {
+  direction: "incoming" | "outgoing";
+  message_id: string;
+  session: SessionListHandle;
 }
 
 export interface SessionAutomationJob {
@@ -337,6 +359,8 @@ export interface ChatSummary {
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   workspaceScope?: WorkspaceScopePayload | null;
+  /** Stable, server-owned @handle for this session. */
+  handle?: SessionHandle | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -1249,6 +1273,13 @@ export type InboundEvent =
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
   | ({
+      event: "session_message";
+      chat_id: string;
+      text: string;
+      created_at_ms: number;
+      session_message: UISessionMessage;
+    } & InboundTurnMetadata)
+  | ({
       event: "file_edit";
       chat_id: string;
       edits: UIFileEdit[];
@@ -1442,6 +1473,7 @@ export type Outbound =
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];
+      session_handles?: SessionHandle[];
       quoted_context?: string;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;

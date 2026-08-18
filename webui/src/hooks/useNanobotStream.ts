@@ -33,6 +33,7 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   OutboundMedia,
+  SessionHandle,
   SessionMention,
   GoalStateWsPayload,
   MessageDeliveryStatus,
@@ -169,6 +170,7 @@ export interface SendOptions {
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];
   sessionMentions?: SessionMention[];
+  sessionHandles?: SessionHandle[];
   quotedContext?: string;
   workspaceScope?: WorkspaceScopePayload | null;
   sideChannel?: boolean;
@@ -188,6 +190,7 @@ function eventExtendsModelActivity(ev: InboundEvent): boolean {
     ev.event === "delta"
     || ev.event === "reasoning_delta"
     || ev.event === "file_edit"
+    || ev.event === "session_message"
   ) return true;
   return ev.event === "message"
     && (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning");
@@ -216,6 +219,33 @@ function transitionTurnDelivery(
     return { ...message, deliveryStatus: status };
   });
   return changed ? next : messages;
+}
+
+function appendLiveSessionMessage(
+  messages: UIMessage[],
+  event: Extract<InboundEvent, { event: "session_message" }>,
+): UIMessage[] {
+  const messageId = event.session_message?.message_id?.trim();
+  if (!messageId || event.session_message.direction !== "incoming") return messages;
+  if (messages.some((message) => message.sessionMessage?.message_id === messageId)) return messages;
+
+  const row: UIMessage = {
+    id: `session-message:${messageId}`,
+    role: "user",
+    content: event.text,
+    createdAt: Number.isFinite(event.created_at_ms) ? event.created_at_ms : Date.now(),
+    sessionMessage: event.session_message,
+    ...turnFieldsFromEvent(event, "user"),
+  };
+  const sameTurnIndex = event.turn_id
+    ? messages.findIndex((message) => message.turnId === event.turn_id)
+    : -1;
+  if (sameTurnIndex < 0) return [...messages, row];
+  return [
+    ...messages.slice(0, sameTurnIndex),
+    row,
+    ...messages.slice(sameTurnIndex),
+  ];
 }
 
 export function useNanobotStream(
@@ -645,6 +675,18 @@ export function useNanobotStream(
     });
   }, [cancelStreamEndTimer, client]);
 
+  useEffect(() => {
+    return client.onRunStatus((updatedChatId, startedAt) => {
+      if (updatedChatId !== chatId) return;
+      // Canonical HTTP reconciliation can settle a turn before its delayed
+      // WebSocket completion frame reaches this mounted thread. The client
+      // then fences that duplicate frame, so keep the pane-local timer in
+      // sync with the client's authoritative per-chat run projection.
+      setRunStartedAt(startedAt);
+      if (startedAt !== null) setIsStreaming(true);
+    });
+  }, [chatId, client]);
+
   // Reset local state when switching chats. Do not reset on every
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
@@ -802,11 +844,19 @@ export function useNanobotStream(
 
       const shouldCloseAnswerBeforeEvent =
         ev.event === "file_edit"
+        || ev.event === "session_message"
         || (
           ev.event === "message"
           && (ev.kind === "tool_hint" || ev.kind === "progress")
         );
       flushPendingStreamEvents({ closeAnswerSegment: shouldCloseAnswerBeforeEvent });
+
+      if (ev.event === "session_message") {
+        clearActivitySegment();
+        setIsStreaming(true);
+        setMessages((prev) => appendLiveSessionMessage(prev, ev));
+        return;
+      }
 
       if (ev.event === "reasoning_end") {
         if (suppressStreamUntilTurnEndRef.current) return;
@@ -1137,6 +1187,9 @@ export function useNanobotStream(
             ...(options?.mcpPresets?.length ? { mcpPresets: options.mcpPresets } : {}),
             ...(options?.sessionMentions?.length
               ? { sessionMentions: options.sessionMentions }
+              : {}),
+            ...(options?.sessionHandles?.length
+              ? { sessionHandles: options.sessionHandles }
               : {}),
           },
         ];

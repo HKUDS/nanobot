@@ -14,6 +14,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable, Collection, Generator, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
@@ -179,6 +180,7 @@ class Session:
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
+    discarded: bool = field(default=False, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -1520,6 +1522,7 @@ class SessionManager:
         self.sessions_dir = self._jsonl_store.sessions_dir
         self.legacy_sessions_dir = self._jsonl_store.legacy_sessions_dir
         self._cache: OrderedDict[str, Session] = OrderedDict()
+        self._state_lock = RLock()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
@@ -1528,23 +1531,25 @@ class SessionManager:
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
-        self._overflow_cache.pop(session.key, None)
-        self._cache[session.key] = session
-        self._cache.move_to_end(session.key)
-        while len(self._cache) > self._max_cached_sessions:
-            key, evicted = self._cache.popitem(last=False)
-            self._overflow_cache[key] = evicted
+        with self._state_lock:
+            self._overflow_cache.pop(session.key, None)
+            self._cache[session.key] = session
+            self._cache.move_to_end(session.key)
+            while len(self._cache) > self._max_cached_sessions:
+                key, evicted = self._cache.popitem(last=False)
+                self._overflow_cache[key] = evicted
 
     def _cached(self, key: str) -> Session | None:
-        session = self._cache.get(key)
-        if session is not None:
-            self._cache.move_to_end(key)
-            return session
+        with self._state_lock:
+            session = self._cache.get(key)
+            if session is not None:
+                self._cache.move_to_end(key)
+                return session
 
-        session = self._overflow_cache.get(key)
-        if session is not None:
-            self._remember(session)
-        return session
+            session = self._overflow_cache.get(key)
+            if session is not None:
+                self._remember(session)
+            return session
 
     def get_cached(self, key: str) -> Session | None:
         """Return a cached session without creating or loading one from disk."""
@@ -1611,16 +1616,28 @@ class SessionManager:
         Returns:
             The session.
         """
-        session = self._cached(key)
-        if session is not None:
+        with self._state_lock:
+            session = self._cached(key)
+            if session is not None:
+                return session
+
+            session = self._load(key)
+            if session is None:
+                session = Session(key=key)
+
+            self._remember(session)
             return session
 
-        session = self._load(key)
-        if session is None:
-            session = Session(key=key)
-
-        self._remember(session)
-        return session
+    def get_existing(self, key: str) -> Session | None:
+        """Return an existing cached or persisted session without creating one."""
+        with self._state_lock:
+            session = self._cached(key)
+            if session is not None:
+                return session
+            session = self._load(key)
+            if session is not None:
+                self._remember(session)
+            return session
 
     def get_or_create_transient(
         self,
@@ -1649,61 +1666,62 @@ class SessionManager:
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
-        if not session.policy.persist:
-            return
+        with self._state_lock:
+            if not session.policy.persist or session.discarded:
+                return
 
-        archiver = self._file_cap_archiver
-        if archiver is not None:
-            session.enforce_file_cap(
-                on_archive=lambda messages: archiver(
-                    messages,
-                    session_key=session.key,
+            archiver = self._file_cap_archiver
+            if archiver is not None:
+                session.enforce_file_cap(
+                    on_archive=lambda messages: archiver(
+                        messages,
+                        session_key=session.key,
+                    )
                 )
-            )
 
-        self._store.save(session, fsync=fsync)
-        self._remember(session)
+            self._store.save(session, fsync=fsync)
+            self._remember(session)
 
     def rename_model_preset(self, old_name: str, new_name: str) -> int:
         """Rename a session-scoped model preset across durable and live sessions."""
         if old_name == new_name:
             return 0
+        with self._state_lock:
+            cached = dict(self._overflow_cache.items())
+            cached.update(self._cache)
+            keys = set(cached)
+            keys.update(item["key"] for item in self._store.list_sessions())
 
-        cached = dict(self._overflow_cache.items())
-        cached.update(self._cache)
-        keys = set(cached)
-        keys.update(item["key"] for item in self._store.list_sessions())
-
-        changed: list[Session] = []
-        try:
-            for key in sorted(keys):
-                session = cached.get(key) or self._load(key)
-                if (
-                    session is None
-                    or session.metadata.get(SESSION_MODEL_PRESET_METADATA_KEY) != old_name
-                ):
-                    continue
-                session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = new_name
-                changed.append(session)
-                if session.policy.persist:
-                    self.save(session, fsync=True)
-                else:
-                    self._remember(session)
-        except BaseException:
-            for session in reversed(changed):
-                session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = old_name
-                try:
+            changed: list[Session] = []
+            try:
+                for key in sorted(keys):
+                    session = cached.get(key) or self._load(key)
+                    if (
+                        session is None
+                        or session.metadata.get(SESSION_MODEL_PRESET_METADATA_KEY) != old_name
+                    ):
+                        continue
+                    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = new_name
+                    changed.append(session)
                     if session.policy.persist:
                         self.save(session, fsync=True)
                     else:
                         self._remember(session)
-                except Exception:
-                    logger.exception(
-                        "Failed to roll back model preset rename for session {}",
-                        session.key,
-                    )
-            raise
-        return len(changed)
+            except BaseException:
+                for session in reversed(changed):
+                    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = old_name
+                    try:
+                        if session.policy.persist:
+                            self.save(session, fsync=True)
+                        else:
+                            self._remember(session)
+                    except Exception:
+                        logger.exception(
+                            "Failed to roll back model preset rename for session {}",
+                            session.key,
+                        )
+                raise
+            return len(changed)
 
     def flush_all(self) -> int:
         """Re-save every cached session with fsync for durable shutdown.
@@ -1725,15 +1743,21 @@ class SessionManager:
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
-        self._cache.pop(key, None)
-        self._overflow_cache.pop(key, None)
+        with self._state_lock:
+            self._cache.pop(key, None)
+            self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
-        self.invalidate(key)
-        deleted = self._store.delete(key)
-        if self._delete_observer is not None:
-            self._delete_observer(key)
+        with self._state_lock:
+            session = self._cached(key)
+            if session is not None:
+                session.discarded = True
+            self.invalidate(key)
+            deleted = self._store.delete(key)
+            observer = self._delete_observer
+        if observer is not None:
+            observer(key)
         return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:

@@ -101,6 +101,7 @@ from nanobot.webui.session_context import session_context_payload
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
+    is_persisted_webui_session_row,
     list_webui_sessions,
 )
 from nanobot.webui.sidebar_state import (
@@ -728,34 +729,57 @@ class GatewayHTTPHandler:
 
     def _sessions_list_payload(self) -> dict[str, Any]:
         assert self.session_manager is not None
-        sessions = list_webui_sessions(self.session_manager)
+        from nanobot.session.session_handles import (
+            SessionHandleDirectory,
+            SessionHandleSnapshot,
+        )
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
-        cleaned: list[dict[str, Any]] = []
-        default_scope: WorkspaceScope | None = None
-        for s in sessions:
-            key = s.get("key")
-            if not (isinstance(key, str) and key.startswith("websocket:")):
-                continue
-            row = {
-                k: v
-                for k, v in s.items()
-                if k != "path" and k not in WEBUI_SESSION_INDEX_INTERNAL_FIELDS
-            }
-            chat_id = key.split(":", 1)[1]
-            started_at = websocket_turn_wall_started_at(chat_id)
-            if started_at is not None:
-                row["run_started_at"] = started_at
-            if default_scope is None:
-                default_scope = self.workspaces.default_scope()
-            scope_present, raw_scope = indexed_workspace_scope(s)
-            scope = self.workspaces.scope_for_indexed_metadata(
-                raw_scope,
-                scope_present=scope_present,
-                default_scope=default_scope,
-            )
-            row["workspace_scope"] = scope.payload()
-            cleaned.append(row)
+        with self.session_manager.locked_session_files():
+            sessions = list_webui_sessions(self.session_manager)
+            cleaned: list[dict[str, Any]] = []
+            identity_snapshots: list[SessionHandleSnapshot] = []
+            stale_identity_keys: list[str] = []
+            default_scope: WorkspaceScope | None = None
+            for s in sessions:
+                key = s.get("key")
+                if not (isinstance(key, str) and key.startswith("websocket:")):
+                    continue
+                row = {
+                    k: v
+                    for k, v in s.items()
+                    if k != "path" and k not in WEBUI_SESSION_INDEX_INTERNAL_FIELDS
+                }
+                chat_id = key.split(":", 1)[1]
+                started_at = websocket_turn_wall_started_at(chat_id)
+                if started_at is not None:
+                    row["run_started_at"] = started_at
+                if default_scope is None:
+                    default_scope = self.workspaces.default_scope()
+                scope_present, raw_scope = indexed_workspace_scope(s)
+                scope = self.workspaces.scope_for_indexed_metadata(
+                    raw_scope,
+                    scope_present=scope_present,
+                    default_scope=default_scope,
+                )
+                row["workspace_scope"] = scope.payload()
+                if is_persisted_webui_session_row(s):
+                    identity_snapshots.append(SessionHandleSnapshot(
+                        session_key=key,
+                        workspace=scope.project_path,
+                    ))
+                else:
+                    stale_identity_keys.append(key)
+                cleaned.append(row)
+
+            directory = SessionHandleDirectory(self.session_manager)
+            directory.remove_many(stale_identity_keys)
+            handles = directory.ensure_snapshot_many(identity_snapshots)
+        for row in cleaned:
+            key = cast(str, row["key"])
+            handle = handles.get(key)
+            if handle is not None:
+                row["handle"] = handle.public_payload()
         return {"sessions": cleaned}
 
     def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
@@ -905,9 +929,14 @@ class GatewayHTTPHandler:
                         self.local_trigger_store.delete(job.id)
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
-        session_deleted = self.session_manager.delete_session(decoded_key)
-        transcript_deleted = delete_webui_thread(decoded_key)
-        return _http_json_response({"deleted": bool(session_deleted or transcript_deleted)})
+        with self.session_manager.locked_session_files():
+            deleted = self.session_manager.delete_session(decoded_key)
+            transcript_deleted = delete_webui_thread(decoded_key)
+            if deleted or transcript_deleted:
+                from nanobot.session.session_handles import SessionHandleDirectory
+
+                SessionHandleDirectory(self.session_manager).remove_many([decoded_key])
+        return _http_json_response({"deleted": bool(deleted or transcript_deleted)})
 
     # -- Automation routes --------------------------------------------------
 

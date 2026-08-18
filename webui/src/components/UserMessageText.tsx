@@ -3,14 +3,24 @@ import { useTranslation } from "react-i18next";
 
 import {
   CapabilityMentionToken,
+  SessionReferenceToken,
   splitCapabilityMentionSegments,
+  splitSessionReferenceSegments,
   type CapabilityMentionSegment,
+  type SessionReferenceSegment,
 } from "@/components/CliAppMentionText";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
-import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  SessionHandle,
+  SessionMention,
+  UICliAppAttachment,
+  UIMcpPresetAttachment,
+} from "@/lib/types";
 
 type SkillReferenceSegment =
   | { kind: "text"; text: string }
@@ -18,6 +28,7 @@ type SkillReferenceSegment =
 
 type UserMessageSegment =
   | CapabilityMentionSegment
+  | SessionReferenceSegment
   | { kind: "skill"; text: string; name: string };
 
 function splitSkillReferenceSegments(value: string): SkillReferenceSegment[] {
@@ -49,18 +60,75 @@ function splitUserMessageSegments(
   cliApps: CliAppInfo[],
   mcpPresets: McpPresetInfo[],
   sessionMentions: SessionMention[],
+  sessionHandles: SessionHandle[],
+  attachedCliApps: UICliAppAttachment[],
+  attachedMcpPresets: UIMcpPresetAttachment[],
 ): UserMessageSegment[] {
   const segments: UserMessageSegment[] = [];
-  for (const segment of splitCapabilityMentionSegments(
-    value,
-    cliApps,
-    mcpPresets,
-    sessionMentions,
-  )) {
-    if (segment.kind === "text") {
-      segments.push(...splitSkillReferenceSegments(segment.text));
-    } else {
-      segments.push(segment);
+  const structuredAtNamespaces = new Map<string, "handle" | "cli" | "mcp">();
+  sessionHandles.forEach((handle) => {
+    structuredAtNamespaces.set(handle.name.toLowerCase(), "handle");
+  });
+  attachedCliApps.forEach((app) => {
+    const name = app.name.toLowerCase();
+    if (!structuredAtNamespaces.has(name)) structuredAtNamespaces.set(name, "cli");
+  });
+  attachedMcpPresets.forEach((preset) => {
+    const name = preset.name.toLowerCase();
+    if (!structuredAtNamespaces.has(name)) structuredAtNamespaces.set(name, "mcp");
+  });
+  const structuredAtNames = new Set(structuredAtNamespaces.keys());
+  const replayCliApps = cliApps.filter((app) => {
+    const owner = structuredAtNamespaces.get(app.name.toLowerCase());
+    return owner === undefined || owner === "cli";
+  });
+  const replayMcpPresets = mcpPresets.filter((preset) => {
+    const owner = structuredAtNamespaces.get(preset.name.toLowerCase());
+    return owner === undefined || owner === "mcp";
+  });
+  const replaySessionHandles = sessionHandles.filter((handle) => (
+    structuredAtNamespaces.get(handle.name.toLowerCase()) === "handle"
+  ));
+  const hashSegments = splitSessionReferenceSegments(value, sessionMentions);
+  const hashSessionKeys = new Set(hashSegments.flatMap((segment) => (
+    segment.kind === "session" ? [segment.mention.session_key] : []
+  )));
+  const legacySessionMentions = sessionMentions.filter((mention) => (
+    !hashSessionKeys.has(mention.session_key)
+    && !structuredAtNames.has(mention.name.toLowerCase())
+  ));
+
+  const appendCapabilitiesAndSkills = (text: string) => {
+    for (const capability of splitCapabilityMentionSegments(
+      text,
+      replayCliApps,
+      replayMcpPresets,
+      replaySessionHandles,
+    )) {
+      if (capability.kind === "text") {
+        segments.push(...splitSkillReferenceSegments(capability.text));
+      } else {
+        segments.push(capability);
+      }
+    }
+  };
+
+  for (const hashSegment of hashSegments) {
+    if (hashSegment.kind === "session") {
+      segments.push(hashSegment);
+      continue;
+    }
+    for (const legacySegment of splitSessionReferenceSegments(
+      hashSegment.text,
+      legacySessionMentions,
+      undefined,
+      true,
+    )) {
+      if (legacySegment.kind === "session") {
+        segments.push(legacySegment);
+      } else {
+        appendCapabilitiesAndSkills(legacySegment.text);
+      }
     }
   }
   return segments;
@@ -71,14 +139,28 @@ export function UserMessageText({
   cliApps,
   mcpPresets,
   sessionMentions = [],
+  sessionHandles = [],
+  attachedCliApps = [],
+  attachedMcpPresets = [],
 }: {
   text: string;
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
   sessionMentions?: SessionMention[];
+  sessionHandles?: SessionHandle[];
+  attachedCliApps?: UICliAppAttachment[];
+  attachedMcpPresets?: UIMcpPresetAttachment[];
 }) {
   const { t } = useTranslation();
-  const segments = splitUserMessageSegments(text, cliApps, mcpPresets, sessionMentions);
+  const segments = splitUserMessageSegments(
+    text,
+    cliApps,
+    mcpPresets,
+    sessionMentions,
+    sessionHandles,
+    attachedCliApps,
+    attachedMcpPresets,
+  );
   return (
     <>
       {segments.map((segment, index) => {
@@ -94,6 +176,14 @@ export function UserMessageText({
           >
             {segment.name}
           </InlineTokenHighlight>
+        );
+        if (segment.kind === "session") return (
+          <SessionReferenceToken
+            key={`session-${segment.mention.session_key}-${index}`}
+            mention={segment.mention}
+            label={segment.text}
+            variant="message"
+          />
         );
         return (
           <CapabilityMentionToken

@@ -1180,7 +1180,6 @@
       "placeholderStreaming": "模型正在回复…",
       "inputAria": "消息输入框",
       "sendHint": "Enter 发送 · Shift+Enter 换行",
-      "runRuntimeTitle": "运行中 · {{elapsed}}",
       "goalStateStrip": "目标 · {{label}}",
       "goalStateFallback": "目标",
       "goalStateExpandAria": "查看完整目标",
@@ -1323,9 +1322,7 @@
         "cliDescription": "使用 @{{name}} 调用本地 CLI",
         "mcpDescription": "使用 @{{name}} 调用 MCP 服务",
         "cliTitle": "CLI 应用：{{name}}",
-        "mcpTitle": "MCP 服务：{{name}}",
-        "sessionBadge": "Nanobot 对话",
-        "sessionDescription": "引用历史会话 @{{name}}"
+        "mcpTitle": "MCP 服务：{{name}}"
       },
       "encoding": "处理中…",
       "remove": "移除附件",

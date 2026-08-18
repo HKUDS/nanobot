@@ -1180,7 +1180,6 @@
       "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
-      "runRuntimeTitle": "Running · {{elapsed}}",
       "goalStateStrip": "Goal · {{label}}",
       "goalStateFallback": "Goal",
       "goalStateExpandAria": "Show full goal",
@@ -1324,9 +1323,7 @@
         "cliDescription": "Use @{{name}} as a local CLI app",
         "mcpDescription": "Use @{{name}} as an MCP server",
         "cliTitle": "CLI app: {{name}}",
-        "mcpTitle": "MCP server: {{name}}",
-        "sessionBadge": "Nanobot conversation",
-        "sessionDescription": "Reference @{{name}} as a previous chat"
+        "mcpTitle": "MCP server: {{name}}"
       },
       "encoding": "Encoding…",
       "remove": "Remove attachment",

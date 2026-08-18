@@ -26,7 +26,13 @@ import {
   promptTop,
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  SessionHandle,
+  SlashCommand,
+  UIMessage,
+} from "@/lib/types";
 
 export interface ThreadViewportHandle {
   jumpToUserPrompt: (promptId: string) => void;
@@ -50,6 +56,7 @@ interface ThreadViewportProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
+  sessionDirectory?: SessionHandle[];
   forkBoundaryMessageCount?: number | null;
   hasMoreBefore?: boolean;
   loadingOlder?: boolean;
@@ -69,6 +76,7 @@ const SOFT_KEYBOARD_MIN_INSET_PX = 80;
 const SESSION_HANDOFF_EXIT_DURATION_MS = 80;
 const SESSION_HANDOFF_ENTER_DURATION_MS = 140;
 const SESSION_HANDOFF_OPACITY = 0.82;
+const EMPTY_SESSION_DIRECTORY: SessionHandle[] = [];
 export const INITIAL_HISTORY_WINDOW = 160;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
@@ -104,16 +112,16 @@ function isKeyboardEditableElement(element: Element | null): element is HTMLElem
   ].includes(element.type);
 }
 
-function isThreadDisclosureTarget(target: EventTarget | null): boolean {
-  return target instanceof Element
-    && target.closest("[data-thread-disclosure]") !== null;
-}
-
 function isKeyboardControl(element: Element | null): boolean {
   return element instanceof HTMLElement
     && element.closest(
       "button, a[href], select, [role='button'], [role='menuitem'], [role='option']",
     ) !== null;
+}
+
+function isThreadDisclosureTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest("[data-thread-disclosure]") !== null;
 }
 
 type ThreadScrollDirection = "backward" | "forward";
@@ -185,6 +193,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
+  sessionDirectory = EMPTY_SESSION_DIRECTORY,
   forkBoundaryMessageCount = null,
   hasMoreBefore = false,
   loadingOlder = false,
@@ -762,6 +771,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   slashCommands={slashCommands}
+                  sessionDirectory={sessionDirectory}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}

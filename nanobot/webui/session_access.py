@@ -14,9 +14,17 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
-from nanobot.webui.session_list_index import list_webui_sessions
+from nanobot.session.session_handles import (
+    SessionHandle,
+    SessionHandleDirectory,
+)
+from nanobot.session.session_messages import is_persisted_webui_session
+from nanobot.webui.session_list_index import (
+    list_webui_sessions,
+)
 from nanobot.webui.transcript import (
     build_webui_thread_response,
+    normalize_session_handles_metadata,
     normalize_session_mentions_metadata,
 )
 
@@ -27,6 +35,13 @@ class SessionMention(TypedDict):
     name: str
     session_key: str
     title: str
+
+
+class SessionHandleMention(TypedDict):
+    id: str
+    name: str
+    session_key: str
+    color_slot: int
 
 
 class SessionMessage(TypedDict):
@@ -103,6 +118,7 @@ class WebuiSessionAccess:
 
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
+        self._handles = SessionHandleDirectory(sessions)
 
     def _metadata(
         self,
@@ -228,7 +244,7 @@ class WebuiSessionAccess:
         for raw_mention in normalize_session_mentions_metadata(raw):
             mention = cast(SessionMention, raw_mention)
             key = mention["session_key"]
-            folded_name = mention["name"].lower()
+            folded_name = mention["name"].casefold()
             payload = self._metadata(key, exclude_session_key=exclude_session_key)
             if payload is None or key in seen_keys or folded_name in seen_names:
                 continue
@@ -240,6 +256,68 @@ class WebuiSessionAccess:
             seen_keys.add(key)
             seen_names.add(folded_name)
         return normalized
+
+    def normalize_session_handles(
+        self,
+        raw: object,
+        *,
+        source_session_key: str,
+    ) -> list[SessionHandleMention]:
+        """Validate active session handles selected by a WebUI user turn."""
+        normalized: list[SessionHandleMention] = []
+        seen_keys: set[str] = set()
+        seen_names: set[str] = set()
+        source_handle = self._session_handle(source_session_key)
+        if source_handle is None:
+            return []
+        for raw_handle in normalize_session_handles_metadata(raw):
+            key = str(raw_handle["session_key"])
+            raw_handle_id = cast(object, raw_handle.get("id"))
+            if not isinstance(raw_handle_id, str) or key in seen_keys:
+                continue
+            if key == source_session_key:
+                handle = source_handle
+            else:
+                payload = self._metadata(key, exclude_session_key=None)
+                if payload is None or not key.startswith("websocket:"):
+                    continue
+                raw_metadata = payload.get("metadata")
+                if not isinstance(raw_metadata, Mapping):
+                    continue
+                metadata = cast(Mapping[str, object], raw_metadata)
+                if metadata.get("webui") is not True:
+                    continue
+                handle = self._handles.resolve(
+                    str(raw_handle["name"]),
+                )
+            if (
+                handle is None
+                or handle.session_key != key
+                or handle.id != raw_handle_id
+                or handle.name != str(raw_handle["name"])
+            ):
+                continue
+            folded_name = handle.name.casefold()
+            if folded_name in seen_names:
+                continue
+            normalized.append({
+                "id": handle.id,
+                "name": handle.name,
+                "session_key": key,
+                "color_slot": handle.color_slot,
+            })
+            seen_keys.add(key)
+            seen_names.add(folded_name)
+        return normalized
+
+    def _session_handle(
+        self,
+        session_key: str,
+    ) -> SessionHandle | None:
+        payload = self._metadata(session_key, exclude_session_key=None)
+        if payload is None or not is_persisted_webui_session(session_key, payload):
+            return None
+        return self._handles.handle_for_session(session_key)
 
 
 def session_mentions_runtime_context(

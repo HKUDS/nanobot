@@ -1166,7 +1166,6 @@
       "placeholderStreaming": "モデルが応答しています…",
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
-      "runRuntimeTitle": "実行中 · {{elapsed}}",
       "goalStateStrip": "目標 · {{label}}",
       "goalStateFallback": "目標",
       "goalStateExpandAria": "目標の全文を表示",
@@ -1326,9 +1325,7 @@
         "cliDescription": "@{{name}} をローカル CLI アプリとして使用",
         "mcpDescription": "@{{name}} を MCP サーバーとして使用",
         "cliTitle": "CLI アプリ: {{name}}",
-        "mcpTitle": "MCP サーバー: {{name}}",
-        "sessionBadge": "Nanobot の会話",
-        "sessionDescription": "@{{name}} を過去のチャットとして参照"
+        "mcpTitle": "MCP サーバー: {{name}}"
       },
       "workspace": {
         "accessAria": "ワークスペースのアクセスモード",

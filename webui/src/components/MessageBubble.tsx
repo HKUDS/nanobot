@@ -20,6 +20,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
+import { sessionHandleColor } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
@@ -48,6 +49,7 @@ import type {
   UIMessage,
   MessageDeliveryErrorKind,
   MessageDeliveryStatus,
+  SessionHandle,
 } from "@/lib/types";
 
 interface MessageBubbleProps {
@@ -61,6 +63,7 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
+  sessionDirectory?: SessionHandle[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
 }
@@ -259,6 +262,77 @@ function UserDeliveryStatus({
   );
 }
 
+function IncomingSessionMessage({
+  message,
+  showCopyAction,
+  sessionDirectory,
+  onOpenFilePreview,
+}: {
+  message: UIMessage;
+  showCopyAction: boolean;
+  sessionDirectory: SessionHandle[];
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  const handle = message.sessionMessage!.session;
+  const activeSession = sessionDirectory.find((candidate) => candidate.id === handle.id);
+  const color = sessionHandleColor(handle.color_slot);
+  const createdAtLabel = formatMessageEndTime(message.createdAt);
+  const handleName = `@${handle.name}`;
+  const name = <span className="font-medium text-foreground">{handleName}</span>;
+
+  return (
+    <div
+      data-handle-message="incoming"
+      className="group w-full text-[15px]"
+      style={{ lineHeight: "var(--cjk-line-height)" }}
+    >
+      <div
+        data-handle-message-body
+        className="min-w-0 rounded-es-[16px] border-s-2 bg-background pb-1 ps-2.5"
+        style={{ borderInlineStartColor: color }}
+      >
+        <div className="mb-1.5 flex items-center text-[12px] text-muted-foreground">
+          {activeSession?.session_key ? (
+            <a
+              href={`#/chat/${encodeURIComponent(activeSession.session_key)}`}
+              className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              {name}
+            </a>
+          ) : name}
+        </div>
+        <div data-assistant-selectable="true" className="min-w-0">
+          <MarkdownText
+            preserveStreamingLayout
+            onOpenFilePreview={onOpenFilePreview}
+            sessionHandles={sessionDirectory}
+          >
+            {message.content}
+          </MarkdownText>
+        </div>
+      </div>
+      {createdAtLabel || showCopyAction ? (
+        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <div
+            data-handle-footer
+            className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
+          >
+            {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
+            {createdAtLabel ? (
+              <MessageTimestamp
+                timestamp={message.createdAt}
+                tooltipLabel={fmtDateTime(message.createdAt)}
+              >
+                {createdAtLabel}
+              </MessageTimestamp>
+            ) : null}
+          </div>
+        </TooltipProvider>
+      ) : null}
+    </div>
+  );
+}
+
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
@@ -268,6 +342,7 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
+  sessionDirectory = [],
   onOpenFilePreview,
   onForkFromHere,
 }: MessageBubbleProps) {
@@ -283,6 +358,17 @@ export function MessageBubble({
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} />;
+  }
+
+  if (message.role === "user" && message.sessionMessage?.direction === "incoming") {
+    return (
+      <IncomingSessionMessage
+        message={message}
+        showCopyAction={showCopyAction}
+        sessionDirectory={sessionDirectory}
+        onOpenFilePreview={onOpenFilePreview}
+      />
+    );
   }
 
   if (message.role === "user") {
@@ -308,6 +394,9 @@ export function MessageBubble({
           cliApps={mentionCliApps}
           mcpPresets={mentionMcpPresets}
           sessionMentions={message.sessionMentions}
+          sessionHandles={message.sessionHandles}
+          attachedCliApps={message.cliApps}
+          attachedMcpPresets={message.mcpPresets}
         />
       </>
     ) : (
@@ -316,6 +405,9 @@ export function MessageBubble({
         cliApps={mentionCliApps}
         mcpPresets={mentionMcpPresets}
         sessionMentions={message.sessionMentions}
+        sessionHandles={message.sessionHandles}
+        attachedCliApps={message.cliApps}
+        attachedMcpPresets={message.mcpPresets}
       />
     );
     return (
@@ -433,6 +525,7 @@ export function MessageBubble({
               streaming={!!message.isStreaming}
               preserveStreamingLayout
               onOpenFilePreview={onOpenFilePreview}
+              sessionHandles={sessionDirectory}
             >
               {message.content}
             </MarkdownText>

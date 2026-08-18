@@ -21,6 +21,7 @@ function makeClient() {
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const runGenerationByChatId = new Map<string, number>();
   const latestRunTurnIdByChatId = new Map<string, string>();
@@ -108,6 +109,13 @@ function makeClient() {
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
     getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
+    onRunStatus: (handler: (chatId: string, startedAt: number | null) => void) => {
+      runStatusHandlers.add(handler);
+      for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
+      return () => {
+        runStatusHandlers.delete(handler);
+      };
+    },
     finishRunLocally: vi.fn((chatId: string) => {
       runStartedAtByChatId.delete(chatId);
       latestRunTurnIdByChatId.delete(chatId);
@@ -413,6 +421,164 @@ describe("ThreadShell", () => {
         ok: false,
         status: 404,
         json: async () => ({}),
+      }),
+    );
+  });
+
+  it("keeps the current handle handle visible in the thread header", async () => {
+    const client = makeClient();
+    const currentSession = {
+      ...session("handle-handle"),
+      handle: {
+        id: "handle-current",
+        name: "mira",
+        session_key: "websocket:handle-handle",
+        color_slot: 3,
+      },
+    };
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={currentSession}
+        title="A title that may change independently"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const handle = await screen.findByTestId("thread-handle-handle");
+    expect(handle).toHaveTextContent("@mira");
+    expect(handle.querySelector("[aria-hidden]")).toBeNull();
+    const headerDecoration = handle.querySelector("span[style*='border-bottom-color']");
+    expect(headerDecoration?.getAttribute("style"))
+      .toContain("var(--session-handle-3)");
+    expect(headerDecoration?.querySelector(".text-foreground"))
+      .toHaveClass("text-foreground");
+  });
+
+  it("pins each handle identity inside its workbench pane", async () => {
+    const client = makeClient();
+    const currentSession = {
+      ...session("pane-handle"),
+      handle: {
+        id: "handle-pane",
+        name: "kai",
+        session_key: "websocket:pane-handle",
+        color_slot: 2,
+      },
+    };
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={currentSession}
+        title="Investigate incoming messages"
+        onToggleSidebar={() => {}}
+        hideHeaderTitle
+        headerActive={false}
+      />,
+    ));
+
+    expect(screen.queryByTestId("thread-handle-handle")).not.toBeInTheDocument();
+    const identity = await screen.findByTestId("pane-handle-identity");
+    expect(identity).toHaveAttribute("data-active", "false");
+    expect(identity).toHaveAttribute("aria-label", "Session @kai");
+    expect(identity.querySelector("[data-pane-handle-handle]")).toHaveTextContent("@kai");
+    expect(identity.querySelector("[aria-hidden]")).toBeNull();
+    const paneDecoration = identity.querySelector(
+      "[data-pane-handle-handle] span[style*='border-bottom-color']",
+    );
+    expect(paneDecoration?.getAttribute("style")).toContain("var(--session-handle-2)");
+    const paneText = paneDecoration?.querySelector(".text-foreground");
+    expect(paneText).toHaveClass("text-foreground");
+    expect(paneText).not.toHaveClass("opacity-80");
+    expect(identity).not.toHaveTextContent("Investigate incoming messages");
+    expect(identity.className).not.toContain("bg-");
+    expect(identity.className).not.toContain("border-");
+  });
+
+  it("sends a structured handle mention through the focused thread", async () => {
+    const client = makeClient();
+    const source = {
+      ...session("source"),
+      handle: {
+        id: "handle_00000000000000000000000000000001",
+        name: "source",
+        session_key: "websocket:source",
+        color_slot: 1,
+      },
+    };
+    const reviewer = {
+      ...session("reviewer"),
+      handle: {
+        id: "handle_00000000000000000000000000000002",
+        name: "reviewer",
+        session_key: "websocket:reviewer",
+        color_slot: 2,
+      },
+    };
+    render(wrap(
+      client,
+      <ThreadShell
+        session={source}
+        sessions={[source, reviewer]}
+        title="Source"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@rev", selectionStart: 4 } });
+    fireEvent.keyDown(input, { key: "Tab" });
+    const message = `${input.value}check this`;
+    fireEvent.change(input, { target: { value: message, selectionStart: message.length } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      source.chatId,
+      message,
+      undefined,
+      expect.objectContaining({
+        sessionHandles: [reviewer.handle],
+        turnId: expect.any(String),
+      }),
+    );
+  });
+
+  it("offers the focused session's own handle handle as a structured mention", async () => {
+    const client = makeClient();
+    const source = {
+      ...session("source-self"),
+      handle: {
+        id: "handle_00000000000000000000000000000003",
+        name: "bea",
+        session_key: "websocket:source-self",
+        color_slot: 3,
+      },
+    };
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={source}
+        sessions={[source]}
+        title="Source"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@be", selectionStart: 3 } });
+    fireEvent.keyDown(input, { key: "Tab" });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      source.chatId,
+      "@bea",
+      undefined,
+      expect.objectContaining({
+        sessionHandles: [source.handle],
+        turnId: expect.any(String),
       }),
     );
   });
@@ -787,7 +953,7 @@ describe("ThreadShell", () => {
     fireEvent.click(badge);
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Message input" }), {
       target: { value: "hello" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Configure model" }));
@@ -941,6 +1107,39 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByText("keep this only in memory")).not.toBeInTheDocument();
     });
+  });
+
+  it("does not offer persisted sessions inside a temporary chat", async () => {
+    const client = makeClient();
+    const handle = {
+      ...session("handle"),
+      title: "Reviewer",
+      handle: {
+        id: "handle_11111111111111111111111111111111",
+        name: "reviewer",
+        color_slot: 3,
+        session_key: "websocket:handle",
+      },
+    };
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("temporary")}
+        sessions={[handle]}
+        title="Temporary chat"
+        temporary
+        temporaryChatIds={["temporary"]}
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    });
+
+    expect(screen.queryByRole("group", { name: "Nanobot conversations" }))
+      .not.toBeInTheDocument();
   });
 
   it("highlights sent skill references without skill metadata", async () => {
@@ -2052,7 +2251,7 @@ describe("ThreadShell", () => {
     );
 
     await waitFor(() => expect(historyCalls).toBe(1));
-    const input = screen.getByRole("textbox", { name: "Message input" });
+    const input = screen.getByRole("combobox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "rejected local turn" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.getByText("rejected local turn")).toBeInTheDocument());
@@ -2289,7 +2488,7 @@ describe("ThreadShell", () => {
     act(() => client._emitSessionUpdate("chat-version-a"));
     await waitFor(() => expect(chatACalls).toBe(2));
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Message input" }), {
       target: { value: "new question" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -2390,7 +2589,7 @@ describe("ThreadShell", () => {
         turn_id: newTurnId,
       });
     });
-    const input = screen.getByRole("textbox", { name: "Message input" });
+    const input = screen.getByRole("combobox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "queued for the new run" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(client.sendMessage).not.toHaveBeenCalled();
@@ -2689,7 +2888,7 @@ describe("ThreadShell", () => {
         turn_id: turnId,
       });
     });
-    const input = screen.getByRole("textbox", { name: "Message input" });
+    const input = screen.getByRole("combobox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "queued guidance" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(client.sendMessage).not.toHaveBeenCalled();
@@ -2792,7 +2991,7 @@ describe("ThreadShell", () => {
       });
     });
     await waitFor(() => expect(screen.getByText("partial answer")).toBeInTheDocument());
-    const input = screen.getByRole("textbox", { name: "Message input" });
+    const input = screen.getByRole("combobox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "queued guidance" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("queued guidance")).toBeInTheDocument();
@@ -2888,7 +3087,7 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Continuing the search.")).toBeInTheDocument());
-    const input = screen.getByRole("textbox", { name: "Message input" });
+    const input = screen.getByRole("combobox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "How is it going?" } });
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -3930,41 +4129,56 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("offers only same-project sessions in restricted mode", async () => {
-    const client = makeClient();
-    const currentScope = {
-      project_path: "/projects/current",
-      access_mode: "restricted" as const,
-    };
-    const sameProject = {
-      ...session("same-project"),
-      title: "Same project",
-      workspaceScope: currentScope,
-    };
-    const otherProject = {
-      ...session("other-project"),
-      title: "Other project",
-      workspaceScope: {
-        project_path: "/projects/other",
-        access_mode: "restricted" as const,
-      },
-    };
+  it.each(["restricted", "full"] as const)(
+    "offers routable sessions across projects in %s mode",
+    async (accessMode) => {
+      const client = makeClient();
+      const currentScope = {
+        project_path: "/projects/current",
+        access_mode: accessMode,
+      };
+      const sameProject = {
+        ...session("same-project"),
+        title: "Same project",
+        workspaceScope: currentScope,
+        handle: {
+          id: "handle_same_project",
+          name: "same-project",
+          color_slot: 1,
+          session_key: "websocket:same-project",
+        },
+      };
+      const otherProject = {
+        ...session("other-project"),
+        title: "Other project",
+        workspaceScope: {
+          project_path: "/projects/other",
+          access_mode: accessMode,
+        },
+        handle: {
+          id: "handle_other_project",
+          name: "other-project",
+          color_slot: 2,
+          session_key: "websocket:other-project",
+        },
+      };
 
-    render(wrap(
-      client,
-      <ThreadShell
-        session={session("current")}
-        sessions={[sameProject, otherProject]}
-        title="Current"
-        onToggleSidebar={() => {}}
-        workspaceScope={currentScope}
-      />,
-    ));
+      render(wrap(
+        client,
+        <ThreadShell
+          session={session("current")}
+          sessions={[sameProject, otherProject]}
+          title="Current"
+          onToggleSidebar={() => {}}
+          workspaceScope={currentScope}
+        />,
+      ));
 
-    const input = await screen.findByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+      const input = await screen.findByLabelText("Message input");
+      fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
-    expect(screen.getByRole("option", { name: /Same project/i })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Other project/i })).not.toBeInTheDocument();
-  });
+      expect(screen.getByRole("option", { name: /^@same-project$/i })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /^@other-project$/i })).toBeInTheDocument();
+    },
+  );
 });
