@@ -464,6 +464,32 @@ async def test_posted_thread_event_uses_thread_policy():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("post_type", ["system_join_channel", "system_leave_channel"])
+async def test_posted_event_ignores_system_posts(post_type: str):
+    channel, _ = _make_channel({"groupPolicy": "open"})
+    channel._self_id = "bot_id"
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "posted",
+            "data": {
+                "channel_type": "O",
+                "post": json.dumps({
+                    "id": "system_post_1",
+                    "user_id": "user_1",
+                    "channel_id": "channel_1",
+                    "message": "A user joined or left the channel.",
+                    "type": post_type,
+                }),
+            },
+            "broadcast": {},
+        }
+
+        await channel._handle_ws_message(ws_msg)
+
+    mock_handle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_group_policy_in_thread_allowlist():
     """Thread uses allowlist policy when configured."""
     channel, fake = _make_channel({

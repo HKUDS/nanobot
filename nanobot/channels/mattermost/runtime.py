@@ -221,6 +221,10 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("failed to parse post json")
             return
 
+        post_type = post.get("type")
+        if isinstance(post_type, str) and post_type.startswith("system_"):
+            return
+
         sender_id = post.get("user_id", "")
         channel_id = post.get("channel_id", "")
         message_text = post.get("message", "")
