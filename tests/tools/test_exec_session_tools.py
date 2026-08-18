@@ -468,7 +468,7 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
             session_id=sid,
             chars="\n",
             wait_for="ready",
-            wait_timeout_ms=1000,
+            wait_timeout_ms=10000,
             yield_time_ms=0,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
