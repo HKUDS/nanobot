@@ -224,7 +224,6 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
         session,
         runtime=runtime,
         replay_max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
-        known_usage=None,
     )
     assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
     assert all(

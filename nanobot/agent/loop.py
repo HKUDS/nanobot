@@ -1811,14 +1811,10 @@ class AgentLoop:
             runtime.context_window_tokens
         )
         if not ctx.ephemeral:
-            # OpenAI-style usage.prompt_tokens is the authoritative count for
-            # providers that report it (OpenAI/OpenRouter); it guards against
-            # local estimation undercounting the live conversation.
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 runtime=runtime,
                 replay_max_messages=replay_max_messages,
-                known_usage=self._last_usage.get("prompt_tokens") or None,
             )
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
@@ -1985,6 +1981,7 @@ class AgentLoop:
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
         if ctx.usage and not ctx.ephemeral:
             session.metadata["_last_usage"] = dict(ctx.usage)
+            session.metadata["_last_usage_consolidation_cursor"] = session.last_consolidated
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,

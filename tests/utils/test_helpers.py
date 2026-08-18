@@ -198,6 +198,22 @@ def test_estimate_chain_uses_known_usage_as_floor(monkeypatch) -> None:
     assert source.endswith("+usage")
 
 
+def test_estimate_chain_uses_known_usage_over_provider_counter() -> None:
+    class Provider:
+        def estimate_prompt_tokens(self, messages, tools, model):
+            return 100, "provider"
+
+    est, source = helpers.estimate_prompt_tokens_chain(
+        Provider(),
+        "test-model",
+        [{"role": "user", "content": "short"}],
+        known_usage=5000,
+    )
+
+    assert est == 5000
+    assert source == "provider+usage"
+
+
 def test_estimate_chain_keeps_estimate_when_usage_is_lower(monkeypatch) -> None:
     monkeypatch.setattr(helpers, "_get_token_encoding", lambda model=None: _FakeEncoding("o200k_base"))
     monkeypatch.setattr(helpers, "_estimate_tools_tokens", lambda enc, tools, **kw: 0)

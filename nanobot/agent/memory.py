@@ -938,6 +938,19 @@ class Consolidator:
             }
             self.sessions.save(session)
 
+    @staticmethod
+    def _session_known_prompt_tokens(session: Session) -> int | None:
+        """Return usage still applicable to the uncompressed session tail."""
+        usage = session.metadata.get("_last_usage")
+        cursor = session.metadata.get("_last_usage_consolidation_cursor")
+        if not isinstance(usage, dict) or cursor != session.last_consolidated:
+            return None
+        usage_data = cast(dict[str, Any], usage)
+        prompt_tokens = usage_data.get("prompt_tokens")
+        if isinstance(prompt_tokens, bool) or not isinstance(prompt_tokens, int):
+            return None
+        return prompt_tokens if prompt_tokens > 0 else None
+
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -1080,6 +1093,8 @@ class Consolidator:
                 replay_max_messages,
                 runtime=runtime,
             )
+            if known_usage is None:
+                known_usage = self._session_known_prompt_tokens(session)
             estimate_kwargs: dict[str, int] = {}
             if known_usage is not None:
                 estimate_kwargs["known_usage"] = known_usage

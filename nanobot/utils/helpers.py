@@ -802,17 +802,25 @@ def estimate_prompt_tokens_chain(
     and, when higher than the estimate, is used as a floor so undercounting
     hidden template/system tokens never keeps consolidation from firing.
     """
+    estimated = 0
+    estimate_source = "none"
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
         with suppress(Exception):
             tokens, source = cast(tuple[object, object], provider_counter(messages, tools, model))
             if isinstance(tokens, (int, float)) and tokens > 0:
-                return int(tokens), str(source or "provider_counter")
-    estimated, source = _estimate_prompt_tokens_with_source(messages, tools, model=model)
+                estimated = int(tokens)
+                estimate_source = str(source or "provider_counter")
+    if estimated <= 0:
+        estimated, estimate_source = _estimate_prompt_tokens_with_source(
+            messages,
+            tools,
+            model=model,
+        )
     if known_usage and known_usage > estimated:
-        return int(known_usage), f"{source}+usage"
+        return int(known_usage), f"{estimate_source}+usage"
     if estimated > 0:
-        return int(estimated), source
+        return int(estimated), estimate_source
     return 0, "none"
 
 
