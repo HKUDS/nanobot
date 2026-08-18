@@ -234,6 +234,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
         state = self._read_state()
         if state and result.status.pid == state.get("pid"):
             state["launch_mode"] = "background"
+            state["pending_pid_handoff"] = True
             self._write_state(state)
         return RuntimeResult(True, result.message, self.status())
 
@@ -288,14 +289,24 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             lease.wait_for_shutdown()
             with self._transition_lock(), self._lifecycle_lock():
                 current = self.status()
-                if current.running and current.pid != pid:
+                state = self._read_state() or {}
+                pid_handoff = (
+                    self.platform_name == "Windows"
+                    and current.running
+                    and current.pid != pid
+                    and current.pid == os.getppid()
+                    and state.get("pid") == current.pid
+                    and state.get("launch_mode") == "background"
+                    and state.get("pending_pid_handoff") is True
+                )
+                if current.running and current.pid != pid and not pid_handoff:
                     raise GatewayAlreadyRunningError(current)
                 if lease._shutdown_pending_locked():
                     continue
-                state = self._read_state() or {}
                 launch_mode: GatewayLaunchMode = (
                     "background"
-                    if state.get("pid") == pid and state.get("launch_mode") == "background"
+                    if state.get("launch_mode") == "background"
+                    and (state.get("pid") == pid or pid_handoff)
                     else "foreground"
                 )
                 state.update(
@@ -311,6 +322,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                         "launch_mode": launch_mode,
                     }
                 )
+                state.pop("pending_pid_handoff", None)
                 state.pop("stable_identity", None)
                 state.update(self.process_identity_record(pid))
                 self._write_state(state)

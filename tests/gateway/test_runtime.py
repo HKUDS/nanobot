@@ -120,6 +120,29 @@ def _wait_for_claim(
     pytest.fail(f"gateway claim failed: returncode={process.poll()}, {detail}")
 
 
+class _ManagedForegroundChildRuntime(GatewayRuntime):
+    """Launch the foreground claim helper through the managed-process path."""
+
+    def __init__(self, *, data_dir: Path, marker: Path) -> None:
+        super().__init__(
+            paths=_paths(data_dir),
+            platform_name="Windows",
+            python_executable=sys.executable,
+        )
+        self._data_dir = data_dir
+        self._marker = marker
+
+    def _build_child_command(self, options: GatewayStartOptions) -> list[str]:
+        return [
+            self.python_executable,
+            "-c",
+            _FOREGROUND_CHILD,
+            str(self._data_dir),
+            "30",
+            str(self._marker),
+        ]
+
+
 def test_paths_use_stable_instance_suffix_for_custom_selectors(tmp_path):
     default_paths = GatewayRuntimePaths.for_instance(data_dir=tmp_path)
     first_paths = GatewayRuntimePaths.for_instance(
@@ -773,6 +796,32 @@ def test_start_background_uses_windows_process_group_flags(tmp_path, monkeypatch
     assert result.ok is True
     assert "creationflags" in calls[0]["kwargs"]
     assert "start_new_session" not in calls[0]["kwargs"]
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or sys.prefix == sys.base_prefix,
+    reason="requires a Windows virtualenv launcher",
+)
+def test_managed_background_hands_off_virtualenv_launcher_pid(tmp_path: Path) -> None:
+    marker = tmp_path / "managed-foreground.marker"
+    runtime = _ManagedForegroundChildRuntime(data_dir=tmp_path, marker=marker)
+
+    result = runtime.start_on_demand(GatewayStartOptions(port=18790))
+    launcher = runtime._owned_process
+    assert isinstance(launcher, subprocess.Popen)
+    try:
+        claimed_pid = _wait_for_claim(launcher, marker)
+
+        status = runtime.status()
+        assert result.ok is True
+        assert claimed_pid != launcher.pid
+        assert status.pid == claimed_pid
+        assert status.launch_mode == "background"
+        assert status.lifetime == "on_demand"
+    finally:
+        if runtime.status().running:
+            runtime.stop(timeout_s=3)
+        launcher.wait(timeout=3)
 
 
 def test_windows_process_probe_never_sends_ctrl_c(monkeypatch):
