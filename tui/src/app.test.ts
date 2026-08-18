@@ -1674,21 +1674,23 @@ describe("NanobotTui layout", () => {
     expect(setup.renderer.getSelection()).toBeNull()
   })
 
-  test("returns text input focus when other TUI content is clicked", async () => {
+  test("keeps text input focus when the focusable transcript is clicked", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)
     const ui = app as unknown as {
       composer: TextareaRenderable
-      status: TextRenderable
+      transcript: {
+        root: { x: number; y: number; focused: boolean }
+      }
     }
     app.accept({ event: "delta", chat_id: "chat", text: "clickable answer" })
     app.accept({ event: "stream_end", chat_id: "chat" })
     await setup.flush()
 
-    ui.composer.blur()
-    await setup.mockMouse.click(ui.status.x, ui.status.y)
+    await setup.mockMouse.click(ui.transcript.root.x + 1, ui.transcript.root.y + 1)
 
     expect(ui.composer.focused).toBe(true)
+    expect(ui.transcript.root.focused).toBe(false)
   })
 
   test("animates one stable status line while the agent works", async () => {

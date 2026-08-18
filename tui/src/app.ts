@@ -511,7 +511,13 @@ export class NanobotTui {
       backgroundColor: RGBA.defaultBackground(),
       onMouseDown: (event) => {
         if (event.button !== 0) return
-        if (!this.diffViewer.visible) this.composer.focus()
+        if (!this.diffViewer.visible) {
+          // OpenTUI applies automatic focus after mouse handlers run. Prevent
+          // a focusable transcript ancestor from stealing text focus back
+          // after the composer has been restored here.
+          event.preventDefault()
+          this.composer.focus()
+        }
         // Runtime pickers are transient popovers. A primary click anywhere
         // outside their trigger or body dismisses them; hide() restores the
         // composer focus through the shared visibility callback.
