@@ -438,7 +438,10 @@ async def test_web_search_mst_no_package(monkeypatch) -> None:
         tool = WebSearchTool(config=WebSearchConfig(provider="mst"))
         result = await tool.execute("test query")
 
-    assert "Error:" in result and "mst-python" in result
+    assert (
+        "mst support is not installed" in result
+        and "nanobot plugins enable mst" in result
+    )
 
 
 @pytest.mark.asyncio

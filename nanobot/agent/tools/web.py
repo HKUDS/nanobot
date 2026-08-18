@@ -712,8 +712,7 @@ class WebSearchTool(Tool):
             )
         except ImportError:
             return ToolResult.error(
-                "Error: mst-python package not installed. "
-                "Run: uv pip install mst-python"
+                "mst support is not installed. Run `nanobot plugins enable mst`."
             )
 
         mst_error_cls: type[Exception] = cast(type[Exception], MSTError)
