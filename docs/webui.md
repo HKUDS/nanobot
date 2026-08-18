@@ -79,7 +79,7 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
-| Composer | Send text, images, voice input, slash commands, and `@` mentions for sessions, Apps, or MCP presets |
+| Composer | Send text, images, voice input, slash commands, and `@` mentions for topics, Apps, or MCP presets |
 | Channels | Connect and validate chat platforms, install their optional support, and manage saved channel setup |
 | Apps | Install, test, update, and use local CLI App adapters and MCP presets |
 | Skills | Inspect and manage installed skills, or discover skills from supported marketplaces |
@@ -106,7 +106,7 @@ diff** to expand the change; large diffs may hide unchanged lines or truncate th
 inline preview. Use **Open file** from a file edit to open the read-only file
 preview panel.
 
-File previews follow the active session access mode. Restricted workspace access
+File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
 
@@ -135,7 +135,7 @@ or a result you must retain.
 ## Workspace and Access
 
 Use the workspace picker before starting project-specific work. This gives the
-agent the right project context for file paths, shell commands, and session
+agent the right project context for file paths, shell commands, and topic
 metadata. A locally hosted WebUI opens the operating system's folder chooser
 when one is available; remote deployments keep the manual absolute path entry.
 
@@ -174,14 +174,14 @@ clients.
 
 The composer supports plain messages, image attachments, voice input when
 transcription is configured, slash commands, and `@` mentions for installed Apps,
-MCP presets, or persisted sessions. Sessions have short, pronounceable handles such as
-`@luma`; titles are display text rather than addresses. Select a session
+MCP presets, or persisted topics. Topics have short, pronounceable handles such as
+`@luma`; titles are display text rather than addresses. Select a topic
 from the menu, or drag it from the sidebar, to attach its structured reference.
 Typing the same text without selecting it remains plain text.
 
-The agent can inspect an attached session with `read_session`. It can discover other
-persisted sessions with `list_sessions` and send asynchronous messages with
-`send_session_message`; session messaging is not limited by workspace scope.
+The agent can inspect an attached topic with `read_session`. It can discover other
+persisted topics with `list_sessions` and send asynchronous messages with
+`send_session_message`; topic messaging is not limited by workspace scope.
 The model badge shows the current model or preset and links to model settings when
 setup is incomplete.
 
@@ -309,7 +309,7 @@ with the content that should be delivered.
 
 ## Settings
 
-Settings is the control surface for the browser session and gateway-backed
+Settings is the control surface for browser-local and gateway-backed
 runtime configuration. Use it to review or adjust model presets, providers,
 image generation, voice transcription, web tools, chat channels, Apps,
 Automations, Skills, runtime identity, and advanced safety controls.
