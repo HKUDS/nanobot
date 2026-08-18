@@ -88,6 +88,35 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("retries an API request only once after reauthentication", async () => {
+    const original = globalThis.fetch
+    const authorizations: Array<string | null> = []
+    let reauthenticationRequests = 0
+    globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      authorizations.push(new Headers(init?.headers).get("Authorization"))
+      return Promise.resolve(new Response("Unauthorized", { status: 401 }))
+    }) as typeof fetch
+
+    try {
+      await expect(fetchSlashCommands(
+        "http://nanobot.test",
+        "expired-api-token",
+        async (rejectedApiToken) => {
+          expect(rejectedApiToken).toBe("expired-api-token")
+          reauthenticationRequests += 1
+          return { apiUrl: "http://nanobot.test", apiToken: "fresh-api-token" }
+        },
+      )).rejects.toMatchObject({ message: "command request failed: HTTP 401" })
+      expect(reauthenticationRequests).toBe(1)
+      expect(authorizations).toEqual([
+        "Bearer expired-api-token",
+        "Bearer fresh-api-token",
+      ])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("waits for bootstrap before opening the websocket", async () => {
     const original = globalThis.WebSocket
     let resolveConnection: ((value: {

@@ -549,6 +549,85 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("refreshes expired API credentials before opening sessions", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    let expired = false
+    let bootstrapRequests = 0
+    const sessionAuthorizations: Array<string | null> = []
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      const authorization = new Headers(init?.headers).get("Authorization")
+      if (url.endsWith("/webui/bootstrap")) {
+        bootstrapRequests += 1
+        return new Response(JSON.stringify({
+          ws_url: "ws://nanobot.test/ws",
+          token: "fresh-websocket-token",
+          api_token: "fresh-api-token",
+        }))
+      }
+      if (authorization === "Bearer expired-api-token") {
+        if (expired) return new Response("Unauthorized", { status: 401 })
+      }
+      if (url.endsWith("/api/sessions")) {
+        sessionAuthorizations.push(authorization)
+        return new Response(JSON.stringify({
+          sessions: [{ key: "websocket:chat", title: "Current chat" }],
+        }))
+      }
+      if (url.endsWith("/api/commands")) {
+        return new Response(JSON.stringify({ commands: [] }))
+      }
+      if (url.endsWith("/api/settings")) {
+        return new Response(JSON.stringify({ model_presets: [] }))
+      }
+      if (url.endsWith("/api/workspaces")) {
+        return new Response(JSON.stringify({ controls: {} }))
+      }
+      if (url.includes("/api/settings/cli-apps")) {
+        return new Response(JSON.stringify({ apps: [] }))
+      }
+      if (url.endsWith("/api/settings/mcp-presets")) {
+        return new Response(JSON.stringify({ presets: [] }))
+      }
+      return new Response("{}")
+    }) as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      {
+        ...options,
+        bootstrapUrl: "http://nanobot.test/webui/bootstrap",
+        bootstrapSecret: "bootstrap-secret",
+        apiUrl: "http://nanobot.test",
+        apiToken: "expired-api-token",
+      },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      ready: boolean
+      composer: TextareaRenderable
+      sessionMenu: { visible: boolean }
+      status: { plainText: string }
+    }
+
+    try {
+      await waitUntil(() => ui.ready)
+      expired = true
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
+
+      await waitUntil(() => bootstrapRequests === 1)
+      await waitUntil(() => ui.sessionMenu.visible)
+      expect(bootstrapRequests).toBe(1)
+      expect(sessionAuthorizations.at(-1)).toBe("Bearer fresh-api-token")
+      expect(ui.status.plainText).not.toContain("HTTP 401")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("tracks canonical presets without overwriting a session override", async () => {
     setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)

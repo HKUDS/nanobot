@@ -26,8 +26,10 @@ import {
   fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
+  type ApiReauthenticator,
   type ConnectionStatus,
   type FileEditEvent,
+  type GatewayApiConnection,
   type HistoryMessage,
   type InboundEvent,
   type MentionCandidate,
@@ -428,6 +430,8 @@ export class NanobotTui {
   private hostBlocked = false
   private hostWorkspace: string
   private hostBranch: string
+  private readonly apiReauthenticator: ApiReauthenticator | undefined
+  private apiRefreshPromise: Promise<GatewayApiConnection> | null = null
 
   private constructor(
     renderer: CliRenderer,
@@ -443,6 +447,9 @@ export class NanobotTui {
     this.modelPreset = options.modelPreset
     this.hostWorkspace = options.hostWorkspace || options.workspace
     this.hostBranch = options.branch || ""
+    this.apiReauthenticator = options.bootstrapUrl
+      ? (rejectedApiToken) => this.refreshApiConnection(rejectedApiToken)
+      : undefined
     this.sessionModelPreset = options.chatId ? undefined : null
     this.backgroundKnown = options.theme !== "auto" || renderer.themeMode !== null
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
@@ -576,6 +583,7 @@ export class NanobotTui {
         modelPreset: this.modelPreset,
         workspace: options.workspace,
         access: options.access,
+        reauthenticateApi: this.apiReauthenticator,
         // Runtime settings are session state. Changing them during a turn is
         // safe and takes effect when the next provider call starts.
         available: () => this.ready,
@@ -1123,7 +1131,13 @@ export class NanobotTui {
       }
       if (restoring || (!this.historyLoaded && this.options.chatId)) {
         this.historyLoaded = true
-        const history = await fetchHistory(this.options.apiUrl, this.options.apiToken, chatId)
+        const history = await fetchHistory(
+          this.options.apiUrl,
+          this.options.apiToken,
+          chatId,
+          undefined,
+          this.apiReauthenticator,
+        )
         if (hydrationId !== this.hydrationId) return
         this.historyBeforeCursor = history.beforeCursor
         this.historyHasMore = history.hasMoreBefore
@@ -1158,12 +1172,40 @@ export class NanobotTui {
     for (const event of events || []) this.accept(event)
   }
 
-  private useGatewayConnection(apiUrl: string, apiToken: string): void {
+  private updateGatewayApiConnection(apiUrl: string, apiToken: string): void {
     this.options.apiUrl = apiUrl
     this.options.apiToken = apiToken
     this.runtimeControls.useApiConnection(apiUrl, apiToken)
+  }
+
+  private useGatewayConnection(apiUrl: string, apiToken: string): void {
+    this.updateGatewayApiConnection(apiUrl, apiToken)
     void this.loadCommands()
     void this.loadMentions()
+  }
+
+  private async refreshApiConnection(
+    rejectedApiToken: string,
+  ): Promise<GatewayApiConnection> {
+    if (this.options.apiToken && rejectedApiToken !== this.options.apiToken) {
+      return { apiUrl: this.options.apiUrl, apiToken: this.options.apiToken }
+    }
+    if (this.apiRefreshPromise) return this.apiRefreshPromise
+    const refresh = fetchGatewayConnection(
+      this.options.bootstrapUrl || "",
+      this.options.bootstrapSecret || "",
+      this.options.apiUrl,
+      `tui-${process.pid}`,
+    ).then((connection) => {
+      this.updateGatewayApiConnection(connection.apiUrl, connection.apiToken)
+      return connection
+    })
+    this.apiRefreshPromise = refresh
+    try {
+      return await refresh
+    } finally {
+      if (this.apiRefreshPromise === refresh) this.apiRefreshPromise = null
+    }
   }
 
   private handleStatus(status: ConnectionStatus, detail?: string): void {
@@ -1790,6 +1832,7 @@ export class NanobotTui {
       discovered = await fetchSlashCommands(
         this.options.apiUrl,
         this.options.apiToken,
+        this.apiReauthenticator,
       )
     } catch {
       // Local navigation remains available against older gateways.
@@ -1828,6 +1871,7 @@ export class NanobotTui {
       this.mentionCandidates = await fetchMentionCandidates(
         this.options.apiUrl,
         this.options.apiToken,
+        this.apiReauthenticator,
       )
       if (this.activeMentionQuery) this.syncComposerMenus()
     } catch {
@@ -1864,6 +1908,8 @@ export class NanobotTui {
         this.options.apiUrl,
         this.options.apiToken,
         chatId,
+        undefined,
+        this.apiReauthenticator,
       )
       if (chatId !== this.client.activeChatId) return
       const points = branchPoints(history.messages)
@@ -1929,7 +1975,11 @@ export class NanobotTui {
     const loadId = ++this.sessionLoadId
     this.status.content = "Loading sessions…"
     try {
-      const sessions = await fetchSessions(this.options.apiUrl, this.options.apiToken)
+      const sessions = await fetchSessions(
+        this.options.apiUrl,
+        this.options.apiToken,
+        this.apiReauthenticator,
+      )
       if (this.quitting || loadId !== this.sessionLoadId) return
       this.sessionLoading = false
       const current = sessions.find((session) => session.chatId === this.client.activeChatId)
@@ -2130,6 +2180,7 @@ export class NanobotTui {
         this.options.apiUrl,
         this.options.apiToken,
         this.client.activeChatId,
+        this.apiReauthenticator,
       )
       if (!context) {
         this.status.content = "Context unavailable · new session or older gateway"
@@ -2150,7 +2201,11 @@ export class NanobotTui {
     if (!this.options.apiUrl || !this.options.apiToken) return
     const requestId = ++this.sessionMetadataId
     try {
-      const sessions = await fetchSessions(this.options.apiUrl, this.options.apiToken)
+      const sessions = await fetchSessions(
+        this.options.apiUrl,
+        this.options.apiToken,
+        this.apiReauthenticator,
+      )
       if (
         requestId !== this.sessionMetadataId
         || chatId !== this.client.activeChatId
@@ -2172,6 +2227,7 @@ export class NanobotTui {
         this.options.apiUrl,
         this.options.apiToken,
         chatId,
+        this.apiReauthenticator,
       )
       if (!context || chatId !== this.client.activeChatId) return
       this.contextTokens = context.estimatedSessionTokens
@@ -2216,6 +2272,7 @@ export class NanobotTui {
         this.options.apiToken,
         chatId,
         this.historyBeforeCursor,
+        this.apiReauthenticator,
       )
       if (hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
       await this.transcript.prependHistory(history.messages)

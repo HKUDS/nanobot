@@ -162,11 +162,18 @@ export interface ClientOptions {
   onStatus: (status: ConnectionStatus, detail?: string) => void
 }
 
-export interface GatewayConnection {
-  wsUrl: string
+export interface GatewayApiConnection {
   apiUrl: string
   apiToken: string
 }
+
+export interface GatewayConnection extends GatewayApiConnection {
+  wsUrl: string
+}
+
+export type ApiReauthenticator = (
+  rejectedApiToken: string,
+) => Promise<GatewayApiConnection>
 
 export class GatewayConnectionError extends Error {
   constructor(message: string, readonly retryable: boolean) {
@@ -460,11 +467,26 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   return value as InboundEvent
 }
 
+async function fetchApi(
+  apiUrl: string,
+  apiToken: string,
+  path: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<Response> {
+  const request = (connection: GatewayApiConnection) => fetch(`${connection.apiUrl}${path}`, {
+    headers: { Authorization: `Bearer ${connection.apiToken}` },
+  })
+  const response = await request({ apiUrl, apiToken })
+  if (response.status !== 401 || !reauthenticate) return response
+  return request(await reauthenticate(apiToken))
+}
+
 export async function fetchHistory(
   apiUrl: string,
   apiToken: string,
   chatId: string,
   beforeCursor?: string | null,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<HistorySnapshot> {
   if (!apiUrl || !apiToken) {
     return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
@@ -472,9 +494,12 @@ export async function fetchHistory(
   const key = encodeURIComponent(`websocket:${chatId}`)
   const params = new URLSearchParams({ limit: "120", direction: "latest" })
   if (beforeCursor) params.set("before", beforeCursor)
-  const response = await fetch(`${apiUrl}/api/sessions/${key}/webui-thread?${params}`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const response = await fetchApi(
+    apiUrl,
+    apiToken,
+    `/api/sessions/${key}/webui-thread?${params}`,
+    reauthenticate,
+  )
   if (response.status === 404) {
     return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
   }
@@ -544,12 +569,16 @@ export async function fetchSessionContext(
   apiUrl: string,
   apiToken: string,
   chatId: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<SessionContextSnapshot | null> {
   if (!apiUrl || !apiToken) return null
   const key = encodeURIComponent(`websocket:${chatId}`)
-  const response = await fetch(`${apiUrl}/api/sessions/${key}/context`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const response = await fetchApi(
+    apiUrl,
+    apiToken,
+    `/api/sessions/${key}/context`,
+    reauthenticate,
+  )
   if (response.status === 404) return null
   if (!response.ok) throw new Error(`context request failed: HTTP ${response.status}`)
   const value = await response.json() as Record<string, unknown>
@@ -572,11 +601,10 @@ export async function fetchSessionContext(
 export async function fetchSlashCommands(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<SlashCommand[]> {
   if (!apiUrl || !apiToken) return []
-  const response = await fetch(`${apiUrl}/api/commands`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const response = await fetchApi(apiUrl, apiToken, "/api/commands", reauthenticate)
   if (!response.ok) throw new Error(`command request failed: HTTP ${response.status}`)
   const payload = await response.json() as { commands?: unknown[] }
   return (payload.commands || []).flatMap((value) => {
@@ -600,12 +628,12 @@ export async function fetchSlashCommands(
 export async function fetchRuntimeControls(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<RuntimeControls> {
   if (!apiUrl || !apiToken) return { modelPresets: [], canUseFullAccess: false }
-  const headers = { Authorization: `Bearer ${apiToken}` }
   const [settingsResponse, workspacesResponse] = await Promise.all([
-    fetch(`${apiUrl}/api/settings`, { headers }),
-    fetch(`${apiUrl}/api/workspaces`, { headers }).catch(() => null),
+    fetchApi(apiUrl, apiToken, "/api/settings", reauthenticate),
+    fetchApi(apiUrl, apiToken, "/api/workspaces", reauthenticate).catch(() => null),
   ])
   if (!settingsResponse.ok) {
     throw new Error(`settings request failed: HTTP ${settingsResponse.status}`)
@@ -631,12 +659,12 @@ export async function fetchRuntimeControls(
 export async function fetchSessions(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<SessionSummary[]> {
   if (!apiUrl || !apiToken) return []
-  const headers = { Authorization: `Bearer ${apiToken}` }
   const [response, sidebarResponse] = await Promise.all([
-    fetch(`${apiUrl}/api/sessions`, { headers }),
-    fetch(`${apiUrl}/api/webui/sidebar-state`, { headers }).catch(() => null),
+    fetchApi(apiUrl, apiToken, "/api/sessions", reauthenticate),
+    fetchApi(apiUrl, apiToken, "/api/webui/sidebar-state", reauthenticate).catch(() => null),
   ])
   if (!response.ok) throw new Error(`session request failed: HTTP ${response.status}`)
   const payload = await response.json() as { sessions?: unknown[] }
@@ -692,13 +720,18 @@ function sessionMentionName(session: SessionSummary): string {
 export async function fetchMentionCandidates(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<MentionCandidate[]> {
   if (!apiUrl || !apiToken) return []
-  const headers = { Authorization: `Bearer ${apiToken}` }
   const [sessions, appsResponse, mcpResponse] = await Promise.all([
-    fetchSessions(apiUrl, apiToken),
-    fetch(`${apiUrl}/api/settings/cli-apps?installed_only=1`, { headers }).catch(() => null),
-    fetch(`${apiUrl}/api/settings/mcp-presets`, { headers }).catch(() => null),
+    fetchSessions(apiUrl, apiToken, reauthenticate),
+    fetchApi(
+      apiUrl,
+      apiToken,
+      "/api/settings/cli-apps?installed_only=1",
+      reauthenticate,
+    ).catch(() => null),
+    fetchApi(apiUrl, apiToken, "/api/settings/mcp-presets", reauthenticate).catch(() => null),
   ])
   const used = new Set<string>()
   const uniqueName = (raw: string) => {
