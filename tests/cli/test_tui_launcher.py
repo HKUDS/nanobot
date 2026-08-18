@@ -13,7 +13,6 @@ from nanobot.cli.agent import agent
 from nanobot.cli.tui_launcher import (
     TuiSessionError,
     TuiUnavailableError,
-    _authenticated_ws_url,
     _download_release_tui,
     _ensure_gateway,
     _initial_tui_chat_id,
@@ -50,14 +49,6 @@ def _release_archive(
     archive_name = f"{asset}.zip"
     checksum = f"{hashlib.sha256(payload).hexdigest()}  {archive_name}\n".encode()
     return payload, checksum
-
-
-def test_authenticated_ws_url_preserves_existing_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nanobot.cli.tui_launcher.os.getpid", lambda: 42)
-    url = _authenticated_ws_url(
-        {"ws_url": "ws://127.0.0.1:8765/ws?mode=local", "token": "a b"}
-    )
-    assert url == "ws://127.0.0.1:8765/ws?mode=local&token=a+b&client_id=tui-42"
 
 
 @pytest.mark.parametrize(
@@ -104,40 +95,43 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    config = Config()
+    config = Config(
+        channels={"websocket": {"tokenIssueSecret": "bootstrap-secret"}},
+    )
     config.model_presets["Deep Research"] = ModelPresetConfig(model="openai/gpt-5.6")
     config.agents.defaults.model_preset = "Deep Research"
     captured: dict[str, str] = {}
+    events: list[str] = []
     released: list[bool] = []
 
     class FakeLease:
-        def release(self) -> None:
+        def release(self, *, wait_for_stop: bool = True) -> None:
+            assert wait_for_stop is False
             released.append(True)
 
     monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._ensure_gateway",
-        lambda *args, **kwargs: SimpleNamespace(
+    def ensure_gateway(*args: object, **kwargs: object) -> SimpleNamespace:
+        assert events == ["spawned"]
+        assert kwargs["wait_until_ready"] is False
+        return SimpleNamespace(
             base_url="http://127.0.0.1:8765",
             lease=FakeLease(),
-        ),
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._fetch_bootstrap",
-        lambda *args, **kwargs: {
-            "ws_url": "ws://127.0.0.1:8765/ws",
-            "token": "socket-token",
-            "api_token": "api-token",
-        },
-    )
+        )
 
-    def run(command: list[str], *, env: dict[str, str], check: bool) -> subprocess.CompletedProcess:
+    monkeypatch.setattr("nanobot.cli.tui_launcher._ensure_gateway", ensure_gateway)
+
+    class FakeProcess:
+        def wait(self) -> int:
+            events.append("waited")
+            return 0
+
+    def popen(command: list[str], *, env: dict[str, str]) -> FakeProcess:
         assert command == ["nanobot-tui"]
-        assert check is False
         captured.update(env)
-        return subprocess.CompletedProcess(command, 0)
+        events.append("spawned")
+        return FakeProcess()
 
-    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", run)
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.Popen", popen)
 
     result = launch_tui(
         config,
@@ -150,8 +144,55 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert result == 0
     assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
     assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
+    assert captured["NANOBOT_TUI_BOOTSTRAP_URL"] == (
+        "http://127.0.0.1:8765/webui/bootstrap"
+    )
+    assert captured["NANOBOT_TUI_BOOTSTRAP_SECRET"] == "bootstrap-secret"
+    assert "NANOBOT_TUI_WS_URL" not in captured
+    assert "NANOBOT_TUI_API_TOKEN" not in captured
     assert "NANOBOT_TUI_CHAT_ID" not in captured
+    assert events == ["spawned", "waited"]
     assert released == [True]
+
+
+def test_launcher_terminates_the_tui_when_gateway_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    terminated: list[bool] = []
+
+    class FakeProcess:
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            terminated.append(True)
+
+        def wait(self, timeout: float | None = None) -> int:
+            assert timeout == 5
+            return 1
+
+    def fail_gateway(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("gateway failed")
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher.subprocess.Popen",
+        lambda *args, **kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr("nanobot.cli.tui_launcher._ensure_gateway", fail_gateway)
+
+    with pytest.raises(RuntimeError, match="gateway failed"):
+        launch_tui(
+            config,
+            config_path=tmp_path / "config.json",
+            workspace_override=None,
+            session_id=None,
+            theme="dark",
+        )
+
+    assert terminated == [True]
 
 
 def test_explicit_tui_binary_must_exist(
@@ -597,6 +638,33 @@ def test_gateway_reuses_the_matching_managed_instance(
     )
 
     assert gateway.base_url == "http://127.0.0.1:8765"
+
+
+def test_gateway_reuse_can_return_before_the_webui_endpoint_is_ready(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            self.paths = paths
+
+        def status(self) -> SimpleNamespace:
+            return SimpleNamespace(running=True, port=config.gateway.port)
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: False)
+
+    gateway = _ensure_gateway(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=None,
+        wait_until_ready=False,
+    )
+
+    assert gateway.base_url == "http://127.0.0.1:8765"
+    assert gateway.lease is not None
 
 
 def test_gateway_started_for_tui_stops_when_its_last_lease_exits(

@@ -1488,7 +1488,9 @@ describe("NanobotTui layout", () => {
   test("overlaps automatic terminal detection with connection startup", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     let connected = false
+    let rendered = false
     let resolveMode: (mode: "light") => void = () => undefined
+    setup.renderer.start = () => { rendered = true }
     setup.renderer.waitForThemeMode = () => new Promise((resolve) => {
       resolveMode = resolve
     })
@@ -1505,6 +1507,7 @@ describe("NanobotTui layout", () => {
     const starting = app.start()
     await Bun.sleep(1)
     expect(connected).toBe(true)
+    expect(rendered).toBe(true)
 
     resolveMode("light")
     await starting
@@ -1992,6 +1995,26 @@ describe("NanobotTui layout", () => {
     setup.mockInput.pressCtrlC()
 
     expect(closed).toBe(true)
+    expect(setup.renderer.isDestroyed).toBe(true)
+  })
+
+  test("accepts the exit command before the gateway connection is ready", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    let closed = false
+    const transport = client()
+    transport.close = () => { closed = true }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    composer.setText("exit")
+    composer.submit()
+    await waitUntil(() => closed)
+
     expect(setup.renderer.isDestroyed).toBe(true)
   })
 })

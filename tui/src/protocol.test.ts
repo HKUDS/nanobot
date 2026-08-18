@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 
 import {
   NanobotClient,
+  GatewayConnectionError,
+  fetchGatewayConnection,
   fetchHistory,
   fetchMentionCandidates,
   fetchRuntimeControls,
@@ -37,6 +39,156 @@ class FakeSocket {
 }
 
 describe("gateway protocol", () => {
+  test("bootstraps fresh websocket and API credentials", async () => {
+    const original = globalThis.fetch
+    let headers: Headers | undefined
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      headers = new Headers(init?.headers)
+      return new Response(JSON.stringify({
+        ws_url: "ws://nanobot.test/ws?mode=local",
+        token: "socket token",
+        api_token: "api-token",
+      }))
+    }) as typeof fetch
+
+    try {
+      const connection = await fetchGatewayConnection(
+        "http://nanobot.test/webui/bootstrap",
+        "bootstrap-secret",
+        "http://nanobot.test",
+        "tui-42",
+      )
+      expect(headers?.get("X-Nanobot-Auth")).toBe("bootstrap-secret")
+      expect(connection).toEqual({
+        wsUrl: "ws://nanobot.test/ws?mode=local&token=socket+token&client_id=tui-42",
+        apiUrl: "http://nanobot.test",
+        apiToken: "api-token",
+      })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("rejects malformed bootstrap responses without retrying", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.resolve(new Response("not json"))) as unknown as typeof fetch
+
+    try {
+      await expect(fetchGatewayConnection(
+        "http://nanobot.test/webui/bootstrap",
+        "bootstrap-secret",
+        "http://nanobot.test",
+        "tui-42",
+      )).rejects.toMatchObject({
+        message: "gateway bootstrap response is invalid",
+        retryable: false,
+      })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("waits for bootstrap before opening the websocket", async () => {
+    const original = globalThis.WebSocket
+    let resolveConnection: ((value: {
+      wsUrl: string
+      apiUrl: string
+      apiToken: string
+    }) => void) | undefined
+    let requestedUrl = ""
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor(url: string) {
+          super()
+          requestedUrl = url
+        }
+      },
+    })
+
+    try {
+      const connections: string[] = []
+      const client = new NanobotClient({
+        resolveConnection: () => new Promise((resolve) => { resolveConnection = resolve }),
+        onConnection: (connection) => connections.push(connection.apiToken),
+        onEvent: () => undefined,
+        onStatus: () => undefined,
+      })
+      client.connect()
+      await Bun.sleep(1)
+      expect(requestedUrl).toBe("")
+      resolveConnection?.({
+        wsUrl: "ws://nanobot.test/ws?token=fresh",
+        apiUrl: "http://nanobot.test",
+        apiToken: "fresh-api-token",
+      })
+      await Bun.sleep(1)
+      expect(requestedUrl).toBe("ws://nanobot.test/ws?token=fresh")
+      expect(connections).toEqual(["fresh-api-token"])
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("retries bootstrap while the local gateway starts", async () => {
+    const original = globalThis.WebSocket
+    let attempts = 0
+    let requestedUrl = ""
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor(url: string) {
+          super()
+          requestedUrl = url
+        }
+      },
+    })
+
+    try {
+      const client = new NanobotClient({
+        resolveConnection: async () => {
+          attempts += 1
+          if (attempts === 1) throw new Error("gateway is still starting")
+          return {
+            wsUrl: "ws://nanobot.test/ws?token=second",
+            apiUrl: "http://nanobot.test",
+            apiToken: "second-api-token",
+          }
+        },
+        reconnectDelayMs: 1,
+        onEvent: () => undefined,
+        onStatus: () => undefined,
+      })
+      client.connect()
+      for (let index = 0; index < 20 && !requestedUrl; index += 1) await Bun.sleep(2)
+      expect(attempts).toBe(2)
+      expect(requestedUrl).toBe("ws://nanobot.test/ws?token=second")
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("reports a permanent bootstrap rejection without retrying", async () => {
+    let attempts = 0
+    const statuses: string[] = []
+    const client = new NanobotClient({
+      resolveConnection: async () => {
+        attempts += 1
+        throw new GatewayConnectionError("gateway bootstrap failed: HTTP 401", false)
+      },
+      reconnectDelayMs: 1,
+      onEvent: () => undefined,
+      onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+    })
+    client.connect()
+    await Bun.sleep(5)
+    expect(attempts).toBe(1)
+    expect(statuses.at(-1)).toBe("error:gateway bootstrap failed: HTTP 401")
+    client.close()
+  })
+
   test("represents lifecycle frames without browser state", () => {
     const events: InboundEvent[] = [
       {

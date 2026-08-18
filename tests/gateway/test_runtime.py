@@ -479,6 +479,25 @@ def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatc
     assert not webui.state_path.exists()
 
 
+def test_last_client_can_leave_shutdown_to_the_gateway_monitor(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(
+        runtime,
+        "_stop",
+        lambda **_kwargs: pytest.fail("deferred release must not stop synchronously"),
+    )
+    client = GatewayClientLease(runtime, kind="tui", pid=os.getpid(), token="tui")
+    client.acquire()
+    client.mark_ephemeral()
+
+    assert client.release(wait_for_stop=False) is False
+
+    state = json.loads(client.state_path.read_text(encoding="utf-8"))
+    assert state == {"auto_stop": True, "clients": {}}
+
+
 def test_last_client_shutdown_preserves_a_replacement_lease(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)

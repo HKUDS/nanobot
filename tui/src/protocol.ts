@@ -151,11 +151,28 @@ type OutboundEvent =
     }
 
 export interface ClientOptions {
-  url: string
+  url?: string
+  resolveConnection?: () => Promise<GatewayConnection>
+  onConnection?: (connection: GatewayConnection) => void
+  connectionRetryLabel?: string
+  startupRetryMaxDelayMs?: number
   chatId?: string
   reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
   onStatus: (status: ConnectionStatus, detail?: string) => void
+}
+
+export interface GatewayConnection {
+  wsUrl: string
+  apiUrl: string
+  apiToken: string
+}
+
+export class GatewayConnectionError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message)
+    this.name = "GatewayConnectionError"
+  }
 }
 
 export interface HistoryMessage {
@@ -747,12 +764,63 @@ function sessionLabelForMention(session: SessionSummary): string {
   return (session.title || session.preview || "Untitled chat").replace(/\s+/gu, " ").trim()
 }
 
+/** Resolve fresh short-lived credentials once the local gateway is reachable. */
+export async function fetchGatewayConnection(
+  bootstrapUrl: string,
+  bootstrapSecret: string,
+  apiUrl: string,
+  clientId: string,
+): Promise<GatewayConnection> {
+  const response = await fetch(bootstrapUrl, {
+    headers: bootstrapSecret ? { "X-Nanobot-Auth": bootstrapSecret } : {},
+  })
+  if (!response.ok) {
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500
+    throw new GatewayConnectionError(
+      `gateway bootstrap failed: HTTP ${response.status}`,
+      retryable,
+    )
+  }
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    throw new GatewayConnectionError("gateway bootstrap response is invalid", false)
+  }
+  if (!isRecord(payload)) {
+    throw new GatewayConnectionError("gateway bootstrap response is invalid", false)
+  }
+  if (typeof payload.ws_url !== "string" || !payload.ws_url.trim()) {
+    throw new GatewayConnectionError("gateway bootstrap response is missing ws_url", false)
+  }
+  let wsUrl: URL
+  try {
+    wsUrl = new URL(payload.ws_url)
+  } catch {
+    throw new GatewayConnectionError("gateway bootstrap response has an invalid ws_url", false)
+  }
+  if (wsUrl.protocol !== "ws:" && wsUrl.protocol !== "wss:") {
+    throw new GatewayConnectionError("gateway bootstrap response has an invalid ws_url", false)
+  }
+  if (typeof payload.token === "string" && payload.token) {
+    wsUrl.searchParams.append("token", payload.token)
+  }
+  wsUrl.searchParams.append("client_id", clientId)
+  return {
+    wsUrl: wsUrl.toString(),
+    apiUrl,
+    apiToken: typeof payload.api_token === "string" ? payload.api_token : "",
+  }
+}
+
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private closedByClient = false
+  private opening = false
+  private connectedOnce = false
 
   constructor(private readonly options: ClientOptions) {}
 
@@ -762,16 +830,46 @@ export class NanobotClient {
 
   connect(): void {
     this.closedByClient = false
-    this.open()
+    void this.open()
   }
 
-  private open(): void {
-    if (this.socket) return
+  private async open(): Promise<void> {
+    if (this.socket || this.opening || this.closedByClient) return
+    this.opening = true
     this.options.onStatus("connecting")
-    const socket = new WebSocket(this.options.url)
+    let url = this.options.url
+    try {
+      if (this.options.resolveConnection) {
+        const connection = await this.options.resolveConnection()
+        if (this.closedByClient) return
+        this.options.onConnection?.(connection)
+        url = connection.wsUrl
+      }
+    } catch (error) {
+      if (!this.closedByClient) {
+        if (error instanceof GatewayConnectionError && !error.retryable) {
+          this.options.onStatus("error", error.message)
+          return
+        }
+        this.options.onStatus(
+          "connecting",
+          this.options.connectionRetryLabel || "gateway unavailable",
+        )
+        this.scheduleReconnect(false)
+      }
+      return
+    } finally {
+      this.opening = false
+    }
+    if (!url) {
+      this.options.onStatus("error", "gateway URL is not configured")
+      return
+    }
+    const socket = new WebSocket(url)
     this.socket = socket
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return
+      this.connectedOnce = true
       this.reconnectAttempt = 0
       this.options.onStatus("connected")
     })
@@ -872,14 +970,17 @@ export class NanobotClient {
     this.options.onEvent(event)
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect(announce = true): void {
     if (this.reconnectTimer || this.closedByClient) return
     const base = this.options.reconnectDelayMs ?? 500
-    const delay = Math.min(8_000, base * 2 ** Math.min(this.reconnectAttempt++, 4))
-    this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
+    const maxDelay = this.connectedOnce
+      ? 8_000
+      : this.options.startupRetryMaxDelayMs ?? 8_000
+    const delay = Math.min(maxDelay, base * 2 ** Math.min(this.reconnectAttempt++, 4))
+    if (announce) this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.open()
+      void this.open()
     }, delay)
   }
 

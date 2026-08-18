@@ -112,6 +112,14 @@ export class RuntimeControls {
     void this.load().catch(() => {})
   }
 
+  useApiConnection(apiUrl: string, apiToken: string): void {
+    this.options.apiUrl = apiUrl
+    this.options.apiToken = apiToken
+    this.controlsLoaded = false
+    this.controlsLoadedAt = 0
+    this.preload()
+  }
+
   updateWorkspaceScope(scope: WorkspaceScopePayload): void {
     this.scope = scope
     this.render()

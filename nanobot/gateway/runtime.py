@@ -466,8 +466,8 @@ class GatewayClientLease:
             self._write_state(state)
             return True
 
-    def release(self, *, timeout_s: int = 20) -> bool:
-        """Release this client and stop an ephemeral gateway when it was the last."""
+    def release(self, *, timeout_s: int = 20, wait_for_stop: bool = True) -> bool:
+        """Release this client, optionally leaving last-client shutdown to the monitor."""
         if not self._acquired:
             return False
         while True:
@@ -482,7 +482,7 @@ class GatewayClientLease:
                     self._acquired = False
                     should_stop = not clients and bool(state.get("auto_stop"))
                     self._write_or_clear(state)
-                if not should_stop:
+                if not should_stop or not wait_for_stop:
                     return False
                 result = self.runtime._stop(timeout_s=timeout_s)
                 stopped = result.ok or result.message in {

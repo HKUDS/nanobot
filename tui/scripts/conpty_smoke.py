@@ -37,7 +37,9 @@ def _wait_for(process: Any, needle: str, timeout: float) -> str:
         output.append(_read(process, min(0.1, deadline - time.monotonic())))
     text = "".join(output)
     if needle not in text:
-        raise AssertionError(f"terminal output did not contain {needle!r}")
+        raise AssertionError(
+            f"terminal output did not contain {needle!r}; recent output: {text[-2000:]!r}"
+        )
     return text
 
 
@@ -47,7 +49,7 @@ def _wait_for_exit(process: Any, timeout: float) -> int:
         time.sleep(0.05)
     if process.isalive():
         process.close(force=True)
-        raise AssertionError("TUI did not exit after Ctrl+C")
+        raise AssertionError("TUI did not exit after the exit command")
     return int(process.exitstatus or 0)
 
 
@@ -78,6 +80,8 @@ def main() -> int:
         # width probes. Keep this smoke test focused on application behavior.
         "OPENTUI_FORCE_EXPLICIT_WIDTH": "false",
     }
+    env.pop("HERDR_ENV", None)
+    env.pop("HERDR_PANE_ID", None)
     process = PtyProcess.spawn(
         [bun, "src/index.ts"],
         cwd=str(ROOT),
@@ -100,11 +104,11 @@ def main() -> int:
         if "\x1b[18;" not in resized or ";42H" not in resized:
             raise AssertionError("TUI did not repaint to the resized ConPTY dimensions")
 
-        # First Ctrl+C clears the draft. The second exits the app and must
-        # restore the alternate screen without an unhandled exception.
+        # Ctrl+C clears the draft. The local exit command must still work while
+        # the intentionally unavailable gateway has not attached a chat.
         process.sendcontrol("c")
         output.append(_read(process, 0.2))
-        process.sendcontrol("c")
+        process.write("exit\r")
         output.append(_wait_for(process, LEAVE_ALT_SCREEN, 8))
         exit_code = _wait_for_exit(process, 8)
     finally:

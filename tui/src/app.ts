@@ -21,6 +21,7 @@ import {
 import {
   NanobotClient,
   fetchHistory,
+  fetchGatewayConnection,
   fetchMentionCandidates,
   fetchSessionContext,
   fetchSessions,
@@ -78,7 +79,9 @@ import {
 import { createTuiHost, currentGitBranch, type TuiHost } from "./host"
 
 interface AppOptions {
-  wsUrl: string
+  wsUrl?: string
+  bootstrapUrl?: string
+  bootstrapSecret?: string
   apiUrl: string
   apiToken: string
   chatId?: string
@@ -472,7 +475,23 @@ export class NanobotTui {
     )
     this.queuePreview = new QueuePreview(renderer, queuePreviewTheme(this.palette))
     this.client = client || new NanobotClient({
-      url: options.wsUrl,
+      ...(options.bootstrapUrl
+        ? {
+            resolveConnection: () => fetchGatewayConnection(
+              options.bootstrapUrl || "",
+              options.bootstrapSecret || "",
+              options.apiUrl,
+              `tui-${process.pid}`,
+            ),
+            onConnection: (connection) => this.useGatewayConnection(
+              connection.apiUrl,
+              connection.apiToken,
+            ),
+            connectionRetryLabel: "Starting local gateway",
+            reconnectDelayMs: 100,
+            startupRetryMaxDelayMs: 250,
+          }
+        : { url: options.wsUrl }),
       chatId: options.chatId,
       onEvent: (event) => this.accept(event),
       onStatus: (status, detail) => this.handleStatus(status, detail),
@@ -719,16 +738,15 @@ export class NanobotTui {
     void this.loadCommands()
     void this.loadMentions()
     this.runtimeControls.preload()
+    this.renderer.start()
     // OpenTUI learns the real terminal background through OSC 10/11. Wait for
-    // that bounded probe before first paint, as OpenCode does, so a light
-    // terminal does not briefly render the dark palette. The app already owns
-    // the renderer here, so a signal during the probe can still restore it.
+    // that bounded probe after first paint. The neutral terminal background is
+    // safe to render immediately, and the detected palette can be applied later.
     if (this.options.theme === "auto") await this.renderer.waitForThemeMode(1_000)
     if (this.quitting) return
     if (this.options.theme === "auto" && this.renderer.themeMode) {
       this.applyTheme(this.renderer.themeMode)
     }
-    this.renderer.start()
   }
 
   stop(): void {
@@ -775,6 +793,10 @@ export class NanobotTui {
       return
     }
     if (!visibleContent) return
+    if (["exit", "quit", "/exit", "/quit", ":q"].includes(visibleContent.toLowerCase())) {
+      this.quit()
+      return
+    }
     const completion = this.commandMenu.completion(visibleContent)
     if (completion) {
       this.setComposer(completion)
@@ -802,10 +824,6 @@ export class NanobotTui {
     }
     if (!this.ready) {
       this.status.content = "Preparing chat…"
-      return
-    }
-    if (["exit", "quit", "/exit", "/quit", ":q"].includes(visibleContent.toLowerCase())) {
-      this.quit()
       return
     }
     const prompt = { content, options: mentionOptions(content, this.availableMentions()) }
@@ -1132,6 +1150,14 @@ export class NanobotTui {
     for (const event of events || []) this.accept(event)
   }
 
+  private useGatewayConnection(apiUrl: string, apiToken: string): void {
+    this.options.apiUrl = apiUrl
+    this.options.apiToken = apiToken
+    this.runtimeControls.useApiConnection(apiUrl, apiToken)
+    void this.loadCommands()
+    void this.loadMentions()
+  }
+
   private handleStatus(status: ConnectionStatus, detail?: string): void {
     if (status === "connected") {
       this.ready = false
@@ -1141,9 +1167,12 @@ export class NanobotTui {
     }
     if (status === "connecting") {
       this.ready = false
-      this.host.reportState("unknown", detail ? "Reconnecting" : "Connecting")
+      const label = detail === "Starting local gateway"
+        ? detail
+        : detail ? "Reconnecting" : "Connecting"
+      this.host.reportState("unknown", label)
       if (detail) this.setActive(false)
-      this.status.content = detail ? "Reconnecting…" : "Connecting…"
+      this.status.content = `${label}…`
       return
     }
     if (status === "error") {
