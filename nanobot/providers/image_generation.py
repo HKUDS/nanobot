@@ -2112,6 +2112,175 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
         return images
 
 
+async def _dashscope_images_from_payload(
+    client: httpx.AsyncClient,
+    payload: dict[str, Any],
+) -> list[str]:
+    """Extract image data URLs from a DashScope multimodal-generation payload.
+
+    DashScope returns images as temporary URLs under
+    ``output.choices[].message.content[].image``.  We download and re-encode
+    them as base64 data URLs.
+    """
+    images: list[str] = []
+    output = payload.get("output") if isinstance(payload, dict) else None
+    if not isinstance(output, dict):
+        return images
+    for choice in output.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message") if isinstance(choice, dict) else None
+        if not isinstance(message, dict):
+            continue
+        for item in message.get("content") or []:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("image")
+            if isinstance(url, str) and url:
+                if url.startswith("data:image/"):
+                    images.append(url)
+                else:
+                    images.append(await _download_image_data_url(client, url))
+    return images
+
+
+class DashScopeImageGenerationClient(ImageGenerationProvider):
+    """Native DashScope API client for Alibaba Cloud Model Studio image models.
+
+    DashScope serves its image models (qwen-image / wan2.7 / z-image) through
+    the native ``/api/v1/services/aigc/multimodal-generation/generation``
+    endpoint; the OpenAI-compatible ``/images/generations`` route is not
+    available for image generation.  The response returns temporary image
+    URLs that are downloaded and re-encoded as base64 data URLs.
+    """
+
+    provider_name = "dashscope"
+    model_options = (
+        "qwen-image-3.0",
+        "qwen-image-3.0-pro",
+        "qwen-image-2.0",
+        "qwen-image-2.0-pro",
+        "qwen-image-max",
+        "qwen-image-plus-2026-01-09",
+        "wan2.7-image",
+        "wan2.7-image-pro",
+        "z-image-turbo",
+    )
+    missing_key_message = (
+        "DashScope API key is not configured. Set providers.dashscope.apiKey."
+    )
+    default_timeout = 300.0
+
+    def _default_base_url(self) -> str:
+        return "https://dashscope.aliyuncs.com"
+
+    @staticmethod
+    def _dashscope_size(
+        aspect_ratio: str | None,
+        image_size: str | None,
+    ) -> str | None:
+        """Resolve aspect ratio / image_size to a DashScope ``WxH`` string.
+
+        DashScope accepts ``width*height`` (e.g. ``1024*1024``) with a pixel
+        area between 512*512 and 2048*2048.  Returns None to let the model
+        pick a resolution automatically.
+        """
+        if image_size:
+            requested = image_size.strip().lower()
+            if requested == "1k":
+                return "1024*1024"
+            if requested == "2k":
+                return "2048*2048"
+            if requested == "4k":
+                return "2048*2048"
+            if "x" in requested or "*" in requested:
+                w, sep, h = requested.replace("*", "x").partition("x")
+                if sep and w.strip().isdigit() and h.strip().isdigit():
+                    return f"{w.strip()}*{h.strip()}"
+        sizes = {
+            "1:1": "1024*1024",
+            "16:9": "1920*1080",
+            "9:16": "1080*1920",
+            "4:3": "1536*1152",
+            "3:4": "1152*1536",
+        }
+        if aspect_ratio and aspect_ratio in sizes:
+            return sizes[aspect_ratio]
+        return None
+
+    def _generation_url(self) -> str:
+        base = self.api_base.rstrip("/")
+        if base.endswith("/compatible-mode/v1"):
+            base = base[: -len("/compatible-mode/v1")]
+        return f"{base}/api/v1/services/aigc/multimodal-generation/generation"
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        reference_images: list[str] | None = None,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImageResponse:
+        if not self.api_key:
+            raise ImageGenerationError(self.missing_key_message)
+
+        content: list[dict[str, str]] = []
+        if reference_images:
+            for path in reference_images:
+                content.append({"image": image_path_to_data_url(path)})
+        content.append({"text": prompt})
+
+        parameters: dict[str, Any] = {"prompt_extend": True}
+        size = self._dashscope_size(aspect_ratio, image_size)
+        if size:
+            parameters["size"] = size
+        parameters.update(self.extra_body)
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+        body: dict[str, Any] = {
+            "model": model,
+            "input": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content,
+                    }
+                ]
+            },
+            "parameters": parameters,
+        }
+
+        client = self._client or httpx.AsyncClient(timeout=self.timeout)
+        try:
+            response = await client.post(
+                self._generation_url(),
+                headers=headers,
+                json=body,
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                detail = response.text[:1000]
+                raise ImageGenerationError(
+                    f"DashScope image generation failed (HTTP {response.status_code}): {detail}"
+                ) from exc
+            payload = response.json()
+            images = await _dashscope_images_from_payload(client, payload)
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+        self._require_images(images, payload)
+        return GeneratedImageResponse(images=images, content="", raw=payload)
+
+
 # ---------------------------------------------------------------------------
 # Provider registration
 # ---------------------------------------------------------------------------
@@ -2127,3 +2296,4 @@ register_image_gen_provider(OpenRouterImageGenerationClient)
 register_image_gen_provider(StepFunImageGenerationClient)
 register_image_gen_provider(ZhipuImageGenerationClient)
 register_image_gen_provider(ModelScopeImageGenerationClient)
+register_image_gen_provider(DashScopeImageGenerationClient)
