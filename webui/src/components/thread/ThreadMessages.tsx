@@ -4,13 +4,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type {
-  CliAppInfo,
-  McpPresetInfo,
-  SessionHandle,
-  SlashCommand,
-  UIMessage,
-} from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -24,7 +18,6 @@ interface ThreadMessagesProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
-  sessionDirectory?: SessionHandle[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
@@ -69,7 +62,6 @@ export function ThreadMessages({
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
-  sessionDirectory = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
@@ -167,7 +159,6 @@ export function ThreadMessages({
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
-            sessionDirectory={sessionDirectory}
             onOpenFilePreview={onOpenFilePreview}
             onForkFromMessage={onForkFromMessage}
           />
@@ -249,7 +240,6 @@ interface ThreadDisplayUnitProps {
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
   slashCommands: SlashCommand[];
-  sessionDirectory: SessionHandle[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
@@ -268,7 +258,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   cliApps,
   mcpPresets,
   slashCommands,
-  sessionDirectory,
   onOpenFilePreview,
   onForkFromMessage,
 }: ThreadDisplayUnitProps) {
@@ -307,7 +296,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
-            sessionDirectory={sessionDirectory}
             onOpenFilePreview={onOpenFilePreview}
             onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
           />
@@ -336,7 +324,6 @@ function threadDisplayUnitPropsEqual(
     && previous.cliApps === next.cliApps
     && previous.mcpPresets === next.mcpPresets
     && previous.slashCommands === next.slashCommands
-    && previous.sessionDirectory === next.sessionDirectory
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
   );

@@ -215,7 +215,7 @@ function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
 }
 
 describe("ThreadViewport", () => {
-  it("keeps unmanaged reasoning disclosure anchored for pointer and keyboard toggles", () => {
+  it("keeps reasoning disclosure anchored for pointer and keyboard toggles", () => {
     const takeUserControl = vi.spyOn(
       ThreadMotionCoordinator.prototype,
       "takeUserControl",

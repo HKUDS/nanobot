@@ -22,10 +22,6 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
-from nanobot.session.session_messages import (
-    session_message_envelope,
-    session_message_public_metadata,
-)
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
@@ -698,14 +694,6 @@ def append_session_message_input(
     chat_id = _chat_id_from_session_key(session_key)
     if chat_id is None:
         return
-    message_id = session_message.get("message_id")
-    if isinstance(message_id, str) and any(
-        isinstance(record.get("session_message"), Mapping)
-        and cast(Mapping[str, Any], record["session_message"]).get("message_id")
-        == message_id
-        for record in read_transcript_lines(session_key)
-    ):
-        return
     event = build_user_transcript_event(chat_id, content)
     if event is None:
         return
@@ -728,9 +716,7 @@ def webui_message_source(metadata: dict[str, Any] | None) -> dict[str, str] | No
         return None
     source_metadata = cast(dict[str, Any], raw)
     kind = source_metadata.get("kind")
-    if not isinstance(kind, str) or (
-        not is_automation_kind(kind) and kind != "session"
-    ):
+    if not isinstance(kind, str) or not is_automation_kind(kind):
         return None
     source: dict[str, str] = {"kind": kind}
     label = source_metadata.get("label")
@@ -794,7 +780,6 @@ class WebUITranscriptRecorder:
         cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
         session_mentions: Sequence[Mapping[str, Any]] | None = None,
-        session_handles: Sequence[Mapping[str, Any]] | None = None,
     ) -> bool:
         if text.strip() == "/stop" and not media_paths:
             return False
@@ -805,7 +790,6 @@ class WebUITranscriptRecorder:
             cli_apps=cli_apps,
             mcp_presets=mcp_presets,
             session_mentions=session_mentions,
-            session_handles=session_handles,
         )
         if payload is None:
             return False
@@ -914,17 +898,36 @@ def write_session_messages_as_transcript(
     messages: list[dict[str, Any]],
 ) -> None:
     """Write a minimal WebUI transcript from already-truncated session messages."""
+    target_chat_id = _chat_id_from_session_key(target_key)
     rows: list[dict[str, Any]] = []
     for msg in messages:
+        if is_hidden_history_message(msg):
+            continue
+        msg = public_history_message(msg)
         role = msg.get("role")
+        content = msg.get("content")
+        text = content if isinstance(content, str) else ""
         if role == "user":
-            row = _session_user_event(target_key, msg)
-        elif role == "assistant":
-            row = _session_assistant_event(target_key, msg)
+            row: dict[str, Any] = {"event": "user", "chat_id": target_chat_id, "text": text}
+            media = msg.get("media")
+            if isinstance(media, list) and media:
+                row["media_paths"] = [
+                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
+                ]
+            for key in ("cli_apps", "mcp_presets", "session_mentions"):
+                value = msg.get(key)
+                if isinstance(value, list) and value:
+                    row[key] = json.loads(json.dumps(value, ensure_ascii=False))
+        elif role == "assistant" and text.strip():
+            row = {"event": "message", "chat_id": target_chat_id, "text": text}
+            media = msg.get("media")
+            if isinstance(media, list) and media:
+                row["media"] = [
+                    str(p) for p in cast(list[Any], media) if isinstance(p, str) and p
+                ]
         else:
             continue
-        if row is not None:
-            rows.append(row)
+        rows.append(row)
     _write_transcript_lines(target_key, rows)
 
 
@@ -960,55 +963,20 @@ def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
         name = item.get("name")
         session_key = item.get("session_key")
         title = item.get("title")
+        handle_id = item.get("id")
         if not isinstance(name, str) or not isinstance(session_key, str):
             continue
         name = name.strip()[:80]
         session_key = session_key.strip()[:512]
         if not name or not session_key or _SESSION_MENTION_NAME_RE.fullmatch(name) is None:
             continue
-        normalized.append({
+        mention = {
             "name": name,
             "session_key": session_key,
             "title": title.strip()[:160] if isinstance(title, str) else "",
-        })
-    return normalized
-
-
-def normalize_session_handles_metadata(raw: object) -> list[dict[str, Any]]:
-    """Validate session-handle metadata crossing a persistence seam."""
-    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
-        return []
-    normalized: list[dict[str, Any]] = []
-    for raw_item in cast(Sequence[object], raw)[:MAX_SESSION_MENTIONS]:
-        if not isinstance(raw_item, Mapping):
-            continue
-        item = cast(Mapping[str, object], raw_item)
-        name = item.get("name")
-        session_key = item.get("session_key")
-        handle_id = item.get("id")
-        if (
-            not isinstance(name, str)
-            or not isinstance(session_key, str)
-            or not isinstance(handle_id, str)
-            or _SESSION_HANDLE_ID_RE.fullmatch(handle_id) is None
-        ):
-            continue
-        name = name.strip()[:80]
-        session_key = session_key.strip()[:512]
-        if not name or not session_key or _SESSION_MENTION_NAME_RE.fullmatch(name) is None:
-            continue
-        mention: dict[str, Any] = {
-            "id": handle_id,
-            "name": name,
-            "session_key": session_key,
         }
-        color_slot = item.get("color_slot")
-        if (
-            isinstance(color_slot, int)
-            and not isinstance(color_slot, bool)
-            and 0 <= color_slot < 8
-        ):
-            mention["color_slot"] = color_slot
+        if isinstance(handle_id, str) and _SESSION_HANDLE_ID_RE.fullmatch(handle_id):
+            mention["id"] = handle_id
         normalized.append(mention)
     return normalized
 
@@ -1019,11 +987,9 @@ def normalize_session_message_ui_metadata(raw: object) -> dict[str, Any] | None:
         return None
     raw_data = cast(Mapping[str, object], raw)
     session = raw_data.get("session")
-    direction = raw_data.get("direction")
     message_id = raw_data.get("message_id")
     if (
-        direction not in {"incoming", "outgoing"}
-        or not isinstance(message_id, str)
+        not isinstance(message_id, str)
         or not message_id.strip()
         or not isinstance(session, Mapping)
     ):
@@ -1031,24 +997,18 @@ def normalize_session_message_ui_metadata(raw: object) -> dict[str, Any] | None:
     session_data = cast(Mapping[str, object], session)
     handle_id = session_data.get("id")
     name = session_data.get("name")
-    color_slot = session_data.get("color_slot")
     if (
         not isinstance(handle_id, str)
-        or not handle_id.strip()
+        or _SESSION_HANDLE_ID_RE.fullmatch(handle_id) is None
         or not isinstance(name, str)
         or not name.strip()
-        or not isinstance(color_slot, int)
-        or isinstance(color_slot, bool)
-        or not 0 <= color_slot < 8
     ):
         return None
     handle: dict[str, Any] = {
         "id": handle_id.strip()[:128],
         "name": name.strip()[:80],
-        "color_slot": color_slot,
     }
     return {
-        "direction": direction,
         "message_id": message_id.strip()[:128],
         "session": handle,
     }
@@ -1062,7 +1022,6 @@ def build_user_transcript_event(
     cli_apps: list[Any] | None = None,
     mcp_presets: list[Any] | None = None,
     session_mentions: Sequence[Any] | None = None,
-    session_handles: Sequence[Any] | None = None,
 ) -> dict[str, Any] | None:
     paths = [str(path) for path in (media_paths or []) if path]
     if not text and not paths:
@@ -1091,9 +1050,6 @@ def build_user_transcript_event(
     mentions = normalize_session_mentions_metadata(session_mentions)
     if mentions:
         event["session_mentions"] = mentions
-    handles = normalize_session_handles_metadata(session_handles)
-    if handles:
-        event["session_handles"] = handles
     return event
 
 
@@ -1118,7 +1074,6 @@ def _session_user_event(
         return None
     if is_hidden_history_message(message):
         return None
-    message_envelope = session_message_envelope(message)
     message = public_history_message(message)
     if _is_legacy_raw_subagent_result(message):
         return None
@@ -1128,9 +1083,8 @@ def _session_user_event(
     cli_apps = message.get("cli_apps")
     mcp_presets = message.get("mcp_presets")
     session_mentions = message.get("session_mentions")
-    session_handles = message.get("session_handles")
     chat_id = session_key.split(":", 1)[1] if ":" in session_key else session_key
-    event = build_user_transcript_event(
+    return build_user_transcript_event(
         chat_id,
         text,
         media_paths=cast(list[Any], media) if isinstance(media, list) else None,
@@ -1139,13 +1093,7 @@ def _session_user_event(
         session_mentions=(
             cast(list[Any], session_mentions) if isinstance(session_mentions, list) else None
         ),
-        session_handles=(
-            cast(list[Any], session_handles) if isinstance(session_handles, list) else None
-        ),
     )
-    if event is not None and message_envelope is not None:
-        event["session_message"] = session_message_public_metadata(message_envelope)
-    return event
 
 
 def _assistant_text_signature(value: Any) -> str:
@@ -1331,9 +1279,7 @@ def _find_unique_session_turn(
 def _user_recovery_signature(event: dict[str, Any]) -> str:
     fields = {
         key: event[key]
-        for key in (
-            "text", "media_paths", "cli_apps", "mcp_presets", "session_mentions", "session_handles"
-        )
+        for key in ("text", "media_paths", "cli_apps", "mcp_presets", "session_mentions")
         if key in event
     }
     return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1790,9 +1736,7 @@ def replay_transcript_to_ui_messages(
             return {}
         source_data = cast(dict[str, Any], source)
         kind = source_data.get("kind")
-        if not isinstance(kind, str) or (
-            not is_automation_kind(kind) and kind != "session"
-        ):
+        if not isinstance(kind, str) or not is_automation_kind(kind):
             return {}
         out: dict[str, Any] = {"source": {"kind": kind}}
         label = source_data.get("label")
@@ -2203,9 +2147,6 @@ def replay_transcript_to_ui_messages(
             )
             if session_mentions:
                 row["sessionMentions"] = session_mentions
-            session_handles = normalize_session_handles_metadata(rec.get("session_handles"))
-            if session_handles:
-                row["sessionHandles"] = session_handles
             if session_message := normalize_session_message_ui_metadata(
                 rec.get("session_message")
             ):

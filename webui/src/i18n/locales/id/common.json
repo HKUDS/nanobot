@@ -1166,6 +1166,7 @@
       "placeholderStreaming": "Model sedang merespons…",
       "inputAria": "Input pesan",
       "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
+      "runRuntimeTitle": "Berjalan · {{elapsed}}",
       "goalStateStrip": "Tujuan · {{label}}",
       "goalStateFallback": "Tujuan",
       "goalStateExpandAria": "Lihat tujuan lengkap",
@@ -1325,7 +1326,9 @@
         "cliDescription": "Gunakan @{{name}} sebagai aplikasi CLI lokal",
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP",
         "cliTitle": "Aplikasi CLI: {{name}}",
-        "mcpTitle": "Server MCP: {{name}}"
+        "mcpTitle": "Server MCP: {{name}}",
+        "sessionBadge": "Percakapan Nanobot",
+        "sessionDescription": "Referensikan @{{name}} sebagai chat sebelumnya"
       },
       "workspace": {
         "accessAria": "Mode akses ruang kerja",

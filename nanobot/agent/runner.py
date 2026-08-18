@@ -175,9 +175,6 @@ class AgentRunner:
                 and not is_hidden_history_message(injection)
                 and not is_hidden_history_message(messages[-1])
                 and allows_conversation_message_merge(messages[-1])
-                and allows_conversation_message_merge(injection)
-                and set(messages[-1]).issubset({"role", "content", "_meta"})
-                and set(injection).issubset({"role", "content", "_meta"})
             ):
                 merged = dict(messages[-1])
                 left_meta = merged.get("_meta")

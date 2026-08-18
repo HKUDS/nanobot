@@ -2331,18 +2331,6 @@ function Shell({
       .map((key) => byKey.get(key))
       .filter((session): session is ChatSummary => session !== undefined);
   }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, sessions]);
-  const collaborationSessions = useMemo(() => {
-    const nearby = workbenchPaneSessions.length > 0
-      ? workbenchPaneSessions
-      : activeSession
-        ? [activeSession]
-        : [];
-    const nearbyKeys = new Set(nearby.map((session) => session.key));
-    return [
-      ...nearby,
-      ...sessions.filter((session) => !nearbyKeys.has(session.key)),
-    ];
-  }, [activeSession, sessions, workbenchPaneSessions]);
   const paneChromeEnabled = Boolean(
     activeKey && activeSession && !temporaryChatActive && activeTabState,
   );
@@ -2759,7 +2747,7 @@ function Shell({
                     return (
                       <ThreadShell
                         session={activeSession}
-                        sessions={collaborationSessions}
+                        sessions={sessions}
                         title={headerTitle}
                         temporary={temporaryChatRequested}
                         temporaryChatIds={temporaryChatIds}
@@ -2804,7 +2792,7 @@ function Shell({
                   return (
                     <ThreadShell
                       session={paneSession}
-                      sessions={collaborationSessions}
+                      sessions={sessions}
                       title={pane.title}
                       onToggleSidebar={toggleSidebar}
                       onNewChat={onNewChat}

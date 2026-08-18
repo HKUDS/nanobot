@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
-import { SessionHandleHighlight } from "@/components/CliAppMentionText";
+import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -37,7 +37,6 @@ import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
-  SessionHandle,
   SettingsPayload,
   SlashCommand,
   SkillSummary,
@@ -639,28 +638,10 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
-  const referenceSessions = useMemo(
-    () => sessions.filter((candidate) => (
-      candidate.key !== historyKey
-      && (
-        workspaceScope?.access_mode !== "restricted"
-        || candidate.workspaceScope?.project_path === workspaceScope.project_path
-      )
-    )),
-    [historyKey, sessions, workspaceScope],
+  const mentionSessions = useMemo(
+    () => sessions.filter((candidate) => candidate.key !== historyKey),
+    [historyKey, sessions],
   );
-  const handleSessions = useMemo(() => {
-    if (temporary) return [];
-    return sessions;
-  }, [sessions, temporary]);
-  const sessionDirectory = useMemo<SessionHandle[]>(() => {
-    const handles = new Map<string, SessionHandle>();
-    if (session?.handle) handles.set(session.handle.id, session.handle);
-    for (const candidate of handleSessions) {
-      if (candidate.handle) handles.set(candidate.handle.id, candidate.handle);
-    }
-    return [...handles.values()];
-  }, [handleSessions, session?.handle]);
   const {
     messages: historical,
     loading,
@@ -1330,14 +1311,7 @@ export function ThreadShell({
       setPendingFirstTargetChatId(newId);
       return true;
     },
-    [
-      booting,
-      client,
-      localModelPreset,
-      onCreateChat,
-      withWorkspaceScope,
-      workspaceScope,
-    ],
+    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
   );
 
   const handleThreadSend = useCallback(
@@ -1490,8 +1464,7 @@ export function ThreadShell({
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
-          sessions={referenceSessions}
-          handleSessions={handleSessions}
+          sessions={mentionSessions}
           skills={skills}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
@@ -1538,8 +1511,7 @@ export function ThreadShell({
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
-          sessions={referenceSessions}
-          handleSessions={handleSessions}
+          sessions={mentionSessions}
           skills={skills}
           surfaceRef={composerSurfaceRef}
           onTranscribeAudio={transcribeAudio}
@@ -1609,18 +1581,15 @@ export function ThreadShell({
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {hideHeaderTitle && !temporary && session?.handle ? (
           <div
-            data-testid="pane-handle-identity"
-            data-active={headerActive ? "true" : "false"}
             aria-label={`Session @${session.handle.name}`}
             className="flex h-8 shrink-0 items-center px-3 text-[12px]"
           >
             <span
-              data-pane-handle-handle
               className="shrink-0"
             >
-              <SessionHandleHighlight handle={session.handle}>
+              <SessionHandleLabel id={session.handle.id}>
                 @{session.handle.name}
-              </SessionHandleHighlight>
+              </SessionHandleLabel>
             </span>
           </div>
         ) : null}
@@ -1643,7 +1612,6 @@ export function ThreadShell({
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
-            sessionDirectory={sessionDirectory}
             slashCommands={availableSlashCommands}
             forkBoundaryMessageCount={forkBoundaryMessageCount}
             hasMoreBefore={hasMoreBefore}

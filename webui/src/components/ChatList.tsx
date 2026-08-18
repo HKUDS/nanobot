@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
-import { SessionHandleHighlight, sessionHandleColor } from "@/components/CliAppMentionText";
+import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
@@ -64,6 +64,7 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
+import { sessionHandleColor } from "@/lib/session-handle";
 import {
   clearDraggedSession,
   hasDraggedSession,
@@ -120,7 +121,7 @@ function SidebarSelectionTrack({
         active ? "scale-x-100" : "scale-x-0",
       )}
       style={{
-        backgroundColor: handle ? sessionHandleColor(handle.color_slot) : "currentColor",
+        backgroundColor: handle ? sessionHandleColor(handle.id) : "currentColor",
       }}
     />
   );
@@ -130,12 +131,11 @@ function SidebarSessionHandle({ handle }: { handle: ChatSummary["handle"] }) {
   if (!handle) return null;
   return (
     <span
-      data-sidebar-handle-handle
       className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] font-medium leading-5"
     >
-      <SessionHandleHighlight handle={handle}>
+      <SessionHandleLabel id={handle.id}>
         @{handle.name}
-      </SessionHandleHighlight>
+      </SessionHandleLabel>
     </span>
   );
 }

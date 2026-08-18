@@ -504,7 +504,7 @@ describe("NanobotClient", () => {
     expect(handler).toHaveBeenCalledTimes(3);
   });
 
-  it("records canonical run status without an onChat subscriber", () => {
+  it("records goal_status run strip without an onChat subscriber", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -527,50 +527,7 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
   });
 
-  it("starts the run projection immediately when a lifecycle message is submitted", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-13T10:00:00.000Z"));
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    const handler = vi.fn();
-    client.onRunStatus(handler);
-    client.connect();
-    lastSocket().fakeOpen();
-
-    client.sendMessage("chat-optimistic", "hello", undefined, {
-      turnId: "turn-optimistic",
-    });
-
-    const submittedAt = Date.now() / 1000;
-    expect(client.getRunStartedAt("chat-optimistic")).toBe(submittedAt);
-    expect(handler).toHaveBeenLastCalledWith("chat-optimistic", submittedAt);
-    expect(client.hasUnsettledRun("chat-optimistic")).toBe(true);
-  });
-
-  it("does not start a separate run projection for side-channel guidance", () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    const handler = vi.fn();
-    client.onRunStatus(handler);
-    client.connect();
-    lastSocket().fakeOpen();
-
-    client.sendMessage("chat-guidance-only", "focus here", undefined, {
-      turnId: "turn-guidance-only",
-      startsNewRun: false,
-    });
-
-    expect(client.getRunStartedAt("chat-guidance-only")).toBeNull();
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it("clears the local run status immediately when a stop is requested", () => {
+  it("clears the local run strip immediately when a stop is requested", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -595,7 +552,7 @@ describe("NanobotClient", () => {
     expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
   });
 
-  it("clears stale run status when reconnecting after a dropped socket", async () => {
+  it("clears stale run strip when reconnecting after a dropped socket", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: true,
@@ -621,7 +578,7 @@ describe("NanobotClient", () => {
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
   });
 
-  it("clears run status when a turn_end arrives without idle", () => {
+  it("clears run strip when a turn_end arrives without idle", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -771,7 +728,6 @@ describe("NanobotClient", () => {
     expect(
       client.reconcileCanonicalCompletion("chat-rejected", requestGeneration, []),
     ).toBe(true);
-    expect(client.getRunStartedAt("chat-rejected")).toBeNull();
   });
 
   it("does not let an older rejection settle or stop a newer run", () => {
@@ -2106,7 +2062,7 @@ describe("NanobotClient", () => {
     );
   });
 
-  it("keeps session references and handle mentions separate on the wire", () => {
+  it("includes session mentions in outbound messages", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -2115,34 +2071,22 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
 
-    client.sendMessage("chat-current", "Use #pricing and ask @mira", undefined, {
+    client.sendMessage("chat-current", "Use @pricing", undefined, {
       sessionMentions: [{
         name: "pricing",
         session_key: "websocket:pricing",
         title: "Pricing",
-      }],
-      sessionHandles: [{
-        id: "handle_mira",
-        name: "mira",
-        session_key: "websocket:mira",
-        color_slot: 3,
       }],
     });
 
     expect(lastSocket().sent).toContain(JSON.stringify({
       type: "message",
       chat_id: "chat-current",
-      content: "Use #pricing and ask @mira",
+      content: "Use @pricing",
       session_mentions: [{
         name: "pricing",
         session_key: "websocket:pricing",
         title: "Pricing",
-      }],
-      session_handles: [{
-        id: "handle_mira",
-        name: "mira",
-        session_key: "websocket:mira",
-        color_slot: 3,
       }],
       webui: true,
     }));

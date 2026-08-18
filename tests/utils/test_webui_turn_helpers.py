@@ -1,35 +1,29 @@
 """Tests for WebSocket turn timing strip bookkeeping."""
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
-from nanobot.agent.turn_delivery import TurnRoute
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import (
-    GoalStatusEvent,
-    TurnModelUpdatedEvent,
-)
+from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent, UserInputEvent
 from nanobot.bus.runtime_events import (
     RuntimeEventBus,
     RuntimeEventContext,
-    SessionTurnStarted,
     TurnRuntimeAdmitted,
+    UserInputAccepted,
 )
 from nanobot.providers.base import GenerationSettings
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
+from nanobot.session.session_handles import session_handle_for_key
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
-from nanobot.webui.transcript import read_transcript_lines
 
 
 @pytest.fixture(autouse=True)
-def _clear_turn_wall_clock(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+def _clear_turn_wall_clock() -> None:
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
@@ -227,6 +221,57 @@ async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_session_input_is_projected_by_the_webui_coordinator(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    sessions = SessionManager(tmp_path)
+    target_session = sessions.get_or_create("websocket:target")
+    target_session.metadata["webui"] = True
+    sessions.save(target_session)
+    source = session_handle_for_key("websocket:source")
+    envelope = {
+        "message_id": "message-1",
+        "created_at_ms": 123,
+        "expect_reply": False,
+        "source_session_key": "websocket:source",
+        "target_session_key": "websocket:target",
+    }
+    append_input = MagicMock()
+    monkeypatch.setattr(wth, "append_session_message_input", append_input)
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sessions,
+        schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe(runtime_events)
+
+    await runtime_events.publish(UserInputAccepted(
+        context=RuntimeEventContext(
+            channel="system",
+            chat_id="websocket:target",
+            session_key="websocket:target",
+            metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
+        ),
+        content="Review this",
+    ))
+
+    append_input.assert_called_once()
+    outbound = bus.publish_outbound.await_args.args[0]
+    assert outbound.channel == "websocket"
+    assert outbound.chat_id == "target"
+    assert isinstance(outbound.event, UserInputEvent)
+    assert outbound.event.content == "Review this"
+    assert outbound.event.provenance["session_message"]["session"] == {
+        "id": source.id,
+        "name": source.name,
+    }
+
+
+@pytest.mark.asyncio
 async def test_fallback_model_ignores_non_websocket_requests() -> None:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
@@ -236,90 +281,3 @@ async def test_fallback_model_ignores_non_websocket_requests() -> None:
         await observer("fallback")
 
     bus.publish_outbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_session_route_does_not_duplicate_already_projected_input(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sessions = SessionManager(tmp_path / "sessions")
-    target = sessions.get_or_create("websocket:target")
-    target.metadata["webui"] = True
-    sessions.save(target)
-    metadata = {
-        SESSION_MESSAGE_METADATA_KEY: {
-            "message_id": "message-1",
-            "created_at_ms": 1234,
-            "expect_reply": True,
-            "source": {
-                "name": "reviewer",
-                "session_key": "websocket:source",
-                "handle_id": "handle_11111111111111111111111111111111",
-                "color_slot": 3,
-            },
-            "target": {
-                "name": "implementer",
-                "session_key": "websocket:target",
-            },
-        }
-    }
-    msg = InboundMessage(
-        channel="system",
-        sender_id="session",
-        chat_id="websocket:target",
-        content="Please review this.",
-        metadata=metadata,
-        session_key_override="websocket:target",
-        require_existing_session=True,
-    )
-
-    routed = wth.WebuiTurnRoutePolicy(sessions)(
-        msg,
-        "websocket:target",
-        TurnRoute(channel="websocket", chat_id="target"),
-    )
-
-    assert routed.publish_lifecycle is True
-    assert read_transcript_lines("websocket:target") == []
-
-    bus = MagicMock()
-    bus.publish_outbound = AsyncMock()
-    coordinator = wth.WebuiTurnCoordinator(
-        bus=bus,
-        sessions=sessions,
-        schedule_background=lambda _task: None,
-    )
-    await coordinator._handle_session_turn_started(SessionTurnStarted(
-        context=RuntimeEventContext(
-            channel=routed.channel,
-            chat_id=routed.chat_id,
-            session_key="websocket:target",
-            metadata=routed.metadata,
-        ),
-        content=msg.content,
-    ))
-
-    assert read_transcript_lines("websocket:target") == []
-    bus.publish_outbound.assert_not_awaited()
-
-
-def _session_message_metadata() -> dict[str, Any]:
-    return {
-        SESSION_MESSAGE_METADATA_KEY: {
-            "message_id": "message-1",
-            "created_at_ms": 1,
-            "expect_reply": True,
-            "source": {
-                "name": "reviewer",
-                "session_key": "websocket:source",
-                "handle_id": "handle_11111111111111111111111111111111",
-                "color_slot": 1,
-            },
-            "target": {
-                "name": "implementer",
-                "session_key": "websocket:target",
-            },
-        }
-    }

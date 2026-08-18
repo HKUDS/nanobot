@@ -15,8 +15,6 @@ export interface ToolField {
     | "key"
     | "label"
     | "name"
-    | "to"
-    | "expect_reply"
     | "channel"
     | "chat_id"
     | "session_id"
@@ -121,7 +119,7 @@ export function describeGenericToolRun(items: GenericToolRunItem[]): GenericTool
     status,
     label: activityLabel(family, status, collected, name, items),
     detail: activityDetail(items, family, name),
-    aside: activityAside(items, family, name),
+    aside: activityAside(items, family),
   };
 }
 
@@ -170,7 +168,6 @@ function safeFields(args: unknown): ToolField[] {
     "key",
     "label",
     "name",
-    "to",
     "channel",
     "chat_id",
     "session_id",
@@ -179,17 +176,6 @@ function safeFields(args: unknown): ToolField[] {
     const value = record[key];
     if (typeof value === "string" && value.trim()) {
       fields.push({ key, value: value.trim() });
-    }
-  }
-  const expectReply = record.expect_reply;
-  if (typeof expectReply === "boolean") {
-    fields.push({ key: "expect_reply", value: String(expectReply) });
-  } else if (typeof expectReply === "string") {
-    const normalized = expectReply.toLowerCase();
-    if (["true", "1", "yes"].includes(normalized)) {
-      fields.push({ key: "expect_reply", value: "true" });
-    } else if (["false", "0", "no"].includes(normalized)) {
-      fields.push({ key: "expect_reply", value: "false" });
     }
   }
   return fields;
@@ -240,18 +226,6 @@ function activityLabel(
       return statusCopy(status, "Generating image", "Generated image", "Could not generate image");
     case "spawn":
       return statusCopy(status, "Delegating task", "Delegated task", "Could not delegate task");
-    case "send_session_message":
-      if (items.length > 1) {
-        return statusCopy(
-          status,
-          "Sending messages",
-          "Sent messages",
-          "Could not send messages",
-        );
-      }
-      return fieldValue(items[0]?.trace, "expect_reply") === "true"
-        ? statusCopy(status, "Asking", "Asked", "Could not reach")
-        : statusCopy(status, "Sending to", "Sent to", "Could not reach");
     case "message":
       return statusCopy(status, "Sending message", "Sent message", "Could not send message");
     case "my":
@@ -307,8 +281,6 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
   switch (name) {
     case "spawn":
       return safeText(fieldValue(trace, "label"));
-    case "send_session_message":
-      return safeText(fieldValue(trace, "to"));
     case "message":
       return safeText(fieldValue(trace, "channel"));
     case "my":
@@ -329,15 +301,10 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
   }
 }
 
-function activityAside(
-  items: GenericToolRunItem[],
-  family: ToolFamily,
-  name: string,
-): string {
+function activityAside(items: GenericToolRunItem[], family: ToolFamily): string {
   const pathCount = uniqueValues(items, ["path", "file_path"]).length;
   if (pathCount > 1) return `${pathCount} files`;
   if (items.length <= 1) return "";
-  if (name === "send_session_message") return `${items.length} messages`;
   if (family === "content-search" || family === "file-search" || family === "memory") {
     return `${items.length} searches`;
   }

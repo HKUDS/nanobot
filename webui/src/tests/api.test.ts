@@ -1049,7 +1049,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("maps title-free handle handles", async () => {
+  it("maps generated session titles from the sessions list", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -1062,9 +1062,8 @@ describe("webui API helpers", () => {
             model_preset: "fast",
             run_started_at: 1_700_000_000,
             handle: {
-              id: "handle_1234567890abcdef1234567890abcdef",
-              name: "webui-review",
-              color_slot: 5,
+              id: "handle_0123456789abcdef0123456789abcdef",
+              name: "mira-0123456789",
             },
           },
         ],
@@ -1079,36 +1078,11 @@ describe("webui API helpers", () => {
         modelPreset: "fast",
         runStartedAt: 1_700_000_000,
         handle: {
-          id: "handle_1234567890abcdef1234567890abcdef",
-          name: "webui-review",
-          color_slot: 5,
-          session_key: "websocket:chat-1",
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
         },
       },
     ]);
-  });
-
-  it("rejects malformed session-list handle DTOs instead of trusting enriched fields", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        sessions: [
-          {
-            key: "websocket:chat-1",
-            created_at: null,
-            updated_at: null,
-            handle: {
-              id: "handle_1234567890abcdef1234567890abcdef",
-              name: "valid-handle",
-              color_slot: 8,
-              session_key: "websocket:attacker-controlled",
-            },
-          },
-        ],
-      }),
-    } as Response);
-
-    await expect(listSessions("tok")).resolves.toMatchObject([{ handle: null }]);
   });
 
   it("maps slash command metadata from the commands endpoint", async () => {

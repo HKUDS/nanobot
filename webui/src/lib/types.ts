@@ -66,8 +66,6 @@ export interface UIMessage {
   mcpPresets?: UIMcpPresetAttachment[];
   /** Persisted sessions explicitly referenced by this user turn. */
   sessionMentions?: SessionMention[];
-  /** Active session handles structurally selected by this user turn. */
-  sessionHandles?: SessionHandle[];
   /** Assistant turn: accumulated model reasoning / thinking text. Built up
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
@@ -114,29 +112,24 @@ export interface UIMcpPresetAttachment {
 }
 
 export interface SessionMention {
-  /** Text token inserted in the composer, without the leading #. */
+  /** Stable public identity. Older transcript rows may not include it. */
+  id?: string;
+  /** Text token inserted in the composer, without the leading @. */
   name: string;
   /** Stable persisted-session identifier used by read_session. */
   session_key: string;
   title: string;
 }
 
-/** Exact public handle DTO returned by the session-list endpoint. */
-export interface SessionListHandle {
+/** Stable public handle returned by the session-list endpoint. */
+export interface SessionHandle {
   id: string;
   name: string;
-  color_slot: number;
-}
-
-/** Public session handle enriched with its UI navigation target. */
-export interface SessionHandle extends SessionListHandle {
-  session_key: string;
 }
 
 export interface UISessionMessage {
-  direction: "incoming" | "outgoing";
   message_id: string;
-  session: SessionListHandle;
+  session: SessionHandle;
 }
 
 export interface SessionAutomationJob {
@@ -1249,10 +1242,12 @@ export type InboundEvent =
       active_turn_id?: string;
       starts_turn: boolean;
       started_at?: number;
+      created_at_ms?: number;
       media_urls?: UIMediaAttachment[];
       cli_apps?: UICliAppAttachment[];
       mcp_presets?: UIMcpPresetAttachment[];
       session_mentions?: SessionMention[];
+      provenance?: { session_message?: UISessionMessage };
     }
   | ({
       event: "message";
@@ -1271,13 +1266,6 @@ export type InboundEvent =
       source?: UIMessageSource;
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
-    } & InboundTurnMetadata)
-  | ({
-      event: "session_message";
-      chat_id: string;
-      text: string;
-      created_at_ms: number;
-      session_message: UISessionMessage;
     } & InboundTurnMetadata)
   | ({
       event: "file_edit";
@@ -1473,7 +1461,6 @@ export type Outbound =
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];
-      session_handles?: SessionHandle[];
       quoted_context?: string;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;

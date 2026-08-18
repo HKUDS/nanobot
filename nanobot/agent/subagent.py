@@ -505,7 +505,6 @@ class SubagentManager:
             content=announce_content,
             session_key_override=override,
             metadata=metadata,
-            require_existing_session=True,
         )
 
         await self.bus.publish_inbound(msg)

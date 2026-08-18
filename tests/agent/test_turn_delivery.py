@@ -7,14 +7,9 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.session.manager import SessionManager
-from nanobot.session.session_messages import (
-    SESSION_MESSAGE_METADATA_KEY,
-    SESSION_REPLY_TIMEOUT_METADATA_KEY,
-)
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
-    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
 
@@ -82,6 +77,36 @@ def test_websocket_lifecycle_reuses_registered_ingress_owner(tmp_path: Path) -> 
         assert msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == owner
     finally:
         wth.clear_websocket_turn_if_current("chat-queued", owner)
+
+
+def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
+    from nanobot.session import webui_turns as wth
+
+    sessions = SessionManager(tmp_path / "sessions")
+    target = sessions.get_or_create("websocket:target")
+    target.metadata["webui"] = True
+    sessions.save(target)
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        RuntimeEventBus(),
+        route_policy=WebuiTurnRoutePolicy(sessions),
+    )
+    msg = InboundMessage(
+        channel="system",
+        sender_id="session",
+        chat_id="websocket:target",
+        content="Review this",
+        session_key_override="websocket:target",
+        input_role="user",
+    )
+
+    delivery = factory.create(msg, msg.session_key)
+
+    assert (delivery.route.channel, delivery.route.chat_id) == ("websocket", "target")
+    assert delivery.route.publish_lifecycle
+    assert delivery.route.metadata["_wants_stream"] is True
+    owner = delivery.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    wth.clear_websocket_turn_if_current("target", owner)
 
 
 @pytest.mark.asyncio
@@ -203,147 +228,3 @@ def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> Non
         "injected_event": "subagent_result",
         "subagent_task_id": "sub-1",
     }
-
-
-def test_session_route_targets_its_webui_session_with_source_provenance(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sessions = SessionManager(tmp_path)
-    session_key = "websocket:reviewer"
-    session = sessions.get_or_create(session_key)
-    session.metadata["webui"] = True
-    sessions.save(session)
-    envelope = {
-        "message_id": "handle-message-1",
-        "created_at_ms": 1,
-        "expect_reply": True,
-        "source": {
-            "name": "lead",
-            "session_key": "websocket:lead",
-            "handle_id": "handle_00000000000000000000000000000001",
-            "color_slot": 1,
-        },
-        "target": {
-            "name": "reviewer",
-            "session_key": session_key,
-        },
-    }
-    msg = InboundMessage(
-        channel="system",
-        sender_id="session",
-        chat_id=session_key,
-        content="Review this",
-        session_key_override=session_key,
-        require_existing_session=True,
-        metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
-    )
-    factory = TurnDeliveryFactory(
-        MessageBus(),
-        RuntimeEventBus(),
-        route_policy=WebuiTurnRoutePolicy(sessions),
-    )
-
-    route = factory.create(msg, session_key).route
-
-    assert route.channel == "websocket"
-    assert route.chat_id == "reviewer"
-    assert route.publish_lifecycle is True
-    assert route.metadata[SESSION_MESSAGE_METADATA_KEY] == envelope
-    assert route.metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] == {
-        "kind": "session",
-        "label": "@lead",
-    }
-    assert route.metadata[WEBUI_TURN_METADATA_KEY].startswith("session-message:")
-    assert msg.metadata == {SESSION_MESSAGE_METADATA_KEY: envelope}
-
-
-def test_session_timeout_route_resumes_its_webui_session(tmp_path: Path) -> None:
-    sessions = SessionManager(tmp_path)
-    session_key = "websocket:lead"
-    session = sessions.get_or_create(session_key)
-    session.metadata["webui"] = True
-    sessions.save(session)
-    envelope = {
-        "message_id": "handle-message-1",
-        "created_at_ms": 1,
-        "expect_reply": True,
-        "timeout_seconds": 60,
-        "source": {
-            "name": "lead",
-            "session_key": session_key,
-            "handle_id": "handle_00000000000000000000000000000001",
-            "color_slot": 1,
-        },
-        "target": {
-            "name": "reviewer",
-            "session_key": "websocket:reviewer",
-        },
-    }
-    msg = InboundMessage(
-        channel="system",
-        sender_id="session_timeout",
-        chat_id=session_key,
-        content="",
-        session_key_override=session_key,
-        require_existing_session=True,
-        metadata={SESSION_REPLY_TIMEOUT_METADATA_KEY: envelope},
-    )
-    factory = TurnDeliveryFactory(
-        MessageBus(),
-        RuntimeEventBus(),
-        route_policy=WebuiTurnRoutePolicy(sessions),
-    )
-
-    route = factory.create(msg, session_key).route
-
-    assert route.channel == "websocket"
-    assert route.chat_id == "lead"
-    assert route.publish_lifecycle is True
-    assert route.metadata[WEBUI_TURN_METADATA_KEY].startswith("session-reply-timeout:")
-    assert WEBUI_MESSAGE_SOURCE_METADATA_KEY not in route.metadata
-
-
-def test_session_route_does_not_create_a_missing_target_session(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sessions = SessionManager(tmp_path)
-    session_key = "websocket:deleted"
-    envelope = {
-        "message_id": "handle-message-deleted",
-        "created_at_ms": 1,
-        "expect_reply": True,
-        "source": {
-            "name": "lead",
-            "session_key": "websocket:lead",
-            "handle_id": "handle_00000000000000000000000000000001",
-            "color_slot": 1,
-        },
-        "target": {
-            "name": "deleted",
-            "session_key": session_key,
-        },
-    }
-    msg = InboundMessage(
-        channel="system",
-        sender_id="session",
-        chat_id=session_key,
-        content="Review this",
-        session_key_override=session_key,
-        require_existing_session=True,
-        metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
-    )
-    factory = TurnDeliveryFactory(
-        MessageBus(),
-        RuntimeEventBus(),
-        route_policy=WebuiTurnRoutePolicy(sessions),
-    )
-
-    route = factory.create(msg, session_key).route
-
-    assert route.publish_lifecycle is False
-    assert sessions.get_cached(session_key) is None
-    assert sessions.read_session_metadata(session_key) is None

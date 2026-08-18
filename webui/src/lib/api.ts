@@ -23,7 +23,7 @@ import type {
   ProviderOAuthLoginResult,
   ProviderSettingsUpdate,
   SessionDeleteResult,
-  SessionListHandle,
+  SessionHandle,
   SessionAutomationsPayload,
   SettingsPayload,
   SettingsUpdate,
@@ -167,20 +167,17 @@ function splitKey(key: string): { channel: string; chatId: string } {
   return { channel: key.slice(0, idx), chatId: key.slice(idx + 1) };
 }
 
-function normalizeSessionListHandle(value: unknown): SessionListHandle | null {
+function normalizeSessionHandle(value: unknown): SessionHandle | null {
   if (!value || typeof value !== "object") return null;
-  const handle = value as Partial<SessionListHandle>;
+  const handle = value as Partial<SessionHandle>;
   const id = typeof handle.id === "string" ? handle.id.trim() : "";
   const name = typeof handle.name === "string" ? handle.name.trim() : "";
   if (
     !/^handle_[a-f0-9]{32}$/i.test(id)
     || !name
     || !/^[\p{L}\p{N}_-]+$/u.test(name)
-    || !Number.isInteger(handle.color_slot)
-    || (handle.color_slot ?? -1) < 0
-    || (handle.color_slot ?? 8) >= 8
   ) return null;
-  return { id, name, color_slot: handle.color_slot as number };
+  return { id, name };
 }
 
 export async function listSessions(
@@ -196,7 +193,7 @@ export async function listSessions(
     model_preset?: string | null;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
-    handle?: SessionListHandle | null;
+    handle?: SessionHandle | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -205,8 +202,7 @@ export async function listSessions(
     API_READ_TIMEOUT_MS,
   );
   return body.sessions.map((s) => {
-    const rawSession = normalizeSessionListHandle(s.handle);
-    const handle = rawSession ? { ...rawSession, session_key: s.key } : null;
+    const handle = normalizeSessionHandle(s.handle);
     return {
       key: s.key,
       ...splitKey(s.key),

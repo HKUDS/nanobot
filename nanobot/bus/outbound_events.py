@@ -79,12 +79,12 @@ class SessionUpdatedEvent(OutboundEvent):
 
 
 @dataclass(frozen=True)
-class SessionMessageInputEvent(OutboundEvent):
-    """One session-authored message projected live into its target WebUI thread."""
+class UserInputEvent(OutboundEvent):
+    """A user-input row projected by an edge adapter."""
 
     content: str
     created_at_ms: int
-    session_message: dict[str, Any]
+    provenance: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -147,7 +147,7 @@ def replace_outbound_event(
 def _event_content(event: OutboundEvent) -> str:
     if isinstance(
         event,
-        ProgressEvent | RetryWaitEvent | StreamDeltaEvent | StreamEndEvent | SessionMessageInputEvent,
+        ProgressEvent | RetryWaitEvent | StreamDeltaEvent | StreamEndEvent | UserInputEvent,
     ):
         return event.content
     return ""

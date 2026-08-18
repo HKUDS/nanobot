@@ -38,8 +38,6 @@ const SEMANTIC_MESSAGE_FIELDS = [
   "cliApps",
   "mcpPresets",
   "sessionMentions",
-  "sessionHandles",
-  "handle",
   "reasoning",
   "latencyMs",
   "source",
@@ -72,7 +70,6 @@ function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
   const errorHandlers = new Set<(error: StreamError) => void>();
-  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const unsettledRunByChatId = new Map<string, boolean>();
   const goalStateByChatId = new Map<string, GoalStateWsPayload>();
@@ -116,13 +113,6 @@ function fakeClient() {
         errorHandlers.add(handler);
         return () => errorHandlers.delete(handler);
       },
-      onRunStatus(handler: (chatId: string, startedAt: number | null) => void) {
-        runStatusHandlers.add(handler);
-        for (const [chatId, startedAt] of runStartedAtByChatId) {
-          handler(chatId, startedAt);
-        }
-        return () => runStatusHandlers.delete(handler);
-      },
       getRunStartedAt(chatId: string) {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
@@ -164,11 +154,6 @@ function fakeClient() {
     emitError(error: StreamError) {
       errorHandlers.forEach((handler) => handler(error));
     },
-    emitRunStatus(chatId: string, startedAt: number | null) {
-      if (startedAt === null) runStartedAtByChatId.delete(chatId);
-      else runStartedAtByChatId.set(chatId, startedAt);
-      runStatusHandlers.forEach((handler) => handler(chatId, startedAt));
-    },
     setUnsettled(chatId: string, unsettled: boolean) {
       unsettledRunByChatId.set(chatId, unsettled);
     },
@@ -197,101 +182,6 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
-  it("keeps a handle mention on the focused chat's optimistic and outbound turn", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(
-      () => useNanobotStream("chat-source", EMPTY_MESSAGES),
-      { wrapper: wrap(fake.client) },
-    );
-    const reviewer = {
-      id: "handle_00000000000000000000000000000001",
-      name: "reviewer",
-      session_key: "websocket:chat-reviewer",
-      color_slot: 3,
-    };
-
-    act(() => {
-      result.current.send("@reviewer check this", undefined, {
-        sessionHandles: [reviewer],
-      });
-    });
-
-    expect(result.current.messages).toEqual([
-      expect.objectContaining({
-        role: "user",
-        content: "@reviewer check this",
-        deliveryStatus: "sending",
-        sessionHandles: [reviewer],
-      }),
-    ]);
-    expect(result.current.isStreaming).toBe(true);
-    expect(fake.client.sendMessage).toHaveBeenCalledWith(
-      "chat-source",
-      "@reviewer check this",
-      undefined,
-      expect.objectContaining({
-        sessionHandles: [reviewer],
-        turnId: expect.any(String),
-      }),
-    );
-  });
-
-  it("renders an incoming handle message before the target model responds", async () => {
-    const fake = fakeClient();
-    const { result } = renderHook(
-      () => useNanobotStream("chat-handle", EMPTY_MESSAGES),
-      { wrapper: wrap(fake.client) },
-    );
-    const sessionMessageEvent: InboundEvent = {
-      event: "session_message",
-      chat_id: "chat-handle",
-      text: "What did you change?",
-      created_at_ms: 1_234,
-      turn_id: "handle-turn-1",
-      turn_phase: "user",
-      session_message: {
-        direction: "incoming",
-        message_id: "handle-message-1",
-        session: {
-          id: "handle_11111111111111111111111111111111",
-          name: "kai",
-          session_key: "websocket:source",
-          color_slot: 2,
-        },
-      },
-    };
-
-    act(() => {
-      fake.emit("chat-handle", sessionMessageEvent);
-      fake.emit("chat-handle", sessionMessageEvent);
-    });
-
-    expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0]).toMatchObject({
-      id: "session-message:handle-message-1",
-      role: "user",
-      content: "What did you change?",
-      createdAt: 1_234,
-      turnId: "handle-turn-1",
-      turnPhase: "user",
-      sessionMessage: sessionMessageEvent.session_message,
-    });
-    expect(result.current.isStreaming).toBe(true);
-
-    act(() => fake.emit("chat-handle", {
-      event: "delta",
-      chat_id: "chat-handle",
-      text: "I changed",
-      turn_id: "handle-turn-1",
-    }));
-    await flushStreamFrame();
-
-    expect(result.current.messages.map((message) => message.role)).toEqual([
-      "user",
-      "assistant",
-    ]);
-  });
-
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");
@@ -2029,6 +1919,44 @@ describe("useNanobotStream", () => {
     expect(result.current.runStartedAt).toBe(1_700_000_000);
   });
 
+  it("projects a cross-session input with its public handle exactly once", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-target", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    const event: InboundEvent = {
+      event: "user_message",
+      chat_id: "chat-target",
+      text: "Please review this.",
+      created_at_ms: 1_700_000_000_123,
+      starts_turn: false,
+      provenance: {
+        session_message: {
+          message_id: "message-1",
+          session: {
+            id: "handle_0123456789abcdef0123456789abcdef",
+            name: "mira-0123456789",
+          },
+        },
+      },
+    };
+
+    act(() => {
+      fake.emit("chat-target", event);
+      fake.emit("chat-target", event);
+    });
+
+    expect(result.current.messages).toEqual([expect.objectContaining({
+      id: "session-message:message-1",
+      role: "user",
+      content: "Please review this.",
+      createdAt: 1_700_000_000_123,
+      sessionMessage: event.provenance?.session_message,
+    })]);
+    expect(result.current.isStreaming).toBe(true);
+  });
+
   it("marks only the optimistic turn named by a correlated rejection as failed", () => {
     const fake = fakeClient();
     const { result } = renderHook(
@@ -2973,28 +2901,6 @@ describe("useNanobotStream", () => {
     });
     expect(result.current.runStartedAt).toBeNull();
     expect(result.current.isStreaming).toBe(false);
-  });
-
-  it("clears the pane timer when canonical reconciliation settles the client run", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-g", EMPTY_MESSAGES), {
-      wrapper: wrap(fake.client),
-    });
-
-    act(() => {
-      fake.emit("chat-g", {
-        event: "goal_status",
-        chat_id: "chat-g",
-        status: "running",
-        started_at: 1700,
-        turn_id: "handle:turn-1",
-      });
-    });
-    expect(result.current.runStartedAt).toBe(1700);
-
-    act(() => fake.emitRunStatus("chat-g", null));
-
-    expect(result.current.runStartedAt).toBeNull();
   });
 
   it("restores runStartedAt after switching away and back when goal_status was recorded without a subscriber", () => {

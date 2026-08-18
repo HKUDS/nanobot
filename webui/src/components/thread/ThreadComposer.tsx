@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -14,17 +13,10 @@ import {
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   CapabilityMentionToken,
-  SessionReferenceToken,
   cliAppInitials,
   mcpPresetInitials,
-  sessionHandleColor,
   splitCapabilityMentionSegments,
-  splitSessionReferenceSegments,
   type CapabilityMentionSegment,
-  type SessionHandleSelection,
-  type SessionReferenceSegment,
-  type SessionMentionSelection,
-  type TokenSelection,
 } from "@/components/CliAppMentionText";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
@@ -99,7 +91,6 @@ import type {
   McpPresetInfo,
   OutboundCliAppMention,
   OutboundMcpPresetMention,
-  SessionHandle,
   SessionMention,
   SlashCommand,
   SkillSummary,
@@ -110,6 +101,7 @@ import type {
 import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
+import { sessionHandleColor } from "@/lib/session-handle";
 import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
@@ -211,7 +203,6 @@ interface ThreadComposerProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   sessions?: ChatSummary[];
-  handleSessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
   surfaceRef?: Ref<HTMLDivElement>;
@@ -254,14 +245,10 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
-const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v2:";
-const LEGACY_QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
+const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
-const SESSION_HANDLES_LIMIT = 8;
-const SESSION_HANDLE_SELECTIONS_LIMIT = SESSION_HANDLES_LIMIT * 4;
 const SESSION_MENTIONS_LIMIT = 8;
-const SESSION_MENTION_SELECTIONS_LIMIT = SESSION_MENTIONS_LIMIT * 4;
 
 function VoiceRecordingMeter({
   ariaLabel,
@@ -314,11 +301,7 @@ interface QueuedPrompt {
   text: string;
   images?: QueuedPromptImage[];
   quotedContext?: string;
-  sessionHandles?: SessionHandle[];
-  sessionHandleSelections?: SessionHandleSelection[];
   sessionMentions?: SessionMention[];
-  sessionMentionSelections?: SessionMentionSelection[];
-  atMentionNamespaces?: AtMentionNamespaces;
 }
 
 interface QueuedPromptImage {
@@ -333,25 +316,11 @@ interface CliAppMentionQuery {
   end: number;
 }
 
-type AtMentionNamespace = "handle" | "cli" | "mcp";
-type AtMentionNamespaces = Record<string, AtMentionNamespace>;
-
-function atMentionNamespace(
-  namespaces: AtMentionNamespaces,
-  name: string,
-): AtMentionNamespace | undefined {
-  const key = name.trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(namespaces, key)
-    ? namespaces[key]
-    : undefined;
-}
-
 type MentionCandidate = {
   name: string;
   displayName: string;
 } & (
   | { kind: "session"; mention: SessionMention }
-  | { kind: "handle"; handle: SessionHandle }
   | {
       kind: "cli" | "mcp";
       brandColor: string | null;
@@ -367,39 +336,11 @@ interface MentionInsertion {
   tokenEnd: number;
 }
 
-function atMentionNames(value: string): Set<string> {
-  const names = new Set<string>();
-  const mentionRe = /(^|[\s([{])@([\p{L}\p{N}_-]+)(?=$|[^\p{L}\p{N}_-])/giu;
-  let match: RegExpExecArray | null;
-  while ((match = mentionRe.exec(value)) !== null) {
-    names.add((match[2] ?? "").toLowerCase());
-  }
-  return names;
-}
-
-function normalizeAtMentionNamespaces(
-  value: unknown,
-  text: string,
-): AtMentionNamespaces {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const presentNames = atMentionNames(text);
-  return Object.fromEntries(Object.entries(value).flatMap(([rawName, rawKind]) => {
-    const name = rawName.trim().toLowerCase();
-    if (
-      !presentNames.has(name)
-      || !/^[\p{L}\p{N}_-]+$/u.test(name)
-      || (rawKind !== "handle" && rawKind !== "cli" && rawKind !== "mcp")
-    ) return [];
-    return [[name, rawKind]];
-  }));
-}
-
 function mentionInsertion(
   value: string,
   name: string,
   start: number,
   end: number,
-  sigil: "@" | "#" = "@",
 ): MentionInsertion {
   const from = Math.min(Math.max(start, 0), value.length);
   const to = Math.min(Math.max(end, from), value.length);
@@ -410,252 +351,23 @@ function mentionInsertion(
   const tokenStart = prefix.length + leadingSpace.length;
   const tokenEnd = tokenStart + name.length + 1;
   return {
-    value: `${prefix}${leadingSpace}${sigil}${name}${trailingSpace}${suffix}`,
+    value: `${prefix}${leadingSpace}@${name}${trailingSpace}${suffix}`,
     cursor: tokenEnd + trailingSpace.length,
     tokenStart,
     tokenEnd,
   };
 }
 
-function sessionMentionBase(session: ChatSummary): string {
-  const label = session.title?.trim() || session.preview.trim() || "session";
-  const slug = label
-    .normalize("NFKC")
-    .replace(/\s+/g, "-")
-    .replace(/[^\p{L}\p{N}_-]+/gu, "")
-    .replace(/^-+|-+$/g, "");
-  return Array.from(slug || "session").slice(0, 40).join("");
-}
-
 function sessionMentionOptions(sessions: ChatSummary[]): SessionMention[] {
-  const used = new Set<string>();
-  const namesByKey = new Map<string, string>();
-  for (const session of [...sessions].sort((a, b) => a.key.localeCompare(b.key))) {
-    const base = sessionMentionBase(session);
-    let name = base;
-    let suffix = 2;
-    while (used.has(name.toLowerCase())) {
-      name = `${base}-${suffix}`;
-      suffix += 1;
-    }
-    used.add(name.toLowerCase());
-    namesByKey.set(session.key, name);
-  }
-  return sessions.map((session) => ({
-    name: namesByKey.get(session.key) ?? sessionMentionBase(session),
-    session_key: session.key,
-    title: session.title?.trim() || session.preview.trim(),
-  }));
-}
-
-function sessionHandleOptions(sessions: ChatSummary[]): SessionHandle[] {
   return sessions.flatMap((session) => {
-    const handle = session.handle;
-    if (!handle) return [];
-    return [{ ...handle, session_key: handle.session_key || session.key }];
-  });
-}
-
-interface TextEditRange {
-  start: number;
-  end: number;
-}
-
-function selectionMatchesText<T extends { name: string }>(
-  value: string,
-  selection: TokenSelection<T>,
-  sigil: "@" | "#",
-): boolean {
-  return value.slice(selection.start, selection.end).toLowerCase()
-    === `${sigil}${selection.mention.name}`.toLowerCase();
-}
-
-function reconcileTokenSelections<T extends { name: string }>(
-  previousValue: string,
-  nextValue: string,
-  selections: TokenSelection<T>[],
-  sigil: "@" | "#",
-  replacedRange?: TextEditRange | null,
-): TokenSelection<T>[] {
-  if (previousValue === nextValue) return selections;
-  if (replacedRange) {
-    const start = Math.min(Math.max(replacedRange.start, 0), previousValue.length);
-    const end = Math.min(Math.max(replacedRange.end, start), previousValue.length);
-    const insertedLength = nextValue.length - (previousValue.length - (end - start));
-    const nextSuffixStart = start + insertedLength;
-    const describesEdit = insertedLength >= 0
-      && previousValue.slice(0, start) === nextValue.slice(0, start)
-      && previousValue.slice(end) === nextValue.slice(nextSuffixStart);
-    if (describesEdit) {
-      const delta = insertedLength - (end - start);
-      return selections.flatMap((selection) => {
-        if (selection.start < end && selection.end > start) return [];
-        const mapped = selection.start >= end
-          ? {
-              ...selection,
-              start: selection.start + delta,
-              end: selection.end + delta,
-            }
-          : selection;
-        return selectionMatchesText(nextValue, mapped, sigil) ? [mapped] : [];
-      });
-    }
-  }
-  let prefix = 0;
-  while (
-    prefix < previousValue.length
-    && prefix < nextValue.length
-    && previousValue[prefix] === nextValue[prefix]
-  ) {
-    prefix += 1;
-  }
-  let suffix = 0;
-  while (
-    suffix < previousValue.length - prefix
-    && suffix < nextValue.length - prefix
-    && previousValue[previousValue.length - suffix - 1]
-      === nextValue[nextValue.length - suffix - 1]
-  ) {
-    suffix += 1;
-  }
-  const oldChangedEnd = previousValue.length - suffix;
-  const delta = nextValue.length - previousValue.length;
-
-  return selections.flatMap((selection) => {
-    const mapped = selection.end <= prefix
-      ? selection
-      : selection.start >= oldChangedEnd
-        ? {
-            ...selection,
-            start: selection.start + delta,
-            end: selection.end + delta,
-          }
-        : null;
-    return mapped && selectionMatchesText(nextValue, mapped, sigil) ? [mapped] : [];
-  });
-}
-
-function tokenSelectionsForText<T extends { name: string }>(
-  value: string,
-  mentions: T[],
-  sigil: "@" | "#",
-): TokenSelection<T>[] {
-  const selections: TokenSelection<T>[] = [];
-  for (const mention of mentions) {
-    const pattern = new RegExp(
-      `(^|[\\s([{])${sigil === "#" ? "#" : "@"}${mention.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`
-        + "(?=$|[^\\p{L}\\p{N}_-])",
-      "iu",
-    );
-    const match = pattern.exec(value);
-    if (!match) continue;
-    const start = match.index + (match[1]?.length ?? 0);
-    selections.push({ mention, start, end: start + mention.name.length + 1 });
-  }
-  return selections;
-}
-
-function uniqueMentions<T extends { session_key: string }>(
-  selections: TokenSelection<T>[],
-  limit = SESSION_MENTIONS_LIMIT,
-): T[] {
-  const seen = new Set<string>();
-  return selections.flatMap(({ mention }) => {
-    if (seen.has(mention.session_key)) return [];
-    seen.add(mention.session_key);
-    return [mention];
-  }).slice(0, limit);
-}
-
-function selectionsForTrimmedText<T extends { name: string }>(
-  value: string,
-  selections: TokenSelection<T>[],
-  sigil: "@" | "#",
-): TokenSelection<T>[] {
-  const trimmed = value.trim();
-  const leadingChars = value.length - value.trimStart().length;
-  const sourceEnd = leadingChars + trimmed.length;
-  return selections.flatMap((selection) => {
-    if (selection.start < leadingChars || selection.end > sourceEnd) return [];
-    const mapped = {
-      ...selection,
-      start: selection.start - leadingChars,
-      end: selection.end - leadingChars,
-    };
-    return selectionMatchesText(trimmed, mapped, sigil) ? [mapped] : [];
-  });
-}
-
-function validateSessionMentionSelections(
-  text: string,
-  selections: SessionMentionSelection[],
-  availableMentions: SessionMention[],
-): SessionMentionSelection[] {
-  const availableByKey = new Map(
-    availableMentions.map((mention) => [mention.session_key, mention]),
-  );
-  return selections.flatMap((selection) => {
-    const available = availableByKey.get(selection.mention.session_key);
-    if (
-      !available
-      || !selectionMatchesText(text, selection, "#")
-    ) return [];
+    if (!session.handle) return [];
     return [{
-      ...selection,
-      mention: {
-        ...available,
-        // The visible #slug is occurrence-bound. A later title refresh must
-        // not silently detach the already selected session reference.
-        name: selection.mention.name,
-      },
+      id: session.handle.id,
+      name: session.handle.name,
+      session_key: session.key,
+      title: session.title?.trim() || session.preview.trim(),
     }];
   });
-}
-
-function validateSessionHandleSelections(
-  text: string,
-  selections: SessionHandleSelection[],
-  availableMentions: SessionHandle[],
-): SessionHandleSelection[] {
-  const availableByKey = new Map(
-    availableMentions.map((mention) => [mention.session_key, mention]),
-  );
-  return selections.flatMap((selection) => {
-    const available = availableByKey.get(selection.mention.session_key);
-    if (
-      available?.id !== selection.mention.id
-      || available.name.toLowerCase() !== selection.mention.name.toLowerCase()
-      || !selectionMatchesText(text, selection, "@")
-    ) return [];
-    return [{ ...selection, mention: available }];
-  });
-}
-
-type ComposerTokenSegment = CapabilityMentionSegment | Exclude<SessionReferenceSegment, { kind: "text" }>;
-
-function splitComposerTokenSegments(
-  value: string,
-  cliApps: CliAppInfo[],
-  mcpPresets: McpPresetInfo[],
-  sessionHandles: SessionHandle[],
-  handleSelections: SessionHandleSelection[],
-  sessionMentions: SessionMention[],
-): ComposerTokenSegment[] {
-  const segments: ComposerTokenSegment[] = [];
-  for (const segment of splitCapabilityMentionSegments(
-    value,
-    cliApps,
-    mcpPresets,
-    sessionHandles,
-    handleSelections,
-  )) {
-    if (segment.kind === "text") {
-      segments.push(...splitSessionReferenceSegments(segment.text, sessionMentions));
-    } else {
-      segments.push(segment);
-    }
-  }
-  return segments;
 }
 
 interface SlashPaletteCommand {
@@ -709,12 +421,9 @@ function storeSlashRecents(commands: string[]): void {
   }
 }
 
-function queuedPromptsStorageKey(
-  key?: string | null,
-  prefix = QUEUED_PROMPTS_STORAGE_PREFIX,
-): string | null {
+function queuedPromptsStorageKey(key?: string | null): string | null {
   const clean = key?.trim();
-  return clean ? `${prefix}${clean}` : null;
+  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
 }
 
 function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
@@ -730,90 +439,14 @@ function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
       || !/^[\p{L}\p{N}_-]+$/u.test(name)
     ) return [];
     return [{
+      ...(typeof candidate.id === "string" && /^handle_[a-f0-9]{32}$/i.test(candidate.id)
+        ? { id: candidate.id }
+        : {}),
       name,
       session_key: sessionKey,
       title: candidate.title?.trim().slice(0, 160) ?? "",
     }];
   }).slice(0, SESSION_MENTIONS_LIMIT);
-}
-
-function normalizeQueuedSessionMentionSelections(
-  value: unknown,
-  text: string,
-  fallbackMentions: SessionMention[],
-): SessionMentionSelection[] {
-  if (!Array.isArray(value)) {
-    return tokenSelectionsForText(text, fallbackMentions, "#");
-  }
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const candidate = item as Partial<SessionMentionSelection>;
-    const mention = normalizeQueuedSessionMentions([candidate.mention])[0];
-    const start = candidate.start;
-    const end = candidate.end;
-    if (
-      !mention
-      || !Number.isInteger(start)
-      || !Number.isInteger(end)
-      || typeof start !== "number"
-      || typeof end !== "number"
-      || start < 0
-      || end <= start
-      || end > text.length
-    ) return [];
-    const selection = { mention, start, end };
-    return selectionMatchesText(text, selection, "#") ? [selection] : [];
-  }).slice(0, SESSION_MENTION_SELECTIONS_LIMIT);
-}
-
-function normalizeQueuedSessionHandles(value: unknown): SessionHandle[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const candidate = item as Partial<SessionHandle>;
-    const id = candidate.id?.trim().slice(0, 80);
-    const name = candidate.name?.trim().slice(0, 80);
-    const sessionKey = candidate.session_key?.trim().slice(0, 512);
-    const colorSlot = candidate.color_slot;
-    if (
-      !id
-      || !name
-      || !sessionKey?.startsWith("websocket:")
-      || !/^[\p{L}\p{N}_-]+$/u.test(name)
-      || !Number.isInteger(colorSlot)
-      || typeof colorSlot !== "number"
-    ) return [];
-    return [{ id, name, session_key: sessionKey, color_slot: colorSlot }];
-  }).slice(0, SESSION_HANDLES_LIMIT);
-}
-
-function normalizeQueuedSessionHandleSelections(
-  value: unknown,
-  text: string,
-  fallbackMentions: SessionHandle[],
-): SessionHandleSelection[] {
-  if (!Array.isArray(value)) {
-    return tokenSelectionsForText(text, fallbackMentions, "@");
-  }
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const candidate = item as Partial<SessionHandleSelection>;
-    const mention = normalizeQueuedSessionHandles([candidate.mention])[0];
-    const start = candidate.start;
-    const end = candidate.end;
-    if (
-      !mention
-      || !Number.isInteger(start)
-      || !Number.isInteger(end)
-      || typeof start !== "number"
-      || typeof end !== "number"
-      || start < 0
-      || end <= start
-      || end > text.length
-    ) return [];
-    const selection = { mention, start, end };
-    return selectionMatchesText(text, selection, "@") ? [selection] : [];
-  }).slice(0, SESSION_HANDLE_SELECTIONS_LIMIT);
 }
 
 function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
@@ -846,20 +479,6 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
     ? record.quotedContext.trim().slice(0, QUEUED_PROMPT_MAX_CHARS)
     : "";
   const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
-  const sessionMentionSelections = normalizeQueuedSessionMentionSelections(
-    record.sessionMentionSelections,
-    text,
-    sessionMentions,
-  );
-  const selectedSessionMentions = uniqueMentions(sessionMentionSelections);
-  const sessionHandles = normalizeQueuedSessionHandles(record.sessionHandles);
-  const sessionHandleSelections = normalizeQueuedSessionHandleSelections(
-    record.sessionHandleSelections,
-    text,
-    sessionHandles,
-  );
-  const selectedSessionHandles = uniqueMentions(sessionHandleSelections, SESSION_HANDLES_LIMIT);
-  const atMentionNamespaces = normalizeAtMentionNamespaces(record.atMentionNamespaces, text);
   if (!text && images.length === 0) return null;
   const id = typeof record.id === "string" && record.id.trim()
     ? record.id
@@ -869,16 +488,7 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
     text,
     ...(images.length > 0 ? { images } : {}),
     ...(quotedContext ? { quotedContext } : {}),
-    ...(selectedSessionMentions.length > 0
-      ? {
-          sessionMentions: selectedSessionMentions,
-          sessionMentionSelections,
-        }
-      : {}),
-    ...(selectedSessionHandles.length > 0
-      ? { sessionHandles: selectedSessionHandles, sessionHandleSelections }
-      : {}),
-    ...(Object.keys(atMentionNamespaces).length > 0 ? { atMentionNamespaces } : {}),
+    ...(sessionMentions.length > 0 ? { sessionMentions } : {}),
   };
 }
 
@@ -897,63 +507,6 @@ function readQueuedPrompts(storageKey: string): QueuedPrompt[] {
   }
 }
 
-function serializeQueuedPrompts(prompts: QueuedPrompt[]): string {
-  return JSON.stringify(
-    prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => {
-      const sessionSelections = (prompt.sessionMentionSelections ?? []).filter((selection) => (
-        selectionMatchesText(prompt.text, selection, "#")
-      )).slice(0, SESSION_MENTION_SELECTIONS_LIMIT);
-      const sessionMentions = uniqueMentions(sessionSelections);
-      const handleSelections = (prompt.sessionHandleSelections ?? []).filter((selection) => (
-        selectionMatchesText(prompt.text, selection, "@")
-      )).slice(0, SESSION_HANDLE_SELECTIONS_LIMIT);
-      const sessionHandles = uniqueMentions(handleSelections, SESSION_HANDLES_LIMIT);
-      const atMentionNamespaces = normalizeAtMentionNamespaces(
-        prompt.atMentionNamespaces,
-        prompt.text,
-      );
-      return {
-        id: prompt.id,
-        text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
-        ...(prompt.images?.length
-          ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) }
-          : {}),
-        ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-        ...(sessionMentions.length > 0
-          ? { sessionMentions, sessionMentionSelections: sessionSelections }
-          : {}),
-        ...(sessionHandles.length > 0
-          ? { sessionHandles, sessionHandleSelections: handleSelections }
-          : {}),
-        ...(Object.keys(atMentionNamespaces).length > 0 ? { atMentionNamespaces } : {}),
-      };
-    }),
-  );
-}
-
-function readQueuedPromptsWithLegacyMigration(
-  storageKey: string,
-  legacyStorageKey: string | null,
-): QueuedPrompt[] {
-  if (typeof window === "undefined") return [];
-  try {
-    if (window.localStorage.getItem(storageKey) !== null) {
-      return readQueuedPrompts(storageKey);
-    }
-    if (!legacyStorageKey || window.localStorage.getItem(legacyStorageKey) === null) {
-      return [];
-    }
-    const prompts = readQueuedPrompts(legacyStorageKey);
-    if (prompts.length > 0) {
-      window.localStorage.setItem(storageKey, serializeQueuedPrompts(prompts));
-    }
-    window.localStorage.removeItem(legacyStorageKey);
-    return prompts;
-  } catch {
-    return [];
-  }
-}
-
 function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
   if (typeof window === "undefined") return;
   try {
@@ -963,7 +516,17 @@ function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
     }
     window.localStorage.setItem(
       storageKey,
-      serializeQueuedPrompts(prompts),
+      JSON.stringify(
+        prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => ({
+          id: prompt.id,
+          text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
+          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
+          ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+          ...(prompt.sessionMentions?.length
+            ? { sessionMentions: prompt.sessionMentions.slice(0, SESSION_MENTIONS_LIMIT) }
+            : {}),
+        })),
+      ),
     );
   } catch {
     // localStorage persistence is a convenience; the in-memory queue still works.
@@ -1337,7 +900,6 @@ export function ThreadComposer({
   cliApps = [],
   mcpPresets = [],
   sessions = [],
-  handleSessions = [],
   skills = [],
   onStop,
   surfaceRef,
@@ -1360,15 +922,7 @@ export function ThreadComposer({
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
-  const [selectedSessionMentionSelections, setSelectedSessionMentionSelections] = useState<
-    SessionMentionSelection[]
-  >([]);
-  const [selectedSessionHandleSelections, setSelectedSessionHandleSelections] = useState<
-    SessionHandleSelection[]
-  >([]);
-  const [selectedAtMentionNamespaces, setSelectedAtMentionNamespaces] = useState<
-    AtMentionNamespaces
-  >({});
+  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
     start: number;
@@ -1385,13 +939,8 @@ export function ThreadComposer({
   const [cursorPosition, setCursorPosition] = useState(0);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
-  const paletteId = useId();
-  const slashPaletteId = `${paletteId}-slash-listbox`;
-  const mentionPaletteId = `${paletteId}-mention-listbox`;
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const inputSelectionRef = useRef<TextEditRange>({ start: 0, end: 0 });
-  const pendingInputEditRef = useRef<TextEditRange | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1411,13 +960,6 @@ export function ThreadComposer({
     () => queuedPromptsStorageKey(pendingQueueKey),
     [pendingQueueKey],
   );
-  const legacyQueuedPromptStorageKey = useMemo(
-    () => queuedPromptsStorageKey(
-      pendingQueueKey,
-      LEGACY_QUEUED_PROMPTS_STORAGE_PREFIX,
-    ),
-    [pendingQueueKey],
-  );
   const projectPickerAvailable =
     isHero
     && !!workspaceDefaultScope
@@ -1428,15 +970,8 @@ export function ThreadComposer({
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
     skipQueuedPromptPersistRef.current = true;
-    setQueuedPrompts(
-      queuedPromptStorageKey
-        ? readQueuedPromptsWithLegacyMigration(
-            queuedPromptStorageKey,
-            legacyQueuedPromptStorageKey,
-          )
-        : [],
-    );
-  }, [legacyQueuedPromptStorageKey, pendingQueueKey, queuedPromptStorageKey]);
+    setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
+  }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!queuedPromptStorageKey) return;
@@ -1711,90 +1246,13 @@ export function ThreadComposer({
     };
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
 
-  const sessionReferenceQuery = useMemo<CliAppMentionQuery | null>(() => {
-    if (interactionDisabled || cliAppMenuDismissed) return null;
-    const caret = Math.min(Math.max(cursorPosition, 0), value.length);
-    const beforeCaret = value.slice(0, caret);
-    const match = /(?:^|\s)#([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
-    if (!match) return null;
-    const query = match[1].toLowerCase();
-    return { query, start: caret - query.length - 1, end: caret };
-  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
-
   const availableSessionMentions = useMemo(
     () => sessionMentionOptions(sessions),
     [sessions],
   );
-  const availableSessionHandles = useMemo(
-    () => sessionHandleOptions(handleSessions),
-    [handleSessions],
-  );
-  const validSelectedSessionMentionSelections = useMemo(
-    () => validateSessionMentionSelections(
-      value,
-      selectedSessionMentionSelections,
-      availableSessionMentions,
-    ),
-    [availableSessionMentions, selectedSessionMentionSelections, value],
-  );
-  const activeSessionMentions = useMemo(
-    () => uniqueMentions(validSelectedSessionMentionSelections),
-    [validSelectedSessionMentionSelections],
-  );
-  const validSelectedSessionHandleSelections = useMemo(
-    () => validateSessionHandleSelections(
-      value,
-      selectedSessionHandleSelections,
-      availableSessionHandles,
-    ),
-    [availableSessionHandles, selectedSessionHandleSelections, value],
-  );
-  const activeSessionHandles = useMemo(
-    () => uniqueMentions(validSelectedSessionHandleSelections),
-    [validSelectedSessionHandleSelections],
-  );
-  const validAtMentionNamespaces = useMemo(
-    () => normalizeAtMentionNamespaces(selectedAtMentionNamespaces, value),
-    [selectedAtMentionNamespaces, value],
-  );
-  const ownedSessionHandles = useMemo(
-    () => activeSessionHandles.filter((handle) => (
-      (atMentionNamespace(validAtMentionNamespaces, handle.name) ?? "handle") === "handle"
-    )),
-    [activeSessionHandles, validAtMentionNamespaces],
-  );
-  const effectiveCliApps = useMemo(
-    () => cliApps.filter((app) => {
-      const owner = atMentionNamespace(validAtMentionNamespaces, app.name);
-      return owner === undefined || owner === "cli";
-    }),
-    [cliApps, validAtMentionNamespaces],
-  );
-  const effectiveMcpPresets = useMemo(
-    () => mcpPresets.filter((preset) => {
-      const owner = atMentionNamespace(validAtMentionNamespaces, preset.name);
-      return owner === undefined || owner === "mcp";
-    }),
-    [mcpPresets, validAtMentionNamespaces],
-  );
   const mentionSegments = useMemo(
-    () => splitComposerTokenSegments(
-      value,
-      effectiveCliApps,
-      effectiveMcpPresets,
-      ownedSessionHandles,
-      validSelectedSessionHandleSelections,
-      activeSessionMentions,
-    ),
-    [
-      activeSessionMentions,
-      effectiveCliApps,
-      effectiveMcpPresets,
-      ownedSessionHandles,
-      validSelectedSessionHandleSelections,
-      validSelectedSessionMentionSelections,
-      value,
-    ],
+    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
+    [cliApps, mcpPresets, selectedSessionMentions, value],
   );
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
@@ -1802,150 +1260,49 @@ export function ThreadComposer({
         sessionDragPreview.mention.name,
         sessionDragPreview.start,
         sessionDragPreview.end,
-        "#",
       )
     : null;
   const displayMentionSegments = sessionDragInsertion && sessionDragPreview
-    ? (() => {
-        const previewSelections = [
-          ...reconcileTokenSelections(
-            value,
-            sessionDragInsertion.value,
-            validSelectedSessionMentionSelections,
-            "#",
-            { start: sessionDragPreview.start, end: sessionDragPreview.end },
-          ).filter((selection) => (
-            selection.mention.session_key !== sessionDragPreview.mention.session_key
-            && selection.mention.name.toLowerCase()
-              !== sessionDragPreview.mention.name.toLowerCase()
-          )),
-          {
-            mention: sessionDragPreview.mention,
-            start: sessionDragInsertion.tokenStart,
-            end: sessionDragInsertion.tokenEnd,
-          },
-        ];
-        const previewSessionSelections = reconcileTokenSelections(
-          value,
-          sessionDragInsertion.value,
-          validSelectedSessionHandleSelections,
-          "@",
-          { start: sessionDragPreview.start, end: sessionDragPreview.end },
-        );
-        return splitComposerTokenSegments(
-          sessionDragInsertion.value,
-          effectiveCliApps,
-          effectiveMcpPresets,
-          uniqueMentions(previewSessionSelections).filter((handle) => (
-            (atMentionNamespace(validAtMentionNamespaces, handle.name) ?? "handle") === "handle"
-          )),
-          previewSessionSelections,
-          previewSelections.map((selection) => selection.mention),
-        );
-      })()
+    ? splitCapabilityMentionSegments(
+        sessionDragInsertion.value,
+        cliApps,
+        mcpPresets,
+        [...selectedSessionMentions, sessionDragPreview.mention],
+      )
     : mentionSegments;
-  useEffect(() => {
-    if (
-      validSelectedSessionMentionSelections.length
-        === selectedSessionMentionSelections.length
-      && validSelectedSessionMentionSelections.every((selection, index) => {
-        const current = selectedSessionMentionSelections[index];
-        return current?.mention.name === selection.mention.name
-          && current.mention.session_key === selection.mention.session_key
-          && current.mention.title === selection.mention.title
-          && current.start === selection.start
-          && current.end === selection.end;
-      })
-    ) return;
-    setSelectedSessionMentionSelections(validSelectedSessionMentionSelections);
-  }, [selectedSessionMentionSelections, validSelectedSessionMentionSelections]);
-  useEffect(() => {
-    if (
-      validSelectedSessionHandleSelections.length === selectedSessionHandleSelections.length
-      && validSelectedSessionHandleSelections.every((selection, index) => {
-        const current = selectedSessionHandleSelections[index];
-        return current?.mention.id === selection.mention.id
-          && current.mention.name === selection.mention.name
-          && current.mention.session_key === selection.mention.session_key
-          && current.mention.color_slot === selection.mention.color_slot
-          && current.start === selection.start
-          && current.end === selection.end;
-      })
-    ) return;
-    setSelectedSessionHandleSelections(validSelectedSessionHandleSelections);
-  }, [selectedSessionHandleSelections, validSelectedSessionHandleSelections]);
-  const applyComposerTextEdit = useCallback(
-    (
-      nextValue: string,
-      replacedRange: TextEditRange | null = null,
-      nextSelection: TextEditRange = { start: nextValue.length, end: nextValue.length },
-    ) => {
-      setSelectedSessionMentionSelections(reconcileTokenSelections(
-        value,
-        nextValue,
-        validSelectedSessionMentionSelections,
-        "#",
-        replacedRange,
-      ));
-      setSelectedSessionHandleSelections(reconcileTokenSelections(
-        value,
-        nextValue,
-        validSelectedSessionHandleSelections,
-        "@",
-        replacedRange,
-      ));
-      setSelectedAtMentionNamespaces((current) => normalizeAtMentionNamespaces(
-        current,
-        nextValue,
-      ));
-      setValue(nextValue);
-      inputSelectionRef.current = nextSelection;
-      pendingInputEditRef.current = null;
-    },
-    [validSelectedSessionHandleSelections, validSelectedSessionMentionSelections, value],
-  );
-  const resetComposerText = useCallback(() => {
-    setValue("");
-    setSelectedSessionMentionSelections([]);
-    setSelectedSessionHandleSelections([]);
-    setSelectedAtMentionNamespaces({});
-    inputSelectionRef.current = { start: 0, end: 0 };
-    pendingInputEditRef.current = null;
-  }, []);
+  const activeSessionMentions = useMemo(() => {
+    const seen = new Set<string>();
+    return mentionSegments.flatMap((segment) => {
+      if (segment.kind !== "session" || seen.has(segment.mention.session_key)) return [];
+      seen.add(segment.mention.session_key);
+      return [segment.mention];
+    }).slice(0, SESSION_MENTIONS_LIMIT);
+  }, [mentionSegments]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
-    if (sessionReferenceQuery) {
-      return availableSessionMentions
-        .filter((mention) => (
-          activeSessionMentions.length < SESSION_MENTIONS_LIMIT
-          || activeSessionMentions.some((selected) => selected.session_key === mention.session_key)
-        ))
-        .filter((mention) => [mention.name, mention.title]
-          .join(" ").toLowerCase().includes(sessionReferenceQuery.query))
-        .slice(0, 8)
-        .map((mention) => ({
-          kind: "session" as const,
-          name: mention.name,
-          displayName: mention.title || mention.name,
-          mention,
-        }));
-    }
     if (!cliAppMention) return [];
-    const handleCandidates: MentionCandidate[] = availableSessionHandles
+    const sessionCandidates: MentionCandidate[] = availableSessionMentions
       .filter((mention) => (
-        activeSessionHandles.length < SESSION_MENTIONS_LIMIT
-        || activeSessionHandles.some(
+        activeSessionMentions.length < SESSION_MENTIONS_LIMIT
+        || activeSessionMentions.some(
           (selected) => selected.session_key === mention.session_key,
         )
       ))
-      .filter((mention) => mention.name.toLowerCase().includes(cliAppMention.query))
+      .filter((mention) => [
+        mention.name,
+        mention.title,
+      ].join(" ").toLowerCase().includes(cliAppMention.query))
       .map((mention) => ({
-        kind: "handle",
+        kind: "session",
         name: mention.name,
-        displayName: `@${mention.name}`,
-        handle: mention,
+        displayName: mention.title || mention.name,
+        mention,
       }));
+    const sessionNames = new Set(
+      availableSessionMentions.map((mention) => mention.name.toLowerCase()),
+    );
     const cliCandidates: MentionCandidate[] = cliApps
       .filter((app) => app.installed)
+      .filter((app) => !sessionNames.has(app.name.toLowerCase()))
       .filter((app) => {
         const haystack = [
           app.name,
@@ -1966,6 +1323,7 @@ export function ThreadComposer({
       }));
     const mcpCandidates: MentionCandidate[] = mcpPresets
       .filter((preset) => preset.installed && preset.configured)
+      .filter((preset) => !sessionNames.has(preset.name.toLowerCase()))
       .filter((preset) => {
         const haystack = [
           preset.name,
@@ -1985,7 +1343,7 @@ export function ThreadComposer({
         initials: mcpPresetInitials(preset),
       }));
     const groups = [
-      { candidates: handleCandidates, reserved: 4 },
+      { candidates: sessionCandidates, reserved: 4 },
       { candidates: cliCandidates, reserved: 2 },
       { candidates: mcpCandidates, reserved: 2 },
     ];
@@ -2001,16 +1359,7 @@ export function ThreadComposer({
       remaining -= extra;
     }
     return groups.flatMap(({ candidates }, index) => candidates.slice(0, counts[index]));
-  }, [
-    activeSessionHandles,
-    activeSessionMentions,
-    availableSessionHandles,
-    availableSessionMentions,
-    cliAppMention,
-    cliApps,
-    mcpPresets,
-    sessionReferenceQuery,
-  ]);
+  }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
@@ -2044,7 +1393,7 @@ export function ThreadComposer({
 
   useEffect(() => {
     setSelectedCliAppIndex(0);
-  }, [cliAppMention?.query, sessionReferenceQuery?.query]);
+  }, [cliAppMention?.query]);
 
   useEffect(() => {
     if (selectedCommandIndex >= filteredSlashCommands.length) {
@@ -2129,7 +1478,8 @@ export function ThreadComposer({
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
-    resetComposerText();
+    setValue("");
+    setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -2141,25 +1491,22 @@ export function ThreadComposer({
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
     });
-  }, [clear, pendingQueueKey, resetComposerText]);
+  }, [clear, pendingQueueKey]);
 
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
     secondEnterPromptIdRef.current = null;
-    const separator = value.trim() && !/[\s\n]$/.test(value) ? " " : "";
-    const next = value.trim() ? `${value}${separator}${transcript}` : transcript;
-    const nextCursor = next.length;
-    applyComposerTextEdit(
-      next,
-      { start: value.length, end: value.length },
-      { start: nextCursor, end: nextCursor },
-    );
+    setValue((current) => {
+      if (!current.trim()) return transcript;
+      const separator = /[\s\n]$/.test(current) ? "" : " ";
+      return `${current}${separator}${transcript}`;
+    });
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setInlineError(null);
     resizeTextarea();
-  }, [applyComposerTextEdit, resizeTextarea, value]);
+  }, [resizeTextarea]);
 
   const clearVoiceErrorTimers = useCallback(() => {
     if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
@@ -2232,7 +1579,7 @@ export function ThreadComposer({
     (command: SlashPaletteCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
         onStop();
-        resetComposerText();
+        setValue("");
         setSlashMenuDismissed(true);
         setCliAppMenuDismissed(false);
         setInlineError(null);
@@ -2252,11 +1599,7 @@ export function ThreadComposer({
         const inserted = `${command.command}${suffix.startsWith(" ") ? "" : " "}`;
         const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
         const nextCursor = skillQuery.start + inserted.length;
-        applyComposerTextEdit(
-          next,
-          { start: skillQuery.start, end: skillQuery.end },
-          { start: nextCursor, end: nextCursor },
-        );
+        setValue(next);
         setCursorPosition(nextCursor);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
@@ -2265,99 +1608,34 @@ export function ThreadComposer({
           el.setSelectionRange(nextCursor, nextCursor);
         });
       } else {
-        const next = command.argHint ? `${command.command} ` : command.command;
-        applyComposerTextEdit(
-          next,
-          { start: 0, end: value.length },
-          { start: next.length, end: next.length },
-        );
+        setValue(command.argHint ? `${command.command} ` : command.command);
       }
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
     },
-    [
-      applyComposerTextEdit,
-      isStreaming,
-      onStop,
-      recentSlashCommands,
-      resetComposerText,
-      resizeTextarea,
-      skillQuery,
-      value,
-    ],
+    [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
   );
 
   const insertMentionCandidate = useCallback(
     (candidate: MentionCandidate, start: number, end: number) => {
-      const insertion = mentionInsertion(
-        value,
-        candidate.name,
-        start,
-        end,
-        candidate.kind === "session" ? "#" : "@",
-      );
-      const reconciledReferenceSelections = reconcileTokenSelections(
-        value,
-        insertion.value,
-        validSelectedSessionMentionSelections,
-        "#",
-        { start, end },
-      );
-      const reconciledHandleSelections = reconcileTokenSelections(
-        value,
-        insertion.value,
-        validSelectedSessionHandleSelections,
-        "@",
-        { start, end },
-      );
       if (candidate.kind === "session") {
         const alreadySelected = activeSessionMentions.some(
           (mention) => mention.session_key === candidate.mention.session_key,
         );
         if (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT) return;
-        setSelectedSessionMentionSelections([
-          ...reconciledReferenceSelections,
-          {
-            mention: candidate.mention,
-            start: insertion.tokenStart,
-            end: insertion.tokenEnd,
-          },
-        ]);
-        setSelectedSessionHandleSelections(reconciledHandleSelections);
-      } else if (candidate.kind === "handle") {
-        const alreadySelected = activeSessionHandles.some(
-          (mention) => mention.session_key === candidate.handle.session_key,
-        );
-        if (!alreadySelected && activeSessionHandles.length >= SESSION_MENTIONS_LIMIT) return;
-        setSelectedSessionHandleSelections([
-          ...reconciledHandleSelections.filter((selection) => (
-            selection.mention.name.toLowerCase() !== candidate.name.toLowerCase()
-          )),
-          {
-            mention: candidate.handle,
-            start: insertion.tokenStart,
-            end: insertion.tokenEnd,
-          },
-        ]);
-        setSelectedSessionMentionSelections(reconciledReferenceSelections);
-      } else {
-        setSelectedSessionMentionSelections(reconciledReferenceSelections);
-        setSelectedSessionHandleSelections(reconciledHandleSelections.filter((selection) => (
-          selection.mention.name.toLowerCase() !== candidate.name.toLowerCase()
-        )));
-      }
-      if (candidate.kind !== "session") {
         const name = candidate.name.toLowerCase();
-        setSelectedAtMentionNamespaces((current) => ({
-          ...normalizeAtMentionNamespaces(current, insertion.value),
-          [name]: candidate.kind,
-        }));
+        setSelectedSessionMentions([
+          ...activeSessionMentions.filter((mention) => (
+            mention.name.toLowerCase() !== name
+            && mention.session_key !== candidate.mention.session_key
+          )),
+          candidate.mention,
+        ]);
       }
+      const insertion = mentionInsertion(value, candidate.name, start, end);
       setValue(insertion.value);
-      inputSelectionRef.current = { start: insertion.cursor, end: insertion.cursor };
-      pendingInputEditRef.current = null;
       setCursorPosition(insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
@@ -2370,23 +1648,15 @@ export function ThreadComposer({
         el.setSelectionRange(insertion.cursor, insertion.cursor);
       });
     },
-    [
-      activeSessionMentions,
-      activeSessionHandles,
-      resizeTextarea,
-      validSelectedSessionHandleSelections,
-      validSelectedSessionMentionSelections,
-      value,
-    ],
+    [activeSessionMentions, resizeTextarea, value],
   );
 
   const chooseMentionCandidate = useCallback(
     (candidate: MentionCandidate) => {
-      const query = candidate.kind === "session" ? sessionReferenceQuery : cliAppMention;
-      if (!query) return;
-      insertMentionCandidate(candidate, query.start, query.end);
+      if (!cliAppMention) return;
+      insertMentionCandidate(candidate, cliAppMention.start, cliAppMention.end);
     },
-    [cliAppMention, insertMentionCandidate, sessionReferenceQuery],
+    [cliAppMention, insertMentionCandidate],
   );
 
   const handleSessionDrop = useCallback((event: React.DragEvent) => {
@@ -2465,13 +1735,14 @@ export function ThreadComposer({
   }, [sessionDragPreview]);
 
   const clearComposerText = useCallback((restoreFocus = true) => {
-    resetComposerText();
+    setValue("");
+    setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
     resizeTextarea(restoreFocus);
-  }, [resetComposerText, resizeTextarea]);
+  }, [resizeTextarea]);
 
   const queueGuidancePrompt = useCallback(() => {
     const text = value.trim();
@@ -2481,18 +1752,6 @@ export function ThreadComposer({
       return;
     }
     const queuedImages = readyImagesToQueuedImages(readyImages);
-    const sessionMentionSelections = selectionsForTrimmedText(
-      value,
-      validSelectedSessionMentionSelections,
-      "#",
-    );
-    const sessionMentions = uniqueMentions(sessionMentionSelections);
-    const sessionHandleSelections = selectionsForTrimmedText(
-      value,
-      validSelectedSessionHandleSelections,
-      "@",
-    );
-    const sessionHandles = uniqueMentions(sessionHandleSelections, SESSION_HANDLES_LIMIT);
     queuedPromptCounterRef.current += 1;
     const id = `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`;
     secondEnterPromptIdRef.current = id;
@@ -2503,14 +1762,8 @@ export function ThreadComposer({
         text,
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
         ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-        ...(sessionMentions.length > 0
-          ? { sessionMentions, sessionMentionSelections }
-          : {}),
-        ...(sessionHandles.length > 0
-          ? { sessionHandles, sessionHandleSelections }
-          : {}),
-        ...(Object.keys(validAtMentionNamespaces).length > 0
-          ? { atMentionNamespaces: validAtMentionNamespaces }
+        ...(activeSessionMentions.length > 0
+          ? { sessionMentions: activeSessionMentions }
           : {}),
       },
     ]);
@@ -2518,6 +1771,7 @@ export function ThreadComposer({
     clearComposerText();
     onQuotedContextChange?.(null);
   }, [
+    activeSessionMentions,
     canQueueGuidance,
     clear,
     clearComposerText,
@@ -2526,9 +1780,6 @@ export function ThreadComposer({
     onQuotedContextChange,
     readyImages,
     textTooLargeMessage,
-    validSelectedSessionHandleSelections,
-    validSelectedSessionMentionSelections,
-    validAtMentionNamespaces,
     value,
   ]);
 
@@ -2541,28 +1792,8 @@ export function ThreadComposer({
   const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
     secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
-    const restoredSelections = validateSessionMentionSelections(
-      prompt.text,
-      prompt.sessionMentionSelections
-        ?? tokenSelectionsForText(prompt.text, prompt.sessionMentions ?? [], "#"),
-      availableSessionMentions,
-    );
-    const restoredSessionSelections = validateSessionHandleSelections(
-      prompt.text,
-      prompt.sessionHandleSelections
-        ?? tokenSelectionsForText(prompt.text, prompt.sessionHandles ?? [], "@"),
-      availableSessionHandles,
-    );
-    const restoredNamespaces = normalizeAtMentionNamespaces(
-      prompt.atMentionNamespaces,
-      prompt.text,
-    );
     setValue(prompt.text);
-    setSelectedSessionMentionSelections(restoredSelections);
-    setSelectedSessionHandleSelections(restoredSessionSelections);
-    setSelectedAtMentionNamespaces(restoredNamespaces);
-    inputSelectionRef.current = { start: prompt.text.length, end: prompt.text.length };
-    pendingInputEditRef.current = null;
+    setSelectedSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -2580,14 +1811,7 @@ export function ThreadComposer({
       el.focus();
       el.setSelectionRange(prompt.text.length, prompt.text.length);
     });
-  }, [
-    availableSessionHandles,
-    availableSessionMentions,
-    clear,
-    onQuotedContextChange,
-    resizeTextarea,
-    restoreReadyImages,
-  ]);
+  }, [clear, onQuotedContextChange, resizeTextarea, restoreReadyImages]);
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
@@ -2603,90 +1827,22 @@ export function ThreadComposer({
     });
   }, []);
 
-  const queuedSessionMentions = useCallback(
-    (prompt: QueuedPrompt): SessionMention[] => uniqueMentions(
-      validateSessionMentionSelections(
-        prompt.text,
-        prompt.sessionMentionSelections
-          ?? tokenSelectionsForText(prompt.text, prompt.sessionMentions ?? [], "#"),
-        availableSessionMentions,
-      ),
-    ),
-    [availableSessionMentions],
-  );
-  const queuedSessionHandles = useCallback(
-    (prompt: QueuedPrompt): SessionHandle[] => uniqueMentions(
-      validateSessionHandleSelections(
-        prompt.text,
-        prompt.sessionHandleSelections
-          ?? tokenSelectionsForText(prompt.text, prompt.sessionHandles ?? [], "@"),
-        availableSessionHandles,
-      ),
-      SESSION_HANDLES_LIMIT,
-    ),
-    [availableSessionHandles],
-  );
-  const queuedCapabilityMentions = useCallback((prompt: QueuedPrompt) => {
-    const owners = normalizeAtMentionNamespaces(prompt.atMentionNamespaces, prompt.text);
-    const effectiveCli = cliApps.filter((app) => {
-      const name = app.name.toLowerCase();
-      const owner = atMentionNamespace(owners, name);
-      return owner === undefined || owner === "cli";
-    });
-    const effectiveMcp = mcpPresets.filter((preset) => {
-      const name = preset.name.toLowerCase();
-      const owner = atMentionNamespace(owners, name);
-      return owner === undefined || owner === "mcp";
-    });
-    const cliMentions = new Map<string, OutboundCliAppMention>();
-    const mcpMentions = new Map<string, OutboundMcpPresetMention>();
-    for (const segment of splitCapabilityMentionSegments(
-      prompt.text,
-      effectiveCli,
-      effectiveMcp,
-    )) {
-      if (segment.kind === "cli") {
-        cliMentions.set(segment.app.name.toLowerCase(), cliAppMentionPayload(segment.app));
-      } else if (segment.kind === "mcp") {
-        mcpMentions.set(
-          segment.preset.name.toLowerCase(),
-          mcpPresetMentionPayload(segment.preset),
-        );
-      }
-    }
-    return {
-      cliApps: [...cliMentions.values()],
-      mcpPresets: [...mcpMentions.values()],
-    };
-  }, [cliApps, mcpPresets]);
-
   const sendQueuedPrompt = useCallback(
     (prompt: QueuedPrompt) => {
       secondEnterPromptIdRef.current = null;
       const text = prompt.text.trim();
       const queuedImages = queuedImagesToSendImages(prompt.images);
-      const sessionMentions = queuedSessionMentions(prompt);
-      const sessionHandles = queuedSessionHandles(prompt);
-      const capabilities = queuedCapabilityMentions(prompt);
       setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
       if (text || queuedImages?.length) {
         const options: SendOptions | undefined = (
           prompt.quotedContext
-          || sessionMentions.length
-          || sessionHandles.length
-          || capabilities.cliApps.length
-          || capabilities.mcpPresets.length
+          || prompt.sessionMentions?.length
           || isStreaming
         )
           ? {
               ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-              ...(sessionMentions.length
-                ? { sessionMentions }
-                : {}),
-              ...(sessionHandles.length ? { sessionHandles } : {}),
-              ...(capabilities.cliApps.length ? { cliApps: capabilities.cliApps } : {}),
-              ...(capabilities.mcpPresets.length
-                ? { mcpPresets: capabilities.mcpPresets }
+              ...(prompt.sessionMentions?.length
+                ? { sessionMentions: prompt.sessionMentions }
                 : {}),
               ...(isStreaming ? { continueActiveTurn: true } : {}),
             }
@@ -2695,13 +1851,7 @@ export function ThreadComposer({
       }
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    [
-      isStreaming,
-      onSend,
-      queuedCapabilityMentions,
-      queuedSessionHandles,
-      queuedSessionMentions,
-    ],
+    [isStreaming, onSend],
   );
 
   const sendNextQueuedPrompt = useCallback(() => {
@@ -2713,25 +1863,13 @@ export function ThreadComposer({
     }
     setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id));
     const queuedImages = queuedImagesToSendImages(nextPrompt.images);
-    const sessionMentions = queuedSessionMentions(nextPrompt);
-    const sessionHandles = queuedSessionHandles(nextPrompt);
-    const capabilities = queuedCapabilityMentions(nextPrompt);
     const options: SendOptions | undefined = (
-      nextPrompt.quotedContext
-      || sessionMentions.length
-      || sessionHandles.length
-      || capabilities.cliApps.length
-      || capabilities.mcpPresets.length
+      nextPrompt.quotedContext || nextPrompt.sessionMentions?.length
     )
       ? {
           ...(nextPrompt.quotedContext ? { quotedContext: nextPrompt.quotedContext } : {}),
-          ...(sessionMentions.length
-            ? { sessionMentions }
-            : {}),
-          ...(sessionHandles.length ? { sessionHandles } : {}),
-          ...(capabilities.cliApps.length ? { cliApps: capabilities.cliApps } : {}),
-          ...(capabilities.mcpPresets.length
-            ? { mcpPresets: capabilities.mcpPresets }
+          ...(nextPrompt.sessionMentions?.length
+            ? { sessionMentions: nextPrompt.sessionMentions }
             : {}),
         }
       : undefined;
@@ -2740,13 +1878,7 @@ export function ThreadComposer({
     else if (options) onSend(nextPrompt.text.trim(), undefined, options);
     else onSend(nextPrompt.text.trim());
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [
-    onSend,
-    queuedCapabilityMentions,
-    queuedSessionHandles,
-    queuedPrompts,
-    queuedSessionMentions,
-  ]);
+  }, [onSend, queuedPrompts]);
 
   useEffect(() => {
     const wasStreaming = wasStreamingRef.current;
@@ -2800,16 +1932,12 @@ export function ThreadComposer({
       attachedCliApps.length > 0
       || attachedMcpPresets.length > 0
       || activeSessionMentions.length > 0
-      || ownedSessionHandles.length > 0
       || normalizedQuotedContext
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
             ...(activeSessionMentions.length > 0
               ? { sessionMentions: activeSessionMentions }
-              : {}),
-            ...(ownedSessionHandles.length > 0
-              ? { sessionHandles: ownedSessionHandles }
               : {}),
             ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
           }
@@ -2818,8 +1946,7 @@ export function ThreadComposer({
       payload === undefined
       && attachedCliApps.length === 0
       && attachedMcpPresets.length === 0
-      && activeSessionMentions.length === 0
-      && ownedSessionHandles.length === 0;
+      && activeSessionMentions.length === 0;
     const slashLifecycle = hasPlainTextCommandPayload
       ? slashCommandLifecycle(content, slashCommands)
       : null;
@@ -2888,7 +2015,6 @@ export function ThreadComposer({
     onStop,
     onQuotedContextChange,
     normalizedQuotedContext,
-    ownedSessionHandles,
     readyImages,
     slashCommands,
     textTooLargeMessage,
@@ -2896,7 +2022,6 @@ export function ThreadComposer({
   ]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.nativeEvent.isComposing) return;
     if (showCliAppMenu) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2945,7 +2070,7 @@ export function ThreadComposer({
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
         if (!e.repeat) queueGuidancePrompt();
@@ -3075,7 +2200,6 @@ export function ThreadComposer({
     >
       {showSlashMenu ? (
         <SlashCommandPalette
-          id={slashPaletteId}
           commands={filteredSlashCommands}
           selectedIndex={selectedCommandIndex}
           layout={slashPaletteLayout}
@@ -3086,7 +2210,6 @@ export function ThreadComposer({
       ) : null}
       {showCliAppMenu ? (
         <CliAppMentionPalette
-          id={mentionPaletteId}
           candidates={filteredMentionCandidates}
           selectedIndex={selectedCliAppIndex}
           layout={slashPaletteLayout}
@@ -3201,75 +2324,23 @@ export function ThreadComposer({
             value={value}
             onChange={(e) => {
               secondEnterPromptIdRef.current = null;
-              const nextValue = e.target.value;
-              const nextStart = e.target.selectionStart ?? nextValue.length;
-              const nextEnd = e.target.selectionEnd ?? nextStart;
-              applyComposerTextEdit(
-                nextValue,
-                pendingInputEditRef.current ?? inputSelectionRef.current,
-                { start: nextStart, end: nextEnd },
-              );
+              setValue(e.target.value);
               setSlashMenuDismissed(false);
               setCliAppMenuDismissed(false);
-              setCursorPosition(nextStart);
-            }}
-            onBeforeInput={(e) => {
-              pendingInputEditRef.current = {
-                start: e.currentTarget.selectionStart ?? 0,
-                end: e.currentTarget.selectionEnd ?? e.currentTarget.selectionStart ?? 0,
-              };
+              setCursorPosition(e.target.selectionStart ?? e.target.value.length);
             }}
             onBlur={() => {
               secondEnterPromptIdRef.current = null;
             }}
             onInput={onInput}
             onKeyDown={onKeyDown}
-            onKeyUp={(e) => {
-              const start = e.currentTarget.selectionStart ?? e.currentTarget.value.length;
-              const end = e.currentTarget.selectionEnd ?? start;
-              inputSelectionRef.current = { start, end };
-              setCursorPosition(start);
-            }}
-            onSelect={(e) => {
-              const start = e.currentTarget.selectionStart ?? e.currentTarget.value.length;
-              const end = e.currentTarget.selectionEnd ?? start;
-              inputSelectionRef.current = { start, end };
-              setCursorPosition(start);
-            }}
-            onClick={(e) => {
-              const start = e.currentTarget.selectionStart ?? e.currentTarget.value.length;
-              const end = e.currentTarget.selectionEnd ?? start;
-              inputSelectionRef.current = { start, end };
-              setCursorPosition(start);
-            }}
-            onPaste={(e) => {
-              pendingInputEditRef.current = {
-                start: e.currentTarget.selectionStart ?? 0,
-                end: e.currentTarget.selectionEnd ?? e.currentTarget.selectionStart ?? 0,
-              };
-              onPaste(e);
-              if (e.defaultPrevented) pendingInputEditRef.current = null;
-            }}
+            onKeyUp={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onSelect={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onPaste={onPaste}
             rows={1}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={showAnyPalette}
-            aria-controls={
-              showCliAppMenu
-                ? mentionPaletteId
-                : showSlashMenu
-                  ? slashPaletteId
-                  : undefined
-            }
-            aria-activedescendant={
-              showCliAppMenu
-                ? `${mentionPaletteId}-option-${selectedCliAppIndex}`
-                : showSlashMenu
-                  ? `${slashPaletteId}-option-${selectedCommandIndex}`
-                  : undefined
-            }
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
@@ -3671,7 +2742,7 @@ function ComposerCliMentionOverlay({
   className,
   ghostRange,
 }: {
-  segments: ComposerTokenSegment[];
+  segments: CapabilityMentionSegment[];
   isHero: boolean;
   className: string;
   ghostRange?: { start: number; end: number } | null;
@@ -3698,19 +2769,11 @@ function ComposerCliMentionOverlay({
             data-testid={isGhost ? "composer-session-drag-preview" : undefined}
             className={cn(isGhost && "opacity-45 transition-opacity duration-100")}
           >
-            {segment.kind === "session" ? (
-              <SessionReferenceToken
-                mention={segment.mention}
-                label={segment.text}
-                variant="composer"
-              />
-            ) : (
-              <CapabilityMentionToken
-                segment={segment}
-                variant="composer"
-                isHero={isHero}
-              />
-            )}
+            <CapabilityMentionToken
+              segment={segment}
+              variant="composer"
+              isHero={isHero}
+            />
           </span>
         );
       })}
@@ -3718,7 +2781,6 @@ function ComposerCliMentionOverlay({
   );
 }
 interface SlashCommandPaletteProps {
-  id: string;
   commands: SlashPaletteCommand[];
   selectedIndex: number;
   layout: SlashPaletteLayout;
@@ -3728,7 +2790,6 @@ interface SlashCommandPaletteProps {
 }
 
 interface CliAppMentionPaletteProps {
-  id: string;
   candidates: MentionCandidate[];
   selectedIndex: number;
   layout: SlashPaletteLayout;
@@ -3755,7 +2816,6 @@ function useSelectedOptionScroll(selectedIndex: number) {
 }
 
 function CliAppMentionPalette({
-  id,
   candidates,
   selectedIndex,
   layout,
@@ -3769,16 +2829,14 @@ function CliAppMentionPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
-  const groupedCandidates = (["handle", "cli", "mcp", "session"] as const)
+  const groupedCandidates = (["session", "cli", "mcp"] as const)
     .map((kind) => ({
       kind,
-      label: kind === "handle"
+      label: kind === "session"
         ? t("thread.composer.mentions.sessionGroup")
-        : kind === "session"
-          ? t("thread.composer.mentions.sessionGroup")
-          : kind === "cli"
-            ? t("thread.composer.mentions.cliGroup")
-            : t("thread.composer.mentions.mcpGroup"),
+        : kind === "cli"
+          ? t("thread.composer.mentions.cliGroup")
+          : t("thread.composer.mentions.mcpGroup"),
       items: candidates
         .map((candidate, index) => ({ candidate, index }))
         .filter(({ candidate }) => candidate.kind === kind),
@@ -3786,7 +2844,6 @@ function CliAppMentionPalette({
     .filter((group) => group.items.length > 0);
   return (
     <div
-      id={id}
       role="listbox"
       aria-label={t("thread.composer.mentions.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}
@@ -3810,31 +2867,20 @@ function CliAppMentionPalette({
                 ? t("thread.composer.mentions.cliBadge")
                 : candidate.kind === "mcp"
                   ? t("thread.composer.mentions.mcpBadge")
-                  : "";
+                  : t("thread.composer.mentions.sessionBadge");
               const ariaDescription = candidate.kind === "cli"
                 ? t("thread.composer.mentions.cliDescription", { name })
                 : candidate.kind === "mcp"
                   ? t("thread.composer.mentions.mcpDescription", { name })
-                  : "";
-              const sigil = candidate.kind === "session" ? "#" : "@";
+                  : t("thread.composer.mentions.sessionDescription", { name });
               return (
                 <button
-                  key={candidate.kind === "session"
-                    ? `session-${candidate.mention.session_key}`
-                    : candidate.kind === "handle"
-                      ? `handle-${candidate.handle.id}`
-                      : `${candidate.kind}-${name}`}
-                  id={`${id}-option-${index}`}
+                  key={`${candidate.kind}-${name}`}
                   type="button"
                   role="option"
-                  tabIndex={-1}
                   data-palette-index={index}
                   aria-selected={selected}
-                  aria-label={candidate.kind === "handle"
-                    ? `@${name}`
-                    : candidate.kind === "session"
-                      ? `${candidate.displayName} #${name}`
-                      : `${candidate.displayName} ${sigil}${name} ${ariaDescription} ${typeLabel}`}
+                  aria-label={`${candidate.displayName} @${name} ${ariaDescription} ${typeLabel}`}
                   onMouseEnter={() => onHover(index)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -3849,23 +2895,15 @@ function CliAppMentionPalette({
                   )}
                 >
                   <MentionCandidateLogo candidate={candidate} selected={selected} />
-                  {candidate.kind === "handle" ? (
-                    <span
-                      className="min-w-0 flex-1 truncate text-[15px] font-medium tracking-normal text-foreground"
-                    >
+                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                    <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
+                      {candidate.displayName}
+                    </span>
+                    <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
                       @{name}
                     </span>
-                  ) : (
-                    <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                      <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
-                        {candidate.displayName}
-                      </span>
-                      <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
-                        {sigil}{name}
-                      </span>
-                    </span>
-                  )}
-                  {candidate.kind === "cli" || candidate.kind === "mcp" ? (
+                  </span>
+                  {candidate.kind !== "session" ? (
                     <span
                       className={cn(
                         "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
@@ -3894,26 +2932,22 @@ function MentionCandidateLogo({
   candidate: MentionCandidate;
   selected: boolean;
 }) {
-  const color = candidate.kind === "handle"
-    ? sessionHandleColor(candidate.handle.color_slot)
-    : candidate.kind === "session"
-      ? INLINE_TOKEN_HIGHLIGHT_COLOR
-      : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const rawLogoUrl = candidate.kind === "cli" || candidate.kind === "mcp"
-    ? candidate.logoUrl
-    : null;
+  const color = candidate.kind === "session"
+    ? candidate.mention.id
+      ? sessionHandleColor(candidate.mention.id)
+      : INLINE_TOKEN_HIGHLIGHT_COLOR
+    : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
+  const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
-  if (candidate.kind === "handle" || candidate.kind === "session") {
+  if (candidate.kind === "session") {
     return (
       <span
         className="flex h-5 w-5 shrink-0 items-center justify-center"
         style={{ color }}
       >
-        {candidate.kind === "handle"
-          ? <MessageCircle className="h-4 w-4" aria-hidden />
-          : <History className="h-4 w-4" aria-hidden />}
+        <MessageCircle className="h-4 w-4" aria-hidden />
       </span>
     );
   }
@@ -3948,7 +2982,6 @@ function MentionCandidateLogo({
 }
 
 function SlashCommandPalette({
-  id,
   commands,
   selectedIndex,
   layout,
@@ -3964,7 +2997,6 @@ function SlashCommandPalette({
   const listRef = useSelectedOptionScroll(selectedIndex);
   return (
     <div
-      id={id}
       role="listbox"
       aria-label={t("thread.composer.slash.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}
@@ -3990,10 +3022,8 @@ function SlashCommandPalette({
           return (
             <button
               key={command.command}
-              id={`${id}-option-${index}`}
               type="button"
               role="option"
-              tabIndex={-1}
               data-palette-index={index}
               aria-selected={selected}
               onMouseEnter={() => onHover(index)}

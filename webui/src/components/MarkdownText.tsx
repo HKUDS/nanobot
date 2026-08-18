@@ -8,7 +8,6 @@ import {
 } from "react";
 
 import { cn } from "@/lib/utils";
-import type { SessionHandle } from "@/lib/types";
 
 interface MarkdownTextProps {
   children: string;
@@ -16,7 +15,6 @@ interface MarkdownTextProps {
   streaming?: boolean;
   preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
-  sessionHandles?: SessionHandle[];
 }
 
 const loadMarkdownRenderer = () => import("@/components/MarkdownTextRenderer");
@@ -28,14 +26,12 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   highlightCode,
   streaming,
   onOpenFilePreview,
-  sessionHandles,
 }: {
   source: string;
   className?: string;
   highlightCode: boolean;
   streaming: boolean;
   onOpenFilePreview?: (path: string) => void;
-  sessionHandles?: SessionHandle[];
 }) {
   return (
     <LazyMarkdownRenderer
@@ -43,7 +39,6 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
       highlightCode={highlightCode}
       streaming={streaming}
       onOpenFilePreview={onOpenFilePreview}
-      sessionHandles={sessionHandles}
     >
       {source}
     </LazyMarkdownRenderer>
@@ -82,7 +77,6 @@ export function MarkdownText({
   streaming = false,
   preserveStreamingLayout = false,
   onOpenFilePreview,
-  sessionHandles,
 }: MarkdownTextProps) {
   const renderedSource = children;
   const renderPhase = streaming ? "streaming" : "complete";
@@ -114,7 +108,6 @@ export function MarkdownText({
           highlightCode={highlightCode}
           streaming={renderWithStreamingLayout}
           onOpenFilePreview={onOpenFilePreview}
-          sessionHandles={sessionHandles}
         />
       </Suspense>
     </MarkdownRendererBoundary>

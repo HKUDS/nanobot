@@ -80,44 +80,6 @@ def test_webui_session_index_uses_unique_temp_file(tmp_path: Path) -> None:
     assert not list(manager.sessions_dir.glob(".webui_session_index.json.*.tmp"))
 
 
-def test_webui_session_index_v7_rebuilds_session_handle_addressability(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:upgrade")
-    session.metadata["webui"] = True
-    session.add_message("user", "upgrade me")
-    manager.save(session)
-    list_webui_sessions(manager)
-    index_path = manager.sessions_dir / ".webui_session_index.json"
-    stale = json.loads(index_path.read_text(encoding="utf-8"))
-    stale["version"] = 7
-    for row in stale["sessions"]:
-        row.pop("_persisted_webui", None)
-    index_path.write_text(json.dumps(stale), encoding="utf-8")
-    scanned: list[str] = []
-    original_scan = session_list_index._scan_session_row
-
-    def record_scan(
-        session_manager: SessionManager,
-        path: Path,
-        webui_dir: Path,
-    ) -> dict | None:
-        scanned.append(path.name)
-        return original_scan(session_manager, path, webui_dir)
-
-    monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
-
-    [row] = list_webui_sessions(manager)
-
-    assert scanned == [manager._get_session_path(session.key).name]
-    assert session_list_index.is_persisted_webui_session_row(row)
-    rebuilt = json.loads(index_path.read_text(encoding="utf-8"))
-    assert rebuilt["version"] == 8
-    assert rebuilt["sessions"][0]["_persisted_webui"] is True
-
-
 def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
     tmp_path: Path,
 ) -> None:
@@ -390,28 +352,11 @@ def test_webui_session_list_recovers_transcript_without_canonical_session(
     assert row["key"] == key
     assert row["preview"] == "original question"
     assert row["created_at"] == datetime.fromtimestamp(1785502800).isoformat()
-    assert not session_list_index.is_persisted_webui_session_row(row)
     assert not manager._get_session_path(key).exists()
     assert manager.list_sessions() == []
 
     reloaded = SessionManager(tmp_path / "workspace")
     assert [row["key"] for row in list_webui_sessions(reloaded)] == [key]
-
-
-def test_webui_session_list_marks_only_canonical_webui_sessions_addressable(
-    tmp_path: Path,
-) -> None:
-    manager = SessionManager(tmp_path / "workspace")
-    webui = manager.get_or_create("websocket:webui")
-    webui.metadata["webui"] = True
-    manager.save(webui)
-    plain = manager.get_or_create("websocket:plain")
-    manager.save(plain)
-
-    rows = {row["key"]: row for row in list_webui_sessions(manager)}
-
-    assert session_list_index.is_persisted_webui_session_row(rows["websocket:webui"])
-    assert not session_list_index.is_persisted_webui_session_row(rows["websocket:plain"])
 
 
 def test_webui_session_list_recovers_colon_chat_id_from_transcript(

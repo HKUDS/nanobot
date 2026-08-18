@@ -66,104 +66,6 @@ describe("ChatList", () => {
     expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
   });
 
-  it("keeps each handle handle visible beside its conversation title", () => {
-    render(
-      <ChatList
-        sessions={[session({
-          chatId: "review",
-          title: "Review the patch",
-          handle: {
-            id: "handle_1234",
-            name: "mira",
-            color_slot: 3,
-            session_key: "websocket:review",
-          },
-        })]}
-        activeKey="websocket:review"
-        onSelect={vi.fn()}
-        onRequestDelete={vi.fn()}
-        onTogglePin={vi.fn()}
-        onRequestRename={vi.fn()}
-        onToggleArchive={vi.fn()}
-      />,
-    );
-
-    const conversation = screen.getByRole("button", {
-      name: "@mira Review the patch",
-    });
-    expect(conversation).toHaveTextContent("Review the patch");
-    expect(conversation).toHaveTextContent("@mira");
-    expect(conversation.querySelector("[data-sidebar-handle-handle]"))
-      .toHaveClass("max-w-20", "shrink-0");
-    const handle = conversation.querySelector("[data-sidebar-handle-handle]");
-    expect(handle?.querySelector("[aria-hidden]")).toBeNull();
-    const decoration = handle?.querySelector("span[style*='border-bottom-color']");
-    expect(decoration?.getAttribute("style"))
-      .toContain("var(--session-handle-3)");
-    expect(decoration?.querySelector("[data-testid], .text-foreground"))
-      .toHaveClass("text-foreground");
-    const selectionTrack = conversation.querySelector("[data-sidebar-selection-track]");
-    expect(selectionTrack).toHaveAttribute("data-active", "true");
-    expect(selectionTrack?.getAttribute("style")).toContain("var(--session-handle-3)");
-  });
-
-  it("keeps aligned handle handles when conversations become grouped panes", () => {
-    const mira = {
-      id: "handle_1234",
-      name: "mira",
-      color_slot: 3,
-      session_key: "websocket:root",
-    };
-    const nora = {
-      id: "handle_5678",
-      name: "nora",
-      color_slot: 5,
-      session_key: "websocket:child",
-    };
-    render(
-      <ChatList
-        sessions={[session({
-          key: "tab:group",
-          chatId: "workbench-tab:group",
-          title: "Grouped work",
-        })]}
-        activeKey="websocket:root"
-        paneGroups={{
-          "tab:group": {
-            tabKey: "tab:group",
-            title: "Grouped work",
-            activePaneKey: "websocket:root",
-            visible: true,
-            panes: [
-              { key: "websocket:root", chatId: "root", title: "Short", handle: mira },
-              {
-                key: "websocket:child",
-                chatId: "child",
-                title: "A much longer conversation title",
-                handle: nora,
-              },
-            ],
-          },
-        }}
-        onSelect={vi.fn()}
-        onRequestDelete={vi.fn()}
-        onTogglePin={vi.fn()}
-        onRequestRename={vi.fn()}
-        onToggleArchive={vi.fn()}
-      />,
-    );
-
-    const root = screen.getByRole("button", { name: "@mira Short" });
-    const child = screen.getByRole("button", {
-      name: "@nora A much longer conversation title",
-    });
-    expect(root).toHaveTextContent("@mira");
-    expect(child).toHaveTextContent("@nora");
-    for (const handle of document.querySelectorAll("[data-sidebar-handle-handle]")) {
-      expect(handle).toHaveClass("max-w-20", "shrink-0");
-    }
-  });
-
   it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
     render(
       <ChatList
@@ -1080,10 +982,10 @@ describe("ChatList", () => {
 
     const activeButton = screen.getByRole("button", { name: "Active topic" });
     expect(activeButton).toHaveAttribute("aria-current", "page");
-    const activeTrack = activeButton.querySelector("[data-sidebar-selection-track]");
-    expect(activeTrack)
+    expect(activeButton.querySelector("[data-sidebar-selection-track]"))
       .toHaveClass("origin-left", "scale-x-100", "transition-transform");
-    expect(activeTrack?.getAttribute("style")).toContain("currentcolor");
+    expect(activeButton.querySelector("[data-sidebar-selection-track]"))
+      .toHaveStyle({ backgroundColor: "currentColor" });
 
     rerender(
       <ChatList

@@ -3,7 +3,7 @@ import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { SessionHandleHighlight } from "@/components/CliAppMentionText";
+import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import {
   Tooltip,
   TooltipContent,
@@ -85,12 +85,11 @@ export function ThreadHeader({
         ) : null}
         {handle ? (
           <span
-            data-testid="thread-handle-handle"
             className="flex shrink-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium"
           >
-            <SessionHandleHighlight handle={handle}>
+            <SessionHandleLabel id={handle.id}>
               @{handle.name}
-            </SessionHandleHighlight>
+            </SessionHandleLabel>
           </span>
         ) : null}
       </div>

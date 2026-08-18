@@ -23,7 +23,6 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot
-from nanobot.runtime_context import RUNTIME_CONTEXT_MESSAGE_META, detach_runtime_context
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
@@ -854,16 +853,11 @@ class TestToolEventProgress:
         assert len(requests) == 2
         assert requests[0][-1]["role"] == "user"
         assert requests[0][-1]["content"].endswith("Background research completed")
-        follow_up = next(
-            message
+        assert any(
+            message.get("role") == "user"
+            and message.get("content") == "Can you include the key detail?"
             for message in requests[1]
-            if message.get("role") == "user"
-            and str(message.get("content", "")).startswith("Can you include the key detail?")
         )
-        marker = follow_up["_meta"][RUNTIME_CONTEXT_MESSAGE_META]
-        detached = detach_runtime_context(follow_up["content"], marker)
-        assert detached is not None
-        assert detached[0] == "Can you include the key detail?"
         assert len(request_contexts) == 1
         request_ctx = request_contexts[0]
         assert request_ctx is not None

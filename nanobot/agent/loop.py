@@ -85,11 +85,6 @@ from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
 )
-from nanobot.session.session_messages import (
-    is_session_input,
-    session_input_history_extra,
-)
-from nanobot.session.webui_turns import project_session_message_input
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
@@ -167,7 +162,6 @@ class TurnContext:
 
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
-    run_status_started: bool = False
     turn_latency_ms: int | None = None
     usage: dict[str, int] = field(default_factory=dict)
 
@@ -1022,11 +1016,7 @@ class AgentLoop:
                     if isinstance(metadata_value, dict)
                     else {}
                 )
-                session_input = is_session_input(pending_msg)
-                if session_input:
-                    session_metadata = session_input_history_extra(pending_msg)
-                    row.update(session_metadata)
-                if pending_msg.channel != "system" or session_input:
+                if pending_msg.is_user_input:
                     scope = self.workspace_scopes.for_turn(
                         channel=pending_msg.channel,
                         message_metadata=metadata,
@@ -1267,13 +1257,10 @@ class AgentLoop:
                     msg.require_existing_session
                     and self.sessions.get_cached(effective_key) is None
                 ):
-                    if await asyncio.to_thread(
-                        self.sessions.read_session_metadata,
-                        effective_key,
-                    ) is None:
-                        continue
-                if self.commands.is_priority(raw):
-                    await project_session_message_input(self.bus, msg, effective_key)
+                    continue
+                if msg.is_user_input:
+                    await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
+                if msg.channel != "system" and self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
                         self.commands.dispatch_priority,
@@ -1301,8 +1288,7 @@ class AgentLoop:
                 if effective_key in self._pending_queues:
                     # Non-priority commands must not be queued for injection;
                     # dispatch them directly (same pattern as priority commands).
-                    if self.commands.is_dispatchable_command(raw):
-                        await project_session_message_input(self.bus, msg, effective_key)
+                    if msg.channel != "system" and self.commands.is_dispatchable_command(raw):
                         await self._dispatch_command_inline(
                             msg, effective_key, raw,
                             self.commands.dispatch,
@@ -1322,7 +1308,6 @@ class AgentLoop:
                             effective_key,
                         )
                     else:
-                        await project_session_message_input(self.bus, msg, effective_key)
                         logger.info(
                             "Routed follow-up message to pending queue for session {}",
                             effective_key,
@@ -1534,11 +1519,7 @@ class AgentLoop:
         attributes: Mapping[str, Any] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        kind = (
-            TurnKind.SYSTEM
-            if msg.channel == "system" and not is_session_input(msg)
-            else TurnKind.USER
-        )
+        kind = TurnKind.USER if msg.is_user_input else TurnKind.SYSTEM
         if kind is TurnKind.SYSTEM:
             destination = (
                 msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
@@ -1718,10 +1699,7 @@ class AgentLoop:
 
         if ctx.session is None:
             if msg.require_existing_session:
-                ctx.session = await asyncio.to_thread(
-                    self.sessions.get_existing,
-                    ctx.session_key,
-                )
+                ctx.session = self.sessions.get_cached(ctx.session_key)
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:
@@ -1752,12 +1730,6 @@ class AgentLoop:
             is_user_turn=ctx.original_user_text is not None,
         )
         await ctx.delivery.started()
-        if is_session_input(ctx.msg):
-            if ctx.visible_run_started_at is None:
-                ctx.visible_run_started_at = time.time()
-            await ctx.delivery.running(started_at=ctx.visible_run_started_at)
-            ctx.run_status_started = True
-            await project_session_message_input(self.bus, ctx.msg, ctx.session_key)
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(session, msg)
 
@@ -1775,7 +1747,7 @@ class AgentLoop:
         ctx.pending_summary = pending
 
     async def _dispatch_command(self, ctx: TurnContext) -> bool:
-        if ctx.kind is TurnKind.SYSTEM:
+        if ctx.kind is TurnKind.SYSTEM or ctx.msg.channel == "system":
             return False
         session = ctx.require_session()
         raw = ctx.msg.content.strip()
@@ -1934,7 +1906,6 @@ class AgentLoop:
                 ctx.msg,
                 session,
                 runtime_context_blocks=ctx.runtime_context_blocks,
-                **session_input_history_extra(ctx.msg),
             )
             if staged_provider_state and not ctx.input_persisted_early:
                 session.provider_state = stored_state
@@ -1953,9 +1924,7 @@ class AgentLoop:
         runtime = ctx.require_runtime()
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
-        if not ctx.run_status_started:
-            await ctx.delivery.running(started_at=ctx.visible_run_started_at)
-            ctx.run_status_started = True
+        await ctx.delivery.running(started_at=ctx.visible_run_started_at)
         result = await self._run_agent_loop(
             ctx.initial_messages,
             runtime=runtime,
@@ -2001,8 +1970,7 @@ class AgentLoop:
             and not ctx.suppress_response
         ):
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
-        if session.discarded:
-            raise RuntimeError("session was deleted while the turn was running")
+
         latency_started_at = (
             ctx.visible_run_started_at
             if (
@@ -2056,11 +2024,8 @@ class AgentLoop:
                 latency_ms=ctx.turn_latency_ms,
             )
             return
-        outbound_input = (
-            ctx.delivery.delivery_message if ctx.msg.channel == "system" else ctx.msg
-        )
         ctx.outbound = self._assemble_outbound(
-            outbound_input,
+            ctx.delivery.delivery_message,
             cast(str, ctx.final_content),
             ctx.stop_reason,
             ctx.had_injections,

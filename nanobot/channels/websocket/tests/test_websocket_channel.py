@@ -28,10 +28,10 @@ from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     ProgressEvent,
     RuntimeModelUpdatedEvent,
-    SessionMessageInputEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
+    UserInputEvent,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import (
@@ -48,6 +48,7 @@ from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.session_handles import session_handle_for_key
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
     http_error as _http_error,
@@ -540,7 +541,7 @@ async def test_temporary_looking_id_does_not_define_session_policy(bus, tmp_path
     )
 
     inbound = bus.publish_inbound.await_args.args[0]
-    assert inbound.require_existing_session is True
+    assert inbound.require_existing_session is False
     assert inbound.session_key_override is None
     session = sessions.get_cached("websocket:temporary-looking-but-persistent")
     assert session is not None
@@ -2008,6 +2009,41 @@ async def test_send_broadcasts_runtime_model_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_projects_external_user_input_to_existing_wire_event() -> None:
+    bus = MessageBus()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            event=UserInputEvent(
+                content="hello from another session",
+                created_at_ms=1234,
+                provenance={"name": "mira-deadbeef00"},
+            ),
+        )
+    )
+
+    payload = json.loads(mock_ws.send.call_args.args[0])
+    assert payload == {
+        "event": "user_message",
+        "chat_id": "chat-1",
+        "text": "hello from another session",
+        "created_at_ms": 1234,
+        "starts_turn": False,
+        "provenance": {"name": "mira-deadbeef00"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
     bus = MessageBus()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
@@ -2064,57 +2100,6 @@ def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
         "model_preset": "Deep Research",
         "usage": {"prompt_tokens": 120, "completion_tokens": 8},
     }
-
-
-@pytest.mark.asyncio
-async def test_send_projects_session_message_only_to_the_target_chat() -> None:
-    bus = MessageBus()
-    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
-    target = AsyncMock()
-    other = AsyncMock()
-    channel._attach(target, "target")
-    channel._attach(other, "other")
-
-    await channel.send(OutboundMessage(
-        channel="websocket",
-        chat_id="target",
-        content="Review this now.",
-        metadata={WEBUI_TURN_METADATA_KEY: "session-message-turn-1"},
-        event=SessionMessageInputEvent(
-            content="Review this now.",
-            created_at_ms=1234,
-            session_message={
-                "direction": "incoming",
-                "message_id": "session-message-1",
-                "session": {
-                    "id": "handle_11111111111111111111111111111111",
-                    "name": "kai",
-                    "session_key": "websocket:source",
-                    "color_slot": 2,
-                },
-            },
-        ),
-    ))
-
-    assert json.loads(target.send.await_args.args[0]) == {
-        "event": "session_message",
-        "chat_id": "target",
-        "text": "Review this now.",
-        "created_at_ms": 1234,
-        "session_message": {
-            "direction": "incoming",
-            "message_id": "session-message-1",
-            "session": {
-                "id": "handle_11111111111111111111111111111111",
-                "name": "kai",
-                "session_key": "websocket:source",
-                "color_slot": 2,
-            },
-        },
-        "turn_phase": "user",
-        "turn_id": "session-message-turn-1",
-    }
-    other.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4971,7 +4956,7 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
-def test_sessions_list_includes_active_run_started_at(monkeypatch, tmp_path: Path) -> None:
+def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
@@ -4979,7 +4964,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch, tmp_path: Pat
     from nanobot.webui import ws_http as ws_http_module
 
     bus = MagicMock()
-    session_manager = SessionManager(tmp_path / "sessions")
+    session_manager = MagicMock()
     sessions = [
         {
             "key": "websocket:chat-1",
@@ -4988,7 +4973,6 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch, tmp_path: Pat
             "title": "Running",
             "preview": "work",
             "model_preset": "fast",
-            "_persisted_webui": True,
             "path": "/private/path",
         },
         {
@@ -5016,13 +5000,8 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch, tmp_path: Pat
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
     workspace_scope = body["sessions"][0].pop("workspace_scope")
-    handle = body["sessions"][0].pop("handle")
     assert workspace_scope["project_path"] == str(channel.gateway.media.workspace_path)
     assert workspace_scope["access_mode"] in {"restricted", "full"}
-    assert handle["id"].startswith("handle_")
-    assert handle["name"].isascii()
-    assert handle["name"].islower()
-    assert 0 <= handle["color_slot"] < 8
     assert body["sessions"] == [
         {
             "key": "websocket:chat-1",
@@ -5032,6 +5011,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch, tmp_path: Pat
             "preview": "work",
             "model_preset": "fast",
             "run_started_at": 1_700_000_000.0,
+            "handle": session_handle_for_key("websocket:chat-1").public_payload(),
         }
     ]
 

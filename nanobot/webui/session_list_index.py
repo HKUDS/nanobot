@@ -32,21 +32,16 @@ from nanobot.session.manager import (
 )
 from nanobot.session.model_selection import model_preset_from_metadata
 
-_INDEX_VERSION = 8
+_INDEX_VERSION = 7
 _INDEX_FILENAME = ".webui_session_index.json"
 _MODEL_PRESET_FIELD = "model_preset"
 _ROW_SOURCE_FIELD = "_source"
 _SESSION_SOURCE = "session"
 _TRANSCRIPT_SOURCE = "webui_transcript"
-_PERSISTED_WEBUI_FIELD = "_persisted_webui"
 _WORKSPACE_SCOPE_PRESENT_FIELD = "_workspace_scope_present"
 _WORKSPACE_SCOPE_VALUE_FIELD = "_workspace_scope_value"
 WEBUI_SESSION_INDEX_INTERNAL_FIELDS = frozenset(
-    {
-        _PERSISTED_WEBUI_FIELD,
-        _WORKSPACE_SCOPE_PRESENT_FIELD,
-        _WORKSPACE_SCOPE_VALUE_FIELD,
-    }
+    {_WORKSPACE_SCOPE_PRESENT_FIELD, _WORKSPACE_SCOPE_VALUE_FIELD}
 )
 _INDEXED_WORKSPACE_SCOPE_KEYS = ("project_path", "path", "access_mode")
 _MAX_INDEXED_WORKSPACE_SCOPE_BYTES = 4096
@@ -250,16 +245,10 @@ def _public_row(sessions_dir: Path, webui_dir: Path, row: dict[str, Any]) -> dic
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
         _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
-        _PERSISTED_WEBUI_FIELD: row.get(_PERSISTED_WEBUI_FIELD) is True,
         _WORKSPACE_SCOPE_PRESENT_FIELD: row.get(_WORKSPACE_SCOPE_PRESENT_FIELD, False),
         _WORKSPACE_SCOPE_VALUE_FIELD: row.get(_WORKSPACE_SCOPE_VALUE_FIELD),
         "path": str(path),
     }
-
-
-def is_persisted_webui_session_row(row: dict[str, Any]) -> bool:
-    """Return whether an indexed row has a canonical, addressable WebUI session."""
-    return row.get(_PERSISTED_WEBUI_FIELD) is True
 
 
 def indexed_workspace_scope(row: dict[str, Any]) -> tuple[bool, object]:
@@ -496,9 +485,6 @@ def _indexed_row_for_session(session: Session, path: Path, webui_dir: Path) -> d
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
-        _PERSISTED_WEBUI_FIELD: (
-            session.key.startswith("websocket:") and session.metadata.get("webui") is True
-        ),
         **_indexed_workspace_scope_fields(session.metadata),
         _ROW_SOURCE_FIELD: _SESSION_SOURCE,
         "file": path.name,
@@ -615,7 +601,6 @@ def _scan_transcript_row(
         "title": "",
         "preview": preview or fallback_preview,
         _MODEL_PRESET_FIELD: None,
-        _PERSISTED_WEBUI_FIELD: False,
         **_indexed_workspace_scope_fields({}),
         _ROW_SOURCE_FIELD: _TRANSCRIPT_SOURCE,
         "file": stem,
@@ -688,12 +673,7 @@ def _scan_session_row(
                 created_at_s = created_at_s or fallback_time
                 updated_at_s = updated_at_s or fallback_time
             key = data.get("key") or storage_key
-            raw_metadata: object = data.get("metadata")
-            metadata = (
-                cast(dict[str, Any], raw_metadata)
-                if isinstance(raw_metadata, dict)
-                else {}
-            )
+            metadata = data.get("metadata", {})
             activity_signature = _webui_activity_signature(key, webui_dir)
             activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
@@ -707,10 +687,6 @@ def _scan_session_row(
                 "title": _metadata_title(metadata),
                 "preview": preview or fallback_preview,
                 _MODEL_PRESET_FIELD: model_preset_from_metadata(metadata),
-                _PERSISTED_WEBUI_FIELD: (
-                    key.startswith("websocket:")
-                    and metadata.get("webui") is True
-                ),
                 **_indexed_workspace_scope_fields(metadata),
                 _ROW_SOURCE_FIELD: _SESSION_SOURCE,
                 "file": path.name,

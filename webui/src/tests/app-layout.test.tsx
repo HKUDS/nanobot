@@ -519,7 +519,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const firstMessage = "keep this first turn visible";
-    fireEvent.change(screen.getByRole("combobox", { name: "Message input" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
       target: { value: firstMessage },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -3375,7 +3375,7 @@ describe("App layout", () => {
       .toEqual(["Alpha", "New topic"]);
 
     const activeComposer = screen.getByTestId("active-pane-composer");
-    const paneInput = within(activeComposer).getByRole("combobox", {
+    const paneInput = within(activeComposer).getByRole("textbox", {
       name: "Message New topic",
     });
     expect(paneInput).toHaveClass("min-h-[50px]");
