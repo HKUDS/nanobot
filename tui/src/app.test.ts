@@ -552,7 +552,6 @@ describe("NanobotTui layout", () => {
   test("refreshes expired API credentials before opening sessions", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
-    let expired = false
     let bootstrapRequests = 0
     const sessionAuthorizations: Array<string | null> = []
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -567,28 +566,13 @@ describe("NanobotTui layout", () => {
         }))
       }
       if (authorization === "Bearer expired-api-token") {
-        if (expired) return new Response("Unauthorized", { status: 401 })
+        return new Response("Unauthorized", { status: 401 })
       }
       if (url.endsWith("/api/sessions")) {
         sessionAuthorizations.push(authorization)
         return new Response(JSON.stringify({
           sessions: [{ key: "websocket:chat", title: "Current chat" }],
         }))
-      }
-      if (url.endsWith("/api/commands")) {
-        return new Response(JSON.stringify({ commands: [] }))
-      }
-      if (url.endsWith("/api/settings")) {
-        return new Response(JSON.stringify({ model_presets: [] }))
-      }
-      if (url.endsWith("/api/workspaces")) {
-        return new Response(JSON.stringify({ controls: {} }))
-      }
-      if (url.includes("/api/settings/cli-apps")) {
-        return new Response(JSON.stringify({ apps: [] }))
-      }
-      if (url.endsWith("/api/settings/mcp-presets")) {
-        return new Response(JSON.stringify({ presets: [] }))
       }
       return new Response("{}")
     }) as typeof fetch
@@ -614,11 +598,10 @@ describe("NanobotTui layout", () => {
 
     try {
       await waitUntil(() => ui.ready)
-      expired = true
       ui.composer.setText("/sessions")
       ui.composer.submit()
 
-      await waitUntil(() => bootstrapRequests === 1)
+      await waitUntil(() => bootstrapRequests >= 1)
       await waitUntil(() => ui.sessionMenu.visible)
       expect(bootstrapRequests).toBe(1)
       expect(sessionAuthorizations.at(-1)).toBe("Bearer fresh-api-token")
