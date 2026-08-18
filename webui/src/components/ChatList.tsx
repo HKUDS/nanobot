@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -50,7 +50,6 @@ import {
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
-import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
@@ -131,11 +130,19 @@ function SidebarSessionHandle({ handle }: { handle: ChatSummary["handle"] }) {
   if (!handle) return null;
   return (
     <span
+      data-sidebar-session-handle
       className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] font-medium leading-5"
     >
-      <SessionHandleLabel id={handle.id}>
+      <span
+        data-sidebar-session-handle-underline
+        className="inline border-b-2 text-foreground"
+        style={{
+          "--sidebar-session-handle-color": sessionHandleColor(handle.id),
+          borderBottomColor: "var(--sidebar-session-handle-color)",
+        } as CSSProperties}
+      >
         @{handle.name}
-      </SessionHandleLabel>
+      </span>
     </span>
   );
 }

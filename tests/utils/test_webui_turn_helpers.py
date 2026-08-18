@@ -16,7 +16,7 @@ from nanobot.bus.runtime_events import (
 from nanobot.providers.base import GenerationSettings
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
-from nanobot.session.session_handles import session_handle_for_key
+from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
@@ -231,11 +231,12 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
     target_session = sessions.get_or_create("websocket:target")
     target_session.metadata["webui"] = True
     sessions.save(target_session)
-    source = session_handle_for_key("websocket:source")
+    source = session_handle_for_name("websocket:source", "luma")
     envelope = {
         "message_id": "message-1",
         "created_at_ms": 123,
         "expect_reply": False,
+        "source_handle": source.name,
         "source_session_key": "websocket:source",
         "target_session_key": "websocket:target",
     }

@@ -43,7 +43,7 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
-from nanobot.session.session_handles import session_handle_for_key
+from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import (
     SessionMessageEnvelope,
     session_message_envelope,
@@ -85,7 +85,10 @@ _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
 def _session_message_public_metadata(
     envelope: SessionMessageEnvelope,
 ) -> dict[str, Any]:
-    source = session_handle_for_key(envelope["source_session_key"])
+    source = session_handle_for_name(
+        envelope["source_session_key"],
+        envelope["source_handle"],
+    )
     return {
         "message_id": envelope["message_id"],
         "session": source.public_payload(),

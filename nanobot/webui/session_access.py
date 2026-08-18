@@ -14,7 +14,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
-from nanobot.session.session_handles import session_handle_for_key
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.session_list_index import list_webui_sessions
 from nanobot.webui.transcript import (
     build_webui_thread_response,
@@ -105,6 +105,7 @@ class WebuiSessionAccess:
 
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
+        self._handles = SessionHandleResolver(sessions)
 
     def _metadata(
         self,
@@ -233,7 +234,9 @@ class WebuiSessionAccess:
             payload = self._metadata(key, exclude_session_key=exclude_session_key)
             if payload is None or key in seen_keys:
                 continue
-            handle = session_handle_for_key(key)
+            handle = self._handles.handle_for_session(key)
+            if handle is None:
+                continue
             folded_name = handle.name.casefold()
             if folded_name in seen_names:
                 continue

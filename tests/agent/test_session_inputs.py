@@ -10,7 +10,6 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
-from nanobot.session.session_handles import session_handle_for_key
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 
 
@@ -34,6 +33,7 @@ def _message(content: str = "Please review") -> InboundMessage:
         "message_id": "message-1",
         "created_at_ms": 1,
         "expect_reply": True,
+        "source_handle": "luma",
         "source_session_key": "websocket:source",
         "target_session_key": "telegram:target",
     }
@@ -70,9 +70,8 @@ async def test_session_message_runs_as_user_input_and_replies_on_target_route(
     provider_input = next(
         row for row in reversed(provider_messages) if row.get("role") == "user"
     )
-    source_name = session_handle_for_key("websocket:source").name
     assert provider_input["content"].startswith("Please review")
-    assert f"Message from @{source_name}." in provider_input["content"]
+    assert "Message from @luma." in provider_input["content"]
     assert "Reply with send_session_message." in provider_input["content"]
 
     stored = loop.sessions.get_or_create("telegram:target").messages

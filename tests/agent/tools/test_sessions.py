@@ -14,7 +14,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.runtime_context import RuntimeContextBlock, append_runtime_context
 from nanobot.session.manager import SessionManager
-from nanobot.session.session_handles import session_handle_for_key
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.transcript import append_transcript_object
 
 
@@ -301,7 +301,8 @@ async def test_read_session_accepts_a_persisted_session_handle(tmp_path):
         title="Slack history",
         messages=[{"role": "user", "content": "needle"}],
     )
-    handle = session_handle_for_key("slack:history")
+    handle = SessionHandleResolver(manager).handle_for_session("slack:history")
+    assert handle is not None
 
     with _webui_request():
         result = _decode(await ReadSessionTool(manager).execute(

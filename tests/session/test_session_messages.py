@@ -10,6 +10,7 @@ def _envelope() -> SessionMessageEnvelope:
         "message_id": "message-1",
         "created_at_ms": 123,
         "expect_reply": True,
+        "source_handle": "luma",
         "source_session_key": "websocket:source",
         "target_session_key": "telegram:target",
     }

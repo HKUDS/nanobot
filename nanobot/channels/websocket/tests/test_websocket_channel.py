@@ -48,7 +48,7 @@ from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-from nanobot.session.session_handles import session_handle_for_key
+from nanobot.session.session_handles import session_handle_for_name
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
     http_error as _http_error,
@@ -2027,7 +2027,7 @@ async def test_send_projects_external_user_input_to_existing_wire_event() -> Non
             event=UserInputEvent(
                 content="hello from another session",
                 created_at_ms=1234,
-                provenance={"name": "mira-deadbeef00"},
+                provenance={"name": "luma"},
             ),
         )
     )
@@ -2039,7 +2039,7 @@ async def test_send_projects_external_user_input_to_existing_wire_event() -> Non
         "text": "hello from another session",
         "created_at_ms": 1234,
         "starts_turn": False,
-        "provenance": {"name": "mira-deadbeef00"},
+        "provenance": {"name": "luma"},
     }
 
 
@@ -4982,6 +4982,14 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         },
     ]
     monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager: sessions)
+    handle = session_handle_for_name("websocket:chat-1", "luma")
+    monkeypatch.setattr(
+        ws_http_module,
+        "SessionHandleResolver",
+        lambda _session_manager: SimpleNamespace(
+            list_all_by_key=lambda: {handle.session_key: handle}
+        ),
+    )
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -5011,7 +5019,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "preview": "work",
             "model_preset": "fast",
             "run_started_at": 1_700_000_000.0,
-            "handle": session_handle_for_key("websocket:chat-1").public_payload(),
+            "handle": handle.public_payload(),
         }
     ]
 

@@ -174,8 +174,8 @@ clients.
 
 The composer supports plain messages, image attachments, voice input when
 transcription is configured, slash commands, and `@` mentions for installed Apps,
-MCP presets, or persisted sessions. Sessions have stable handles such as
-`@mira-1a2b3c4d5e`; titles are display text rather than addresses. Select a session
+MCP presets, or persisted sessions. Sessions have short, pronounceable handles such as
+`@luma`; titles are display text rather than addresses. Select a session
 from the menu, or drag it from the sidebar, to attach its structured reference.
 Typing the same text without selecting it remains plain text.
 

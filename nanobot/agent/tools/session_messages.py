@@ -28,7 +28,7 @@ from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import (
     SessionHandleResolver,
     normalize_session_handle,
-    session_handle_for_key,
+    session_handle_for_name,
 )
 from nanobot.session.session_messages import (
     SESSION_MESSAGE_METADATA_KEY,
@@ -52,6 +52,7 @@ class _CancelHandle(Protocol):
 @dataclass(slots=True)
 class _PendingReply:
     timeout_seconds: int
+    target_handle: str
     request: SessionMessageEnvelope
     timer: _CancelHandle | None = None
 
@@ -80,10 +81,6 @@ class ListSessionsTool(Tool):
     @property
     def description(self) -> str:
         return "List other persisted sessions by @handle."
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     async def execute(self, **kwargs: Any) -> str:
         request = current_request_context()
@@ -167,7 +164,10 @@ class SendSessionMessageTool(Tool):
         envelope = session_message_envelope(request.metadata)
         if envelope is None:
             return None
-        source = session_handle_for_key(envelope["source_session_key"])
+        source = session_handle_for_name(
+            envelope["source_session_key"],
+            envelope["source_handle"],
+        )
         content = f"Message from @{source.name}."
         if envelope["expect_reply"]:
             content += " Reply with send_session_message."
@@ -221,11 +221,17 @@ class SendSessionMessageTool(Tool):
         if target is None:
             raise SessionMessageError(f"session @{target_name} was not found")
 
-        source = session_handle_for_key(source_session_key)
+        source = await asyncio.to_thread(
+            self._handles.handle_for_session,
+            source_session_key,
+        )
+        if source is None:
+            raise SessionMessageError("source session was not found")
         envelope: SessionMessageEnvelope = {
             "message_id": uuid4().hex,
             "created_at_ms": int(time.time() * 1000),
             "expect_reply": expect_reply,
+            "source_handle": source.name,
             "source_session_key": source.session_key,
             "target_session_key": target.session_key,
         }
@@ -256,7 +262,12 @@ class SendSessionMessageTool(Tool):
             self._cancel_pending_reply(reverse_wait_key)
             if timeout_seconds is not None:
                 self._cancel_pending_reply(wait_key)
-                self._schedule_pending_reply(wait_key, timeout_seconds, envelope)
+                self._schedule_pending_reply(
+                    wait_key,
+                    timeout_seconds,
+                    target.name,
+                    envelope,
+                )
 
         return f"@{target.name}"
 
@@ -288,9 +299,14 @@ class SendSessionMessageTool(Tool):
         self,
         key: tuple[str, str],
         timeout_seconds: int,
+        target_handle: str,
         request: SessionMessageEnvelope,
     ) -> None:
-        pending = _PendingReply(timeout_seconds=timeout_seconds, request=request)
+        pending = _PendingReply(
+            timeout_seconds=timeout_seconds,
+            target_handle=target_handle,
+            request=request,
+        )
         self._pending_replies[key] = pending
 
         def expire() -> None:
@@ -311,13 +327,12 @@ class SendSessionMessageTool(Tool):
                 return
             self._pending_replies.pop(key, None)
             source_session_key = expected.request["source_session_key"]
-            target = session_handle_for_key(expected.request["target_session_key"])
             await self._bus.publish_inbound(InboundMessage(
                 channel="system",
                 sender_id="session_timeout",
                 chat_id=source_session_key,
                 content=(
-                    f"No reply from @{target.name} after "
+                    f"No reply from @{expected.target_handle} after "
                     f"{expected.timeout_seconds} seconds."
                 ),
                 session_key_override=source_session_key,

@@ -14,7 +14,7 @@ from nanobot.agent.tools.session_messages import (
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
 from nanobot.session.manager import SessionManager
-from nanobot.session.session_handles import session_handle_for_key
+from nanobot.session.session_handles import SessionHandle, SessionHandleResolver
 from nanobot.session.session_messages import (
     SESSION_MESSAGE_METADATA_KEY,
     session_message_envelope,
@@ -24,6 +24,12 @@ from nanobot.session.session_messages import (
 def _persist(manager: SessionManager, *keys: str) -> None:
     for key in keys:
         manager.save(manager.get_or_create(key))
+
+
+def _handle(manager: SessionManager, key: str) -> SessionHandle:
+    handle = SessionHandleResolver(manager).handle_for_session(key)
+    assert handle is not None
+    return handle
 
 
 class _Timer:
@@ -57,7 +63,7 @@ def test_config_and_tool_schema_keep_only_the_basic_reply_contract(
         bus=MessageBus(),
     )
 
-    assert ToolsConfig().max_session_messages_per_minute == 6
+    assert ToolsConfig.model_fields["max_session_messages_per_minute"].default == 6
     assert tool.parameters["required"] == ["to", "content", "expect_reply"]
     timeout = tool.parameters["properties"]["reply_timeout_seconds"]
     assert (timeout["minimum"], timeout["maximum"]) == (5, 60)
@@ -79,8 +85,8 @@ async def test_list_sessions_includes_all_persisted_channels_except_current(
         result = json.loads(await tool.execute())
 
     assert set(result) == {
-        f"@{session_handle_for_key('telegram:other').name}",
-        f"@{session_handle_for_key('slack:team').name}",
+        f"@{_handle(sessions, 'telegram:other').name}",
+        f"@{_handle(sessions, 'slack:team').name}",
     }
 
 
@@ -92,7 +98,7 @@ async def test_send_publishes_user_input_to_the_existing_target(
     _persist(sessions, "websocket:source", "telegram:target")
     bus = MessageBus()
     tool = SendSessionMessageTool(sessions=sessions, bus=bus)
-    target = session_handle_for_key("telegram:target")
+    target = _handle(sessions, "telegram:target")
 
     sent_to = await tool.enqueue(
         source_session_key="websocket:source",
@@ -125,7 +131,7 @@ async def test_send_fails_when_target_does_not_exist(tmp_path: Path) -> None:
     with pytest.raises(SessionMessageError, match="was not found"):
         await tool.enqueue(
             source_session_key="websocket:source",
-            target_handle="@missing-0000000000",
+            target_handle="@zzzz",
             content="Hello",
             expect_reply=False,
         )
@@ -146,7 +152,7 @@ async def test_rate_limit_is_per_source_session_and_uses_a_rolling_minute(
         max_messages_per_minute=1,
         clock=lambda: now,
     )
-    target = session_handle_for_key("websocket:target").name
+    target = _handle(sessions, "websocket:target").name
 
     await tool.enqueue(
         source_session_key="websocket:a",
@@ -190,7 +196,7 @@ async def test_reply_timeout_injects_a_user_input_back_into_the_source(
         bus=bus,
         schedule_later=scheduler,
     )
-    target = session_handle_for_key("websocket:target")
+    target = _handle(sessions, "websocket:target")
 
     await tool.enqueue(
         source_session_key="websocket:source",
@@ -224,8 +230,8 @@ async def test_reverse_message_cancels_the_pending_reply_timeout(
         bus=bus,
         schedule_later=scheduler,
     )
-    source = session_handle_for_key("websocket:source")
-    target = session_handle_for_key("websocket:target")
+    source = _handle(sessions, "websocket:source")
+    target = _handle(sessions, "websocket:target")
 
     await tool.enqueue(
         source_session_key=source.session_key,
@@ -242,3 +248,41 @@ async def test_reverse_message_cancels_the_pending_reply_timeout(
     )
 
     assert scheduler.calls[0][1].cancelled
+
+
+@pytest.mark.asyncio
+async def test_reply_follows_a_recycled_handle(tmp_path: Path) -> None:
+    sessions = SessionManager(tmp_path)
+    _persist(sessions, "websocket:source", "websocket:target")
+    bus = MessageBus()
+    tool = SendSessionMessageTool(sessions=sessions, bus=bus)
+    source = _handle(sessions, "websocket:source")
+    target = _handle(sessions, "websocket:target")
+
+    await tool.enqueue(
+        source_session_key=source.session_key,
+        target_handle=target.name,
+        content="Question",
+        expect_reply=False,
+    )
+    received = await bus.consume_inbound()
+    assert sessions.delete_session(source.session_key)
+    _persist(sessions, "websocket:replacement")
+    replacement = _handle(sessions, "websocket:replacement")
+    assert replacement.name == source.name
+
+    with request_context(RequestContext(
+        channel="system",
+        chat_id=target.session_key,
+        session_key=target.session_key,
+        metadata=received.metadata,
+    )):
+        result = await tool.execute(
+            to=f"@{source.name}",
+            content="Answer",
+            expect_reply=False,
+        )
+
+    assert result == f"Sent to @{source.name}."
+    reply = await bus.consume_inbound()
+    assert reply.chat_id == replacement.session_key

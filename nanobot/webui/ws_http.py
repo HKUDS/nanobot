@@ -28,6 +28,10 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.security.workspace_access import WorkspaceScope
+from nanobot.session.manager import SessionManager
+from nanobot.session.session_handles import (
+    SessionHandleResolver,
+)
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -216,7 +220,6 @@ if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
-    from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.settings_services import WebUISettingsServices
 
@@ -728,10 +731,10 @@ class GatewayHTTPHandler:
 
     def _sessions_list_payload(self) -> dict[str, Any]:
         assert self.session_manager is not None
-        from nanobot.session.session_handles import session_handle_for_key
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
         sessions = list_webui_sessions(self.session_manager)
+        handles = SessionHandleResolver(self.session_manager).list_all_by_key()
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
         for s in sessions:
@@ -756,7 +759,9 @@ class GatewayHTTPHandler:
                 default_scope=default_scope,
             )
             row["workspace_scope"] = scope.payload()
-            row["handle"] = session_handle_for_key(key).public_payload()
+            handle = handles.get(key)
+            if handle is not None:
+                row["handle"] = handle.public_payload()
             cleaned.append(row)
         return {"sessions": cleaned}
 
