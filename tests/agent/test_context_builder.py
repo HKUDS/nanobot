@@ -332,24 +332,16 @@ class TestBuildSystemPrompt:
 
     def test_includes_session_summary(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder.build_system_prompt(
-            session_summary=SessionSummary(
-                text="Previous chat about Python.",
-                last_active=datetime(2026, 8, 19, 10, 0),
-            )
-        )
+        summary = SessionSummary("Previous chat about Python.", datetime(2026, 8, 19, 10, 0))
+        result = builder.build_system_prompt(session_summary=summary)
         assert "Previous chat about Python." in result
         assert "[Archived Context Summary]" in result
 
     def test_sections_separated_by_separator(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
         builder = _builder(tmp_path)
-        result = builder.build_system_prompt(
-            session_summary=SessionSummary(
-                text="Summary.",
-                last_active=datetime(2026, 8, 19, 10, 0),
-            )
-        )
+        summary = SessionSummary("Summary.", datetime(2026, 8, 19, 10, 0))
+        result = builder.build_system_prompt(session_summary=summary)
         assert "\n\n---\n\n" in result
 
     def test_no_bootstrap_no_summary(self, tmp_path):

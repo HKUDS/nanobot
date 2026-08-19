@@ -121,10 +121,7 @@ def test_session_summary_replaces_matching_recent_history_entry(tmp_path) -> Non
 
     builder.memory.append_history("another session event", session_key=session_key)
     summary_cursor = builder.memory.append_history(overview, session_key=session_key)
-    summary = SessionSummary(
-        text=overview,
-        last_active=real_datetime(2026, 8, 19, 10, 0),
-    )
+    summary = SessionSummary(overview, real_datetime(2026, 8, 19, 10, 0))
 
     prompt = builder.build_system_prompt(
         session_key=session_key,

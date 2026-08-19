@@ -102,11 +102,7 @@ class AutoCompact:
         finally:
             self._archiving.discard(key)
 
-    def prepare_session(
-        self,
-        session: Session,
-        key: str,
-    ) -> tuple[Session, SessionSummary | None]:
+    def prepare_session(self, session: Session, key: str) -> tuple[Session, SessionSummary | None]:
         if self._is_internal_session(key):
             self._archiving.discard(key)
             self._summaries.pop(key, None)

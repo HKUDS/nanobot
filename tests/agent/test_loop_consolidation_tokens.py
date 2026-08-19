@@ -213,13 +213,7 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
     session = loop.sessions.get_or_create("cli:test")
     loop.auto_compact.prepare_session = MagicMock(
-        return_value=(
-            session,
-            SessionSummary(
-                text="earlier context",
-                last_active=session.updated_at,
-            ),
-        )
+        return_value=(session, SessionSummary("earlier context", session.updated_at))
     )  # type: ignore[method-assign]
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)  # type: ignore[method-assign]
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]

@@ -686,10 +686,7 @@ class TestPrepareSession:
         ac.sessions = mock_sm
         key = "dream:20260602-155256"
         ac._archiving.add(key)
-        ac._summaries[key] = SessionSummary(
-            "Hot summary.",
-            datetime(2026, 6, 2, 15, 52, 56),
-        )
+        ac._summaries[key] = SessionSummary("Hot summary.", datetime(2026, 6, 2, 15, 52, 56))
         session = _make_session(
             key=key,
             updated_at=datetime.now() - timedelta(minutes=20),
