@@ -30,7 +30,7 @@ dependencies = [
     # Feishu's lark-oapi currently requires websockets<16; core supports 15 and 16.
     "websockets>=15.0,<17.0",
     "websocket-client>=1.9.0,<2.0.0",
-    "httpx>=0.28.0,<1.0.0",
+    "httpx[socks]>=0.28.0,<1.0.0",
     "ddgs>=9.5.5,<10.0.0",
     "oauth-cli-kit>=0.1.6,<1.0.0",
     "loguru>=0.7.3,<1.0.0",
