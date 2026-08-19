@@ -97,8 +97,27 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     return value
 
 
-@lru_cache(maxsize=1)
-def _get_token_encoding() -> Any:
+@lru_cache(maxsize=16)
+def _get_token_encoding(model: str | None = None) -> Any:
+    """Return a tiktoken encoding for *model*.
+
+    tiktoken's Python package ships only OpenAI vocabularies, so exact
+    counts exist only for the GPT family: legacy GPT-4/GPT-3.5 use
+    cl100k_base, everything else (GPT-4o/GPT-5, o-series, open-weight
+    families like Qwen/DeepSeek/Llama) falls back to o200k_base, which
+    approximates multilingual tokenizers better than cl100k_base.  The
+    no-argument default stays cl100k_base so model-agnostic helpers
+    (``truncate_text_to_tokens``, ``estimate_message_tokens``) keep prior
+    behavior.
+    """
+    if model:
+        name = model.lower()
+        # gpt-4 (but not gpt-4o) and gpt-3.5 are the legacy cl100k vocabularies.
+        if name.startswith("gpt-3.5") or (
+            name.startswith("gpt-4") and not name.startswith("gpt-4o")
+        ):
+            return tiktoken.get_encoding("cl100k_base")
+        return tiktoken.get_encoding("o200k_base")
     return tiktoken.get_encoding("cl100k_base")
 
 
@@ -669,6 +688,7 @@ def build_assistant_message(
 def _estimate_prompt_tokens_with_source(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    model: str | None = None,
 ) -> tuple[int, str]:
     """Estimate prompt tokens and identify the counter used.
 
@@ -704,7 +724,7 @@ def _estimate_prompt_tokens_with_source(
     message_payload = "\n".join(parts)
     per_message_overhead = len(messages) * 4
     try:
-        enc = _get_token_encoding()
+        enc = _get_token_encoding(model)
         tool_tokens = (
             _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
         )
@@ -774,17 +794,33 @@ def estimate_prompt_tokens_chain(
     model: str | None,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    known_usage: int | None = None,
 ) -> tuple[int, str]:
-    """Estimate prompt tokens via provider, tiktoken, then a byte heuristic."""
+    """Estimate prompt tokens via provider, tiktoken, then a byte heuristic.
+
+    *known_usage* (the API's last ``usage.prompt_tokens``) is authoritative
+    and, when higher than the estimate, is used as a floor so undercounting
+    hidden template/system tokens never keeps consolidation from firing.
+    """
+    estimated = 0
+    estimate_source = "none"
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
         with suppress(Exception):
             tokens, source = cast(tuple[object, object], provider_counter(messages, tools, model))
             if isinstance(tokens, (int, float)) and tokens > 0:
-                return int(tokens), str(source or "provider_counter")
-    estimated, source = _estimate_prompt_tokens_with_source(messages, tools)
+                estimated = int(tokens)
+                estimate_source = str(source or "provider_counter")
+    if estimated <= 0:
+        estimated, estimate_source = _estimate_prompt_tokens_with_source(
+            messages,
+            tools,
+            model=model,
+        )
+    if known_usage and known_usage > estimated:
+        return int(known_usage), f"{estimate_source}+usage"
     if estimated > 0:
-        return int(estimated), source
+        return int(estimated), estimate_source
     return 0, "none"
 
 

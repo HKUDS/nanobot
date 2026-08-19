@@ -362,6 +362,7 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop("_last_usage_consolidation_cursor", None)
 
     def retain_recent_legal_suffix(
         self,

@@ -361,6 +361,73 @@ class TestConsolidatorTokenBudget:
         await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
         consolidator.archive.assert_not_called()
 
+    async def test_persisted_usage_is_used_for_uncompressed_session_tail(
+        self, consolidator, runtime
+    ):
+        session = Session(key="test:persisted-usage")
+        session.add_message("user", "hello")
+        session.metadata["_last_usage"] = {"prompt_tokens": 5000}
+        session.metadata["_last_usage_consolidation_cursor"] = session.last_consolidated
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            return_value=(100, "tiktoken")
+        )
+
+        await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
+
+        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
+            session,
+            runtime=runtime,
+            known_usage=5000,
+        )
+
+    async def test_persisted_usage_is_ignored_after_consolidation_advances(
+        self, consolidator, runtime
+    ):
+        session = Session(key="test:stale-persisted-usage")
+        session.add_message("user", "hello")
+        session.last_consolidated = 1
+        session.metadata["_last_usage"] = {"prompt_tokens": 5000}
+        session.metadata["_last_usage_consolidation_cursor"] = 0
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            return_value=(100, "tiktoken")
+        )
+
+        await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
+
+        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
+            session,
+            runtime=runtime,
+        )
+
+    async def test_persisted_usage_is_ignored_after_replay_overflow_advances(
+        self, consolidator, runtime
+    ):
+        session = Session(key="test:replay-overflow-usage")
+        for index in range(4):
+            session.add_message("user", f"user-{index}")
+            session.add_message("assistant", f"assistant-{index}")
+        session.metadata["_last_usage"] = {"prompt_tokens": 5000}
+        session.metadata["_last_usage_consolidation_cursor"] = session.last_consolidated
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            return_value=(100, "tiktoken")
+        )
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            runtime=runtime,
+            replay_max_messages=2,
+        )
+
+        assert session.last_consolidated > 0
+        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
+            session,
+            runtime=runtime,
+        )
+
     async def test_token_estimation_failure_propagates(self, consolidator, runtime):
         session = Session(key="test:estimate-failure")
         session.add_message("user", "hello")

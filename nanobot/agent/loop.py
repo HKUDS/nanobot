@@ -1983,6 +1983,7 @@ class AgentLoop:
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
         if ctx.usage and not ctx.ephemeral:
             session.metadata["_last_usage"] = dict(ctx.usage)
+            session.metadata["_last_usage_consolidation_cursor"] = session.last_consolidated
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,

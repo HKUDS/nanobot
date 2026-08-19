@@ -1844,6 +1844,11 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
         "prompt_tokens": 64,
         "completion_tokens": 9,
     }
+    assert loop.sessions.get_or_create("cli:usage").metadata[
+        "_last_usage_consolidation_cursor"
+    ] == 0
+    background_call = loop.consolidator.maybe_consolidate_by_tokens.call_args_list[-1]
+    assert "known_usage" not in background_call.kwargs
 
 
 @pytest.mark.asyncio
