@@ -306,16 +306,15 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     loop.discard_session_file_state(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated:]
+    snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
-    if snapshot:
+    if session.last_consolidated < len(snapshot):
         runtime = ctx.runtime or loop.runtime_for_session(session)
         archive_snapshot = replace(
             session,
             messages=snapshot,
             metadata=dict(session.metadata),
-            last_consolidated=0,
             provider_state=None,
         )
     session.clear()
