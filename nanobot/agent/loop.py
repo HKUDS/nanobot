@@ -74,7 +74,11 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
+from nanobot.session.keys import (
+    UNIFIED_SESSION_KEY,
+    last_channel_from_metadata,
+    remember_last_channel,
+)
 from nanobot.session.manager import (
     SESSION_CACHE_MAX_SIZE,
     Session,
@@ -442,6 +446,7 @@ class AgentLoop:
             sessions=self.sessions,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
+            resolve_prompt_context=self._idle_consolidation_prompt_context,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
         )
@@ -917,6 +922,23 @@ class AgentLoop:
         if automation_metadata:
             return
         remember_last_channel(session.metadata, msg.channel, msg.chat_id)
+
+    def _idle_consolidation_prompt_context(
+        self,
+        session: Session,
+    ) -> tuple[str | None, Path]:
+        """Resolve the same persisted route and workspace used by a normal turn."""
+        channel = session.key.split(":", 1)[0] if ":" in session.key else None
+        if self._unified_session:
+            route = last_channel_from_metadata(session.metadata)
+            if route is not None:
+                channel = route[0]
+        scope = self.workspace_scopes.for_turn(
+            channel=channel,
+            message_metadata=None,
+            session_metadata=session.metadata,
+        )
+        return channel, scope.project_path
 
     @staticmethod
     def _replay_token_budget(runtime: LLMRuntime) -> int:

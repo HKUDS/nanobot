@@ -712,6 +712,7 @@ class TestCompactIdleSession:
     async def test_new_messages_advance_existing_archive_progress(
         self, real_consolidator, mock_provider, runtime
     ):
+        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Summary.", finish_reason="stop"
         )
@@ -771,6 +772,7 @@ class TestCompactIdleSession:
         the recent suffix it retains. Otherwise a late user correction / final
         result that lands in the kept suffix is excluded from the persisted
         summary, leaving a stale wrong conclusion in history. Regression for #4264."""
+        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Summary.", finish_reason="stop"
         )
@@ -931,6 +933,7 @@ class TestCompactIdleSession:
         self, real_consolidator, mock_provider, runtime
     ):
         """30 turns with last_consolidated=50 → only unconsolidated tail considered."""
+        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -968,6 +971,7 @@ class TestCompactIdleSession:
         mock_provider,
         runtime,
     ):
+        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -1018,6 +1022,7 @@ class TestCompactIdleSession:
         store,
         runtime,
     ):
+        runtime = replace(runtime, context_window_tokens=128_000)
         tools = [{"type": "function", "function": {"name": "lookup"}}]
         real_consolidator._get_tool_definitions.return_value = tools
         mock_provider.chat_with_retry.return_value = LLMResponse(
@@ -1063,6 +1068,115 @@ class TestCompactIdleSession:
         assert [entry["content"] for entry in entries] == [
             "Overview from the temporary turn."
         ]
+
+    @pytest.mark.asyncio
+    async def test_oversized_prefix_falls_back_to_bounded_archive(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        async def bounded_chat(**kwargs):
+            sent_chars = sum(
+                len(str(message.get("content") or ""))
+                for message in kwargs["messages"]
+            )
+            if sent_chars > 20_000:
+                return LLMResponse(content="context too long", finish_reason="error")
+            return LLMResponse(content="Bounded summary.", finish_reason="stop")
+
+        mock_provider.chat_with_retry.side_effect = bounded_chat
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("sdk:oversized")
+        session.add_message("user", "x" * 100_000)
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "sdk:oversized",
+            runtime=runtime,
+        )
+
+        assert result == "Bounded summary."
+        sent = mock_provider.chat_with_retry.call_args.kwargs["messages"]
+        assert sum(len(str(message.get("content") or "")) for message in sent) < 20_000
+        assert not any(
+            "[RAW]" in entry["content"]
+            for entry in store.read_unprocessed_history(since_cursor=0)
+        )
+        assert sessions.get_or_create("sdk:oversized").last_consolidated == 1
+
+    @pytest.mark.asyncio
+    async def test_incremental_scope_counts_only_model_visible_messages(
+        self,
+        real_consolidator,
+        mock_provider,
+        runtime,
+    ):
+        runtime = replace(runtime, context_window_tokens=128_000)
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="Summary.",
+            finish_reason="stop",
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:commands")
+        session.add_message("user", "already archived user")
+        session.add_message("assistant", "already archived answer")
+        session.last_consolidated = 2
+        session.add_message("user", "/status", _command=True)
+        session.add_message("assistant", "status output", _command=True)
+        session.add_message("user", "new user")
+        session.add_message("assistant", "new answer")
+        sessions.save(session)
+
+        await real_consolidator.compact_idle_session(
+            "cli:commands",
+            runtime=runtime,
+        )
+
+        sent = mock_provider.chat_with_retry.call_args.kwargs["messages"]
+        assert [message.get("content") for message in sent[1:-1]] == [
+            "already archived user",
+            "already archived answer",
+            "new user",
+            "new answer",
+        ]
+        assert "final 2 conversation messages" in sent[-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_uses_persisted_workspace_scope_for_system_prefix(
+        self,
+        loop_factory,
+        mock_provider,
+        tmp_path,
+    ):
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "AGENTS.md").write_text("GLOBAL_WORKSPACE_MARKER", encoding="utf-8")
+        (project / "AGENTS.md").write_text("PROJECT_WORKSPACE_MARKER", encoding="utf-8")
+        loop = loop_factory(provider=mock_provider)
+        runtime = loop.llm_runtime()
+        runtime.provider.chat_with_retry.return_value = LLMResponse(
+            content="Summary.",
+            finish_reason="stop",
+        )
+        session = loop.sessions.get_or_create("websocket:scope")
+        session.metadata["workspace_scope"] = {
+            "project_path": str(project),
+            "access_mode": "restricted",
+        }
+        session.add_message("user", "project question")
+        session.add_message("assistant", "project answer")
+        loop.sessions.save(session)
+
+        await loop.consolidator.compact_idle_session(
+            "websocket:scope",
+            runtime=runtime,
+        )
+
+        system = runtime.provider.chat_with_retry.call_args.kwargs["messages"][0]["content"]
+        assert "PROJECT_WORKSPACE_MARKER" in system
+        assert "GLOBAL_WORKSPACE_MARKER" not in system
 
     @pytest.mark.asyncio
     async def test_acquires_consolidation_lock(

@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
+from nanobot.session.manager import (
+    MIN_COMPACTED_REPLAY_MESSAGES,
+    Session,
+    SessionManager,
+    replay_max_messages_for_context,
+)
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -815,6 +820,7 @@ class Consolidator:
         sessions: SessionManager,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
         consolidation_ratio: float = 0.5,
         unified_session: bool = False,
     ):
@@ -824,6 +830,7 @@ class Consolidator:
         self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._resolve_prompt_context = resolve_prompt_context
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -1078,22 +1085,43 @@ class Consolidator:
     def _build_idle_archive_messages(
         self,
         session: Session,
+        messages: list[dict[str, Any]],
         *,
-        archive_count: int,
-    ) -> list[dict[str, Any]]:
+        runtime: LLMRuntime,
+    ) -> list[dict[str, Any]] | None:
         """Append a temporary archive turn to the session's model-facing prefix."""
-        history = self._full_replay_history(session)
+        replay_budget = self._input_token_budget(runtime)
+        if replay_budget <= 0:
+            replay_budget = max(128, runtime.context_window_tokens // 2)
+        history = session.get_history(
+            max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
+            max_tokens=replay_budget,
+        )
+        archive_history = Session(
+            key=session.key,
+            messages=messages,
+        ).get_history(max_messages=max(1, len(messages)))
+        if (
+            not archive_history
+            or len(history) < len(archive_history)
+            or history[-len(archive_history):] != archive_history
+        ):
+            return None
         prompt = render_template(
             "agent/consolidator_idle_archive.md",
             strip=True,
-            archive_count=archive_count,
+            archive_count=len(archive_history),
         )
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
+        workspace: Path | None = None
+        if self._resolve_prompt_context is not None:
+            channel, workspace = self._resolve_prompt_context(session)
         built = self._build_messages(
             history=history,
             current_message=prompt,
             channel=channel,
             session_summary=self._session_summary_for_prompt(session),
+            workspace=workspace,
             session_key=session.key,
             unified_session=self.unified_session,
         )
@@ -1118,14 +1146,48 @@ class Consolidator:
         """Archive an idle tail by extending the ordinary model-facing messages."""
         request_messages = self._build_idle_archive_messages(
             session,
-            archive_count=len(messages),
+            messages,
+            runtime=runtime,
         )
+        if request_messages is None:
+            return await self.archive(
+                messages,
+                runtime=runtime,
+                session_key=session.key,
+            )
+        tools = self._get_tool_definitions()
+        budget = self._input_token_budget(runtime)
+        if budget <= 0:
+            return await self.archive(
+                messages,
+                runtime=runtime,
+                session_key=session.key,
+            )
+        estimated, source = estimate_prompt_tokens_chain(
+            runtime.provider,
+            runtime.model,
+            request_messages,
+            tools,
+        )
+        if estimated > budget:
+            logger.debug(
+                "Idle consolidation falling back to bounded archive for {}: {}/{} via {}",
+                session.key,
+                estimated,
+                budget,
+                source,
+            )
+            return await self.archive(
+                messages,
+                runtime=runtime,
+                session_key=session.key,
+            )
         return await self._archive_request(
             request_messages=request_messages,
             fallback_messages=messages,
             runtime=runtime,
             session_key=session.key,
-            tools=self._get_tool_definitions(),
+            tools=tools,
             tool_choice="none",
         )
 
