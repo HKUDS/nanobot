@@ -1009,29 +1009,49 @@ class Consolidator:
             "agent/consolidator_archive.md",
             strip=True,
         )
+        return await self._archive_request(
+            request_messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {"role": "user", "content": formatted},
+            ],
+            fallback_messages=messages,
+            runtime=runtime,
+            session_key=session_key,
+            tools=None,
+            tool_choice=None,
+        )
+
+    async def _archive_request(
+        self,
+        *,
+        request_messages: list[dict[str, Any]],
+        fallback_messages: list[dict[str, Any]],
+        runtime: LLMRuntime,
+        session_key: str | None,
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None,
+    ) -> str | None:
+        """Run one archive request and persist either its summary or a raw fallback."""
         try:
             response = await runtime.provider.chat_with_retry(
                 model=runtime.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {"role": "user", "content": formatted},
-                ],
-                tools=None,
-                tool_choice=None,
+                messages=request_messages,
+                tools=tools,
+                tool_choice=tool_choice,
                 temperature=runtime.generation.temperature,
                 max_tokens=runtime.generation.max_tokens,
                 reasoning_effort=runtime.generation.reasoning_effort,
             )
         except Exception:
             logger.warning("Consolidation provider call failed, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
+            self.store.raw_archive(fallback_messages, session_key=session_key)
             return None
         if response.finish_reason == "error":
             logger.warning("Consolidation provider returned an error, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
+            self.store.raw_archive(fallback_messages, session_key=session_key)
             return None
         summary = response.content or "[no summary]"
         self.store.append_history(
@@ -1040,6 +1060,74 @@ class Consolidator:
             session_key=session_key,
         )
         return summary
+
+    @staticmethod
+    def _session_summary_for_prompt(session: Session) -> str | None:
+        """Rebuild the summary text used by normal turns after an idle archive."""
+        meta = session.metadata.get("_last_summary")
+        if not isinstance(meta, dict):
+            return None
+        summary_meta = cast(dict[str, Any], meta)
+        text = summary_meta.get("text")
+        if not isinstance(text, str) or not text:
+            return None
+        last_active = summary_meta.get("last_active")
+        timestamp = last_active if isinstance(last_active, str) else session.updated_at.isoformat()
+        return f"Previous conversation summary (last active {timestamp}):\n{text}"
+
+    def _build_idle_archive_messages(
+        self,
+        session: Session,
+        *,
+        archive_count: int,
+    ) -> list[dict[str, Any]]:
+        """Append a temporary archive turn to the session's model-facing prefix."""
+        history = self._full_replay_history(session)
+        prompt = render_template(
+            "agent/consolidator_idle_archive.md",
+            strip=True,
+            archive_count=archive_count,
+        )
+        channel = session.key.split(":", 1)[0] if ":" in session.key else None
+        built = self._build_messages(
+            history=history,
+            current_message=prompt,
+            channel=channel,
+            session_summary=self._session_summary_for_prompt(session),
+            session_key=session.key,
+            unified_session=self.unified_session,
+        )
+        system_prefix = (
+            [built[0]]
+            if built and built[0].get("role") == "system"
+            else []
+        )
+        return [
+            *system_prefix,
+            *history,
+            {"role": "user", "content": prompt},
+        ]
+
+    async def _archive_idle_tail(
+        self,
+        session: Session,
+        messages: list[dict[str, Any]],
+        *,
+        runtime: LLMRuntime,
+    ) -> str | None:
+        """Archive an idle tail by extending the ordinary model-facing messages."""
+        request_messages = self._build_idle_archive_messages(
+            session,
+            archive_count=len(messages),
+        )
+        return await self._archive_request(
+            request_messages=request_messages,
+            fallback_messages=messages,
+            runtime=runtime,
+            session_key=session.key,
+            tools=self._get_tool_definitions(),
+            tool_choice="none",
+        )
 
     async def maybe_consolidate_by_tokens(
         self,
@@ -1183,10 +1271,10 @@ class Consolidator:
 
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
-            summary = await self.archive(
+            summary = await self._archive_idle_tail(
+                session,
                 messages_to_archive,
                 runtime=runtime,
-                session_key=session_key,
             )
 
             if summary and summary != "(nothing)":

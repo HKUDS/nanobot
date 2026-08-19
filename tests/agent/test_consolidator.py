@@ -88,6 +88,14 @@ def _provider_state() -> ProviderConversationState:
     )
 
 
+def _build_test_messages(**kwargs):
+    return [
+        {"role": "system", "content": "system prompt"},
+        *kwargs["history"],
+        {"role": "user", "content": kwargs["current_message"]},
+    ]
+
+
 class TestConsolidatorSummarize:
     async def test_archive_prompt_includes_media_breadcrumb(
         self, consolidator, mock_provider, store, runtime
@@ -634,7 +642,7 @@ class TestCompactIdleSession:
         return Consolidator(
             store=store,
             sessions=sessions,
-            build_messages=MagicMock(return_value=[]),
+            build_messages=MagicMock(side_effect=_build_test_messages),
             get_tool_definitions=MagicMock(return_value=[]),
         )
 
@@ -721,11 +729,14 @@ class TestCompactIdleSession:
         await real_consolidator.compact_idle_session("cli:incremental", runtime=runtime)
 
         assert mock_provider.chat_with_retry.await_count == 2
-        latest_prompt = mock_provider.chat_with_retry.await_args_list[-1].kwargs["messages"][1][
-            "content"
+        latest_messages = mock_provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
+        assert [message["content"] for message in latest_messages[1:5]] == [
+            "first user",
+            "first assistant",
+            "second user",
+            "second assistant",
         ]
-        assert "second user" in latest_prompt
-        assert "first user" not in latest_prompt
+        assert "final 2 conversation messages" in latest_messages[-1]["content"]
         assert sessions.get_or_create("cli:incremental").last_consolidated == 4
 
     @pytest.mark.asyncio
@@ -777,8 +788,11 @@ class TestCompactIdleSession:
             "cli:correction", runtime=runtime, max_suffix=8
         )
 
-        summarized = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
-        assert "CORRECTED_FINAL_RESULT_alpha" in summarized
+        sent_messages = mock_provider.chat_with_retry.call_args.kwargs["messages"]
+        assert any(
+            message.get("content") == "CORRECTED_FINAL_RESULT_alpha"
+            for message in sent_messages
+        )
 
     @pytest.mark.asyncio
     async def test_raw_dumps_full_archive_batch_on_llm_failure(
@@ -939,10 +953,13 @@ class TestCompactIdleSession:
         # Verify only the unconsolidated tail was processed:
         # All 10 unconsolidated messages (50-59) are archived exactly once.
         archived_call = mock_provider.chat_with_retry.call_args
-        user_content = archived_call.kwargs["messages"][1]["content"]
-        # Should contain only tail messages, not early ones
-        assert "u0" not in user_content
-        assert "u25" in user_content or "a25" in user_content
+        sent_messages = archived_call.kwargs["messages"]
+        sent_content = [message.get("content") for message in sent_messages]
+        # The ordinary replay prefix contributes recent context, while the
+        # temporary instruction limits the new overview to the unarchived tail.
+        assert "u0" not in sent_content
+        assert "u26" in sent_content
+        assert "final 10 conversation messages" in sent_messages[-1]["content"]
 
     @pytest.mark.asyncio
     async def test_full_archive_keeps_extended_legal_replay_suffix(
@@ -988,10 +1005,64 @@ class TestCompactIdleSession:
         # the dropped head (user-00) and retained suffix (user-14 through
         # assistant-09) are all summarized.
         archived_call = mock_provider.chat_with_retry.call_args
-        user_content = archived_call.kwargs["messages"][1]["content"]
-        assert "user-00" in user_content
-        assert "assistant-09" in user_content
-        assert "user-14" in user_content
+        sent_content = [message.get("content") for message in archived_call.kwargs["messages"]]
+        assert "user-00" in sent_content
+        assert "assistant-09" in sent_content
+        assert "user-14" in sent_content
+
+    @pytest.mark.asyncio
+    async def test_reuses_model_prefix_without_persisting_temporary_turn(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        tools = [{"type": "function", "function": {"name": "lookup"}}]
+        real_consolidator._get_tool_definitions.return_value = tools
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="Overview from the temporary turn.",
+            finish_reason="stop",
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:tool-history")
+        session.add_message("user", "look this up")
+        session.messages.extend(_tool_round("call-1"))
+        session.add_message("assistant", "final answer")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:tool-history",
+            runtime=runtime,
+        )
+
+        assert result == "Overview from the temporary turn."
+        call = mock_provider.chat_with_retry.call_args.kwargs
+        sent_messages = call["messages"]
+        assert [message["role"] for message in sent_messages] == [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "user",
+        ]
+        assert sent_messages[2]["tool_calls"][0]["id"] == "call-1"
+        assert "final 4 conversation messages" in sent_messages[-1]["content"]
+        assert call["tools"] == tools
+        assert call["tool_choice"] == "none"
+
+        reloaded = sessions.get_or_create("cli:tool-history")
+        assert len(reloaded.messages) == 4
+        assert reloaded.messages[-1]["content"] == "final answer"
+        assert all(
+            "memory overview" not in str(message.get("content", "")).lower()
+            for message in reloaded.messages
+        )
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [entry["content"] for entry in entries] == [
+            "Overview from the temporary turn."
+        ]
 
     @pytest.mark.asyncio
     async def test_acquires_consolidation_lock(
