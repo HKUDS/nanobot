@@ -724,6 +724,10 @@ class TestAutoCompactIntegration:
     async def test_full_lifecycle(self, tmp_path):
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
+        overview = (
+            "IDLE_OVERVIEW_MARKER: User is learning English past tense. "
+            "Example: 'I walked to the store yesterday.'"
+        )
 
         # Phase 1: User has a conversation longer than the retained recent suffix
         session.add_message("user", "I'm learning English, teach me past tense")
@@ -745,7 +749,7 @@ class TestAutoCompactIntegration:
         # Phase 3: User returns with a new message
         loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(
-                content="User is learning English past tense. Example: 'I walked to the store yesterday.'",
+                content=overview,
                 tool_calls=[],
             )
         )
@@ -759,6 +763,9 @@ class TestAutoCompactIntegration:
 
         # Phase 4: Verify
         session_after = loop.sessions.get_or_create("cli:test")
+        resumed_system_prompt = loop.provider.chat_with_retry.await_args_list[-1].kwargs[
+            "messages"
+        ][0]["content"]
 
         assert any(
             "past tense is used" in str(m.get("content", "")).lower()
@@ -773,6 +780,7 @@ class TestAutoCompactIntegration:
         assert not any(
             "[Resumed Session]" in str(m.get("content", "")) for m in session_after.messages
         )
+        assert resumed_system_prompt.count(overview) == 1
         # Runtime context end marker should NOT be persisted
         assert not any(
             "[/Runtime Context]" in str(m.get("content", "")) for m in session_after.messages

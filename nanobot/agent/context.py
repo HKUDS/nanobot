@@ -58,6 +58,7 @@ class ContextBuilder:
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = RUNTIME_CONTEXT_END
+    _SESSION_SUMMARY_HEADER_PREFIX = "Previous conversation summary (last active "
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
@@ -115,16 +116,50 @@ class ContextBuilder:
             )
             if entries:
                 capped = entries[-self._MAX_RECENT_HISTORY:]
-                history_text = "\n".join(
-                    f"- [{e['timestamp']}] {e['content']}" for e in capped
+                capped = self._without_duplicate_session_summary(
+                    capped,
+                    session_key=session_key,
+                    session_summary=session_summary,
                 )
-                history_text = truncate_text_to_tokens(history_text, self._MAX_HISTORY_TOKENS)
-                parts.append("# Recent History\n\n" + history_text)
+                if capped:
+                    history_text = "\n".join(
+                        f"- [{e['timestamp']}] {e['content']}" for e in capped
+                    )
+                    history_text = truncate_text_to_tokens(
+                        history_text,
+                        self._MAX_HISTORY_TOKENS,
+                    )
+                    parts.append("# Recent History\n\n" + history_text)
 
         if session_summary:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
         return "\n\n---\n\n".join(parts)
+
+    @classmethod
+    def _without_duplicate_session_summary(
+        cls,
+        entries: list[dict[str, Any]],
+        *,
+        session_key: str | None,
+        session_summary: str | None,
+    ) -> list[dict[str, Any]]:
+        """Drop the history entry already represented by the session summary."""
+        if not session_summary:
+            return entries
+        summary_content = session_summary
+        if session_summary.startswith(cls._SESSION_SUMMARY_HEADER_PREFIX):
+            _header, separator, content = session_summary.partition("):\n")
+            if separator and content:
+                summary_content = content
+        for index in range(len(entries) - 1, -1, -1):
+            entry = entries[index]
+            if (
+                entry.get("session_key") == session_key
+                and entry.get("content") == summary_content
+            ):
+                return [*entries[:index], *entries[index + 1:]]
+        return entries
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""

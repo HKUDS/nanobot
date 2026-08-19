@@ -112,6 +112,35 @@ def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
     assert "legacy entry without session" not in prompt
 
 
+def test_session_summary_replaces_matching_recent_history_entry(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    session_key = "telegram:chat-1"
+    overview = "CURRENT_SESSION_OVERVIEW_MARKER"
+
+    builder.memory.append_history("another session event", session_key=session_key)
+    summary_cursor = builder.memory.append_history(overview, session_key=session_key)
+    summary = f"Previous conversation summary (last active 2026-08-19T10:00:00):\n{overview}"
+
+    prompt = builder.build_system_prompt(
+        session_key=session_key,
+        session_summary=summary,
+    )
+
+    assert "# Recent History" in prompt
+    assert "another session event" in prompt
+    assert "[Archived Context Summary]" in prompt
+    assert prompt.count(overview) == 1
+
+    builder.memory.set_last_dream_cursor(summary_cursor)
+    processed_prompt = builder.build_system_prompt(
+        session_key=session_key,
+        session_summary=summary,
+    )
+    assert "# Recent History" not in processed_prompt
+    assert processed_prompt.count(overview) == 1
+
+
 def test_recent_history_injection_unified_excludes_cron_internals(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
