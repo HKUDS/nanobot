@@ -96,17 +96,6 @@ def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
     assert re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", prompt)
 
 
-def test_nothing_history_entry_is_not_injected(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-    builder.memory.append_history("(nothing)")
-
-    prompt = builder.build_system_prompt()
-
-    assert "# Recent History" not in prompt
-    assert "(nothing)" not in prompt
-
-
 def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)

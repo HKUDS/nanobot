@@ -431,11 +431,7 @@ class MemoryStore:
         unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Return unprocessed history entries safe to inject into a turn prompt."""
-        entries = [
-            entry
-            for entry in self.read_unprocessed_history(since_cursor=since_cursor)
-            if str(entry.get("content", "")).strip() != "(nothing)"
-        ]
+        entries = self.read_unprocessed_history(since_cursor=since_cursor)
         if session_key is None:
             return entries
         if not unified_session:
