@@ -1949,6 +1949,28 @@ def _patch_gateway_ports_free(monkeypatch) -> None:
     )
 
 
+def _record_gateway_lease_release(monkeypatch, captured: dict[str, object]) -> None:
+    from nanobot.gateway import GatewayClientLease
+
+    original_release = GatewayClientLease.release
+
+    def record_release(
+        lease: GatewayClientLease,
+        *,
+        timeout_s: int = 20,
+        wait_for_stop: bool = True,
+    ) -> bool:
+        captured["lease_release_wait_for_stop"] = wait_for_stop
+        captured["dev_running_at_release"] = captured.get("dev_running")
+        return original_release(
+            lease,
+            timeout_s=timeout_s,
+            wait_for_stop=wait_for_stop,
+        )
+
+    monkeypatch.setattr(GatewayClientLease, "release", record_release)
+
+
 def _patch_webui_managed_gateway(
     monkeypatch,
     seen: dict[str, object] | None = None,
@@ -1957,6 +1979,7 @@ def _patch_webui_managed_gateway(
     from nanobot.gateway import GatewayStatus, RuntimeResult
 
     captured = seen if seen is not None else {}
+    _record_gateway_lease_release(monkeypatch, captured)
 
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
@@ -2219,7 +2242,8 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "bootstrap secret was generated" in compact_output
     assert "channels.websocket.tokenIssueSecret" in compact_output
     assert "rerun without --no-open" in compact_output
-    assert "Last local client exited; the on-demand gateway was stopped" in compact_output
+    assert seen["lease_release_wait_for_stop"] is False
+    assert "stop_timeout" not in seen
 
 
 def test_webui_background_points_to_the_single_persistent_gateway_command(
@@ -2312,6 +2336,8 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     assert seen["attach_kwargs"] == {"poll_hook": seen["dev_server"].ensure_running}
     assert seen["opened_url"] == browser_url
     assert seen["dev_running"] is False
+    assert seen["dev_running_at_release"] is False
+    assert seen["lease_release_wait_for_stop"] is False
     assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
         r"\s+", " ", _strip_ansi(result.stdout)
     )
@@ -2509,6 +2535,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     seen: dict[str, object] = {}
+    _record_gateway_lease_release(monkeypatch, seen)
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: True)
@@ -2571,6 +2598,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     fragment = parsed.fragment.removeprefix("/?")
     assert parse_qs(fragment).get("bootstrapSecret")
     assert seen["open_kwargs"] == {"wait": False}
+    assert seen["lease_release_wait_for_stop"] is False
 
 
 def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys) -> None:
