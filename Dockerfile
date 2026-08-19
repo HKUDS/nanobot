@@ -68,7 +68,12 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 # and fails closed if it cannot, so the agent never runs as root (see
 # entrypoint.sh).
 USER root
-ENV HOME=/home/nanobot
+# Keep OAuth client data on the writable, persisted instance mount.  In
+# particular, oauth-cli-kit follows XDG_DATA_HOME for its token file; leaving it
+# at the default under $HOME/.local makes container logins both ephemeral and
+# vulnerable to ownership mismatches on deployments that only mount .nanobot.
+ENV HOME=/home/nanobot \
+    XDG_DATA_HOME=/home/nanobot/.nanobot/data
 # Ensure crash output reaches Render logs (app output is otherwise swallowed on
 # non-graceful exit).
 ENV PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
