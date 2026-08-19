@@ -1064,7 +1064,11 @@ class Consolidator:
             logger.warning("Consolidation provider returned tool calls, raw-dumping to history")
             self.store.raw_archive(fallback_messages, session_key=session_key)
             return None
-        summary = response.content or "[no summary]"
+        summary = response.content
+        if not summary or not summary.strip():
+            logger.warning("Consolidation provider returned no summary, raw-dumping to history")
+            self.store.raw_archive(fallback_messages, session_key=session_key)
+            return None
         self.store.append_history(
             summary,
             max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
@@ -1154,19 +1158,21 @@ class Consolidator:
             runtime=runtime,
         )
         if request_messages is None:
-            return await self.archive(
-                messages,
-                runtime=runtime,
-                session_key=session.key,
+            logger.debug(
+                "Idle consolidation cannot replay the full tail for {}; raw-dumping",
+                session.key,
             )
-        tools = self._get_tool_definitions()
+            self.store.raw_archive(messages, session_key=session.key)
+            return None
         budget = self._input_token_budget(runtime)
         if budget <= 0:
-            return await self.archive(
-                messages,
-                runtime=runtime,
-                session_key=session.key,
+            logger.debug(
+                "Idle consolidation has no safe input budget for {}; raw-dumping",
+                session.key,
             )
+            self.store.raw_archive(messages, session_key=session.key)
+            return None
+        tools = self._get_tool_definitions()
         estimated, source = estimate_prompt_tokens_chain(
             runtime.provider,
             runtime.model,
@@ -1175,17 +1181,14 @@ class Consolidator:
         )
         if estimated > budget:
             logger.debug(
-                "Idle consolidation falling back to bounded archive for {}: {}/{} via {}",
+                "Idle consolidation prefix exceeds budget for {}; raw-dumping: {}/{} via {}",
                 session.key,
                 estimated,
                 budget,
                 source,
             )
-            return await self.archive(
-                messages,
-                runtime=runtime,
-                session_key=session.key,
-            )
+            self.store.raw_archive(messages, session_key=session.key)
+            return None
         return await self._archive_request(
             request_messages=request_messages,
             fallback_messages=messages,

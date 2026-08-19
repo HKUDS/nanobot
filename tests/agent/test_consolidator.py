@@ -635,6 +635,15 @@ class TestCompactIdleSession:
     """Idle compaction tests."""
 
     @pytest.fixture
+    def runtime(self, mock_provider):
+        """Exercise the structured idle-consolidation path by default."""
+        return LLMRuntime.capture(
+            mock_provider,
+            "test-model",
+            context_window_tokens=128_000,
+        )
+
+    @pytest.fixture
     def real_consolidator(self, store, mock_provider):
         """Create a Consolidator with a real SessionManager (not a mock)."""
         from nanobot.session.manager import SessionManager
@@ -713,7 +722,6 @@ class TestCompactIdleSession:
     async def test_new_messages_advance_existing_archive_progress(
         self, real_consolidator, mock_provider, runtime
     ):
-        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Summary.", finish_reason="stop"
         )
@@ -773,7 +781,6 @@ class TestCompactIdleSession:
         the recent suffix it retains. Otherwise a late user correction / final
         result that lands in the kept suffix is excluded from the persisted
         summary, leaving a stale wrong conclusion in history. Regression for #4264."""
-        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Summary.", finish_reason="stop"
         )
@@ -934,7 +941,6 @@ class TestCompactIdleSession:
         self, real_consolidator, mock_provider, runtime
     ):
         """30 turns with last_consolidated=50 → only unconsolidated tail considered."""
-        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -972,7 +978,6 @@ class TestCompactIdleSession:
         mock_provider,
         runtime,
     ):
-        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -1023,7 +1028,6 @@ class TestCompactIdleSession:
         store,
         runtime,
     ):
-        runtime = replace(runtime, context_window_tokens=128_000)
         tools = [{"type": "function", "function": {"name": "lookup"}}]
         real_consolidator._get_tool_definitions.return_value = tools
         mock_provider.chat_with_retry.return_value = LLMResponse(
@@ -1102,23 +1106,44 @@ class TestCompactIdleSession:
         assert sessions.get_or_create("cli:unexpected-tool").last_consolidated == 2
 
     @pytest.mark.asyncio
-    async def test_oversized_prefix_falls_back_to_bounded_archive(
+    async def test_empty_response_uses_raw_fallback(
         self,
         real_consolidator,
         mock_provider,
         store,
         runtime,
     ):
-        async def bounded_chat(**kwargs):
-            sent_chars = sum(
-                len(str(message.get("content") or ""))
-                for message in kwargs["messages"]
-            )
-            if sent_chars > 20_000:
-                return LLMResponse(content="context too long", finish_reason="error")
-            return LLMResponse(content="Bounded summary.", finish_reason="stop")
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="",
+            finish_reason="stop",
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:empty-summary")
+        session.add_message("user", "remember this")
+        session.add_message("assistant", "important answer")
+        sessions.save(session)
 
-        mock_provider.chat_with_retry.side_effect = bounded_chat
+        result = await real_consolidator.compact_idle_session(
+            "cli:empty-summary",
+            runtime=runtime,
+        )
+
+        assert result is None
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert entries[0]["content"].startswith("[RAW] ")
+        assert "important answer" in entries[0]["content"]
+        assert sessions.get_or_create("cli:empty-summary").last_consolidated == 2
+
+    @pytest.mark.asyncio
+    async def test_oversized_prefix_raw_archives_without_flattened_llm_retry(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        runtime = replace(runtime, context_window_tokens=1_000)
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("sdk:oversized")
         session.add_message("user", "x" * 100_000)
@@ -1129,13 +1154,11 @@ class TestCompactIdleSession:
             runtime=runtime,
         )
 
-        assert result == "Bounded summary."
-        sent = mock_provider.chat_with_retry.call_args.kwargs["messages"]
-        assert sum(len(str(message.get("content") or "")) for message in sent) < 20_000
-        assert not any(
-            "[RAW]" in entry["content"]
-            for entry in store.read_unprocessed_history(since_cursor=0)
-        )
+        assert result is None
+        mock_provider.chat_with_retry.assert_not_awaited()
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert entries[0]["content"].startswith("[RAW] ")
         assert sessions.get_or_create("sdk:oversized").last_consolidated == 1
 
     @pytest.mark.asyncio
@@ -1145,7 +1168,6 @@ class TestCompactIdleSession:
         mock_provider,
         runtime,
     ):
-        runtime = replace(runtime, context_window_tokens=128_000)
         mock_provider.chat_with_retry.return_value = LLMResponse(
             content="Summary.",
             finish_reason="stop",
