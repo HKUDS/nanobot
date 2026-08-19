@@ -14,6 +14,7 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMResponse,
     ProviderConversationState,
+    ToolCallRequest,
 )
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -1068,6 +1069,37 @@ class TestCompactIdleSession:
         assert [entry["content"] for entry in entries] == [
             "Overview from the temporary turn."
         ]
+
+    @pytest.mark.asyncio
+    async def test_tool_call_response_uses_raw_fallback(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-1", name="lookup", arguments={})],
+            finish_reason="tool_calls",
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:unexpected-tool")
+        session.add_message("user", "remember this")
+        session.add_message("assistant", "important answer")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:unexpected-tool",
+            runtime=runtime,
+        )
+
+        assert result is None
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert entries[0]["content"].startswith("[RAW] ")
+        assert "important answer" in entries[0]["content"]
+        assert sessions.get_or_create("cli:unexpected-tool").last_consolidated == 2
 
     @pytest.mark.asyncio
     async def test_oversized_prefix_falls_back_to_bounded_archive(
