@@ -1061,7 +1061,7 @@ class TestMainMenuUpdate:
         assert onboard_wizard._configure_quick_start_provider(config) is False
         assert "primary" not in config.model_presets
 
-    def test_quick_start_openai_codex_login_reuses_existing_token(self, monkeypatch):
+    def test_quick_start_openai_codex_login_reuses_existing_token(self, tmp_path, monkeypatch):
         """Quick Start should not open a new login flow when Codex is already authenticated."""
         import oauth_cli_kit
 
@@ -1074,6 +1074,7 @@ class TestMainMenuUpdate:
 
         monkeypatch.setenv("CODEX_PROXY", "http://127.0.0.1:8080")
         monkeypatch.delenv("UNRELATED_MISSING_KEY", raising=False)
+        monkeypatch.setattr(onboard_wizard, "get_data_dir", lambda: tmp_path)
         monkeypatch.setattr(
             oauth_cli_kit,
             "get_token",
@@ -1091,6 +1092,40 @@ class TestMainMenuUpdate:
         assert login_calls == []
         assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
         assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
+
+    def test_quick_start_openai_codex_stores_token_under_nanobot_data_dir(
+        self, tmp_path, monkeypatch
+    ):
+        """Quick Start Codex OAuth must store the token under nanobot's data dir (#5444).
+
+        Regression test: previously the interactive login never passed a
+        ``storage=`` override, so oauth-cli-kit fell back to its own unmanaged
+        ``platformdirs`` default instead of the persistent, permission-managed
+        ``.nanobot`` data dir every other nanobot OAuth provider already uses.
+        """
+        import oauth_cli_kit
+
+        config = Config()
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(onboard_wizard, "get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            oauth_cli_kit,
+            "get_token",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("no cached token")),
+        )
+
+        def fake_login(*, print_fn, prompt_fn, proxy=None, storage=None):
+            captured["storage"] = storage
+            return SimpleNamespace(access="access-token", account_id="acct-test")
+
+        monkeypatch.setattr(oauth_cli_kit, "login_oauth_interactive", fake_login)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *args, **kwargs: None)
+
+        assert onboard_wizard._quick_start_oauth_login(config, "openai_codex") is True
+        storage = captured["storage"]
+        assert storage is not None
+        assert storage.get_token_path() == tmp_path / "auth" / "codex.json"
 
     def test_quick_start_openai_codex_reports_incomplete_installation(self, monkeypatch):
         import oauth_cli_kit
@@ -1110,7 +1145,7 @@ class TestMainMenuUpdate:
         ]
 
     def test_quick_start_openai_codex_runs_interactive_login_for_bad_cached_token(
-        self, monkeypatch
+        self, tmp_path, monkeypatch
     ):
         """A malformed cached token should fall back to the interactive OAuth flow."""
         import oauth_cli_kit
@@ -1119,6 +1154,7 @@ class TestMainMenuUpdate:
         config.providers.openai_codex.proxy = "http://127.0.0.1:8080"
         prompts: list[str] = []
         printed: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        monkeypatch.setattr(onboard_wizard, "get_data_dir", lambda: tmp_path)
 
         class FakePrompt:
             def ask(self):
@@ -1158,13 +1194,16 @@ class TestMainMenuUpdate:
         )
         assert any(r"\[red]account-123\[/red]" in str(args[0]) for args, _kwargs in printed)
 
-    def test_quick_start_codex_auth_check_ignores_unrelated_missing_env(self, monkeypatch):
+    def test_quick_start_codex_auth_check_ignores_unrelated_missing_env(
+        self, tmp_path, monkeypatch
+    ):
         """OAuth readiness should depend only on the Codex proxy and token."""
         import oauth_cli_kit
 
         config = Config()
         config.providers.anthropic.api_key = "${UNRELATED_MISSING_KEY}"
         monkeypatch.delenv("UNRELATED_MISSING_KEY", raising=False)
+        monkeypatch.setattr(onboard_wizard, "get_data_dir", lambda: tmp_path)
         monkeypatch.setattr(
             oauth_cli_kit,
             "get_token",
@@ -1176,10 +1215,11 @@ class TestMainMenuUpdate:
             is True
         )
 
-    def test_quick_start_codex_auth_check_rejects_malformed_token(self, monkeypatch):
+    def test_quick_start_codex_auth_check_rejects_malformed_token(self, tmp_path, monkeypatch):
         """A malformed cached token should report not-ready instead of crashing."""
         import oauth_cli_kit
 
+        monkeypatch.setattr(onboard_wizard, "get_data_dir", lambda: tmp_path)
         monkeypatch.setattr(
             oauth_cli_kit,
             "get_token",
