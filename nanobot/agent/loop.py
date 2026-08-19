@@ -74,10 +74,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import (
-    UNIFIED_SESSION_KEY,
-    remember_last_channel,
-)
+from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import (
     SESSION_CACHE_MAX_SIZE,
     Session,
