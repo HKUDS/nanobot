@@ -9,6 +9,8 @@ from typing import Any, cast
 
 import yaml
 
+from nanobot.runtime_context import RuntimeContextBlock
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -176,6 +178,28 @@ class SkillsLoader:
             if name in available and name not in invoked:
                 invoked.append(name)
         return invoked
+
+    def build_explicit_skill_runtime_context(
+        self,
+        text: str,
+    ) -> RuntimeContextBlock | None:
+        """Load non-always skills explicitly invoked by the current message."""
+        skill_names = self.get_explicitly_invoked_skills(text)
+        if not skill_names:
+            return None
+        always_active = set(self.get_always_skills())
+        skill_names = [name for name in skill_names if name not in always_active]
+        content = self.load_skills_for_context(skill_names)
+        if not content:
+            return None
+        return RuntimeContextBlock(
+            source="explicit_skills",
+            content=(
+                "[Active Skills — instructions for this user turn]\n"
+                f"{content}\n"
+                "[/Active Skills]"
+            ),
+        )
 
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
         """

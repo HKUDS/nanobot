@@ -797,10 +797,12 @@ class AgentLoop:
         ]
         blocks = runtime_context_blocks_from_metadata(request.metadata)
         blocks.extend(await resolve_runtime_context(providers, request))
-        return self.context.build_runtime_context_blocks(
-            request.original_user_text or "",
-            blocks,
+        skill_context = self.context.skills.build_explicit_skill_runtime_context(
+            request.original_user_text or ""
         )
+        if skill_context is not None and skill_context not in blocks:
+            blocks.append(skill_context)
+        return blocks
 
     async def _dispatch_command_inline(
         self,

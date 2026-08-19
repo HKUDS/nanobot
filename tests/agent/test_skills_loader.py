@@ -383,6 +383,36 @@ def test_explicit_skill_references_resolve_available_enabled_names_in_order(
     assert invoked == ["alpha"]
 
 
+def test_multiple_explicit_skills_share_one_ordered_runtime_context(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "alpha", body="Alpha instructions")
+    _write_skill(skills_root, "beta", body="Beta instructions")
+    _write_skill(
+        skills_root,
+        "always",
+        metadata_json={"always": True},
+        body="Always instructions",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    context = loader.build_explicit_skill_runtime_context(
+        "Use $beta, then $alpha, $beta again, and $always."
+    )
+
+    assert context is not None
+    assert context.source == "explicit_skills"
+    assert context.content.count("### Skill: beta") == 1
+    assert context.content.count("### Skill: alpha") == 1
+    assert context.content.index("### Skill: beta") < context.content.index(
+        "### Skill: alpha"
+    )
+    assert "### Skill: always" not in context.content
+
+
 # -- multiline description tests (YAML folded > and literal |) -----------------
 
 

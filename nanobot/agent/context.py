@@ -159,33 +159,6 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def build_runtime_context_blocks(
-        self,
-        current_message: str,
-        blocks: Sequence[RuntimeContextBlock] | None = None,
-    ) -> list[RuntimeContextBlock]:
-        """Add explicitly invoked skill instructions to this turn's runtime context."""
-        merged = list(blocks or ())
-        invoked = self.skills.get_explicitly_invoked_skills(current_message)
-        if not invoked:
-            return merged
-        always_active = set(self.skills.get_always_skills())
-        skill_names = [name for name in invoked if name not in always_active]
-        skill_content = self.skills.load_skills_for_context(skill_names)
-        if not skill_content:
-            return merged
-        skill_block = RuntimeContextBlock(
-            source="explicit_skills",
-            content=(
-                "[Active Skills — instructions for this user turn]\n"
-                f"{skill_content}\n"
-                "[/Active Skills]"
-            ),
-        )
-        if skill_block not in merged:
-            merged.append(skill_block)
-        return merged
-
     @staticmethod
     def _without_duplicate_session_summary(
         entries: list[dict[str, Any]],
@@ -347,11 +320,12 @@ class ContextBuilder:
     ) -> dict[str, Any]:
         """Build only the fresh turn message without merging it into history."""
         content = self.build_user_content(current_message, image_paths=media)
-        blocks = (
-            self.build_runtime_context_blocks(current_message, runtime_context_blocks)
-            if current_role == "user"
-            else []
-        )
+        blocks: list[RuntimeContextBlock] = []
+        if current_role == "user":
+            blocks.extend(runtime_context_blocks or ())
+            skill_context = self.skills.build_explicit_skill_runtime_context(current_message)
+            if skill_context is not None and skill_context not in blocks:
+                blocks.append(skill_context)
         merged, runtime_context_meta = append_runtime_context(content, blocks)
         current: dict[str, Any] = {"role": current_role, "content": merged}
         if current_role == "user" and runtime_context_meta is not None:
