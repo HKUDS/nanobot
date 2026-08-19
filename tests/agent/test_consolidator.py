@@ -274,6 +274,18 @@ class TestConsolidatorPromptContract:
         assert "check context below" not in prompt.lower()
         assert "Do not mark something [skip] merely because it might already exist" in prompt
 
+    def test_archive_prompt_scopes_idle_overview_when_message_count_is_provided(self):
+        prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+            archive_count=4,
+        )
+
+        assert "only the final 4 conversation messages" in prompt
+        assert "Earlier messages are context" in prompt
+        assert "Do not call tools" in prompt
+        assert "Only SNIP facts" in prompt
+
 
 class TestConsolidatorArchiveErrorHandling:
     """archive() must fall back to raw_archive when the LLM returns an error

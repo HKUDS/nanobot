@@ -1000,74 +1000,58 @@ class Consolidator:
         runtime: LLMRuntime,
         session_key: str | None = None,
         summary_messages: list[dict[str, Any]] | None = None,
+        request_messages: list[dict[str, Any]] | None = None,
+        request_tools: list[dict[str, Any]] | None = None,
     ) -> str | None:
         """Summarize messages and append the result to history.jsonl.
 
         ``summary_messages`` adds context but is excluded from raw fallback.
+        ``request_messages`` preserves a prebuilt model-facing prefix instead
+        of flattening the messages; tools are included but disabled.
         """
         if not messages:
             return None
-        messages_to_summarize = public_history_messages(
-            summary_messages if summary_messages is not None else messages
-        )
-        formatted = MemoryStore._format_messages(messages_to_summarize)
-        formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
-        system_prompt = render_template(
-            "agent/consolidator_archive.md",
-            strip=True,
-        )
-        return await self._archive_request(
-            request_messages=[
+        prebuilt_request = request_messages is not None
+        if request_messages is None:
+            formatted = MemoryStore._format_messages(
+                public_history_messages(
+                    summary_messages if summary_messages is not None else messages
+                )
+            )
+            formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
+            request_messages = [
                 {
                     "role": "system",
-                    "content": system_prompt,
+                    "content": render_template("agent/consolidator_archive.md", strip=True),
                 },
                 {"role": "user", "content": formatted},
-            ],
-            fallback_messages=messages,
-            runtime=runtime,
-            session_key=session_key,
-            tools=None,
-            tool_choice=None,
-        )
-
-    async def _archive_request(
-        self,
-        *,
-        request_messages: list[dict[str, Any]],
-        fallback_messages: list[dict[str, Any]],
-        runtime: LLMRuntime,
-        session_key: str | None,
-        tools: list[dict[str, Any]] | None,
-        tool_choice: str | dict[str, Any] | None,
-    ) -> str | None:
-        """Run one archive request and persist either its summary or a raw fallback."""
+            ]
         try:
             response = await runtime.provider.chat_with_retry(
                 model=runtime.model,
                 messages=request_messages,
-                tools=tools,
-                tool_choice=tool_choice,
+                tools=request_tools if prebuilt_request else None,
+                tool_choice="none" if prebuilt_request else None,
                 temperature=runtime.generation.temperature,
                 max_tokens=runtime.generation.max_tokens,
                 reasoning_effort=runtime.generation.reasoning_effort,
             )
         except Exception:
             logger.warning("Consolidation provider call failed, raw-dumping to history")
-            self.store.raw_archive(fallback_messages, session_key=session_key)
+            self.store.raw_archive(messages, session_key=session_key)
             return None
         if response.finish_reason == "error":
             logger.warning("Consolidation provider returned an error, raw-dumping to history")
-            self.store.raw_archive(fallback_messages, session_key=session_key)
+            self.store.raw_archive(messages, session_key=session_key)
             return None
         if response.has_tool_calls is True:
             logger.warning("Consolidation provider returned tool calls, raw-dumping to history")
-            self.store.raw_archive(fallback_messages, session_key=session_key)
+            self.store.raw_archive(messages, session_key=session_key)
             return None
         summary = response.content
         if not summary or not summary.strip():
             logger.warning("Consolidation provider returned no summary, raw-dumping to history")
-            self.store.raw_archive(fallback_messages, session_key=session_key)
+            self.store.raw_archive(messages, session_key=session_key)
             return None
         self.store.append_history(
             summary,
@@ -1090,60 +1074,6 @@ class Consolidator:
         timestamp = last_active if isinstance(last_active, str) else session.updated_at.isoformat()
         return f"Previous conversation summary (last active {timestamp}):\n{text}"
 
-    def _build_idle_archive_messages(
-        self,
-        session: Session,
-        messages: list[dict[str, Any]],
-        *,
-        runtime: LLMRuntime,
-    ) -> list[dict[str, Any]] | None:
-        """Append a temporary archive turn to the session's model-facing prefix."""
-        replay_budget = self._input_token_budget(runtime)
-        if replay_budget <= 0:
-            replay_budget = max(128, runtime.context_window_tokens // 2)
-        history = session.get_history(
-            max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
-            max_tokens=replay_budget,
-        )
-        archive_history = Session(
-            key=session.key,
-            messages=messages,
-        ).get_history(max_messages=max(1, len(messages)))
-        if (
-            not archive_history
-            or len(history) < len(archive_history)
-            or history[-len(archive_history):] != archive_history
-        ):
-            return None
-        prompt = render_template(
-            "agent/consolidator_idle_archive.md",
-            strip=True,
-            archive_count=len(archive_history),
-        )
-        channel = session.key.split(":", 1)[0] if ":" in session.key else None
-        workspace: Path | None = None
-        if self._resolve_prompt_context is not None:
-            channel, workspace = self._resolve_prompt_context(session)
-        built = self._build_messages(
-            history=history,
-            current_message=prompt,
-            channel=channel,
-            session_summary=self._session_summary_for_prompt(session),
-            workspace=workspace,
-            session_key=session.key,
-            unified_session=self.unified_session,
-        )
-        system_prefix = (
-            [built[0]]
-            if built and built[0].get("role") == "system"
-            else []
-        )
-        return [
-            *system_prefix,
-            *history,
-            {"role": "user", "content": prompt},
-        ]
-
     async def _archive_idle_tail(
         self,
         session: Session,
@@ -1152,18 +1082,6 @@ class Consolidator:
         runtime: LLMRuntime,
     ) -> str | None:
         """Archive an idle tail by extending the ordinary model-facing messages."""
-        request_messages = self._build_idle_archive_messages(
-            session,
-            messages,
-            runtime=runtime,
-        )
-        if request_messages is None:
-            logger.debug(
-                "Idle consolidation cannot replay the full tail for {}; raw-dumping",
-                session.key,
-            )
-            self.store.raw_archive(messages, session_key=session.key)
-            return None
         budget = self._input_token_budget(runtime)
         if budget <= 0:
             logger.debug(
@@ -1172,6 +1090,42 @@ class Consolidator:
             )
             self.store.raw_archive(messages, session_key=session.key)
             return None
+        history = session.get_history(
+            max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
+            max_tokens=budget,
+        )
+        archive_history = Session(
+            key=session.key,
+            messages=messages,
+        ).get_history(max_messages=len(messages))
+        if (
+            not archive_history
+            or history[-len(archive_history):] != archive_history
+        ):
+            logger.debug(
+                "Idle consolidation cannot replay the full tail for {}; raw-dumping",
+                session.key,
+            )
+            self.store.raw_archive(messages, session_key=session.key)
+            return None
+        prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+            archive_count=len(archive_history),
+        )
+        channel = session.key.split(":", 1)[0] if ":" in session.key else None
+        workspace: Path | None = None
+        if self._resolve_prompt_context is not None:
+            channel, workspace = self._resolve_prompt_context(session)
+        request_messages = self._build_messages(
+            history=history,
+            current_message=prompt,
+            channel=channel,
+            session_summary=self._session_summary_for_prompt(session),
+            workspace=workspace,
+            session_key=session.key,
+            unified_session=self.unified_session,
+        )
         tools = self._get_tool_definitions()
         estimated, source = estimate_prompt_tokens_chain(
             runtime.provider,
@@ -1189,13 +1143,12 @@ class Consolidator:
             )
             self.store.raw_archive(messages, session_key=session.key)
             return None
-        return await self._archive_request(
-            request_messages=request_messages,
-            fallback_messages=messages,
+        return await self.archive(
+            messages,
             runtime=runtime,
             session_key=session.key,
-            tools=tools,
-            tool_choice="none",
+            request_messages=request_messages,
+            request_tools=tools,
         )
 
     async def maybe_consolidate_by_tokens(
