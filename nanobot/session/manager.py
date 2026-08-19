@@ -169,6 +169,20 @@ class SessionPolicy:
     disabled_tools: frozenset[str] = frozenset()
 
 
+class _SessionManagerBinding:
+    """Shared revocation state for runtime copies of one session object."""
+
+    __slots__ = ("revoked",)
+
+    def __init__(self) -> None:
+        self.revoked = False
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "_SessionManagerBinding":
+        # A copied runtime session must be revoked together with its source.
+        memo[id(self)] = self
+        return self
+
+
 @dataclass
 class Session:
     """A conversation session."""
@@ -181,6 +195,32 @@ class Session:
     last_consolidated: int = 0  # Number of messages already consolidated to files
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
+    _manager_binding: _SessionManagerBinding | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def bind_manager_lifecycle(self) -> None:
+        """Associate this runtime object with a revocable manager lifecycle."""
+        if self._manager_binding is None:
+            self._manager_binding = _SessionManagerBinding()
+
+    def revoke_manager_lifecycle(self) -> None:
+        """Prevent this object and runtime copies from being persisted again."""
+        self.bind_manager_lifecycle()
+        assert self._manager_binding is not None
+        self._manager_binding.revoked = True
+
+    def manager_lifecycle_is_bound(self) -> bool:
+        return self._manager_binding is not None
+
+    def shares_manager_lifecycle(self, other: "Session") -> bool:
+        return self._manager_binding is not None and self._manager_binding is other._manager_binding
+
+    def manager_lifecycle_is_revoked(self) -> bool:
+        return self._manager_binding is not None and self._manager_binding.revoked
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -1581,6 +1621,10 @@ class SessionManager:
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
+        current = self._cache.get(session.key) or self._overflow_cache.get(session.key)
+        if current is not None and current is not session:
+            current.revoke_manager_lifecycle()
+        session.bind_manager_lifecycle()
         self._overflow_cache.pop(session.key, None)
         self._cache[session.key] = session
         self._cache.move_to_end(session.key)
@@ -1705,6 +1749,33 @@ class SessionManager:
         if not session.policy.persist:
             return
 
+        if session.manager_lifecycle_is_revoked():
+            logger.warning(
+                "Discarding stale save for invalidated session {}",
+                session.key,
+            )
+            return
+
+        current = self.get_cached(session.key)
+        if (
+            current is not None
+            and current is not session
+            and session.manager_lifecycle_is_bound()
+        ):
+            # Remember the rejection on the incoming object too. Otherwise it
+            # could overwrite a later lifecycle after the current object is
+            # invalidated and the cache becomes empty.
+            # Runtime deep copies share the current object's lifecycle. Revoking
+            # that shared binding here would also poison the canonical object;
+            # invalidating or replacing the canonical object will revoke both.
+            if not session.shares_manager_lifecycle(current):
+                session.revoke_manager_lifecycle()
+            logger.warning(
+                "Discarding stale save for session {} (cache has a different object)",
+                session.key,
+            )
+            return
+
         archiver = self._file_cap_archiver
         if archiver is not None:
             session.enforce_file_cap(
@@ -1777,9 +1848,13 @@ class SessionManager:
         return flushed
 
     def invalidate(self, key: str) -> None:
-        """Remove a session from the in-memory cache."""
-        self._cache.pop(key, None)
-        self._overflow_cache.pop(key, None)
+        """Remove a session from the cache and revoke existing references."""
+        cached = self._cache.pop(key, None)
+        overflow = self._overflow_cache.pop(key, None)
+        if cached is not None:
+            cached.revoke_manager_lifecycle()
+        if overflow is not None and overflow is not cached:
+            overflow.revoke_manager_lifecycle()
 
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""

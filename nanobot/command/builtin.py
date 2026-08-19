@@ -304,15 +304,19 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    loop.discard_session_file_state(ctx.key)
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated:]
-    runtime = None
-    if snapshot:
-        runtime = ctx.runtime or loop.runtime_for_session(session)
-    session.clear()
-    loop.sessions.save(session)
-    loop.sessions.invalidate(session.key)
+    async with loop.consolidator.get_lock(ctx.key):
+        # A background compactor may have replaced the command's original
+        # Session object while awaiting its provider. Clear the current object
+        # only after that lifecycle has finished.
+        loop.discard_session_file_state(ctx.key)
+        session = loop.sessions.get_cached(ctx.key) or ctx.session or loop.sessions.get_or_create(ctx.key)
+        snapshot = session.messages[session.last_consolidated:]
+        runtime = None
+        if snapshot:
+            runtime = ctx.runtime or loop.runtime_for_session(session)
+        session.clear()
+        loop.sessions.save(session)
+        loop.sessions.invalidate(session.key)
     if snapshot and runtime is not None:
         loop.schedule_background(
             loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]

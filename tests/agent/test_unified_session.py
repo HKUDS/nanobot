@@ -251,6 +251,7 @@ class TestCmdNewUnifiedSession:
         # asyncio.create_task().  Mirror that exactly so the coroutine is consumed
         # and no RuntimeWarning is emitted.
         admitted_runtime = MagicMock(name="admitted_runtime")
+        reset_lock = asyncio.Lock()
         file_state_store = FileStateStore()
         previous_file_state = file_state_store.for_session("unified:default")
         tracked_file = tmp_path / "tracked.txt"
@@ -258,7 +259,10 @@ class TestCmdNewUnifiedSession:
         previous_file_state.record_read(tracked_file)
         loop = SimpleNamespace(
             sessions=sessions,
-            consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
+            consolidator=SimpleNamespace(
+                archive=AsyncMock(return_value=True),
+                get_lock=MagicMock(return_value=reset_lock),
+            ),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=file_state_store.discard,
             llm_runtime=MagicMock(return_value=MagicMock()),
@@ -308,9 +312,13 @@ class TestCmdNewUnifiedSession:
         shared.add_message("user", "shared message")
         sessions.save(shared)
 
+        reset_lock = asyncio.Lock()
         loop = SimpleNamespace(
             sessions=sessions,
-            consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
+            consolidator=SimpleNamespace(
+                archive=AsyncMock(return_value=True),
+                get_lock=MagicMock(return_value=reset_lock),
+            ),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=MagicMock(),
             runtime_for_session=MagicMock(return_value=MagicMock()),

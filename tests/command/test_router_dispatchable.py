@@ -109,12 +109,16 @@ class TestMidTurnCommandDispatchedDirectly:
     def fake_loop(self) -> MagicMock:
         loop = MagicMock()
         loop.sessions = MagicMock()
+        loop.sessions.get_cached = MagicMock(return_value=None)
         loop.sessions.get_or_create = MagicMock(return_value=MagicMock(
             messages=[], last_consolidated=0, clear=MagicMock(),
         ))
         loop.sessions.save = MagicMock()
         loop.sessions.invalidate = MagicMock()
         loop.schedule_background = MagicMock()
+        loop.discard_session_file_state = MagicMock()
+        loop.consolidator = MagicMock()
+        loop.consolidator.get_lock = MagicMock(return_value=MagicMock())
         loop._cancel_active_tasks = AsyncMock(return_value=0)
         return loop
 

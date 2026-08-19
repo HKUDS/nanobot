@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
@@ -45,6 +45,7 @@ from nanobot.session.webui_turns import (
     TITLE_GENERATION_REASONING_EFFORT,
     WEBUI_SESSION_METADATA_KEY,
     WEBUI_TITLE_METADATA_KEY,
+    WEBUI_TITLE_USER_EDITED_METADATA_KEY,
     WebuiTurnCoordinator,
     clean_generated_title,
     maybe_generate_webui_title,
@@ -92,6 +93,53 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
         schedule_background=lambda coro: loop.schedule_background(coro),
     ).subscribe(loop.runtime_events)
     return loop
+
+
+@pytest.mark.asyncio
+async def test_new_waits_for_idle_compaction_and_clears_current_session(tmp_path: Path) -> None:
+    from nanobot.command.builtin import cmd_new
+    from nanobot.command.router import CommandContext
+
+    loop = _make_full_loop(tmp_path)
+    key = "cli:reset-race"
+    stale_command_session = loop.sessions.get_or_create(key)
+    stale_command_session.add_message("user", "secret before reset")
+    loop.sessions.save(stale_command_session)
+
+    archive_started = asyncio.Event()
+    release_archive = asyncio.Event()
+
+    async def blocked_archive(*_args, **_kwargs):
+        archive_started.set()
+        await release_archive.wait()
+        return "old summary"
+
+    loop.consolidator.archive = blocked_archive  # type: ignore[method-assign]
+    compact_task = asyncio.create_task(
+        loop.consolidator.compact_idle_session(key, runtime=loop.llm_runtime())
+    )
+    await asyncio.wait_for(archive_started.wait(), timeout=1)
+
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="reset-race", content="/new")
+    ctx = CommandContext(
+        msg=msg,
+        session=stale_command_session,
+        key=key,
+        raw="/new",
+        loop=loop,
+    )
+    reset_task = asyncio.create_task(cmd_new(ctx))
+    await asyncio.sleep(0)
+
+    assert not reset_task.done()
+    release_archive.set()
+    await asyncio.wait_for(compact_task, timeout=1)
+    await asyncio.wait_for(reset_task, timeout=1)
+
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert reloaded.messages == []
+    assert "_last_summary" not in reloaded.metadata
 
 
 def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Path) -> None:
@@ -363,6 +411,132 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
     loop.provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_skips_when_session_replaced_during_await(
+    tmp_path: Path,
+) -> None:
+    """After LLM await, if the cached session was replaced by /new, skip the update."""
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="A stale title", finish_reason="stop")
+    )
+    stale = loop.sessions.get_or_create("websocket:stale-title")
+    stale.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    stale.add_message("user", "hello")
+    stale.add_message("assistant", "hi there")
+    loop.sessions.save(stale)
+
+    # Simulate /new: invalidate the cached session and create a replacement.
+    loop.sessions.invalidate("websocket:stale-title")
+    replacement = loop.sessions.get_or_create("websocket:stale-title")
+    replacement.add_message("user", "new conversation after /new")
+    loop.sessions.save(replacement)
+
+    # Patch get_or_create to return the stale reference (simulating the race
+    # where the function got the session before /new ran).
+    with patch.object(loop.sessions, "get_or_create", return_value=stale):
+        generated = await maybe_generate_webui_title(
+            sessions=loop.sessions,
+            session_key="websocket:stale-title",
+            provider=loop.provider,
+            model=loop.model,
+        )
+
+    # The stale reference should be rejected — title not written.
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in stale.metadata
+    # The replacement must still be the cached session.
+    assert loop.sessions.get_cached("websocket:stale-title") is replacement
+    # The replacement's messages must be intact.
+    assert replacement.messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_skips_when_user_edited_during_await(
+    tmp_path: Path,
+) -> None:
+    """If the user edits the title while LLM generation is in flight, skip the update."""
+    loop = _make_full_loop(tmp_path)
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+
+    async def generate_title(*args: object, **kwargs: object) -> LLMResponse:
+        generation_started.set()
+        await release_generation.wait()
+        return LLMResponse(content="Generated title", finish_reason="stop")
+
+    loop.provider.chat_with_retry = AsyncMock(side_effect=generate_title)
+    session = loop.sessions.get_or_create("websocket:user-edited")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "hello")
+    session.add_message("assistant", "hi there")
+    loop.sessions.save(session)
+
+    generation = asyncio.create_task(
+        maybe_generate_webui_title(
+            sessions=loop.sessions,
+            session_key="websocket:user-edited",
+            provider=loop.provider,
+            model=loop.model,
+        )
+    )
+    await generation_started.wait()
+
+    # The same session object is edited after the provider await starts, so the
+    # initial ownership check has already passed.
+    session.metadata[WEBUI_TITLE_USER_EDITED_METADATA_KEY] = True
+    session.metadata[WEBUI_TITLE_METADATA_KEY] = "User title"
+    release_generation.set()
+
+    generated = await generation
+
+    assert generated is False
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "User title"
+    assert session.metadata[WEBUI_TITLE_USER_EDITED_METADATA_KEY] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_skips_when_title_already_set_during_await(
+    tmp_path: Path,
+) -> None:
+    """If a title was already set while LLM generation was in flight, skip the update."""
+    loop = _make_full_loop(tmp_path)
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+
+    async def generate_title(*args: object, **kwargs: object) -> LLMResponse:
+        generation_started.set()
+        await release_generation.wait()
+        return LLMResponse(content="Generated title", finish_reason="stop")
+
+    loop.provider.chat_with_retry = AsyncMock(side_effect=generate_title)
+    session = loop.sessions.get_or_create("websocket:already-titled")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "hello")
+    session.add_message("assistant", "hi there")
+    loop.sessions.save(session)
+
+    generation = asyncio.create_task(
+        maybe_generate_webui_title(
+            sessions=loop.sessions,
+            session_key="websocket:already-titled",
+            provider=loop.provider,
+            model=loop.model,
+        )
+    )
+    await generation_started.wait()
+
+    # Another writer sets a title after the provider await starts, so the
+    # initial empty-title check has already passed.
+    session.metadata[WEBUI_TITLE_METADATA_KEY] = "User set title"
+    release_generation.set()
+
+    generated = await generation
+
+    assert generated is False
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "User set title"
 
 
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
