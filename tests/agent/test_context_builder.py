@@ -407,15 +407,20 @@ class TestBuildMessages:
         builder = _builder(tmp_path)
 
         messages = builder.build_messages([], "Please $review this patch and use $review carefully.")
+        plain_messages = builder.build_messages([], "Please review this patch carefully.")
 
         system_prompt = messages[0]["content"]
-        assert "# Active Skills" in system_prompt
-        assert "### Skill: review" in system_prompt
-        assert "Follow the unique review checklist." in system_prompt
-        assert system_prompt.count("### Skill: review") == 1
-        assert messages[-1]["content"] == (
-            "Please $review this patch and use $review carefully."
-        )
+        user_prompt = messages[-1]["content"]
+        assert system_prompt == plain_messages[0]["content"]
+        assert "Follow the unique review checklist." not in system_prompt
+        assert "Please $review this patch" in user_prompt
+        assert "[Active Skills — instructions for this user turn]" in user_prompt
+        assert "### Skill: review" in user_prompt
+        assert "Follow the unique review checklist." in user_prompt
+        assert user_prompt.count("### Skill: review") == 1
+        assert messages[-1]["_meta"]["runtime_context"]["sources"] == [
+            "explicit_skills"
+        ]
 
     def test_unknown_skill_reference_does_not_change_active_skills(self, tmp_path):
         messages = _builder(tmp_path).build_messages([], "Keep the shell literal $HOME.")

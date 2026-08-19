@@ -797,7 +797,10 @@ class AgentLoop:
         ]
         blocks = runtime_context_blocks_from_metadata(request.metadata)
         blocks.extend(await resolve_runtime_context(providers, request))
-        return blocks
+        return self.context.build_runtime_context_blocks(
+            request.original_user_text or "",
+            blocks,
+        )
 
     async def _dispatch_command_inline(
         self,
