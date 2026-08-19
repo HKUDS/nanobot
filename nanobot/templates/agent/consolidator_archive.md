@@ -20,7 +20,7 @@ Marks (choose the best match):
 
 Priority: user corrections and preferences > solutions > decisions > events > environment facts. The most valuable memory prevents the user from having to repeat themselves.
 
-Do not output facts already present in the system prompt's Recent History. Those facts have already been archived.
+Do not output facts already present in the system prompt's Recent History.
 
 Do not mark something [skip] merely because it might already exist in long-term memory; Dream handles cross-file deduplication later.
 
