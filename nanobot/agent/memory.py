@@ -431,7 +431,11 @@ class MemoryStore:
         unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Return unprocessed history entries safe to inject into a turn prompt."""
-        entries = self.read_unprocessed_history(since_cursor=since_cursor)
+        entries = [
+            entry
+            for entry in self.read_unprocessed_history(since_cursor=since_cursor)
+            if str(entry.get("content", "")).strip() != "(nothing)"
+        ]
         if session_key is None:
             return entries
         if not unified_session:
@@ -1023,6 +1027,8 @@ class Consolidator:
             logger.warning("Consolidation provider returned no summary, raw-dumping to history")
             self.store.raw_archive(messages, session_key=session_key)
             return None
+        if summary.strip() == "(nothing)":
+            return "(nothing)"
         self.store.append_history(
             summary,
             max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,

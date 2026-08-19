@@ -873,7 +873,7 @@ class TestCompactIdleSession:
     async def test_nothing_summary_not_stored(
         self, real_consolidator, mock_provider, runtime
     ):
-        """LLM returns '(nothing)' → _last_summary NOT in metadata."""
+        """LLM returns '(nothing)' → neither history nor metadata stores it."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="(nothing)", finish_reason="stop"
         )
@@ -891,6 +891,7 @@ class TestCompactIdleSession:
 
         reloaded = sessions.get_or_create("cli:nothing")
         assert "_last_summary" not in reloaded.metadata
+        assert real_consolidator.store.read_unprocessed_history(0) == []
 
     @pytest.mark.asyncio
     async def test_llm_failure_preserves_history_but_advances_replay_boundary(
