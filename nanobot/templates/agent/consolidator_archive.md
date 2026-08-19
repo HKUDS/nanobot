@@ -1,10 +1,6 @@
-{% if archive_count is defined %}
 Create a memory overview for only the final {{ archive_count }} conversation messages immediately before this instruction. Earlier messages are context for resolving references; do not summarize them again.
 
 Do not call tools. Return only the overview, following these memory rules:
-{% else %}
-Extract key facts from this conversation. For each fact, annotate its memory attributes.
-{% endif %}
 
 Only SNIP facts deserve a non-[skip] mark:
 - Signal: would the user need to repeat this if forgotten?

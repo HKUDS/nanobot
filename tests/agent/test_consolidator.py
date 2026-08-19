@@ -233,9 +233,10 @@ class TestConsolidatorSummarize:
 
 class TestConsolidatorPromptContract:
     def test_archive_prompt_outputs_attribute_tags_without_missing_context_claims(self):
-        prompt = render_template("agent/consolidator_archive.md", strip=True)
+        prompt = render_template("agent/consolidator_archive.md", strip=True, archive_count=4)
 
         assert "SNIP" in prompt
+        assert "final 4 conversation messages" in prompt
         for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
             assert mark in prompt
         assert "check context below" not in prompt.lower()
