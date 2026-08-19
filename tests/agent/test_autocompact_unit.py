@@ -184,23 +184,14 @@ class TestIsExpired:
 class TestSessionSummary:
     """Test prompt rendering for the structured summary value."""
 
-    def test_contains_isoformat_timestamp(self):
-        """Output should contain last_active as isoformat."""
+    def test_formats_prompt(self):
         last_active = datetime(2026, 5, 13, 14, 30, 0)
-        result = SessionSummary("Some text", last_active).for_prompt()
-        assert "2026-05-13T14:30:00" in result
+        summary = SessionSummary("User discussed Python.", last_active)
 
-    def test_contains_summary_text(self):
-        """Output should contain the provided text verbatim."""
-        last_active = datetime(2026, 1, 1)
-        result = SessionSummary("User discussed Python.", last_active).for_prompt()
-        assert "User discussed Python." in result
-
-    def test_output_starts_with_label(self):
-        """Output should start with the standard prefix."""
-        last_active = datetime(2026, 1, 1)
-        result = SessionSummary("text", last_active).for_prompt()
-        assert result.startswith("Previous conversation summary (last active ")
+        assert summary.for_prompt() == (
+            "Previous conversation summary (last active 2026-05-13T14:30:00):\n"
+            "User discussed Python."
+        )
 
 
 # ---------------------------------------------------------------------------

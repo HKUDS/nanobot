@@ -113,30 +113,37 @@ def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
     assert "legacy entry without session" not in prompt
 
 
-def test_session_summary_replaces_matching_recent_history_entry(tmp_path) -> None:
+def test_session_summary_replaces_interleaved_recent_history_entry(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
-    session_key = "telegram:chat-1"
+    session_key = "unified:default"
     overview = "CURRENT_SESSION_OVERVIEW_MARKER"
 
     builder.memory.append_history("another session event", session_key=session_key)
-    summary_cursor = builder.memory.append_history(overview, session_key=session_key)
+    builder.memory.append_history(overview, session_key=session_key)
+    latest_cursor = builder.memory.append_history(
+        "later telegram event",
+        session_key="telegram:chat-1",
+    )
     summary = SessionSummary(overview, real_datetime(2026, 8, 19, 10, 0))
 
     prompt = builder.build_system_prompt(
         session_key=session_key,
         session_summary=summary,
+        unified_session=True,
     )
 
     assert "# Recent History" in prompt
     assert "another session event" in prompt
+    assert "later telegram event" in prompt
     assert "[Archived Context Summary]" in prompt
     assert prompt.count(overview) == 1
 
-    builder.memory.set_last_dream_cursor(summary_cursor)
+    builder.memory.set_last_dream_cursor(latest_cursor)
     processed_prompt = builder.build_system_prompt(
         session_key=session_key,
         session_summary=summary,
+        unified_session=True,
     )
     assert "# Recent History" not in processed_prompt
     assert processed_prompt.count(overview) == 1

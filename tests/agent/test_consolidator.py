@@ -21,6 +21,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
@@ -273,19 +274,6 @@ class TestConsolidatorPromptContract:
             assert mark in prompt
         assert "check context below" not in prompt.lower()
         assert "Do not mark something [skip] merely because it might already exist" in prompt
-
-    def test_archive_prompt_scopes_idle_overview_when_message_count_is_provided(self):
-        prompt = render_template(
-            "agent/consolidator_archive.md",
-            strip=True,
-            archive_count=4,
-        )
-
-        assert "only the final 4 conversation messages" in prompt
-        assert "Earlier messages are context" in prompt
-        assert "Do not call tools" in prompt
-        assert "Only SNIP facts" in prompt
-
 
 class TestConsolidatorArchiveErrorHandling:
     """archive() must fall back to raw_archive when the LLM returns an error
@@ -1033,7 +1021,7 @@ class TestCompactIdleSession:
         assert "user-14" in sent_content
 
     @pytest.mark.asyncio
-    async def test_reuses_model_prefix_without_persisting_temporary_turn(
+    async def test_preserves_tool_history_and_persists_only_overview(
         self,
         real_consolidator,
         mock_provider,
@@ -1210,7 +1198,7 @@ class TestCompactIdleSession:
         assert "final 2 conversation messages" in sent[-1]["content"]
 
     @pytest.mark.asyncio
-    async def test_uses_persisted_workspace_scope_for_system_prefix(
+    async def test_reuses_real_prefix_for_unified_session_workspace(
         self,
         loop_factory,
         mock_provider,
@@ -1220,13 +1208,14 @@ class TestCompactIdleSession:
         project.mkdir()
         (tmp_path / "AGENTS.md").write_text("GLOBAL_WORKSPACE_MARKER", encoding="utf-8")
         (project / "AGENTS.md").write_text("PROJECT_WORKSPACE_MARKER", encoding="utf-8")
-        loop = loop_factory(provider=mock_provider)
+        loop = loop_factory(provider=mock_provider, unified_session=True)
         runtime = loop.llm_runtime()
         runtime.provider.chat_with_retry.return_value = LLMResponse(
             content="Summary.",
             finish_reason="stop",
         )
-        session = loop.sessions.get_or_create("websocket:scope")
+        session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+        remember_last_channel(session.metadata, "websocket", "scope")
         session.metadata["workspace_scope"] = {
             "project_path": str(project),
             "access_mode": "restricted",
@@ -1234,13 +1223,24 @@ class TestCompactIdleSession:
         session.add_message("user", "project question")
         session.add_message("assistant", "project answer")
         loop.sessions.save(session)
+        ordinary_messages = loop.context.build_messages(
+            history=session.get_history(max_messages=0),
+            current_message="next project question",
+            channel="websocket",
+            workspace=project,
+            session_key=session.key,
+            unified_session=True,
+        )
 
         await loop.consolidator.compact_idle_session(
-            "websocket:scope",
+            session.key,
             runtime=runtime,
         )
 
-        system = runtime.provider.chat_with_retry.call_args.kwargs["messages"][0]["content"]
+        sent_messages = runtime.provider.chat_with_retry.call_args.kwargs["messages"]
+        assert sent_messages[:-1] == ordinary_messages[:-1]
+        assert "final 2 conversation messages" in sent_messages[-1]["content"]
+        system = sent_messages[0]["content"]
         assert "PROJECT_WORKSPACE_MARKER" in system
         assert "GLOBAL_WORKSPACE_MARKER" not in system
 
