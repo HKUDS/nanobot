@@ -7,6 +7,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import replay_max_messages_for_context
+from nanobot.session.summary import SessionSummary
 
 
 def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -> AgentLoop:
@@ -202,7 +203,7 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
 
     reloaded, pending = loop.auto_compact.prepare_session(reloaded, "cli:test")
     assert pending is not None
-    assert "User discussed project status." in pending
+    assert pending.text == "User discussed project status."
     # _last_summary persists for restart survival.
     assert "_last_summary" in reloaded.metadata
 
@@ -212,7 +213,13 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
     session = loop.sessions.get_or_create("cli:test")
     loop.auto_compact.prepare_session = MagicMock(
-        return_value=(session, "Previous conversation summary: earlier context")
+        return_value=(
+            session,
+            SessionSummary(
+                text="earlier context",
+                last_active=session.updated_at,
+            ),
+        )
     )  # type: ignore[method-assign]
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)  # type: ignore[method-assign]
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]

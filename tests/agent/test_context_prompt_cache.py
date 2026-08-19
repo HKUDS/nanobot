@@ -10,6 +10,7 @@ from pathlib import Path
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.runtime_context import RuntimeContextBlock
+from nanobot.session.summary import SessionSummary
 
 
 class _FakeDatetime(real_datetime):
@@ -120,7 +121,10 @@ def test_session_summary_replaces_matching_recent_history_entry(tmp_path) -> Non
 
     builder.memory.append_history("another session event", session_key=session_key)
     summary_cursor = builder.memory.append_history(overview, session_key=session_key)
-    summary = f"Previous conversation summary (last active 2026-08-19T10:00:00):\n{overview}"
+    summary = SessionSummary(
+        text=overview,
+        last_active=real_datetime(2026, 8, 19, 10, 0),
+    )
 
     prompt = builder.build_system_prompt(
         session_key=session_key,

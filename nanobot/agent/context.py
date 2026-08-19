@@ -3,6 +3,7 @@
 import base64
 import mimetypes
 import platform
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
 
@@ -25,6 +26,10 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.security.workspace_access import WorkspaceScopeResolver
+from nanobot.session.keys import last_channel_from_metadata
+from nanobot.session.manager import Session
+from nanobot.session.summary import SessionSummary
 from nanobot.utils.helpers import (
     detect_image_mime,
     load_bundled_template,
@@ -49,6 +54,27 @@ async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolReg
     return await image_generation_tools.handle_runtime_control(state, msg, tools)
 
 
+@dataclass(frozen=True, slots=True)
+class PersistedPromptContextResolver:
+    """Restore prompt routing context when no inbound message is available."""
+
+    workspace_scopes: WorkspaceScopeResolver
+    unified_session: bool = False
+
+    def __call__(self, session: Session) -> tuple[str | None, Path]:
+        channel = session.key.split(":", 1)[0] if ":" in session.key else None
+        if self.unified_session:
+            route = last_channel_from_metadata(session.metadata)
+            if route is not None:
+                channel = route[0]
+        scope = self.workspace_scopes.for_turn(
+            channel=channel,
+            message_metadata=None,
+            session_metadata=session.metadata,
+        )
+        return channel, scope.project_path
+
+
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
@@ -58,7 +84,6 @@ class ContextBuilder:
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = RUNTIME_CONTEXT_END
-    _SESSION_SUMMARY_HEADER_PREFIX = "Previous conversation summary (last active "
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
@@ -71,7 +96,7 @@ class ContextBuilder:
         *,
         active_skill_names: Sequence[str] | None = None,
         channel: str | None = None,
-        session_summary: str | None = None,
+        session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
         include_memory_recent_history: bool = True,
@@ -132,31 +157,25 @@ class ContextBuilder:
                     parts.append("# Recent History\n\n" + history_text)
 
         if session_summary:
-            parts.append(f"[Archived Context Summary]\n\n{session_summary}")
+            parts.append(f"[Archived Context Summary]\n\n{session_summary.for_prompt()}")
 
         return "\n\n---\n\n".join(parts)
 
-    @classmethod
+    @staticmethod
     def _without_duplicate_session_summary(
-        cls,
         entries: list[dict[str, Any]],
         *,
         session_key: str | None,
-        session_summary: str | None,
+        session_summary: SessionSummary | None,
     ) -> list[dict[str, Any]]:
         """Drop the history entry already represented by the session summary."""
         if not session_summary:
             return entries
-        summary_content = session_summary
-        if session_summary.startswith(cls._SESSION_SUMMARY_HEADER_PREFIX):
-            _header, separator, content = session_summary.partition("):\n")
-            if separator and content:
-                summary_content = content
         for index in range(len(entries) - 1, -1, -1):
             entry = entries[index]
             if (
                 entry.get("session_key") == session_key
-                and entry.get("content") == summary_content
+                and entry.get("content") == session_summary.text
             ):
                 return [*entries[:index], *entries[index + 1:]]
         return entries
@@ -246,7 +265,7 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         current_role: str = "user",
-        session_summary: str | None = None,
+        session_summary: SessionSummary | None = None,
         runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,

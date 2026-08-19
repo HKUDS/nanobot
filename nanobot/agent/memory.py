@@ -27,6 +27,7 @@ from nanobot.session.manager import (
     SessionManager,
     replay_max_messages_for_context,
 )
+from nanobot.session.summary import SessionSummary
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -954,14 +955,9 @@ class Consolidator:
         """Estimate prompt size from the full replayable session history."""
         history = self._full_replay_history(session)
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
-        # Include archived summary in estimation so the budget accounts for it.
-        meta = session.metadata.get("_last_summary")
-        summary = (
-            cast(dict[str, Any], meta).get("text")
-            if isinstance(meta, dict)
-            else meta
-            if isinstance(meta, str)
-            else None
+        summary = SessionSummary.from_metadata(
+            session.metadata,
+            fallback_last_active=session.updated_at,
         )
         probe_messages = self._build_messages(
             history=history,
@@ -1060,20 +1056,6 @@ class Consolidator:
         )
         return summary
 
-    @staticmethod
-    def _session_summary_for_prompt(session: Session) -> str | None:
-        """Rebuild the summary text used by normal turns after an idle archive."""
-        meta = session.metadata.get("_last_summary")
-        if not isinstance(meta, dict):
-            return None
-        summary_meta = cast(dict[str, Any], meta)
-        text = summary_meta.get("text")
-        if not isinstance(text, str) or not text:
-            return None
-        last_active = summary_meta.get("last_active")
-        timestamp = last_active if isinstance(last_active, str) else session.updated_at.isoformat()
-        return f"Previous conversation summary (last active {timestamp}):\n{text}"
-
     async def _archive_idle_tail(
         self,
         session: Session,
@@ -1121,7 +1103,10 @@ class Consolidator:
             history=history,
             current_message=prompt,
             channel=channel,
-            session_summary=self._session_summary_for_prompt(session),
+            session_summary=SessionSummary.from_metadata(
+                session.metadata,
+                fallback_last_active=session.updated_at,
+            ),
             workspace=workspace,
             session_key=session.key,
             unified_session=self.unified_session,

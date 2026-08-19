@@ -24,7 +24,7 @@ from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.automation_turns import publish_next_deferred_turn
-from nanobot.agent.context import ContextBuilder
+from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
@@ -76,7 +76,6 @@ from nanobot.session.goal_state import (
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import (
     UNIFIED_SESSION_KEY,
-    last_channel_from_metadata,
     remember_last_channel,
 )
 from nanobot.session.manager import (
@@ -89,6 +88,7 @@ from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
 )
+from nanobot.session.summary import SessionSummary
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
@@ -155,7 +155,7 @@ class TurnContext:
     on_retry_wait: Callable[[str], Awaitable[None]] | None = None
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
-    pending_summary: str | None = None
+    pending_summary: SessionSummary | None = None
 
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
@@ -446,7 +446,10 @@ class AgentLoop:
             sessions=self.sessions,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            resolve_prompt_context=self._idle_consolidation_prompt_context,
+            resolve_prompt_context=PersistedPromptContextResolver(
+                workspace_scopes=self.workspace_scopes,
+                unified_session=unified_session,
+            ),
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
         )
@@ -922,23 +925,6 @@ class AgentLoop:
         if automation_metadata:
             return
         remember_last_channel(session.metadata, msg.channel, msg.chat_id)
-
-    def _idle_consolidation_prompt_context(
-        self,
-        session: Session,
-    ) -> tuple[str | None, Path]:
-        """Resolve the same persisted route and workspace used by a normal turn."""
-        channel = session.key.split(":", 1)[0] if ":" in session.key else None
-        if self._unified_session:
-            route = last_channel_from_metadata(session.metadata)
-            if route is not None:
-                channel = route[0]
-        scope = self.workspace_scopes.for_turn(
-            channel=channel,
-            message_metadata=None,
-            session_metadata=session.metadata,
-        )
-        return channel, scope.project_path
 
     @staticmethod
     def _replay_token_budget(runtime: LLMRuntime) -> int:
