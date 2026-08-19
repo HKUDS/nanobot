@@ -194,6 +194,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     description: "Continue from an earlier completed reply",
     action: "branch",
   },
+  {
+    command: "/exit",
+    title: "Exit",
+    description: "Close this terminal UI",
+    action: "exit",
+  },
 ]
 
 function syntaxStyle(palette: Palette): SyntaxStyle {
@@ -456,7 +462,9 @@ export class NanobotTui {
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.host = host
     this.localCommands = host.hosted
-      ? LOCAL_COMMANDS.filter(({ command }) => command === "/context" || command === "/diff")
+      ? LOCAL_COMMANDS.filter(({ command }) => (
+        command === "/context" || command === "/diff" || command === "/exit"
+      ))
       : LOCAL_COMMANDS
     this.transcript = new Transcript(
       renderer,
@@ -809,7 +817,7 @@ export class NanobotTui {
       return
     }
     if (!visibleContent) return
-    if (["exit", "quit", "/exit", "/quit", ":q"].includes(visibleContent.toLowerCase())) {
+    if (["exit", "quit", "/quit", ":q"].includes(visibleContent.toLowerCase())) {
       this.quit()
       return
     }
@@ -826,6 +834,7 @@ export class NanobotTui {
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "diff") this.openDiff()
       else if (command.command.action === "branch") void this.openBranch()
+      else if (command.command.action === "exit") this.quit()
       else this.startNewChat()
       return
     }

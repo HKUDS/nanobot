@@ -2106,6 +2106,36 @@ describe("NanobotTui layout", () => {
 
     expect(setup.renderer.isDestroyed).toBe(true)
   })
+
+  test("discovers and runs the local /exit command", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    let closed = false
+    const transport = client(sent)
+    transport.close = () => { closed = true }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      commandMenu: { visible: boolean }
+    }
+
+    await setup.mockInput.typeText("/exit")
+    await setup.flush()
+    expect(ui.commandMenu.visible).toBe(true)
+    expect(setup.captureCharFrame()).toContain("/exit")
+
+    expect(ui.composer.plainText).toBe("/exit")
+    ui.composer.submit()
+    await waitUntil(() => closed)
+
+    expect(sent).toEqual([])
+    expect(setup.renderer.isDestroyed).toBe(true)
+  })
 })
 
 describe("NanobotTui in a Herdr pane", () => {
