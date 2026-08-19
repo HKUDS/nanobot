@@ -1007,8 +1007,11 @@ class Consolidator:
             logger.warning("Consolidation provider call failed, raw-dumping to history")
             self.store.raw_archive(messages, session_key=session_key)
             return None
-        if response.finish_reason == "error":
-            logger.warning("Consolidation provider returned an error, raw-dumping to history")
+        if response.finish_reason in {"error", "length"}:
+            logger.warning(
+                "Consolidation provider did not complete ({}), raw-dumping to history",
+                response.finish_reason,
+            )
             self.store.raw_archive(messages, session_key=session_key)
             return None
         if response.has_tool_calls is True:

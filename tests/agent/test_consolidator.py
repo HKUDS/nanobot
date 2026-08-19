@@ -242,18 +242,26 @@ class TestConsolidatorPromptContract:
         assert "Do not mark something [skip] merely because it might already exist" in prompt
 
 class TestConsolidatorArchiveErrorHandling:
-    """archive() must fall back to raw_archive when the LLM returns an error
-    response (finish_reason == 'error'), e.g. overloaded / quota exceeded.
-    See https://github.com/HKUDS/nanobot/issues/3244
+    """archive() must fall back when the LLM does not complete its overview.
+
+    Error responses include overloaded / quota failures from #3244; length
+    responses contain a partial overview that is likewise unsafe to persist.
     """
 
-    async def test_archive_falls_back_on_error_finish_reason(
-        self, consolidator, mock_provider, store, runtime
+    @pytest.mark.parametrize("finish_reason", ["error", "length"])
+    async def test_archive_falls_back_on_incomplete_finish_reason(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+        runtime,
+        finish_reason: str,
     ):
-        """LLM returning finish_reason='error' should trigger raw_archive, not write error text."""
+        """Incomplete LLM output should trigger raw_archive, not persist partial text."""
+        invalid_output = f"INVALID_{finish_reason.upper()}_OUTPUT"
         mock_provider.chat_with_retry.return_value = MagicMock(
-            content="Error: {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'overloaded_error (529)'}}",
-            finish_reason="error",
+            content=invalid_output,
+            finish_reason=finish_reason,
         )
         messages = [
             {"role": "user", "content": "fix the auth bug"},
@@ -264,7 +272,7 @@ class TestConsolidatorArchiveErrorHandling:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" in entries[0]["content"]
-        assert "Error:" not in entries[0]["content"]
+        assert invalid_output not in entries[0]["content"]
 
     async def test_archive_preserves_summary_on_success(
         self, consolidator, mock_provider, store, runtime
