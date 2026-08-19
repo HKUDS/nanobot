@@ -1,13 +1,11 @@
 """Tests for ContextBuilder — system prompt and message assembly."""
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.runtime_context import RuntimeContextBlock
-from nanobot.session.summary import SessionSummary
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -332,7 +330,10 @@ class TestBuildSystemPrompt:
 
     def test_includes_session_summary(self, tmp_path):
         builder = _builder(tmp_path)
-        summary = SessionSummary("Previous chat about Python.", datetime(2026, 8, 19, 10, 0))
+        summary = {
+            "text": "Previous chat about Python.",
+            "last_active": "2026-08-19T10:00:00",
+        }
         result = builder.build_system_prompt(session_summary=summary)
         assert "Previous chat about Python." in result
         assert "[Archived Context Summary]" in result
@@ -340,7 +341,7 @@ class TestBuildSystemPrompt:
     def test_sections_separated_by_separator(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
         builder = _builder(tmp_path)
-        summary = SessionSummary("Summary.", datetime(2026, 8, 19, 10, 0))
+        summary = {"text": "Summary.", "last_active": "2026-08-19T10:00:00"}
         result = builder.build_system_prompt(session_summary=summary)
         assert "\n\n---\n\n" in result
 

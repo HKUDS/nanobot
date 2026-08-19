@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
@@ -307,18 +307,26 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.discard_session_file_state(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated:]
+    archive_snapshot = None
     runtime = None
     if snapshot:
         runtime = ctx.runtime or loop.runtime_for_session(session)
+        archive_snapshot = replace(
+            session,
+            messages=snapshot,
+            metadata=dict(session.metadata),
+            last_consolidated=0,
+            provider_state=None,
+        )
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
-    if snapshot and runtime is not None:
+    if archive_snapshot is not None and runtime is not None:
         loop.schedule_background(
-            loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]
-                snapshot,
+            loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
+                archive_snapshot,
+                archive_end=len(snapshot),
                 runtime=runtime,
-                session_key=ctx.key,
             )
         )
     return OutboundMessage(

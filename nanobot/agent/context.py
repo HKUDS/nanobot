@@ -157,7 +157,11 @@ class ContextBuilder:
                     parts.append("# Recent History\n\n" + history_text)
 
         if session_summary:
-            parts.append(f"[Archived Context Summary]\n\n{session_summary.for_prompt()}")
+            parts.append(
+                "[Archived Context Summary]\n\n"
+                f"Previous conversation summary (last active {session_summary['last_active']}):\n"
+                f"{session_summary['text']}"
+            )
 
         return "\n\n---\n\n".join(parts)
 
@@ -175,7 +179,7 @@ class ContextBuilder:
             entry = entries[index]
             if (
                 entry.get("session_key") == session_key
-                and entry.get("content") == session_summary.text
+                and entry.get("content") == session_summary["text"]
             ):
                 return [*entries[:index], *entries[index + 1:]]
         return entries

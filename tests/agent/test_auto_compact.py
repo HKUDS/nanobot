@@ -421,7 +421,7 @@ class TestAutoCompact:
 
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
-        assert entry.text == "User said hello."
+        assert entry["text"] == "User said hello."
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 12
         assert len(session_after.get_history(max_messages=12)) == (
@@ -909,7 +909,7 @@ class TestProactiveAutoCompact:
         assert len(archived_messages) == 10
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
-        assert entry.text == "User chatted about old things."
+        assert entry["text"] == "User chatted about old things."
         await loop.aclose()
 
     @pytest.mark.asyncio
@@ -1227,8 +1227,7 @@ class TestSummaryPersistence:
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None
-        assert summary.text == "User said hello."
-        assert "Previous conversation summary" in summary.for_prompt()
+        assert summary["text"] == "User said hello."
         # _last_summary persists in metadata for restart survival.
         assert "_last_summary" in reloaded.metadata
         await loop.aclose()
@@ -1256,7 +1255,7 @@ class TestSummaryPersistence:
         assert summary is not None
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary2 is not None
-        assert summary2.text == "Summary."
+        assert summary2["text"] == "Summary."
         # _last_summary persists in metadata for restart survival.
         assert "_last_summary" in reloaded.metadata
         await loop.aclose()
@@ -1306,7 +1305,7 @@ class TestSummaryPersistence:
             loop.sessions.get_or_create("cli:test"), "cli:test"
         )
         assert summary1 is not None
-        assert summary1.text == "First summary."
+        assert summary1["text"] == "First summary."
         assert "cli:test" not in loop.auto_compact._summaries  # popped by hot path
 
         # Add new messages and archive again (simulating a later turn)
@@ -1326,7 +1325,7 @@ class TestSummaryPersistence:
         reloaded = loop.sessions.get_or_create("cli:test")
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary2 is not None
-        assert summary2.text == "Second summary."
+        assert summary2["text"] == "Second summary."
         await loop.aclose()
 
     @pytest.mark.asyncio

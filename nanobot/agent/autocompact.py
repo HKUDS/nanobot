@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
-from nanobot.session.summary import SessionSummary
+from nanobot.session.summary import SessionSummary, session_summary_from_metadata
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
@@ -91,7 +91,7 @@ class AutoCompact:
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)
-                stored = SessionSummary.from_metadata(
+                stored = session_summary_from_metadata(
                     session.metadata,
                     fallback_last_active=session.updated_at,
                 )
@@ -117,7 +117,7 @@ class AutoCompact:
         # Cold path: summary persisted in session metadata (process restarted).
         # Persisted metadata may outlive schema changes; a malformed summary must
         # not abort turn preparation.
-        return session, SessionSummary.from_metadata(
+        return session, session_summary_from_metadata(
             session.metadata,
             fallback_last_active=session.updated_at,
         )

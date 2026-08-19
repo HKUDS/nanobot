@@ -27,7 +27,7 @@ from nanobot.session.manager import (
     SessionManager,
     replay_max_messages_for_context,
 )
-from nanobot.session.summary import SessionSummary
+from nanobot.session.summary import session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -38,7 +38,6 @@ from nanobot.utils.helpers import (
     recent_message_start_index,
     strip_think,
     truncate_text,
-    truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.workspace_prompts import (
@@ -928,10 +927,10 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
-        summary = await self.archive(
-            chunk,
+        summary = await self.archive_session(
+            session,
+            archive_end=end_idx,
             runtime=runtime,
-            session_key=session.key,
         )
         session.last_consolidated = end_idx
         session.provider_state = None
@@ -955,7 +954,7 @@ class Consolidator:
         """Estimate prompt size from the full replayable session history."""
         history = self._full_replay_history(session)
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
-        summary = SessionSummary.from_metadata(
+        summary = session_summary_from_metadata(
             session.metadata,
             fallback_last_active=session.updated_at,
         )
@@ -982,52 +981,24 @@ class Consolidator:
             - self._SAFETY_BUFFER
         )
 
-    def _truncate_to_token_budget(self, text: str, *, runtime: LLMRuntime) -> str:
-        """Truncate text so it fits within the consolidation LLM's token budget."""
-        budget = self._input_token_budget(runtime)
-        if budget <= 0:
-            return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
-        return truncate_text_to_tokens(text, budget)
-
     async def archive(
         self,
         messages: list[dict[str, Any]],
         *,
         runtime: LLMRuntime,
-        session_key: str | None = None,
-        summary_messages: list[dict[str, Any]] | None = None,
-        request_messages: list[dict[str, Any]] | None = None,
-        request_tools: list[dict[str, Any]] | None = None,
+        session_key: str,
+        request_messages: list[dict[str, Any]],
+        request_tools: list[dict[str, Any]],
     ) -> str | None:
-        """Summarize messages and append the result to history.jsonl.
-
-        ``summary_messages`` adds context but is excluded from raw fallback.
-        ``request_messages`` preserves a prebuilt model-facing prefix instead
-        of flattening the messages; tools are included but disabled.
-        """
+        """Execute a prepared consolidation request and persist its result."""
         if not messages:
             return None
-        prebuilt_request = request_messages is not None
-        if request_messages is None:
-            formatted = MemoryStore._format_messages(
-                public_history_messages(
-                    summary_messages if summary_messages is not None else messages
-                )
-            )
-            formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
-            request_messages = [
-                {
-                    "role": "system",
-                    "content": render_template("agent/consolidator_archive.md", strip=True),
-                },
-                {"role": "user", "content": formatted},
-            ]
         try:
             response = await runtime.provider.chat_with_retry(
                 model=runtime.model,
                 messages=request_messages,
-                tools=request_tools if prebuilt_request else None,
-                tool_choice="none" if prebuilt_request else None,
+                tools=request_tools,
+                tool_choice="none",
                 temperature=runtime.generation.temperature,
                 max_tokens=runtime.generation.max_tokens,
                 reasoning_effort=runtime.generation.reasoning_effort,
@@ -1056,23 +1027,31 @@ class Consolidator:
         )
         return summary
 
-    async def _archive_idle_tail(
+    async def archive_session(
         self,
         session: Session,
-        messages: list[dict[str, Any]],
         *,
+        archive_end: int,
         runtime: LLMRuntime,
     ) -> str | None:
-        """Archive an idle tail by extending the ordinary model-facing messages."""
+        """Archive a session prefix by appending a consolidation instruction."""
+        messages = list(session.messages[session.last_consolidated:archive_end])
+        if not messages:
+            return None
         budget = self._input_token_budget(runtime)
         if budget <= 0:
             logger.debug(
-                "Idle consolidation has no safe input budget for {}; raw-dumping",
+                "Consolidation has no safe input budget for {}; raw-dumping",
                 session.key,
             )
             self.store.raw_archive(messages, session_key=session.key)
             return None
-        history = session.get_history(
+        prefix = Session(
+            key=session.key,
+            messages=list(session.messages[:archive_end]),
+            last_consolidated=session.last_consolidated,
+        )
+        history = prefix.get_history(
             max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
             max_tokens=budget,
         )
@@ -1085,7 +1064,7 @@ class Consolidator:
             or history[-len(archive_history):] != archive_history
         ):
             logger.debug(
-                "Idle consolidation cannot replay the full tail for {}; raw-dumping",
+                "Consolidation cannot replay the full chunk for {}; raw-dumping",
                 session.key,
             )
             self.store.raw_archive(messages, session_key=session.key)
@@ -1103,7 +1082,7 @@ class Consolidator:
             history=history,
             current_message=prompt,
             channel=channel,
-            session_summary=SessionSummary.from_metadata(
+            session_summary=session_summary_from_metadata(
                 session.metadata,
                 fallback_last_active=session.updated_at,
             ),
@@ -1120,7 +1099,7 @@ class Consolidator:
         )
         if estimated > budget:
             logger.debug(
-                "Idle consolidation prefix exceeds budget for {}; raw-dumping: {}/{} via {}",
+                "Consolidation prefix exceeds budget for {}; raw-dumping: {}/{} via {}",
                 session.key,
                 estimated,
                 budget,
@@ -1215,13 +1194,13 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(
-                    chunk,
+                summary = await self.archive_session(
+                    session,
+                    archive_end=end_idx,
                     runtime=runtime,
-                    session_key=session.key,
                 )
                 # Advance the cursor either way: on success the chunk was
-                # summarized; on failure archive() already raw-archived it as
+                # summarized; on failure archive_session() raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call
                 # would just emit duplicate [RAW] entries.
                 if summary:
@@ -1278,9 +1257,9 @@ class Consolidator:
 
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
-            summary = await self._archive_idle_tail(
+            summary = await self.archive_session(
                 session,
-                messages_to_archive,
+                archive_end=archive_end,
                 runtime=runtime,
             )
 

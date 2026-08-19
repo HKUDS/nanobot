@@ -520,14 +520,14 @@ class TestNewCommandArchival:
         call_count = 0
         expected_runtime = loop.llm_runtime()
 
-        async def _failing_summarize(_messages, *, runtime, session_key=None) -> bool:
+        async def _failing_summarize(session, *, archive_end, runtime) -> None:
             nonlocal call_count
             assert runtime is expected_runtime
-            assert session_key == "cli:test"
+            assert session.key == "cli:test"
+            assert archive_end == len(session.messages)
             call_count += 1
-            return False
 
-        loop.consolidator.archive = _failing_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _failing_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg, runtime=expected_runtime)
@@ -557,14 +557,14 @@ class TestNewCommandArchival:
         archived_session_key = None
         expected_runtime = loop.llm_runtime()
 
-        async def _fake_summarize(messages, *, runtime, session_key=None) -> bool:
+        async def _fake_summarize(session, *, archive_end, runtime) -> str:
             nonlocal archived_count, archived_session_key
             assert runtime is expected_runtime
-            archived_count = len(messages)
-            archived_session_key = session_key
-            return True
+            archived_count = len(session.messages[:archive_end])
+            archived_session_key = session.key
+            return "Summary."
 
-        loop.consolidator.archive = _fake_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _fake_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg, runtime=expected_runtime)
@@ -588,12 +588,13 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
         expected_runtime = loop.llm_runtime()
 
-        async def _ok_summarize(_messages, *, runtime, session_key=None) -> bool:
+        async def _ok_summarize(session, *, archive_end, runtime) -> str:
             assert runtime is expected_runtime
-            assert session_key == "cli:test"
-            return True
+            assert session.key == "cli:test"
+            assert archive_end == len(session.messages)
+            return "Summary."
 
-        loop.consolidator.archive = _ok_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _ok_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg, runtime=expected_runtime)
@@ -618,14 +619,15 @@ class TestNewCommandArchival:
         release_archive = asyncio.Event()
         expected_runtime = loop.llm_runtime()
 
-        async def _slow_summarize(_messages, *, runtime, session_key=None) -> bool:
+        async def _slow_summarize(session, *, archive_end, runtime) -> str:
             assert runtime is expected_runtime
-            assert session_key == "cli:test"
+            assert session.key == "cli:test"
+            assert archive_end == len(session.messages)
             await release_archive.wait()
             archived.set()
-            return True
+            return "Summary."
 
-        loop.consolidator.archive = _slow_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _slow_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         await loop._process_message(new_msg, runtime=expected_runtime)

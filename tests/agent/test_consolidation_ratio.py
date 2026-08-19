@@ -72,7 +72,7 @@ async def test_consolidation_ratio_controls_target(
         context_window_tokens=context_window_tokens,
         consolidation_ratio=ratio,
     )
-    loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    loop.consolidator.archive_session = AsyncMock(return_value=True)  # type: ignore[method-assign]
     session = _session_with_turns(loop, turns=10)
 
     remaining_estimates = list(estimates)
@@ -90,7 +90,7 @@ async def test_consolidation_ratio_controls_target(
         runtime=runtime,
     )
 
-    assert loop.consolidator.archive.await_count == expected_archives
+    assert loop.consolidator.archive_session.await_count == expected_archives
 
 
 def test_ratio_propagated_from_config_schema() -> None:
