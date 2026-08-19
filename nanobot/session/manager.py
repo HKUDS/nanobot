@@ -39,11 +39,8 @@ from nanobot.utils.helpers import (
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
-FILE_MAX_MESSAGES = 2000
 SESSION_CACHE_MAX_SIZE = 128
-MIN_REPLAY_MAX_MESSAGES = 120
 MIN_COMPACTED_REPLAY_MESSAGES = 8
-REPLAY_TOKENS_PER_MESSAGE = 100
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -82,15 +79,6 @@ def _json_object(value: object) -> dict[str, Any]:
 def _is_provider_state_record_line(line: str) -> bool:
     """Recognize the canonical private record without decoding its opaque payload."""
     return _PROVIDER_STATE_RECORD_PREFIX_RE.match(line) is not None
-
-
-def replay_max_messages_for_context(context_window_tokens: int | None) -> int:
-    if not context_window_tokens or context_window_tokens <= 0:
-        return FILE_MAX_MESSAGES
-    return min(
-        FILE_MAX_MESSAGES,
-        max(MIN_REPLAY_MAX_MESSAGES, context_window_tokens // REPLAY_TOKENS_PER_MESSAGE),
-    )
 
 
 def _sanitize_assistant_replay_text(content: str) -> str:
@@ -209,7 +197,7 @@ class Session:
 
     def get_history(
         self,
-        max_messages: int = FILE_MAX_MESSAGES,
+        max_messages: int = 0,
         *,
         max_tokens: int = 0,
         extend_to_user: bool = False,
@@ -217,8 +205,8 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        History is sliced by message count first (``max_messages``), then by
-        token budget from the tail (``max_tokens``) when provided.
+        A positive ``max_messages`` applies an explicit caller-owned count
+        limit. The normal model path relies on ``max_tokens`` instead.
         """
         replay_start = self.last_consolidated
         if replay_start:
@@ -233,18 +221,20 @@ class Session:
             replay_start = min(replay_start, recent_start)
 
         replayable = self.messages[replay_start:]
-        max_messages = max_messages if max_messages > 0 else FILE_MAX_MESSAGES
-        unarchived_count = len(self.messages) - self.last_consolidated
-        if replay_start < self.last_consolidated and unarchived_count < max_messages:
-            # The archived replay suffix can exceed the nominal count when one
-            # tool-heavy turn spans the boundary. Preserve that complete turn.
+        if max_messages <= 0:
             start_idx = 0
         else:
-            start_idx = recent_message_start_index(
-                replayable,
-                max_messages,
-                extend_to_user=extend_to_user,
-            )
+            unarchived_count = len(self.messages) - self.last_consolidated
+            if replay_start < self.last_consolidated and unarchived_count < max_messages:
+                # The archived replay suffix can exceed the nominal count when one
+                # tool-heavy turn spans the boundary. Preserve that complete turn.
+                start_idx = 0
+            else:
+                start_idx = recent_message_start_index(
+                    replayable,
+                    max_messages,
+                    extend_to_user=extend_to_user,
+                )
         sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive
@@ -466,46 +456,6 @@ class Session:
             dropped=dropped,
             already_consolidated_count=already_consolidated,
         )
-
-    def enforce_file_cap(
-        self,
-        on_archive: Callable[[list[dict[str, Any]]], None] | None = None,
-        limit: int = FILE_MAX_MESSAGES,
-    ) -> None:
-        """Bound session message growth by archiving and trimming old prefixes."""
-        if limit <= 0 or len(self.messages) <= limit:
-            return
-
-        original_messages = self.messages
-        original_last_consolidated = self.last_consolidated
-        original_provider_state = self.provider_state
-        original_updated_at = self.updated_at
-        result = self.retain_recent_legal_suffix(limit)
-        if not result.dropped:
-            return
-
-        archive_chunk = result.dropped[result.already_consolidated_count:]
-        if archive_chunk and on_archive:
-            try:
-                on_archive(archive_chunk)
-            except BaseException:
-                # Retention runs before the archive callback so the callback can
-                # receive the exact dropped prefix. Restore the in-memory session
-                # if archival fails; otherwise a later save would persist the
-                # trimmed state and make that prefix impossible to retry.
-                self.messages = original_messages
-                self.last_consolidated = original_last_consolidated
-                self.provider_state = original_provider_state
-                self.updated_at = original_updated_at
-                raise
-        logger.info(
-            "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
-            self.key,
-            len(result.dropped),
-            len(archive_chunk),
-            len(self.messages),
-        )
-
 
 class SessionPayload(TypedDict):
     key: str
@@ -1576,7 +1526,6 @@ class SessionManager:
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
-        self._file_cap_archiver: Callable[..., None] | None = None
         self._delete_observer: Callable[[str], None] | None = None
 
     def _remember(self, session: Session) -> None:
@@ -1602,10 +1551,6 @@ class SessionManager:
     def get_cached(self, key: str) -> Session | None:
         """Return a cached session without creating or loading one from disk."""
         return self._cached(key)
-
-    def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
-        """Archive unconsolidated overflow whenever a session is persisted."""
-        self._file_cap_archiver = archiver
 
     def set_delete_observer(self, observer: Callable[[str], None]) -> None:
         """Observe explicit session deletion for process-local state cleanup."""
@@ -1704,15 +1649,6 @@ class SessionManager:
         """Persist a session and retain it in the cache."""
         if not session.policy.persist:
             return
-
-        archiver = self._file_cap_archiver
-        if archiver is not None:
-            session.enforce_file_cap(
-                on_archive=lambda messages: archiver(
-                    messages,
-                    session_key=session.key,
-                )
-            )
 
         self._store.save(session, fsync=fsync)
         self._remember(session)

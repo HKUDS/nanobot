@@ -171,12 +171,6 @@ class TestSessionTTLConfig:
         data = defaults.model_dump(mode="json", by_alias=True)
         assert data["idleCompactCheckIntervalSeconds"] == 10
 
-    def test_session_file_cap_is_internal_constant(self):
-        """Session file cap should remain an internal constant, not a config field."""
-        from nanobot.session.manager import FILE_MAX_MESSAGES
-        assert FILE_MAX_MESSAGES == 2000
-
-
 class TestIdleScanThrottling:
     """Test scheduling of full idle-session scans."""
 
@@ -255,53 +249,7 @@ class TestAgentLoopTTLParam:
         kwargs = session.get_history.call_args.kwargs
         assert isinstance(kwargs.get("max_tokens"), int)
         assert kwargs["max_tokens"] > 0
-        assert set(kwargs) == {"max_messages", "max_tokens", "extend_to_user"}
-
-    @pytest.mark.asyncio
-    async def test_session_file_cap_archives_and_trims_old_messages(self, tmp_path):
-        loop = _make_loop(tmp_path)
-        loop.context.memory.raw_archive = MagicMock()
-
-        for i in range(4):
-            msg = InboundMessage(
-                channel="cli",
-                sender_id="u1",
-                chat_id="direct",
-                content=f"hello {i}",
-            )
-            await loop._process_message(msg)
-
-        session = loop.sessions.get_or_create("cli:direct")
-        from nanobot.session.manager import FILE_MAX_MESSAGES
-        assert len(session.messages) <= FILE_MAX_MESSAGES
-
-    def test_session_enforce_file_cap_skips_archive_when_dropped_prefix_already_consolidated(self, tmp_path):
-        from nanobot.session.manager import Session
-        archive_fn = MagicMock()
-        session = Session(key="cli:direct")
-        for i in range(8):
-            session.add_message("user", f"u{i}")
-        session.last_consolidated = 6
-
-        session.enforce_file_cap(on_archive=archive_fn, limit=4)
-
-        assert len(session.messages) <= 4
-        archive_fn.assert_not_called()
-
-    def test_session_enforce_file_cap_archives_only_unconsolidated_dropped_prefix(self, tmp_path):
-        from nanobot.session.manager import Session
-        archive_fn = MagicMock()
-        session = Session(key="cli:direct")
-        for i in range(8):
-            session.add_message("user", f"u{i}")
-        session.last_consolidated = 2
-
-        session.enforce_file_cap(on_archive=archive_fn, limit=4)
-
-        assert len(session.messages) <= 4
-        archive_fn.assert_called_once()
-        archived = archive_fn.call_args.args[0]
-        assert [m["content"] for m in archived] == ["u2", "u3"]
+        assert set(kwargs) == {"max_tokens", "extend_to_user"}
 
 
 class TestAutoCompact:

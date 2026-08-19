@@ -25,7 +25,6 @@ from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
     Session,
     SessionManager,
-    replay_max_messages_for_context,
 )
 from nanobot.session.summary import session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
@@ -34,8 +33,6 @@ from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
-    find_legal_message_start,
-    recent_message_start_index,
     strip_think,
     truncate_text,
 )
@@ -868,74 +865,7 @@ class Consolidator:
         """Return all messages that can reach the next model prompt."""
         if not session.messages:
             return []
-        return session.get_history(max_messages=len(session.messages))
-
-    @staticmethod
-    def _replay_overflow_boundary(
-        session: Session,
-        replay_max_messages: int | None,
-    ) -> int | None:
-        if not replay_max_messages or replay_max_messages <= 0:
-            return None
-        tail = list(enumerate(session.messages[session.last_consolidated:], session.last_consolidated))
-        if len(tail) <= replay_max_messages:
-            return None
-
-        tail_messages = [message for _idx, message in tail]
-        start_idx = recent_message_start_index(
-            tail_messages,
-            replay_max_messages,
-            extend_to_user=True,
-        )
-        sliced = tail[start_idx:]
-        for i, (_idx, message) in enumerate(sliced):
-            if message.get("role") == "user":
-                start = i
-                if i > 0 and sliced[i - 1][1].get("_channel_delivery"):
-                    start = i - 1
-                sliced = sliced[start:]
-                break
-
-        legal_start = find_legal_message_start([message for _idx, message in sliced])
-        if legal_start:
-            sliced = sliced[legal_start:]
-        if not sliced:
-            return len(session.messages)
-
-        first_visible_idx = sliced[0][0]
-        if first_visible_idx <= session.last_consolidated:
-            return None
-        return first_visible_idx
-
-    async def _consolidate_replay_overflow(
-        self,
-        session: Session,
-        replay_max_messages: int | None,
-        *,
-        runtime: LLMRuntime,
-    ) -> str | None:
-        """Archive messages that would be hidden by the replay message window."""
-        end_idx = self._replay_overflow_boundary(session, replay_max_messages)
-        if end_idx is None:
-            return None
-        chunk = session.messages[session.last_consolidated:end_idx]
-        if not chunk:
-            return None
-        logger.info(
-            "Replay-window consolidation for {}: chunk={} msgs, replay_max={}",
-            session.key,
-            len(chunk),
-            replay_max_messages,
-        )
-        summary = await self.archive_session(
-            session,
-            archive_end=end_idx,
-            runtime=runtime,
-        )
-        session.last_consolidated = end_idx
-        session.provider_state = None
-        self.sessions.save(session)
-        return summary
+        return session.get_history()
 
     def _persist_last_summary(self, session: Session, summary: str | None) -> None:
         if summary and summary != "(nothing)":
@@ -1056,14 +986,11 @@ class Consolidator:
             messages=list(session.messages[:archive_end]),
             last_consolidated=session.last_consolidated,
         )
-        history = prefix.get_history(
-            max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
-            max_tokens=budget,
-        )
+        history = prefix.get_history(max_tokens=budget)
         archive_history = Session(
             key=session.key,
             messages=messages,
-        ).get_history(max_messages=len(messages))
+        ).get_history()
         if (
             not archive_history
             or history[-len(archive_history):] != archive_history
@@ -1125,7 +1052,6 @@ class Consolidator:
         session: Session,
         *,
         runtime: LLMRuntime,
-        replay_max_messages: int | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
@@ -1146,11 +1072,7 @@ class Consolidator:
 
             budget = self._input_token_budget(runtime)
             target = int(budget * self.consolidation_ratio)
-            last_summary = await self._consolidate_replay_overflow(
-                session,
-                replay_max_messages,
-                runtime=runtime,
-            )
+            last_summary: str | None = None
             estimated, source = self.estimate_session_prompt_tokens(
                 session,
                 runtime=runtime,

@@ -83,7 +83,6 @@ def test_loop_has_no_mutable_runtime_mirrors_or_legacy_snapshot_api(tmp_path: Pa
     }.isdisjoint(loop.__dict__)
     assert not hasattr(loop, "_apply_provider_snapshot")
     assert not hasattr(loop, "_build_model_preset_snapshot")
-    assert not hasattr(loop, "_sync_replay_max_messages")
 
 
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:

@@ -14,7 +14,6 @@ from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar, cast
 
@@ -75,12 +74,7 @@ from nanobot.session.goal_state import (
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
-from nanobot.session.manager import (
-    SESSION_CACHE_MAX_SIZE,
-    Session,
-    SessionManager,
-    replay_max_messages_for_context,
-)
+from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -386,7 +380,6 @@ class AgentLoop:
         # WebUI and fork rollback paths.  Observe that boundary once instead of
         # duplicating cleanup in each consumer.
         self.sessions.set_delete_observer(self._file_state_store.discard)
-        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
         self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
@@ -1819,14 +1812,10 @@ class AgentLoop:
             )
         if ctx.on_runtime_admitted is not None:
             await ctx.on_runtime_admitted(runtime)
-        replay_max_messages = replay_max_messages_for_context(
-            runtime.context_window_tokens
-        )
         if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 runtime=runtime,
-                replay_max_messages=replay_max_messages,
             )
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
@@ -1835,7 +1824,6 @@ class AgentLoop:
                 message_tool.start_turn()
 
         _hist_kwargs: dict[str, Any] = {
-            "max_messages": replay_max_messages,
             "max_tokens": self._replay_token_budget(runtime),
             "extend_to_user": is_subagent,
         }
@@ -1999,16 +1987,10 @@ class AgentLoop:
         )
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         if not ctx.ephemeral:
-            session.enforce_file_cap(
-                on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
-            )
             self.schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
                     session,
                     runtime=runtime,
-                    replay_max_messages=replay_max_messages_for_context(
-                        runtime.context_window_tokens
-                    ),
                 )
             )
         self._clear_pending_user_turn(session)

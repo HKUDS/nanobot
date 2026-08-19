@@ -167,40 +167,6 @@ def test_retain_drops_delivery_not_adjacent_to_anchor_user():
     assert _contents(session.messages) == ["ok", "great"]
 
 
-# --- Delivery preservation through the production entry points ---
-
-
-def test_enforce_file_cap_keeps_delivery_in_session():
-    session = Session(key="test:cap-delivery")
-    session.messages.append({"role": "user", "content": "setup"})
-    session.messages.append(_delivery("Remember to drink water"))
-    session.messages.append({"role": "user", "content": "ok"})
-    session.messages.append({"role": "assistant", "content": "great"})
-
-    archived: list[list[dict]] = []
-    session.enforce_file_cap(on_archive=archived.append, limit=3)
-
-    archived_flat = [m for chunk in archived for m in chunk]
-    assert _has_delivery(session.messages)
-    assert not any(m.get("_channel_delivery") for m in archived_flat)
-
-
-def test_enforce_file_cap_archives_only_prefix():
-    session = Session(key="test:cap-prefix")
-    session.messages.append({"role": "user", "content": "setup"})
-    session.messages.append({"role": "assistant", "content": "first reply"})
-    session.messages.append(_delivery("Remember to drink water"))
-    session.messages.append({"role": "user", "content": "ok"})
-    session.messages.append({"role": "assistant", "content": "great"})
-
-    archived: list[list[dict]] = []
-    session.enforce_file_cap(on_archive=archived.append, limit=3)
-
-    archived_flat = [m for chunk in archived for m in chunk]
-    assert _has_delivery(session.messages)
-    assert _contents(archived_flat) == ["setup", "first reply"]
-
-
 def test_compact_probe_keeps_delivery_in_visible_suffix():
     """compact_idle_session() trims a probe copy with extend_to_user=True; the
     visible suffix it keeps must still contain the delivery message."""

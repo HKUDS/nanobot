@@ -1,10 +1,8 @@
 from unittest.mock import MagicMock
 
-import pytest
-
 import nanobot.session as session_api
 from nanobot.session import Session, SessionManager
-from nanobot.session.manager import FILE_MAX_MESSAGES, SessionStore
+from nanobot.session.manager import SessionStore
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
@@ -105,49 +103,23 @@ def test_read_session_snapshot_does_not_populate_runtime_cache(tmp_path) -> None
     store.load.assert_called_once_with(stored.key)
 
 
-def test_manager_applies_file_cap_before_store_save(tmp_path) -> None:
+def test_manager_preserves_full_session_before_store_save(tmp_path) -> None:
     store = MagicMock(spec=SessionStore)
-    archiver = MagicMock()
     manager = SessionManager(tmp_path, store=store)
-    manager.set_file_cap_archiver(archiver)
     session = Session(
         key="cli:large",
         messages=[
-            {"role": "user", "content": str(index)}
-            for index in range(FILE_MAX_MESSAGES + 1)
+            {
+                "role": "user" if index % 2 == 0 else "assistant",
+                "content": str(index),
+            }
+            for index in range(2_001)
         ],
     )
 
     manager.save(session)
 
-    assert len(session.messages) == FILE_MAX_MESSAGES
-    archiver.assert_called_once()
-    store.save.assert_called_once_with(session, fsync=False)
-
-
-def test_manager_retries_file_cap_archive_after_failure(tmp_path) -> None:
-    store = MagicMock(spec=SessionStore)
-    archiver = MagicMock(side_effect=[RuntimeError("history unavailable"), None])
-    manager = SessionManager(tmp_path, store=store)
-    manager.set_file_cap_archiver(archiver)
-    session = Session(
-        key="cli:retry-large",
-        messages=[
-            {"role": "user", "content": str(index)}
-            for index in range(FILE_MAX_MESSAGES + 1)
-        ],
-    )
-
-    with pytest.raises(RuntimeError, match="history unavailable"):
-        manager.save(session)
-
-    assert len(session.messages) == FILE_MAX_MESSAGES + 1
-    store.save.assert_not_called()
-
-    manager.save(session)
-
-    assert len(session.messages) == FILE_MAX_MESSAGES
-    assert archiver.call_count == 2
-    assert archiver.call_args_list[0].args[0][0]["content"] == "0"
-    assert archiver.call_args_list[1].args[0][0]["content"] == "0"
+    assert len(session.messages) == 2_001
+    assert session.messages[0]["content"] == "0"
+    assert session.messages[-1]["content"] == "2000"
     store.save.assert_called_once_with(session, fsync=False)
