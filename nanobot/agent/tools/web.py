@@ -55,6 +55,7 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
+    {"name": "serply", "label": "Serply", "credential": "api_key"},
 )
 
 
@@ -457,6 +458,9 @@ class WebSearchTool(Tool):
         if provider == "serper":
             api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
             return "serper" if api_key else "duckduckgo"
+        if provider == "serply":
+            api_key = self.config.api_key or os.environ.get("SERPLY_API_KEY", "")
+            return "serply" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -515,6 +519,8 @@ class WebSearchTool(Tool):
             return await self._search_keenable(query, n)
         elif provider == "serper":
             return await self._search_serper(query, n)
+        elif provider == "serply":
+            return await self._search_serply(query, n)
         else:
             return ToolResult.error(f"Error: unknown search provider '{provider}'")
 
@@ -846,6 +852,47 @@ class WebSearchTool(Tool):
             return ToolResult.error(f"Error: Serper search failed ({e.response.status_code}): {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Serper search failed: {e}")
+
+    async def _search_serply(self, query: str, n: int) -> str:
+        """Search via Serply (Google Search API)."""
+        api_key = self.config.api_key or os.environ.get("SERPLY_API_KEY", "")
+        if not api_key:
+            logger.warning("SERPLY_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            # Serply sits behind Cloudflare, which rejects requests without a User-Agent.
+            headers = {
+                "X-Api-Key": api_key,
+                "Accept": "application/json",
+                "User-Agent": self.user_agent,
+            }
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.get(
+                    "https://api.serply.io/v1/search/",
+                    params={"q": query, "num": n},
+                    headers=headers,
+                    timeout=float(self.config.timeout),
+                )
+                r.raise_for_status()
+            data = cast(dict[str, Any], r.json())
+            results = cast(list[object], data.get("results", []))
+            items: list[dict[str, Any]] = [
+                {
+                    "title": result.get("title", ""),
+                    "url": result.get("link", ""),
+                    "content": result.get("description", ""),
+                }
+                for result_value in results
+                if isinstance(result_value, dict)
+                for result in (cast(dict[str, Any], result_value),)
+            ]
+            return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                return ToolResult.error("Error: Serply search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Serply search failed ({e.response.status_code}): {e}")
+        except Exception as e:
+            return ToolResult.error(f"Error: Serply search failed: {e}")
 
     async def _search_volcengine(
         self,

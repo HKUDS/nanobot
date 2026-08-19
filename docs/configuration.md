@@ -1725,6 +1725,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `bocha` | `apiKey` | `BOCHA_API_KEY` | Free tier (1M calls for startups) |
 | `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
 | `keenable` | `apiKey` (optional) | `KEENABLE_API_KEY` | Yes (no key needed; key raises limits) |
+| `serply` | `apiKey` | `SERPLY_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -1865,6 +1866,22 @@ Keenable search works out of the box with no account, via its token-less public 
 
 Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_KEY` in the environment instead of storing it in config.
 
+**Serply** (Google Search API):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "serply",
+        "apiKey": "${SERPLY_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Create a key at [serply.io](https://serply.io). You can also set `SERPLY_API_KEY` in the environment instead of storing it in config. See the [Serply documentation](https://serply.io/docs) for available result fields.
+
 **SearXNG** (self-hosted, no API key needed):
 ```json
 {
@@ -1896,7 +1913,7 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `serply`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
