@@ -455,6 +455,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             completed = MemoryStore.dream_run_completed(
                 resp,
                 had_tool_errors=progress.had_tool_errors,
+                recovered_tool_errors=progress.recovered_from_tool_errors,
             )
             if completed:
                 store.set_last_dream_cursor(last_cursor)
@@ -463,8 +464,13 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 else:
                     content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
+                reason = MemoryStore.dream_incompletion_reason(
+                    resp,
+                    had_tool_errors=progress.had_tool_errors,
+                    recovered_tool_errors=progress.recovered_from_tool_errors,
+                )
                 content = (
-                    f"Dream did not complete after {elapsed:.1f}s; "
+                    f"Dream did not complete after {elapsed:.1f}s ({reason}); "
                     "memory cursor was not advanced."
                 )
         except Exception as e:

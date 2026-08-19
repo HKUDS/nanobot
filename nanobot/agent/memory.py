@@ -52,10 +52,21 @@ if TYPE_CHECKING:
 
 
 class DreamRunProgress:
-    """Track tool failures that make a nominally completed Dream run unsafe to advance."""
+    """Track tool failures that make a nominally completed Dream run unsafe to advance.
+
+    A failure in an earlier tool round is tolerated when the model observed
+    the error, retried, and the final tool round ran clean. Only failures the
+    model never got to correct invalidate the run.
+    """
 
     def __init__(self) -> None:
         self.had_tool_errors = False
+        self.last_tool_round_had_errors: bool | None = None
+
+    @property
+    def recovered_from_tool_errors(self) -> bool:
+        """True when errors occurred but the final tool round finished clean."""
+        return self.had_tool_errors and self.last_tool_round_had_errors is False
 
     async def __call__(
         self,
@@ -63,11 +74,17 @@ class DreamRunProgress:
         tool_events: list[dict[str, Any]] | None = None,
         **_kwargs: Any,
     ) -> None:
-        if any(
-            isinstance(cast(object, event), dict) and event.get("phase") == "error"
-            for event in tool_events or ()
-        ):
+        events = [
+            event for event in tool_events or ()
+            if isinstance(cast(object, event), dict)
+        ]
+        round_had_errors = any(event.get("phase") == "error" for event in events)
+        if round_had_errors:
             self.had_tool_errors = True
+        # Terminal payloads ("end"/"error") close a tool round; the most
+        # recent closed round decides whether earlier failures were recovered.
+        if any(event.get("phase") in ("end", "error") for event in events):
+            self.last_tool_round_had_errors = round_had_errors
 
 
 class MemoryStore:
@@ -687,12 +704,39 @@ class MemoryStore:
         resp: object | None,
         *,
         had_tool_errors: bool = False,
+        recovered_tool_errors: bool = False,
     ) -> bool:
-        """Return True only when a Dream turn completed without tool failures."""
+        """Return True only when a Dream turn finished cleanly enough to advance.
+
+        Tool failures from earlier rounds are acceptable when the final tool
+        round ran clean (``recovered_tool_errors``): the model observed the
+        failure, corrected it, and produced a consistent final state. Failures
+        in the final round still invalidate the run.
+        """
         metadata = getattr(resp, "metadata", None)
-        if had_tool_errors or not isinstance(metadata, dict):
+        if not isinstance(metadata, dict):
             return False
-        return cast(dict[str, Any], metadata).get("_stop_reason") == "completed"
+        if cast(dict[str, Any], metadata).get("_stop_reason") != "completed":
+            return False
+        return not had_tool_errors or recovered_tool_errors
+
+    @staticmethod
+    def dream_incompletion_reason(
+        resp: object | None,
+        *,
+        had_tool_errors: bool = False,
+        recovered_tool_errors: bool = False,
+    ) -> str:
+        """Human-readable explanation of why a Dream run cannot advance."""
+        metadata = getattr(resp, "metadata", None)
+        if isinstance(metadata, dict):
+            stop_reason = cast(dict[str, Any], metadata).get("_stop_reason", "unknown")
+        else:
+            stop_reason = "missing response metadata"
+        parts = [f"stop_reason: {stop_reason}"]
+        if had_tool_errors and not recovered_tool_errors:
+            parts.append("unrecovered tool errors")
+        return ", ".join(parts)
 
     # -- message formatting utility ------------------------------------------
 

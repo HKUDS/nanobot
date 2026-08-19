@@ -2,7 +2,7 @@
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import DreamRunProgress, MemoryStore
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
 from nanobot.security.workspace_access import (
@@ -184,6 +184,101 @@ class TestBuildDreamPrompt:
         assert "[skip]: audit-only" in prompt
         assert "[correction]: replace the older conflicting fact" in prompt
         assert "Always strip these bracketed tags from saved memory content" in prompt
+
+
+class TestDreamRunCompletion:
+    """DreamRunProgress + dream_run_completed gate cursor advancement."""
+
+    class _Resp:
+        def __init__(self, stop_reason: str = "completed") -> None:
+            self.metadata = {"_stop_reason": stop_reason}
+
+    @staticmethod
+    async def _feed(progress: DreamRunProgress, *batches: list[dict]) -> None:
+        for batch in batches:
+            await progress("", tool_events=batch)
+
+    @pytest.mark.asyncio
+    async def test_clean_run_completes(self):
+        progress = DreamRunProgress()
+        await self._feed(
+            progress,
+            [{"phase": "start"}, {"phase": "end"}],
+        )
+        assert not progress.had_tool_errors
+        assert not progress.recovered_from_tool_errors
+        assert MemoryStore.dream_run_completed(
+            self._Resp(), had_tool_errors=progress.had_tool_errors,
+        )
+
+    @pytest.mark.asyncio
+    async def test_recovered_tool_error_completes(self):
+        """A failed edit_file retry that later succeeds must not block the cursor."""
+        progress = DreamRunProgress()
+        await self._feed(
+            progress,
+            [{"phase": "start"}, {"phase": "error"}],
+            [{"phase": "start"}, {"phase": "end"}],
+        )
+        assert progress.had_tool_errors
+        assert progress.recovered_from_tool_errors
+        assert MemoryStore.dream_run_completed(
+            self._Resp(),
+            had_tool_errors=progress.had_tool_errors,
+            recovered_tool_errors=progress.recovered_from_tool_errors,
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_in_final_tool_round_blocks(self):
+        """An error the model never corrected still invalidates the run."""
+        progress = DreamRunProgress()
+        await self._feed(
+            progress,
+            [{"phase": "start"}, {"phase": "end"}],
+            [{"phase": "start"}, {"phase": "error"}],
+        )
+        assert progress.had_tool_errors
+        assert not progress.recovered_from_tool_errors
+        assert not MemoryStore.dream_run_completed(
+            self._Resp(),
+            had_tool_errors=progress.had_tool_errors,
+            recovered_tool_errors=progress.recovered_from_tool_errors,
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_only_events_do_not_close_a_round(self):
+        progress = DreamRunProgress()
+        await self._feed(progress, [{"phase": "start"}])
+        assert not progress.had_tool_errors
+        assert progress.last_tool_round_had_errors is None
+        assert not progress.recovered_from_tool_errors
+
+    @pytest.mark.asyncio
+    async def test_thought_progress_calls_are_ignored(self):
+        progress = DreamRunProgress()
+        await progress("thinking...", tool_hint=True)
+        await progress("", file_edit_events=[{"phase": "edit"}])
+        assert not progress.had_tool_errors
+        assert progress.last_tool_round_had_errors is None
+
+    def test_non_completed_stop_reason_blocks_despite_clean_tools(self):
+        assert not MemoryStore.dream_run_completed(self._Resp("max_iterations"))
+        assert not MemoryStore.dream_run_completed(None)
+
+    def test_incompletion_reason_names_the_cause(self):
+        reason = MemoryStore.dream_incompletion_reason(
+            self._Resp("max_iterations"),
+            had_tool_errors=True,
+            recovered_tool_errors=False,
+        )
+        assert "stop_reason: max_iterations" in reason
+        assert "unrecovered tool errors" in reason
+        assert MemoryStore.dream_incompletion_reason(
+            self._Resp(), had_tool_errors=True, recovered_tool_errors=True,
+        ) == "stop_reason: completed"
+        assert MemoryStore.dream_incompletion_reason(None) == (
+            "stop_reason: missing response metadata"
+        )
 
 
 class TestDreamTools:

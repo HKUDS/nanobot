@@ -536,6 +536,7 @@ def _run_gateway(
                 completed = MemoryStore.dream_run_completed(
                     resp,
                     had_tool_errors=progress.had_tool_errors,
+                    recovered_tool_errors=progress.recovered_from_tool_errors,
                 )
                 if completed:
                     store.set_last_dream_cursor(last_cursor)
@@ -552,7 +553,12 @@ def _run_gateway(
                         )
                 else:
                     logger.warning(
-                        "Dream cron job did not complete; cursor remains at {}",
+                        "Dream cron job did not complete ({}); cursor remains at {}",
+                        MemoryStore.dream_incompletion_reason(
+                            resp,
+                            had_tool_errors=progress.had_tool_errors,
+                            recovered_tool_errors=progress.recovered_from_tool_errors,
+                        ),
                         store.get_last_dream_cursor(),
                     )
             except Exception:
