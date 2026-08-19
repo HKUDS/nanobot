@@ -32,6 +32,7 @@ from nanobot.bus.outbound_events import (
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
+    UserInputEvent,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import (
@@ -50,6 +51,7 @@ from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.session_handles import session_handle_for_name
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
@@ -2259,6 +2261,41 @@ async def test_send_broadcasts_runtime_model_updates() -> None:
     assert payload["event"] == "runtime_model_updated"
     assert payload["model_name"] == "openai/gpt-4.1"
     assert payload["model_preset"] == "fast"
+
+
+@pytest.mark.asyncio
+async def test_send_projects_external_user_input_to_existing_wire_event() -> None:
+    bus = MessageBus()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            event=UserInputEvent(
+                content="hello from another session",
+                created_at_ms=1234,
+                provenance={"name": "luma"},
+            ),
+        )
+    )
+
+    payload = json.loads(mock_ws.send.call_args.args[0])
+    assert payload == {
+        "event": "user_message",
+        "chat_id": "chat-1",
+        "text": "hello from another session",
+        "created_at_ms": 1234,
+        "starts_turn": False,
+        "provenance": {"name": "luma"},
+    }
 
 
 @pytest.mark.asyncio
@@ -5305,6 +5342,14 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         },
     ]
     monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager: sessions)
+    handle = session_handle_for_name("websocket:chat-1", "luma")
+    monkeypatch.setattr(
+        ws_http_module,
+        "SessionHandleResolver",
+        lambda _session_manager: SimpleNamespace(
+            list_all_by_key=lambda: {handle.session_key: handle}
+        ),
+    )
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -5334,6 +5379,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "preview": "work",
             "model_preset": "fast",
             "run_started_at": 1_700_000_000.0,
+            "handle": handle.public_payload(),
         }
     ]
 

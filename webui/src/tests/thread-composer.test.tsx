@@ -128,14 +128,24 @@ const MCP_PRESETS: McpPresetInfo[] = [
 ];
 
 function session(chatId: string, title: string, preview = ""): ChatSummary {
+  const key = `websocket:${chatId}`;
+  const handleId = Array.from(chatId)
+    .map((character) => character.codePointAt(0)?.toString(16).padStart(4, "0") ?? "0000")
+    .join("")
+    .padEnd(32, "0")
+    .slice(0, 32);
   return {
-    key: `websocket:${chatId}`,
+    key,
     channel: "websocket",
     chatId,
     createdAt: null,
     updatedAt: null,
     title,
     preview,
+    handle: {
+      id: `handle_${handleId}`,
+      name: title,
+    },
   };
 }
 
@@ -1840,6 +1850,7 @@ describe("ThreadComposer", () => {
 
     expect(onSend).toHaveBeenCalledWith("参考 @收费设计", undefined, {
       sessionMentions: [{
+        id: session("pricing", "收费设计").handle?.id,
         name: "收费设计",
         session_key: "websocket:pricing",
         title: "收费设计",
@@ -1893,6 +1904,7 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend).toHaveBeenCalledWith("Compare @收费设计 notes", undefined, {
       sessionMentions: [{
+        id: session("pricing", "收费设计").handle?.id,
         name: "收费设计",
         session_key: "websocket:pricing",
         title: "收费设计",
@@ -1920,40 +1932,6 @@ describe("ThreadComposer", () => {
     expect(fireEvent.dragEnter(input, { dataTransfer })).toBe(true);
     expect(fireEvent.dragOver(input, { dataTransfer })).toBe(true);
     expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
-  });
-
-  it("disambiguates duplicate and capability-colliding session names", () => {
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        cliApps={CLI_APPS}
-        mcpPresets={MCP_PRESETS}
-        sessions={[
-          ...["a", "b"].map((chatId) => session(chatId, "Plan")),
-          session("blender-chat", "Blender", "3D notes"),
-        ]}
-      />,
-    );
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
-
-    const palette = screen.getByRole("listbox", { name: "Mentions" });
-    expect(within(palette).getAllByRole("group").map((group) => (
-      group.getAttribute("aria-label")
-    ))).toEqual(["CLI apps", "MCP services", "Nanobot conversations"]);
-    const options = screen.getAllByRole("option", { name: /Plan @Plan/i });
-    expect(options.map((option) => option.textContent)).toEqual([
-      expect.stringContaining("@Plan"),
-      expect.stringContaining("@Plan-chat"),
-    ]);
-    expect(screen.getByRole("group", { name: "Nanobot conversations" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "CLI apps" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Blender @Blender-chat Reference/i }))
-      .toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Blender @blender Use/i }))
-      .toBeInTheDocument();
   });
 
   it("releases the eight-session limit when a mention is removed", () => {
@@ -2025,6 +2003,7 @@ describe("ThreadComposer", () => {
 
     expect(onSend).toHaveBeenCalledWith("@Plan", undefined, {
       sessionMentions: [{
+        id: session("z-target", "Plan").handle?.id,
         name: "Plan",
         session_key: "websocket:z-target",
         title: "Plan",

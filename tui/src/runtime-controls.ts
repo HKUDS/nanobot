@@ -7,6 +7,7 @@ import {
 
 import {
   fetchRuntimeControls,
+  type ApiReauthenticator,
   type WorkspaceScopePayload,
 } from "./protocol"
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
@@ -29,6 +30,7 @@ interface RuntimeControlsOptions {
   modelPreset: string
   workspace: string
   access: string
+  reauthenticateApi?: ApiReauthenticator
   available: () => boolean
   beforeOpen: () => void
   refreshScope: () => Promise<void>
@@ -110,6 +112,14 @@ export class RuntimeControls {
   /** Warm the small settings payload while the user is reading the first frame. */
   preload(): void {
     void this.load().catch(() => {})
+  }
+
+  useApiConnection(apiUrl: string, apiToken: string): void {
+    this.options.apiUrl = apiUrl
+    this.options.apiToken = apiToken
+    this.controlsLoaded = false
+    this.controlsLoadedAt = 0
+    this.preload()
   }
 
   updateWorkspaceScope(scope: WorkspaceScopePayload): void {
@@ -194,7 +204,11 @@ export class RuntimeControls {
       return
     }
     this.controlsPromise = (async () => {
-      const controls = await fetchRuntimeControls(this.options.apiUrl, this.options.apiToken)
+      const controls = await fetchRuntimeControls(
+        this.options.apiUrl,
+        this.options.apiToken,
+        this.options.reauthenticateApi,
+      )
       const presets = new Map(controls.modelPresets.map((preset) => [
         preset.name.toLocaleLowerCase(),
         preset,

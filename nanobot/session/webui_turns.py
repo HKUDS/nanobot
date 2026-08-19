@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -23,6 +23,7 @@ from nanobot.bus.outbound_events import (
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
+    UserInputEvent,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -35,6 +36,7 @@ from nanobot.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
+    UserInputAccepted,
 )
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.fallback_provider import FallbackModelObserver
@@ -42,12 +44,18 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.session_handles import session_handle_for_name
+from nanobot.session.session_messages import (
+    SessionMessageEnvelope,
+    session_message_envelope,
+)
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+from nanobot.webui.transcript import append_session_message_input
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -76,6 +84,19 @@ class _WebsocketTurn:
 # All in-flight lifecycle owners per chat, in admission order. The three maps
 # above remain the latest-owner projection consumed by the HTTP API.
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
+
+
+def _session_message_public_metadata(
+    envelope: SessionMessageEnvelope,
+) -> dict[str, Any]:
+    source = session_handle_for_name(
+        envelope["source_session_key"],
+        envelope["source_handle"],
+    )
+    return {
+        "message_id": envelope["message_id"],
+        "session": source.public_payload(),
+    }
 
 
 def _validated_llm_runtime(value: object) -> LLMRuntime | None:
@@ -469,7 +490,7 @@ async def publish_turn_run_status(
 
 @dataclass(frozen=True)
 class WebuiTurnRoutePolicy:
-    """Expose independently dispatched late subagent turns to WebUI sessions."""
+    """Expose independently dispatched agent turns to WebUI sessions."""
 
     sessions: SessionManager
 
@@ -479,21 +500,28 @@ class WebuiTurnRoutePolicy:
         session_key: str,
         route: TurnRoute,
     ) -> TurnRoute:
-        """Make an independently dispatched late subagent result visible in WebUI."""
+        """Make an independently dispatched agent turn visible in WebUI."""
         routed = route
+        internal_user_input = msg.channel == "system" and msg.is_user_input
         if (
-            msg.channel == "system"
-            and msg.sender_id == "subagent"
-            and msg.metadata.get("injected_event") == "subagent_result"
+            (
+                (
+                    msg.channel == "system"
+                    and msg.sender_id == "subagent"
+                    and msg.metadata.get("injected_event") == "subagent_result"
+                )
+                or internal_user_input
+            )
             and route.channel == "websocket"
         ):
             session = self.sessions.get_or_create(session_key)
             if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is True:
                 metadata = dict(route.metadata)
+                turn_prefix = "session-input" if internal_user_input else "subagent"
                 metadata.update({
                     WEBUI_SESSION_METADATA_KEY: True,
                     "_wants_stream": True,
-                    WEBUI_TURN_METADATA_KEY: f"subagent:{uuid4().hex}",
+                    WEBUI_TURN_METADATA_KEY: f"{turn_prefix}:{uuid4().hex}",
                 })
                 routed = replace(route, metadata=metadata, publish_lifecycle=True)
 
@@ -567,6 +595,10 @@ class WebuiTurnCoordinator:
         """Subscribe this coordinator to runtime events."""
         unsubscribe = [
             runtime_events.subscribe(
+                self._handle_user_input_accepted,
+                UserInputAccepted,
+            ),
+            runtime_events.subscribe(
                 self._handle_session_turn_started,
                 SessionTurnStarted,
             ),
@@ -612,6 +644,49 @@ class WebuiTurnCoordinator:
     @staticmethod
     def _is_websocket_event(ctx: RuntimeEventContext) -> bool:
         return ctx.channel == "websocket"
+
+    async def _handle_user_input_accepted(self, event: UserInputAccepted) -> None:
+        envelope = session_message_envelope(event.context.metadata)
+        session_key = event.context.session_key
+        if (
+            event.context.channel != "system"
+            or envelope is None
+            or envelope["target_session_key"] != session_key
+            or not session_key.startswith("websocket:")
+        ):
+            return
+        persisted = self.sessions.read_session_metadata(session_key)
+        metadata_value: object = persisted.get("metadata") if persisted is not None else None
+        metadata = (
+            cast(dict[str, Any], metadata_value)
+            if isinstance(metadata_value, dict)
+            else None
+        )
+        if metadata is None or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+            return
+        public_metadata = _session_message_public_metadata(envelope)
+        try:
+            append_session_message_input(
+                session_key,
+                content=event.content,
+                created_at_ms=envelope["created_at_ms"],
+                session_message=public_metadata,
+            )
+        except (OSError, TypeError, ValueError):
+            logger.warning(
+                "Failed to persist session input {}",
+                envelope["message_id"],
+                exc_info=True,
+            )
+        await self.bus.publish_outbound(outbound_message_for_event(
+            channel="websocket",
+            chat_id=session_key.split(":", 1)[1],
+            event=UserInputEvent(
+                content=event.content,
+                created_at_ms=envelope["created_at_ms"],
+                provenance={"session_message": public_metadata},
+            ),
+        ))
 
     def _handle_session_turn_started(self, event: SessionTurnStarted) -> None:
         if not self._is_websocket_event(event.context):

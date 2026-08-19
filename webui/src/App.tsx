@@ -2379,6 +2379,7 @@ function Shell({
           key: session.key,
           chatId: session.chatId,
           title: titleForSession(session),
+          handle: session.handle,
         }));
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,

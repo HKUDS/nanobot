@@ -14,6 +14,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.runtime_context import RuntimeContextBlock, append_runtime_context
 from nanobot.session.manager import SessionManager
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.transcript import append_transcript_object
 
 
@@ -135,7 +136,10 @@ async def test_search_sessions_has_no_hidden_content_scan_cutoff(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_search_sessions_ranks_titles_before_message_matches(tmp_path):
+async def test_search_sessions_ranks_titles_before_message_matches(tmp_path, monkeypatch):
+    webui_dir = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
     manager = SessionManager(tmp_path)
     _save_session(
         manager,
@@ -289,7 +293,32 @@ async def test_session_tools_read_persisted_sessions_from_any_channel(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_tools_work_without_request_context(tmp_path):
+async def test_read_session_accepts_a_persisted_session_handle(tmp_path):
+    manager = SessionManager(tmp_path)
+    _save_session(
+        manager,
+        "slack:history",
+        title="Slack history",
+        messages=[{"role": "user", "content": "needle"}],
+    )
+    handle = SessionHandleResolver(manager).handle_for_session("slack:history")
+    assert handle is not None
+
+    with _webui_request():
+        result = _decode(await ReadSessionTool(manager).execute(
+            session_key=f"@{handle.name}",
+        ))
+
+    assert result["handle"] == f"@{handle.name}"
+    assert [message["content"] for message in result["messages"]] == ["needle"]
+    assert "session_key" not in result
+
+
+@pytest.mark.asyncio
+async def test_session_tools_work_without_request_context(tmp_path, monkeypatch):
+    webui_dir = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
     manager = SessionManager(tmp_path)
     _save_session(
         manager,

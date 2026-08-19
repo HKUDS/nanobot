@@ -36,6 +36,7 @@ from nanobot.bus.outbound_events import (
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
+    UserInputEvent,
     outbound_event_from_message,
 )
 from nanobot.bus.queue import MessageBus
@@ -1670,6 +1671,7 @@ class WebSocketChannel(BaseChannel):
             if isinstance(
                 event,
                 ProgressEvent
+                | UserInputEvent
                 | TurnEndEvent
                 | SessionUpdatedEvent
                 | GoalStatusEvent
@@ -1685,6 +1687,15 @@ class WebSocketChannel(BaseChannel):
                     model_name=event.model,
                     model_preset=event.model_preset,
                     context_window_tokens=event.context_window_tokens,
+                )
+            return
+        if isinstance(event, UserInputEvent):
+            if conns:
+                await self.send_user_input(
+                    msg.chat_id,
+                    content=event.content,
+                    created_at_ms=event.created_at_ms,
+                    provenance=event.provenance,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -2066,6 +2077,31 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" session_updated ")
+
+    async def send_user_input(
+        self,
+        chat_id: str,
+        *,
+        content: str,
+        created_at_ms: int,
+        provenance: dict[str, Any],
+    ) -> None:
+        """Project user input produced outside a WebSocket connection."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "user_message",
+            "chat_id": chat_id,
+            "text": content,
+            "created_at_ms": created_at_ms,
+            "starts_turn": False,
+        }
+        if provenance:
+            body["provenance"] = provenance
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" user_message ")
 
     async def send_runtime_model_updated(
         self,

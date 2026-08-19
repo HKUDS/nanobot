@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -63,6 +63,7 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
+import { sessionHandleColor } from "@/lib/session-handle";
 import {
   clearDraggedSession,
   hasDraggedSession,
@@ -103,8 +104,10 @@ function SidebarItemTooltip({
 
 function SidebarSelectionTrack({
   active,
+  handle,
 }: {
   active: boolean;
+  handle: ChatSummary["handle"];
 }) {
   return (
     <span
@@ -112,11 +115,35 @@ function SidebarSelectionTrack({
       data-active={active ? "true" : "false"}
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left rounded-full bg-current",
+        "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left rounded-full",
         "transition-transform duration-200 ease-out motion-reduce:transition-none",
         active ? "scale-x-100" : "scale-x-0",
       )}
+      style={{
+        backgroundColor: handle ? sessionHandleColor(handle.id) : "currentColor",
+      }}
     />
+  );
+}
+
+function SidebarSessionHandle({ handle }: { handle: ChatSummary["handle"] }) {
+  if (!handle) return null;
+  return (
+    <span
+      data-sidebar-session-handle
+      className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] font-medium leading-5"
+    >
+      <span
+        data-sidebar-session-handle-underline
+        className="inline border-b-2 text-foreground"
+        style={{
+          "--sidebar-session-handle-color": sessionHandleColor(handle.id),
+          borderBottomColor: "var(--sidebar-session-handle-color)",
+        } as CSSProperties}
+      >
+        @{handle.name}
+      </span>
+    </span>
   );
 }
 
@@ -160,6 +187,7 @@ export interface SidebarPaneGroup {
     key: string;
     chatId: string;
     title: string;
+    handle?: ChatSummary["handle"];
   }>;
 }
 
@@ -965,27 +993,29 @@ export const ChatList = memo(function ChatList({
                                   partial={tabPartiallySelected}
                                 />
                               ) : null}
-                              <span className="min-w-0 flex-1 overflow-hidden">
-                                {projectMode ? (
-                                  <span className="relative flex w-full min-w-0 items-baseline gap-2">
-                                    <span className="min-w-0 flex-1 truncate font-medium leading-5">
-                                      {title}
-                                    </span>
-                                    {isPinned ? <PinnedChatIndicator /> : null}
+                                <span className="min-w-0 flex-1 overflow-hidden">
+                                  {projectMode ? (
+                                    <span className="relative flex w-full min-w-0 items-baseline gap-2">
+                                      <SidebarSessionHandle handle={s.handle} />
+                                      <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                                        {title}
+                                      </span>
+                                      {isPinned ? <PinnedChatIndicator /> : null}
                                     {timestamp ? (
                                       <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground/58">
                                         {timestamp}
                                       </span>
                                     ) : null}
-                                    <SidebarSelectionTrack active={topicActive} />
+                                    <SidebarSelectionTrack active={topicActive} handle={s.handle} />
                                   </span>
                                 ) : (
                                   <span className="relative flex w-full min-w-0 items-center gap-1.5">
+                                    <SidebarSessionHandle handle={s.handle} />
                                     <span className="min-w-0 flex-1 truncate font-medium leading-5">
                                       {title}
                                     </span>
                                     {isPinned ? <PinnedChatIndicator /> : null}
-                                    <SidebarSelectionTrack active={topicActive} />
+                                    <SidebarSelectionTrack active={topicActive} handle={s.handle} />
                                   </span>
                                 )}
                                 {showPreview ? (
@@ -1405,7 +1435,9 @@ function ActivePaneRows({
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
             >
-              <SidebarItemTooltip label={pane.title}>
+              <SidebarItemTooltip
+                label={pane.handle ? `@${pane.handle.name} · ${pane.title}` : pane.title}
+              >
                 <button
                   type="button"
                   onClick={(event) => {
@@ -1437,9 +1469,10 @@ function ActivePaneRows({
                     <SelectionIndicator checked={selected} partial={false} />
                   ) : null}
                   <span className="relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                    <SidebarSessionHandle handle={pane.handle} />
                     <span className="min-w-0 flex-1 truncate">{pane.title}</span>
                     {isPinned ? <PinnedChatIndicator /> : null}
-                    <SidebarSelectionTrack active={active} />
+                    <SidebarSelectionTrack active={active} handle={pane.handle} />
                   </span>
                 </button>
               </SidebarItemTooltip>

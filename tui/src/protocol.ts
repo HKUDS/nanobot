@@ -151,11 +151,35 @@ type OutboundEvent =
     }
 
 export interface ClientOptions {
-  url: string
+  url?: string
+  resolveConnection?: () => Promise<GatewayConnection>
+  onConnection?: (connection: GatewayConnection) => void
+  connectionRetryLabel?: string
+  startupRetryMaxDelayMs?: number
   chatId?: string
   reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
   onStatus: (status: ConnectionStatus, detail?: string) => void
+}
+
+export interface GatewayApiConnection {
+  apiUrl: string
+  apiToken: string
+}
+
+export interface GatewayConnection extends GatewayApiConnection {
+  wsUrl: string
+}
+
+export type ApiReauthenticator = (
+  rejectedApiToken: string,
+) => Promise<GatewayApiConnection>
+
+export class GatewayConnectionError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message)
+    this.name = "GatewayConnectionError"
+  }
 }
 
 export interface HistoryMessage {
@@ -443,11 +467,26 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   return value as InboundEvent
 }
 
+async function fetchApi(
+  apiUrl: string,
+  apiToken: string,
+  path: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<Response> {
+  const request = (connection: GatewayApiConnection) => fetch(`${connection.apiUrl}${path}`, {
+    headers: { Authorization: `Bearer ${connection.apiToken}` },
+  })
+  const response = await request({ apiUrl, apiToken })
+  if (response.status !== 401 || !reauthenticate) return response
+  return request(await reauthenticate(apiToken))
+}
+
 export async function fetchHistory(
   apiUrl: string,
   apiToken: string,
   chatId: string,
   beforeCursor?: string | null,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<HistorySnapshot> {
   if (!apiUrl || !apiToken) {
     return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
@@ -455,9 +494,12 @@ export async function fetchHistory(
   const key = encodeURIComponent(`websocket:${chatId}`)
   const params = new URLSearchParams({ limit: "120", direction: "latest" })
   if (beforeCursor) params.set("before", beforeCursor)
-  const response = await fetch(`${apiUrl}/api/sessions/${key}/webui-thread?${params}`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const response = await fetchApi(
+    apiUrl,
+    apiToken,
+    `/api/sessions/${key}/webui-thread?${params}`,
+    reauthenticate,
+  )
   if (response.status === 404) {
     return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
   }
@@ -527,12 +569,16 @@ export async function fetchSessionContext(
   apiUrl: string,
   apiToken: string,
   chatId: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<SessionContextSnapshot | null> {
   if (!apiUrl || !apiToken) return null
   const key = encodeURIComponent(`websocket:${chatId}`)
-  const response = await fetch(`${apiUrl}/api/sessions/${key}/context`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const response = await fetchApi(
+    apiUrl,
+    apiToken,
+    `/api/sessions/${key}/context`,
+    reauthenticate,
+  )
   if (response.status === 404) return null
   if (!response.ok) throw new Error(`context request failed: HTTP ${response.status}`)
   const value = await response.json() as Record<string, unknown>
@@ -555,11 +601,10 @@ export async function fetchSessionContext(
 export async function fetchSlashCommands(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<SlashCommand[]> {
   if (!apiUrl || !apiToken) return []
-  const response = await fetch(`${apiUrl}/api/commands`, {
-    headers: { Authorization: `Bearer ${apiToken}` },
-  })
+  const response = await fetchApi(apiUrl, apiToken, "/api/commands", reauthenticate)
   if (!response.ok) throw new Error(`command request failed: HTTP ${response.status}`)
   const payload = await response.json() as { commands?: unknown[] }
   return (payload.commands || []).flatMap((value) => {
@@ -583,12 +628,12 @@ export async function fetchSlashCommands(
 export async function fetchRuntimeControls(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<RuntimeControls> {
   if (!apiUrl || !apiToken) return { modelPresets: [], canUseFullAccess: false }
-  const headers = { Authorization: `Bearer ${apiToken}` }
   const [settingsResponse, workspacesResponse] = await Promise.all([
-    fetch(`${apiUrl}/api/settings`, { headers }),
-    fetch(`${apiUrl}/api/workspaces`, { headers }).catch(() => null),
+    fetchApi(apiUrl, apiToken, "/api/settings", reauthenticate),
+    fetchApi(apiUrl, apiToken, "/api/workspaces", reauthenticate).catch(() => null),
   ])
   if (!settingsResponse.ok) {
     throw new Error(`settings request failed: HTTP ${settingsResponse.status}`)
@@ -614,12 +659,12 @@ export async function fetchRuntimeControls(
 export async function fetchSessions(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<SessionSummary[]> {
   if (!apiUrl || !apiToken) return []
-  const headers = { Authorization: `Bearer ${apiToken}` }
   const [response, sidebarResponse] = await Promise.all([
-    fetch(`${apiUrl}/api/sessions`, { headers }),
-    fetch(`${apiUrl}/api/webui/sidebar-state`, { headers }).catch(() => null),
+    fetchApi(apiUrl, apiToken, "/api/sessions", reauthenticate),
+    fetchApi(apiUrl, apiToken, "/api/webui/sidebar-state", reauthenticate).catch(() => null),
   ])
   if (!response.ok) throw new Error(`session request failed: HTTP ${response.status}`)
   const payload = await response.json() as { sessions?: unknown[] }
@@ -675,13 +720,18 @@ function sessionMentionName(session: SessionSummary): string {
 export async function fetchMentionCandidates(
   apiUrl: string,
   apiToken: string,
+  reauthenticate?: ApiReauthenticator,
 ): Promise<MentionCandidate[]> {
   if (!apiUrl || !apiToken) return []
-  const headers = { Authorization: `Bearer ${apiToken}` }
   const [sessions, appsResponse, mcpResponse] = await Promise.all([
-    fetchSessions(apiUrl, apiToken),
-    fetch(`${apiUrl}/api/settings/cli-apps?installed_only=1`, { headers }).catch(() => null),
-    fetch(`${apiUrl}/api/settings/mcp-presets`, { headers }).catch(() => null),
+    fetchSessions(apiUrl, apiToken, reauthenticate),
+    fetchApi(
+      apiUrl,
+      apiToken,
+      "/api/settings/cli-apps?installed_only=1",
+      reauthenticate,
+    ).catch(() => null),
+    fetchApi(apiUrl, apiToken, "/api/settings/mcp-presets", reauthenticate).catch(() => null),
   ])
   const used = new Set<string>()
   const uniqueName = (raw: string) => {
@@ -747,12 +797,63 @@ function sessionLabelForMention(session: SessionSummary): string {
   return (session.title || session.preview || "Untitled chat").replace(/\s+/gu, " ").trim()
 }
 
+/** Resolve fresh short-lived credentials once the local gateway is reachable. */
+export async function fetchGatewayConnection(
+  bootstrapUrl: string,
+  bootstrapSecret: string,
+  apiUrl: string,
+  clientId: string,
+): Promise<GatewayConnection> {
+  const response = await fetch(bootstrapUrl, {
+    headers: bootstrapSecret ? { "X-Nanobot-Auth": bootstrapSecret } : {},
+  })
+  if (!response.ok) {
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500
+    throw new GatewayConnectionError(
+      `gateway bootstrap failed: HTTP ${response.status}`,
+      retryable,
+    )
+  }
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    throw new GatewayConnectionError("gateway bootstrap response is invalid", false)
+  }
+  if (!isRecord(payload)) {
+    throw new GatewayConnectionError("gateway bootstrap response is invalid", false)
+  }
+  if (typeof payload.ws_url !== "string" || !payload.ws_url.trim()) {
+    throw new GatewayConnectionError("gateway bootstrap response is missing ws_url", false)
+  }
+  let wsUrl: URL
+  try {
+    wsUrl = new URL(payload.ws_url)
+  } catch {
+    throw new GatewayConnectionError("gateway bootstrap response has an invalid ws_url", false)
+  }
+  if (wsUrl.protocol !== "ws:" && wsUrl.protocol !== "wss:") {
+    throw new GatewayConnectionError("gateway bootstrap response has an invalid ws_url", false)
+  }
+  if (typeof payload.token === "string" && payload.token) {
+    wsUrl.searchParams.append("token", payload.token)
+  }
+  wsUrl.searchParams.append("client_id", clientId)
+  return {
+    wsUrl: wsUrl.toString(),
+    apiUrl,
+    apiToken: typeof payload.api_token === "string" ? payload.api_token : "",
+  }
+}
+
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private closedByClient = false
+  private opening = false
+  private connectedOnce = false
 
   constructor(private readonly options: ClientOptions) {}
 
@@ -762,16 +863,46 @@ export class NanobotClient {
 
   connect(): void {
     this.closedByClient = false
-    this.open()
+    void this.open()
   }
 
-  private open(): void {
-    if (this.socket) return
+  private async open(): Promise<void> {
+    if (this.socket || this.opening || this.closedByClient) return
+    this.opening = true
     this.options.onStatus("connecting")
-    const socket = new WebSocket(this.options.url)
+    let url = this.options.url
+    try {
+      if (this.options.resolveConnection) {
+        const connection = await this.options.resolveConnection()
+        if (this.closedByClient) return
+        this.options.onConnection?.(connection)
+        url = connection.wsUrl
+      }
+    } catch (error) {
+      if (!this.closedByClient) {
+        if (error instanceof GatewayConnectionError && !error.retryable) {
+          this.options.onStatus("error", error.message)
+          return
+        }
+        this.options.onStatus(
+          "connecting",
+          this.options.connectionRetryLabel || "gateway unavailable",
+        )
+        this.scheduleReconnect(false)
+      }
+      return
+    } finally {
+      this.opening = false
+    }
+    if (!url) {
+      this.options.onStatus("error", "gateway URL is not configured")
+      return
+    }
+    const socket = new WebSocket(url)
     this.socket = socket
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return
+      this.connectedOnce = true
       this.reconnectAttempt = 0
       this.options.onStatus("connected")
     })
@@ -872,14 +1003,17 @@ export class NanobotClient {
     this.options.onEvent(event)
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect(announce = true): void {
     if (this.reconnectTimer || this.closedByClient) return
     const base = this.options.reconnectDelayMs ?? 500
-    const delay = Math.min(8_000, base * 2 ** Math.min(this.reconnectAttempt++, 4))
-    this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
+    const maxDelay = this.connectedOnce
+      ? 8_000
+      : this.options.startupRetryMaxDelayMs ?? 8_000
+    const delay = Math.min(maxDelay, base * 2 ** Math.min(this.reconnectAttempt++, 4))
+    if (announce) this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.open()
+      void this.open()
     }, delay)
   }
 

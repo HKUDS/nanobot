@@ -23,6 +23,7 @@ from nanobot.optional_features import InstallResult
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
@@ -2212,10 +2213,6 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
     }
     sm.save(scoped)
 
-    def fail_metadata_read(_key: str) -> None:
-        raise AssertionError("the session list must use its own index metadata")
-
-    monkeypatch.setattr(sm, "read_session_metadata", fail_metadata_read)
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=29906)
     server_task = asyncio.create_task(channel.start())
     try:
@@ -2232,6 +2229,16 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
         rows = {row["key"]: row for row in sessions}
+        handles = {
+            handle.session_key: handle
+            for handle in SessionHandleResolver(sm).list_all()
+        }
+        assert rows["websocket:alpha"]["handle"] == handles[
+            "websocket:alpha"
+        ].public_payload()
+        assert rows["websocket:beta"]["handle"] == handles[
+            "websocket:beta"
+        ].public_payload()
         assert rows["websocket:beta"]["workspace_scope"]["project_path"] == str(
             project.resolve()
         )

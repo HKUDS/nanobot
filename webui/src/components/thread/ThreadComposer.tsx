@@ -109,6 +109,7 @@ import type {
 import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
+import { sessionHandleColor } from "@/lib/session-handle";
 import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
@@ -367,40 +368,16 @@ function mentionInsertion(
   };
 }
 
-function sessionMentionBase(session: ChatSummary): string {
-  const label = session.title?.trim() || session.preview.trim() || "session";
-  const slug = label
-    .normalize("NFKC")
-    .replace(/\s+/g, "-")
-    .replace(/[^\p{L}\p{N}_-]+/gu, "")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return Array.from(slug || "session").slice(0, 40).join("");
-}
-
-function sessionMentionOptions(
-  sessions: ChatSummary[],
-  reservedNames: string[],
-): SessionMention[] {
-  const used = new Set(reservedNames.map((name) => name.toLowerCase()));
-  const namesByKey = new Map<string, string>();
-  for (const session of [...sessions].sort((a, b) => a.key.localeCompare(b.key))) {
-    const base = sessionMentionBase(session);
-    let name = base;
-    let suffix = 2;
-    if (used.has(name.toLowerCase())) name = `${base}-chat`;
-    while (used.has(name.toLowerCase())) {
-      name = `${base}-chat-${suffix}`;
-      suffix += 1;
-    }
-    used.add(name.toLowerCase());
-    namesByKey.set(session.key, name);
-  }
-  return sessions.map((session) => ({
-    name: namesByKey.get(session.key) ?? sessionMentionBase(session),
-    session_key: session.key,
-    title: session.title?.trim() || session.preview.trim(),
-  }));
+function sessionMentionOptions(sessions: ChatSummary[]): SessionMention[] {
+  return sessions.flatMap((session) => {
+    if (!session.handle) return [];
+    return [{
+      id: session.handle.id,
+      name: session.handle.name,
+      session_key: session.key,
+      title: session.title?.trim() || session.preview.trim(),
+    }];
+  });
 }
 
 interface SlashPaletteCommand {
@@ -472,6 +449,9 @@ function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
       || !/^[\p{L}\p{N}_-]+$/u.test(name)
     ) return [];
     return [{
+      ...(typeof candidate.id === "string" && /^handle_[a-f0-9]{32}$/i.test(candidate.id)
+        ? { id: candidate.id }
+        : {}),
       name,
       session_key: sessionKey,
       title: candidate.title?.trim().slice(0, 160) ?? "",
@@ -1285,16 +1265,8 @@ export function ThreadComposer({
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
 
   const availableSessionMentions = useMemo(
-    () => sessionMentionOptions(
-      sessions,
-      [
-        ...cliApps.filter((app) => app.installed).map((app) => app.name),
-        ...mcpPresets
-          .filter((preset) => preset.installed && preset.configured)
-          .map((preset) => preset.name),
-      ],
-    ),
-    [cliApps, mcpPresets, sessions],
+    () => sessionMentionOptions(sessions),
+    [sessions],
   );
   const mentionSegments = useMemo(
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
@@ -1343,8 +1315,12 @@ export function ThreadComposer({
         displayName: mention.title || mention.name,
         mention,
       }));
+    const sessionNames = new Set(
+      availableSessionMentions.map((mention) => mention.name.toLowerCase()),
+    );
     const cliCandidates: MentionCandidate[] = cliApps
       .filter((app) => app.installed)
+      .filter((app) => !sessionNames.has(app.name.toLowerCase()))
       .filter((app) => {
         const haystack = [
           app.name,
@@ -1365,6 +1341,7 @@ export function ThreadComposer({
       }));
     const mcpCandidates: MentionCandidate[] = mcpPresets
       .filter((preset) => preset.installed && preset.configured)
+      .filter((preset) => !sessionNames.has(preset.name.toLowerCase()))
       .filter((preset) => {
         const haystack = [
           preset.name,
@@ -1384,9 +1361,9 @@ export function ThreadComposer({
         initials: mcpPresetInitials(preset),
       }));
     const groups = [
+      { candidates: sessionCandidates, reserved: 4 },
       { candidates: cliCandidates, reserved: 2 },
       { candidates: mcpCandidates, reserved: 2 },
-      { candidates: sessionCandidates, reserved: 4 },
     ];
     let remaining = 8;
     const counts = groups.map(({ candidates, reserved }) => {
@@ -1394,7 +1371,7 @@ export function ThreadComposer({
       remaining -= count;
       return count;
     });
-    for (const index of [2, 0, 1]) {
+    for (const index of [0, 1, 2]) {
       const extra = Math.min(remaining, groups[index].candidates.length - counts[index]);
       counts[index] += extra;
       remaining -= extra;
@@ -2971,7 +2948,7 @@ function CliAppMentionPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
-  const groupedCandidates = (["cli", "mcp", "session"] as const)
+  const groupedCandidates = (["session", "cli", "mcp"] as const)
     .map((kind) => ({
       kind,
       label: kind === "session"
@@ -3075,7 +3052,9 @@ function MentionCandidateLogo({
   selected: boolean;
 }) {
   const color = candidate.kind === "session"
-    ? INLINE_TOKEN_HIGHLIGHT_COLOR
+    ? candidate.mention.id
+      ? sessionHandleColor(candidate.mention.id)
+      : INLINE_TOKEN_HIGHLIGHT_COLOR
     : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
@@ -3083,7 +3062,10 @@ function MentionCandidateLogo({
 
   if (candidate.kind === "session") {
     return (
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground">
+      <span
+        className="flex h-5 w-5 shrink-0 items-center justify-center"
+        style={{ color }}
+      >
         <MessageCircle className="h-4 w-4" aria-hidden />
       </span>
     );

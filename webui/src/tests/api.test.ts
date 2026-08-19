@@ -1110,6 +1110,10 @@ describe("webui API helpers", () => {
             title: "优化 WebUI 标题",
             model_preset: "fast",
             run_started_at: 1_700_000_000,
+            handle: {
+              id: "handle_0123456789abcdef0123456789abcdef",
+              name: "mira-0123456789",
+            },
           },
         ],
       }),
@@ -1122,6 +1126,10 @@ describe("webui API helpers", () => {
         preview: "",
         modelPreset: "fast",
         runStartedAt: 1_700_000_000,
+        handle: {
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
+        },
       },
     ]);
   });

@@ -1,12 +1,6 @@
 import { NanobotTui, type AppOptions } from "./app"
 import { currentGitBranch } from "./host"
 
-function required(name: string): string {
-  const value = process.env[name]?.trim()
-  if (!value) throw new Error(`${name} is required`)
-  return value
-}
-
 function themePreference(): AppOptions["theme"] {
   const value = process.env.NANOBOT_TUI_THEME?.trim() || "auto"
   if (value === "auto" || value === "dark" || value === "light") return value
@@ -15,8 +9,18 @@ function themePreference(): AppOptions["theme"] {
 
 const workspace = process.env.NANOBOT_TUI_WORKSPACE?.trim() || ""
 const hostWorkspace = process.cwd()
+const bootstrapUrl = process.env.NANOBOT_TUI_BOOTSTRAP_URL?.trim() || ""
+const wsUrl = process.env.NANOBOT_TUI_WS_URL?.trim() || ""
+if (!bootstrapUrl && !wsUrl) {
+  throw new Error("NANOBOT_TUI_BOOTSTRAP_URL or NANOBOT_TUI_WS_URL is required")
+}
 const options: AppOptions = {
-  wsUrl: required("NANOBOT_TUI_WS_URL"),
+  ...(bootstrapUrl
+    ? {
+        bootstrapUrl,
+        bootstrapSecret: process.env.NANOBOT_TUI_BOOTSTRAP_SECRET?.trim() || "",
+      }
+    : { wsUrl }),
   apiUrl: process.env.NANOBOT_TUI_API_URL?.trim() || "",
   apiToken: process.env.NANOBOT_TUI_API_TOKEN?.trim() || "",
   chatId: process.env.NANOBOT_TUI_CHAT_ID?.trim() || undefined,

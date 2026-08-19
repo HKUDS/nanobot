@@ -41,6 +41,14 @@ class SessionTurnStarted:
 
 
 @dataclass(frozen=True)
+class UserInputAccepted:
+    """User input was accepted for dispatch or injection into a session."""
+
+    context: RuntimeEventContext
+    content: str
+
+
+@dataclass(frozen=True)
 class TurnRuntimeAdmitted:
     """The immutable model runtime selected for one admitted turn."""
 
@@ -93,7 +101,8 @@ class RuntimeModelChanged:
 
 
 RuntimeEvent = (
-    SessionTurnStarted
+    UserInputAccepted
+    | SessionTurnStarted
     | TurnRuntimeAdmitted
     | SessionTurnPersisted
     | TurnRunStatusChanged
@@ -102,7 +111,8 @@ RuntimeEvent = (
     | RuntimeModelChanged
 )
 RuntimeEventType = (
-    type[SessionTurnStarted]
+    type[UserInputAccepted]
+    | type[SessionTurnStarted]
     | type[TurnRuntimeAdmitted]
     | type[SessionTurnPersisted]
     | type[TurnRunStatusChanged]
@@ -208,6 +218,23 @@ class RuntimeEventPublisher:
         self._turn_runtime.pop(session_key, None)
         self._turn_usage.pop(session_key, None)
 
+    async def user_input_accepted(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+    ) -> None:
+        await self.bus.publish(
+            UserInputAccepted(
+                context=self._context(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    session_key=session_key,
+                    metadata=msg.metadata,
+                ),
+                content=msg.content,
+            )
+        )
+
     async def session_turn_started(
         self,
         msg: InboundMessage,
@@ -220,7 +247,7 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
-                )
+                ),
             )
         )
 

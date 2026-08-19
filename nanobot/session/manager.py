@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import stat
 from collections import OrderedDict
 from contextlib import contextmanager, suppress
@@ -58,6 +59,7 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
     "runtime_checkpoint",
+    "session_handle",
     "thread_goal",
     "title",
     "title_user_edited",
@@ -556,6 +558,14 @@ class SessionStore(Protocol):
     def read(self, key: str) -> SessionPayload | None: ...
 
     def read_metadata(self, key: str) -> SessionMetadataPayload | None: ...
+
+    def update_metadata(
+        self,
+        key: str,
+        updates: dict[str, Any],
+        *,
+        fsync: bool = False,
+    ) -> bool: ...
 
     def list_sessions(self) -> list[SessionInfo]: ...
 
@@ -1268,6 +1278,49 @@ class JsonlSessionStore:
         finally:
             tmp_path.unlink(missing_ok=True)
 
+    def update_metadata(
+        self,
+        key: str,
+        updates: dict[str, Any],
+        *,
+        fsync: bool = False,
+    ) -> bool:
+        """Atomically replace only a session file's metadata record."""
+        with self._session_files_lock:
+            path = self.get_session_path(key)
+            if not path.exists():
+                return False
+            tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+            try:
+                with open(path, encoding="utf-8") as source:
+                    first_line = source.readline()
+                    data = _json_object(json.loads(first_line))
+                    if data.get("_type") != "metadata":
+                        return False
+                    raw_metadata = cast(object, data.get("metadata", {}))
+                    metadata = (
+                        dict(cast(dict[str, Any], raw_metadata))
+                        if isinstance(raw_metadata, dict)
+                        else {}
+                    )
+                    metadata.update(deepcopy(updates))
+                    data["metadata"] = metadata
+                    with open(tmp_path, "x", encoding="utf-8") as target:
+                        target.write(json.dumps(data, ensure_ascii=False) + "\n")
+                        shutil.copyfileobj(source, target)
+                        if fsync:
+                            target.flush()
+                            os.fsync(target.fileno())
+                os.replace(tmp_path, path)
+                if fsync:
+                    self._fsync_directory(path.parent)
+                return True
+            except _SESSION_DATA_ERRORS as exc:
+                logger.warning("Failed to update session metadata {}: {}", key, exc)
+                return False
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
     def delete(self, key: str) -> bool:
         with self._session_files_lock:
             return self._delete_unlocked(key)
@@ -1807,6 +1860,19 @@ class SessionManager:
     def read_session_metadata(self, key: str) -> dict[str, Any] | None:
         """Read session metadata without loading the transcript."""
         return cast(dict[str, Any] | None, self._store.read_metadata(key))
+
+    def update_session_metadata(
+        self,
+        key: str,
+        updates: dict[str, Any],
+        *,
+        fsync: bool = False,
+    ) -> bool:
+        """Atomically update metadata without replacing session history."""
+        updated = self._store.update_metadata(key, updates, fsync=fsync)
+        if updated and (session := self.get_cached(key)) is not None:
+            session.metadata.update(deepcopy(updates))
+        return updated
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())

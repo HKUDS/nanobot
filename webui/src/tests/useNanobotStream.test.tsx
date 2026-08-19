@@ -1919,6 +1919,44 @@ describe("useNanobotStream", () => {
     expect(result.current.runStartedAt).toBe(1_700_000_000);
   });
 
+  it("projects a cross-session input with its public handle exactly once", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-target", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+    const event: InboundEvent = {
+      event: "user_message",
+      chat_id: "chat-target",
+      text: "Please review this.",
+      created_at_ms: 1_700_000_000_123,
+      starts_turn: false,
+      provenance: {
+        session_message: {
+          message_id: "message-1",
+          session: {
+            id: "handle_0123456789abcdef0123456789abcdef",
+            name: "mira-0123456789",
+          },
+        },
+      },
+    };
+
+    act(() => {
+      fake.emit("chat-target", event);
+      fake.emit("chat-target", event);
+    });
+
+    expect(result.current.messages).toEqual([expect.objectContaining({
+      id: "session-message:message-1",
+      role: "user",
+      content: "Please review this.",
+      createdAt: 1_700_000_000_123,
+      sessionMessage: event.provenance?.session_message,
+    })]);
+    expect(result.current.isStreaming).toBe(true);
+  });
+
   it("marks only the optimistic turn named by a correlated rejection as failed", () => {
     const fake = fakeClient();
     const { result } = renderHook(

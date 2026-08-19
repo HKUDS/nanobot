@@ -70,6 +70,7 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
 })
 MAX_SESSION_MENTIONS = 8
 _SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
+_SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
 
 
 def rewrite_local_markdown_images(
@@ -682,6 +683,25 @@ def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
         _rotate_active_transcript_if_needed(session_key)
 
 
+def append_session_message_input(
+    session_key: str,
+    *,
+    content: str,
+    created_at_ms: int,
+    session_message: Mapping[str, Any],
+) -> None:
+    """Append one admitted cross-session user input to its WebUI transcript."""
+    chat_id = _chat_id_from_session_key(session_key)
+    if chat_id is None:
+        return
+    event = build_user_transcript_event(chat_id, content)
+    if event is None:
+        return
+    event["created_at_ms"] = created_at_ms
+    event["session_message"] = dict(session_message)
+    append_transcript_object(session_key, event)
+
+
 def normalize_webui_turn_id(value: Any) -> str:
     if isinstance(value, str):
         candidate = value.strip()
@@ -943,18 +963,55 @@ def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
         name = item.get("name")
         session_key = item.get("session_key")
         title = item.get("title")
+        handle_id = item.get("id")
         if not isinstance(name, str) or not isinstance(session_key, str):
             continue
         name = name.strip()[:80]
         session_key = session_key.strip()[:512]
         if not name or not session_key or _SESSION_MENTION_NAME_RE.fullmatch(name) is None:
             continue
-        normalized.append({
+        mention = {
             "name": name,
             "session_key": session_key,
             "title": title.strip()[:160] if isinstance(title, str) else "",
-        })
+        }
+        if isinstance(handle_id, str) and _SESSION_HANDLE_ID_RE.fullmatch(handle_id):
+            mention["id"] = handle_id
+        normalized.append(mention)
     return normalized
+
+
+def normalize_session_message_ui_metadata(raw: object) -> dict[str, Any] | None:
+    """Validate session-message provenance at the transcript-to-WebUI boundary."""
+    if not isinstance(raw, Mapping):
+        return None
+    raw_data = cast(Mapping[str, object], raw)
+    session = raw_data.get("session")
+    message_id = raw_data.get("message_id")
+    if (
+        not isinstance(message_id, str)
+        or not message_id.strip()
+        or not isinstance(session, Mapping)
+    ):
+        return None
+    session_data = cast(Mapping[str, object], session)
+    handle_id = session_data.get("id")
+    name = session_data.get("name")
+    if (
+        not isinstance(handle_id, str)
+        or _SESSION_HANDLE_ID_RE.fullmatch(handle_id) is None
+        or not isinstance(name, str)
+        or not name.strip()
+    ):
+        return None
+    handle: dict[str, Any] = {
+        "id": handle_id.strip()[:128],
+        "name": name.strip()[:80],
+    }
+    return {
+        "message_id": message_id.strip()[:128],
+        "session": handle,
+    }
 
 
 def build_user_transcript_event(
@@ -2040,6 +2097,17 @@ def replay_transcript_to_ui_messages(
     for idx, rec in enumerate(lines):
         ev = rec.get("event")
         if ev == "user":
+            if buffer_message_id is not None:
+                for message_index, message in enumerate(messages):
+                    if message.get("id") == buffer_message_id:
+                        messages[message_index] = {
+                            **message,
+                            "isStreaming": False,
+                        }
+                        break
+                buffer_message_id = None
+                buffer_parts = []
+            close_reasoning(messages)
             active_activity_segment_id = None
             active_file_edit_segment_id = None
             text = rec.get("text")
@@ -2079,6 +2147,10 @@ def replay_transcript_to_ui_messages(
             )
             if session_mentions:
                 row["sessionMentions"] = session_mentions
+            if session_message := normalize_session_message_ui_metadata(
+                rec.get("session_message")
+            ):
+                row["sessionMessage"] = session_message
             messages.append(row)
             continue
 

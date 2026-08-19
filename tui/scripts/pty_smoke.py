@@ -68,7 +68,7 @@ def _wait_for_exit(pid: int, timeout: float) -> int:
         time.sleep(0.05)
     os.kill(pid, signal.SIGKILL)
     os.waitpid(pid, 0)
-    raise AssertionError("TUI did not exit after Ctrl+C")
+    raise AssertionError("TUI did not exit after the exit command")
 
 
 def main() -> int:
@@ -90,6 +90,8 @@ def main() -> int:
         # terminal emulator's optional OSC 10/11 response.
         "NANOBOT_TUI_THEME": "dark",
     }
+    env.pop("HERDR_ENV", None)
+    env.pop("HERDR_PANE_ID", None)
 
     pid, master = pty.fork()
     if pid == 0:
@@ -117,11 +119,11 @@ def main() -> int:
         if b"\x1b[18;" not in resized or b";42H" not in resized:
             raise AssertionError("TUI did not repaint to the resized PTY dimensions")
 
-        # First Ctrl+C clears the draft; the second exits and must restore the
-        # alternate screen without a prompt_toolkit-style traceback.
+        # Ctrl+C clears the draft. The local exit command must still work while
+        # the intentionally unavailable gateway has not attached a chat.
         os.write(master, b"\x03")
         output.extend(_read(master, 0.2))
-        os.write(master, b"\x03")
+        os.write(master, b"exit\r")
         output.extend(_wait_for(master, LEAVE_ALT_SCREEN, 5))
         exit_code = _wait_for_exit(pid, 5)
         reaped = True

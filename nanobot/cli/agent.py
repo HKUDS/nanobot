@@ -1,6 +1,7 @@
 """Direct and interactive agent CLI command."""
 
 import asyncio
+import importlib
 import signal
 import sys
 from collections.abc import Awaitable, Callable
@@ -11,17 +12,6 @@ import typer
 from rich.console import Console
 
 from nanobot import __logo__
-from nanobot.agent.hooks import create_file_edit_activity_hook
-from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.mcp import MCPProvider
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.bus.outbound_events import (
-    StreamDeltaEvent,
-    StreamedResponseEvent,
-    StreamEndEvent,
-    outbound_event_from_message,
-)
-from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.log_control import _set_nanobot_logs
 from nanobot.cli.runtime_config import (
     _load_runtime_config,
@@ -29,21 +19,36 @@ from nanobot.cli.runtime_config import (
     _model_display,
     _print_agent_start_error,
 )
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import is_default_workspace
-from nanobot.utils.helpers import (
-    sanitize_surrogates as _sanitize_surrogates,
-)
-from nanobot.utils.helpers import (
-    sync_workspace_templates,
-)
-from nanobot.utils.restart import (
-    consume_restart_notice_from_env,
-    format_restart_completed_message,
-    should_show_cli_restart_notice,
-)
 
 console = Console()
+
+_CLASSIC_DEPENDENCIES = {
+    "AgentLoop": ("nanobot.agent.loop", "AgentLoop"),
+    "StreamRenderer": ("nanobot.cli.stream", "StreamRenderer"),
+    "consume_restart_notice_from_env": (
+        "nanobot.utils.restart",
+        "consume_restart_notice_from_env",
+    ),
+    "is_default_workspace": ("nanobot.config.paths", "is_default_workspace"),
+    "sync_workspace_templates": ("nanobot.utils.helpers", "sync_workspace_templates"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Preserve patchable classic-agent symbols without loading them for the TUI."""
+    dependency = _CLASSIC_DEPENDENCIES.get(name)
+    if dependency is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = dependency
+    value = getattr(importlib.import_module(module_name), attribute)
+    globals()[name] = value
+    return value
+
+
+def _classic_dependency(name: str) -> Any:
+    if name in globals():
+        return globals()[name]
+    return __getattr__(name)
 
 
 def agent(
@@ -74,11 +79,6 @@ def agent(
     ),
 ):
     """Chat in the terminal or send one message non-interactively."""
-    from nanobot.bus.queue import MessageBus
-    from nanobot.cron.service import CronService
-    from nanobot.providers.factory import make_provider
-    from nanobot.providers.image_generation import image_gen_provider_configs
-
     runtime_config = _load_runtime_config(config, workspace)
     theme = theme.strip().lower()
     if theme not in {"auto", "dark", "light"}:
@@ -117,6 +117,33 @@ def agent(
                 raise typer.Exit(exit_code)
             return
 
+    from nanobot.agent.hooks import create_file_edit_activity_hook
+    from nanobot.agent.tools.mcp import MCPProvider
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.bus.outbound_events import (
+        StreamDeltaEvent,
+        StreamedResponseEvent,
+        StreamEndEvent,
+        outbound_event_from_message,
+    )
+    from nanobot.bus.queue import MessageBus
+    from nanobot.cli import terminal as cli_terminal
+    from nanobot.cli.stream import ThinkingSpinner
+    from nanobot.cron.service import CronService
+    from nanobot.providers.factory import make_provider
+    from nanobot.providers.image_generation import image_gen_provider_configs
+    from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
+    from nanobot.utils.restart import (
+        format_restart_completed_message,
+        should_show_cli_restart_notice,
+    )
+
+    agent_loop_class = _classic_dependency("AgentLoop")
+    stream_renderer_class = _classic_dependency("StreamRenderer")
+    consume_restart_notice_from_env = _classic_dependency("consume_restart_notice_from_env")
+    is_default_workspace = _classic_dependency("is_default_workspace")
+    sync_workspace_templates = _classic_dependency("sync_workspace_templates")
+
     session_id = session_id or "cli:direct"
 
     try:
@@ -142,7 +169,7 @@ def agent(
     _set_nanobot_logs(logs)
 
     try:
-        agent_loop = AgentLoop.from_config(
+        agent_loop = agent_loop_class.from_config(
             runtime_config,
             bus,
             provider=provider,
@@ -171,7 +198,7 @@ def agent(
     _thinking: ThinkingSpinner | None = None
 
     def _make_progress(
-        renderer: StreamRenderer | None = None,
+        renderer: Any | None = None,
     ) -> Callable[..., Awaitable[None]]:
         reasoning_buffer = cli_terminal._ReasoningBuffer()
 
@@ -212,7 +239,7 @@ def agent(
         async def run_once() -> None:
             try:
                 await mcp_provider.connect()
-                renderer = StreamRenderer(
+                renderer = stream_renderer_class(
                     render_markdown=markdown,
                     bot_name=runtime_config.agents.defaults.bot_name,
                     bot_icon=runtime_config.agents.defaults.bot_icon,
@@ -278,7 +305,7 @@ def agent(
             turn_done = asyncio.Event()
             turn_done.set()
             turn_response: list[Any] = []
-            renderer: StreamRenderer | None = None
+            renderer: Any | None = None
             reasoning_buffer = cli_terminal._ReasoningBuffer()
 
             async def _consume_outbound() -> None:
@@ -361,7 +388,7 @@ def agent(
                         turn_done.clear()
                         turn_response.clear()
                         reasoning_buffer.clear()
-                        renderer = StreamRenderer(
+                        renderer = stream_renderer_class(
                             render_markdown=markdown,
                             bot_name=runtime_config.agents.defaults.bot_name,
                             bot_icon=runtime_config.agents.defaults.bot_icon,
