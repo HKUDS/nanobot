@@ -4,6 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from urllib.parse import unquote
 
 import pytest
@@ -1566,6 +1567,7 @@ async def test_send_workspace_restriction_blocks_external_attachment(tmp_path) -
 @pytest.mark.asyncio
 async def test_send_handles_upload_exception_and_reports_failure(tmp_path) -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
+    channel.logger = MagicMock()
     client = _FakeAsyncClient("", "", "", None)
     client.raise_on_upload = True
     channel.client = client
@@ -1587,6 +1589,34 @@ async def test_send_handles_upload_exception_and_reports_failure(tmp_path) -> No
     assert (
         client.room_send_calls[0]["content"]["body"]
         == "Please review.\n[attachment: broken.txt - upload failed]"
+    )
+    channel.logger.error.assert_called_once_with(
+        "Matrix media upload failed for {}", "broken.txt", exc_info=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_attachment_room_send_error_logs_room_id(tmp_path) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    channel.logger = MagicMock()
+    client = _FakeAsyncClient("", "", "", None)
+    client.raise_on_send = True
+    channel.client = client
+
+    file_path = tmp_path / "report.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    failure = await channel._upload_and_send_attachment(
+        room_id="!room:matrix.org",
+        path=file_path,
+        limit_bytes=1024,
+    )
+
+    assert failure == "[attachment: report.txt - upload failed]"
+    channel.logger.error.assert_called_once_with(
+        "Matrix room content send failed for room_id={}",
+        "!room:matrix.org",
+        exc_info=True,
     )
 
 
@@ -2212,6 +2242,7 @@ async def test_send_delta_stream_end_noop_when_buffer_missing() -> None:
 @pytest.mark.asyncio
 async def test_send_delta_on_error_stops_typing(monkeypatch) -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
+    channel.logger = MagicMock()
     client = _FakeAsyncClient("", "", "", None)
     client.raise_on_send = True
     channel.client = client
@@ -2226,6 +2257,9 @@ async def test_send_delta_on_error_stops_typing(monkeypatch) -> None:
     assert len(client.room_send_calls) == 1
 
     assert len(client.typing_calls) == 1
+    channel.logger.error.assert_called_once_with(
+        "Stream send/edit failed for chat_id={}", "!room:matrix.org", exc_info=True
+    )
 
 
 @pytest.mark.asyncio
