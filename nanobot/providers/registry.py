@@ -618,6 +618,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.stepfun.com/v1",
         reasoning_as_content=True,
     ),
+    # SenseNova (商汤日日新): OpenAI-compatible API
+    ProviderSpec(
+        name="sensenova",
+        keywords=("sensenova",),
+        env_key="SENSENOVA_API_KEY",
+        display_name="SenseNova",
+        backend="openai_compat",
+        default_api_base="https://token.sensenova.cn/v1",
+    ),
     # Xiaomi MIMO (小米): OpenAI-compatible API
     # Hosted API (api.xiaomimimo.com) accepts {"thinking": {"type": "enabled"|"disabled"}}
     # to toggle reasoning, matching the existing thinking_type style.

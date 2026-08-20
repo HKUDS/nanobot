@@ -1128,6 +1128,63 @@ def test_config_explicit_minimax_anthropic_provider_uses_default_api_base():
     assert config.get_api_base() == "https://api.minimax.io/anthropic"
 
 
+def test_config_explicit_sensenova_provider_uses_default_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "sensenova",
+                    "model": "sensenova-6.8-flash-lite",
+                }
+            },
+            "providers": {
+                "sensenova": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "sensenova"
+    assert config.get_api_key() == "test-key"
+    assert config.get_api_base() == "https://token.sensenova.cn/v1"
+
+
+def test_config_sensenova_provider_uses_custom_api_base_when_set():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "sensenova",
+                    "model": "sensenova-6.8-flash-lite",
+                }
+            },
+            "providers": {
+                "sensenova": {
+                    "apiKey": "test-key",
+                    "apiBase": "https://custom.example.com/v1",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "sensenova"
+    assert config.get_api_key() == "test-key"
+    assert config.get_api_base() == "https://custom.example.com/v1"
+
+
+def test_config_auto_detects_sensenova_from_model_keyword():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "sensenova-6.8-flash-lite"}},
+            "providers": {"sensenova": {"apiKey": "test-key"}},
+        }
+    )
+
+    assert config.get_provider_name() == "sensenova"
+    assert config.get_api_base() == "https://token.sensenova.cn/v1"
+
+
 def test_config_auto_detects_ollama_from_local_api_base():
     config = Config.model_validate(
         {

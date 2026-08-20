@@ -282,6 +282,7 @@ class ProvidersConfig(Base):
     minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰) — LLM + ASR (set apiBase to Plan URL for ASR)
+    sensenova: ProviderConfig = Field(default_factory=ProviderConfig)  # SenseNova (商汤日日新)
     xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
     longcat: ProviderConfig = Field(default_factory=ProviderConfig)  # LongCat
     ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)  # Ant Ling
