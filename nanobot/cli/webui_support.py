@@ -192,10 +192,9 @@ def _prepare_webui_bundle_for_gateway(
         return typer.confirm(message, default=True)
 
     try:
-        # A source checkout is the development product. Every gateway entrypoint
-        # keeps its browser client in lockstep with Python; only Vite mode skips
-        # the production bundle intentionally.
-        if mode != "skip" and inspect_webui_bundle().source_available:
+        # Interactive WebUI commands keep source and bundle in lockstep.
+        # Warn-only gateway startup must not block on a frontend build.
+        if mode not in {"skip", "warn"} and inspect_webui_bundle().source_available:
             mode = "auto"
         ensure_webui_bundle(
             mode=mode,
