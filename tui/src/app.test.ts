@@ -2139,7 +2139,7 @@ describe("NanobotTui layout", () => {
 })
 
 describe("NanobotTui in a Herdr pane", () => {
-  test("stays quiet while reporting task, session, lifecycle, and metadata", async () => {
+  test("keeps local navigation while reporting task, session, lifecycle, and metadata", async () => {
     const setup = await createTestRenderer({ width: 80, height: 22, screenMode: "main-screen" })
     const states: Array<{ state: HostAgentState; message?: string }> = []
     const metadata: HostMetadata[] = []
@@ -2159,6 +2159,14 @@ describe("NanobotTui in a Herdr pane", () => {
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
       host,
     )
+
+    await setup.mockInput.typeText("/")
+    await setup.flush()
+    const commandFrame = setup.captureCharFrame()
+    expect(commandFrame).toContain("/sessions")
+    expect(commandFrame).toContain("/new-chat")
+    expect(commandFrame).toContain("/branch")
+    setup.mockInput.pressEscape()
 
     app.accept({ event: "attached", chat_id: "chat" })
     app.accept({

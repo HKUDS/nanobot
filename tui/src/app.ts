@@ -459,11 +459,7 @@ export class NanobotTui {
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.host = host
-    this.localCommands = host.hosted
-      ? LOCAL_COMMANDS.filter(({ command }) => (
-        command === "/context" || command === "/diff" || command === "/exit"
-      ))
-      : LOCAL_COMMANDS
+    this.localCommands = LOCAL_COMMANDS
     this.transcript = new Transcript(
       renderer,
       transcriptTheme(this.palette, this.backgroundKnown),
