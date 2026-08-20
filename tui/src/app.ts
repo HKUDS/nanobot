@@ -376,7 +376,6 @@ export class NanobotTui {
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
   private readonly host: TuiHost
-  private readonly localCommands: TuiCommand[]
   private readonly draft = new ComposerDraft()
   private readonly promptQueue = new PromptQueue()
   private palette: Palette
@@ -459,7 +458,6 @@ export class NanobotTui {
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
     this.host = host
-    this.localCommands = LOCAL_COMMANDS
     this.transcript = new Transcript(
       renderer,
       transcriptTheme(this.palette, this.backgroundKnown),
@@ -468,7 +466,7 @@ export class NanobotTui {
       !host.hosted,
     )
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
-    this.commandMenu.setCommands([], this.localCommands)
+    this.commandMenu.setCommands([], LOCAL_COMMANDS)
     this.sessionMenu = new SessionMenu(
       renderer,
       commandMenuTheme(this.palette),
@@ -1844,7 +1842,7 @@ export class NanobotTui {
       // Local navigation remains available against older gateways.
     }
     const commands = new Map(discovered.map((command) => [command.command, command]))
-    this.commandMenu.setCommands([...commands.values()], this.localCommands)
+    this.commandMenu.setCommands([...commands.values()], LOCAL_COMMANDS)
     this.syncCommandMenu()
   }
 
