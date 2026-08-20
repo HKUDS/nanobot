@@ -6,7 +6,7 @@ import {
   type TestRendererSetup,
 } from "@opentui/core/testing"
 
-import { NanobotTui, type AppOptions } from "./app"
+import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
 import type { MessageOptions, SlashCommand, WorkspaceScopePayload } from "./protocol"
 import type { HostAgentState, HostMetadata, TuiHost } from "./host"
 
@@ -37,6 +37,12 @@ interface HiddenScrollBox {
 function occurrences(frame: string, value: string): number {
   return frame.split(value).length - 1
 }
+
+test("formats a reusable session ID after exit", () => {
+  expect(sessionExitMessage("resume-chat")).toBe(
+    "Resume with: nanobot agent --session websocket:resume-chat\n",
+  )
+})
 
 function contrastRatio(foreground: string, background: string): number {
   const luminance = (color: string) => {
@@ -2055,19 +2061,29 @@ describe("NanobotTui layout", () => {
   test("destroys the renderer and transport together", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     let closed = false
+    const exited: string[] = []
     const transport = client()
     transport.close = () => { closed = true }
     const app = NanobotTui.mount(
       setup.renderer,
-      options,
+      {
+        ...options,
+        chatId: "original-chat",
+        onExit: (chatId) => {
+          expect(setup?.renderer.isDestroyed).toBe(true)
+          exited.push(chatId)
+        },
+      },
       transport,
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
 
     app.stop()
+    app.stop()
 
     expect(closed).toBe(true)
     expect(setup.renderer.isDestroyed).toBe(true)
+    expect(exited).toEqual(["chat"])
   })
 
   test("exits immediately when Ctrl+C is pressed on an idle empty composer", async () => {
@@ -2244,6 +2260,7 @@ if (process.platform !== "win32") {
         NANOBOT_TUI_WS_URL: "ws://127.0.0.1:9/ws",
         NANOBOT_TUI_API_URL: "",
         NANOBOT_TUI_API_TOKEN: "",
+        NANOBOT_TUI_CHAT_ID: "resume-chat",
         NANOBOT_TUI_MODEL: "test/model",
         NANOBOT_TUI_WORKSPACE: "/tmp/nanobot-test",
         NANOBOT_TUI_VERSION: "test",
@@ -2278,5 +2295,9 @@ if (process.platform !== "win32") {
     expect(error).toBe("")
     expect(output).toContain("\x1b[?1049h")
     expect(output).toContain("\x1b[?1049l")
+    expect(output.indexOf("\x1b[?1049l")).toBeLessThan(output.indexOf("Resume with:"))
+    expect(output).toContain(
+      "Resume with: nanobot agent --session websocket:resume-chat\n",
+    )
   })
 }

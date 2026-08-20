@@ -102,7 +102,8 @@ the next agent turn. `/branch` forks a saved conversation from a completed reply
 opens the latest turn's file changes as a full-screen unified diff.
 `PageUp` loads older transcript pages when you reach the top. By default, each launch starts a
 new session using the launch directory as its workspace. `--session` selects a specific existing
-session, and `--workspace` overrides the launch directory.
+session, and `--workspace` overrides the launch directory. When the TUI exits, it prints a
+ready-to-run `nanobot agent --session ...` command for the current session.
 
 ## Session Storage and Rollback
 

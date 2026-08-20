@@ -1,4 +1,4 @@
-import { NanobotTui, type AppOptions } from "./app"
+import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
 import { currentGitBranch } from "./host"
 
 function themePreference(): AppOptions["theme"] {
@@ -32,6 +32,9 @@ const options: AppOptions = {
   version: process.env.NANOBOT_TUI_VERSION?.trim() || "dev",
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
   theme: themePreference(),
+  onExit: (chatId) => {
+    process.stdout.write(sessionExitMessage(chatId))
+  },
 }
 
 let app: NanobotTui | undefined
