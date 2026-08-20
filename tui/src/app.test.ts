@@ -1042,7 +1042,7 @@ describe("NanobotTui layout", () => {
     }
   })
 
-  test("explains the session-owned agent context without exposing private reasoning", async () => {
+  test("shows compact session context without exposing private reasoning", async () => {
     setup = await createRenderer({ width: 96, height: 26, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     globalThis.fetch = ((input: string | URL | Request) => {
@@ -1079,15 +1079,16 @@ describe("NanobotTui layout", () => {
       expect(ui.runtimeControls.contextText.plainText).toContain("~2.2k ctx")
       const frame = setup.captureCharFrame()
 
-      expect(frame).toContain("Agent context")
-      expect(frame).toContain("~2.2k session tokens · 10 replay messages · 16 archived · summary active")
+      expect(frame).toContain("~2.2k tokens · 10 replay · 16 archived")
       expect(frame).toContain("The earlier turns agreed on a release plan.")
-      expect(frame).toContain("memory, instructions, and skills are added separately")
+      expect(frame).not.toContain("Agent context")
+      expect(frame).not.toContain("summary active")
+      expect(frame).not.toContain("memory, instructions, and skills are added separately")
 
       setup.resize(40, 10)
       await setup.renderOnce()
       const compact = setup.captureCharFrame()
-      expect(occurrences(compact, "Agent context")).toBe(1)
+      expect(occurrences(compact, "Agent context")).toBe(0)
       expect(occurrences(compact, "Ask nanobot anything")).toBe(1)
 
       setup.mockInput.pressEscape()

@@ -258,7 +258,6 @@ function runtimeControlsTheme(palette: Palette) {
 function contextPanelTheme(palette: Palette): ContextPanelTheme {
   return {
     text: palette.text,
-    muted: palette.muted,
     border: palette.border,
     accent: palette.accent,
   }
