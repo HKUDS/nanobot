@@ -31,6 +31,8 @@ dependencies = [
     "websockets>=15.0,<17.0",
     "websocket-client>=1.9.0,<2.0.0",
     "httpx>=0.28.0,<1.0.0",
+    # MCP v2 uses the independently versioned httpx2 package for HTTP transports.
+    "httpx2>=2.5.0,<3.0.0",
     "ddgs>=9.5.5,<10.0.0",
     "oauth-cli-kit>=0.1.6,<1.0.0",
     "loguru>=0.7.3,<1.0.0",
@@ -41,7 +43,7 @@ dependencies = [
     "croniter>=6.0.0,<7.0.0",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "questionary>=2.0.0,<3.0.0",
-    "mcp>=1.26.0,<2.0.0",
+    "mcp>=2.0.0,<3.0.0",
     "json-repair>=0.57.0,<1.0.0",
     "chardet>=3.0.2,<6.0.0",
     "openai>=2.8.0",

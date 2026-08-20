@@ -16,7 +16,7 @@ import multiprocessing
 import socket
 import time
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 from nanobot.agent.tools import mcp as mcp_module
@@ -39,31 +39,29 @@ def _free_port() -> int:
 
 
 def _run_mcp_server(port: int, ready_event: multiprocessing.Event) -> None:
-    """FastMCP server target for ``multiprocessing.Process``.
+    """MCPServer target for ``multiprocessing.Process``.
 
     The server exposes a single ``greet`` tool and terminates idle sessions
     after ``_IDLE_TIMEOUT_SECONDS``.
     """
-    from mcp.server.fastmcp import FastMCP
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    import uvicorn
+    from mcp.server import MCPServer
 
-    mcp = FastMCP("IdleTimeoutDemo", json_response=True, port=port)
+    mcp = MCPServer("IdleTimeoutDemo")
 
     @mcp.tool()
     def greet(name: str = "World") -> str:  # noqa: N802
         """Greet someone."""
         return f"Hello, {name}!"
 
-    mcp._session_manager = StreamableHTTPSessionManager(
-        app=mcp._mcp_server,
-        json_response=mcp.settings.json_response,
-        stateless=mcp.settings.stateless_http,
-        security_settings=mcp.settings.transport_security,
-        session_idle_timeout=_IDLE_TIMEOUT_SECONDS,
+    app = mcp.streamable_http_app(
+        json_response=True,
+        host="127.0.0.1",
     )
+    mcp.session_manager.session_idle_timeout = _IDLE_TIMEOUT_SECONDS
 
     ready_event.set()
-    mcp.run(transport="streamable-http")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 async def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
@@ -119,10 +117,14 @@ def _make_provider(*, mcp_servers: dict) -> tuple[MCPProvider, ToolRegistry]:
 @pytest.fixture(autouse=True)
 def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
     """The repro server runs on 127.0.0.1; allow nanobot to talk to it."""
-    class TestPinnedDNSAsyncTransport(security_network.PinnedDNSAsyncTransport):
+    class TestPinnedDNSAsyncTransport(security_network.Httpx2PinnedDNSAsyncTransport):
         _resolver_lock = asyncio.Lock()
 
-    monkeypatch.setattr(mcp_module, "PinnedDNSAsyncTransport", TestPinnedDNSAsyncTransport)
+    monkeypatch.setattr(
+        mcp_module,
+        "Httpx2PinnedDNSAsyncTransport",
+        TestPinnedDNSAsyncTransport,
+    )
     monkeypatch.setattr(
         mcp_module,
         "validate_url_target",
@@ -145,7 +147,7 @@ def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         mcp_module,
-        "httpx_env_proxy_mounts",
+        "httpx2_env_proxy_mounts",
         lambda: {},
     )
 
