@@ -320,6 +320,25 @@ async def test_codex_timeout_error_is_typed_and_retryable(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_codex_mid_stream_server_error_is_treated_as_transient(monkeypatch) -> None:
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(*args, **kwargs):
+        raise RuntimeError(
+            "Response failed: {'type': 'server_error', 'code': 'server_error', "
+            "'message': 'An error occurred while processing your request.'}"
+        )
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider()
+    response = await provider.chat([{"role": "user", "content": "hello"}])
+
+    assert response.finish_reason == "error"
+    assert provider_base.LLMProvider.is_transient_response(response) is True
+
+
+@pytest.mark.asyncio
 async def test_codex_provider_passes_proxy_to_oauth_and_response_request(monkeypatch) -> None:
     proxy = "http://127.0.0.1:23458"
     seen: dict[str, object] = {}

@@ -326,6 +326,7 @@ class LLMProvider(ABC):
         "timed out",
         "connection",
         "server error",
+        "server_error",
         "temporarily unavailable",
         "速率限制",
         "访问量过大",
