@@ -100,8 +100,9 @@ Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` sta
 conversation, and `/context` explains the compacted summary and raw session suffix available to
 the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff`
 opens the latest turn's file changes as a full-screen unified diff.
-`PageUp` loads older transcript pages when you reach the top. The default
-launch returns to the last attached TUI session; `--session` selects a specific session instead.
+`PageUp` loads older transcript pages when you reach the top. By default, each launch starts a
+new session using the launch directory as its workspace. `--session` selects a specific existing
+session, and `--workspace` overrides the launch directory.
 
 ## Session Storage and Rollback
 

@@ -41,9 +41,10 @@ Unsent prompts return to the composer if the turn stops or fails.
 
 Use `/sessions` to search and switch persisted conversations without leaving the terminal.
 `/new-chat` preserves the current conversation and starts another one; nanobot's existing `/new`
-command keeps its cross-channel behavior and resets the current chat. The next launch returns to
-the last session unless `--session` selects another one. When earlier transcript pages exist,
-press `PageUp` at the top to load them in place.
+command keeps its cross-channel behavior and resets the current chat. Each launch starts a new
+session using the launch directory as its workspace; `--session` selects an existing session and
+`--workspace` overrides the launch directory. When earlier transcript pages exist, press `PageUp`
+at the top to load them in place.
 
 The native client accepts bare WebSocket chat IDs or `websocket:<id>` selectors. Use
 `nanobot agent --classic --session <channel:id>` to resume a session owned by another channel;

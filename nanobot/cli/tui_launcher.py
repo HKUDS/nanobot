@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import os
 import platform
 import shutil
@@ -77,8 +76,8 @@ def launch_tui(
     theme: str,
 ) -> int:
     """Run the native TUI against the shared local gateway."""
-    state_path = config_path.parent / "tui" / "state.json"
-    chat_id = _initial_tui_chat_id(session_id, state_path)
+    chat_id = _initial_tui_chat_id(session_id)
+    tui_workspace = _initial_tui_workspace(workspace_override)
     command = _resolve_tui_command()
     base_url, bootstrap_secret = _tui_gateway_connection(config)
     gateway: _GatewayHandle | None = None
@@ -93,7 +92,7 @@ def launch_tui(
                 "NANOBOT_TUI_API_URL": base_url,
                 "NANOBOT_TUI_MODEL": _model_display(config)[0],
                 "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
-                "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
+                "NANOBOT_TUI_WORKSPACE": str(tui_workspace),
                 "NANOBOT_TUI_VERSION": __version__,
                 "NANOBOT_TUI_ACCESS": (
                     "workspace access" if config.tools.restrict_to_workspace else "full access"
@@ -105,7 +104,6 @@ def launch_tui(
             env["NANOBOT_TUI_BOOTSTRAP_SECRET"] = bootstrap_secret
         else:
             env.pop("NANOBOT_TUI_BOOTSTRAP_SECRET", None)
-        env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
         if chat_id:
             env["NANOBOT_TUI_CHAT_ID"] = chat_id
         else:
@@ -478,26 +476,14 @@ def _websocket_chat_id(session_id: str) -> str | None:
     return session_id or None
 
 
-def _initial_tui_chat_id(session_id: str | None, state_path: Path) -> str | None:
-    """Resume the last TUI chat, while keeping an explicit selector authoritative."""
+def _initial_tui_chat_id(session_id: str | None) -> str | None:
+    """Start fresh unless the caller explicitly selects a TUI chat."""
     if session_id is not None:
         return _websocket_chat_id(session_id)
-    return _read_tui_chat_id(state_path)
+    return None
 
 
-def _read_tui_chat_id(path: Path) -> str | None:
-    """Read the last attached chat without making launch depend on optional state."""
-    try:
-        raw_payload: Any = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(raw_payload, dict):
-        return None
-    payload = cast(dict[str, Any], raw_payload)
-    value = payload.get("chat_id")
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if not value or len(value) > 256 or any(character in value for character in "\r\n"):
-        return None
-    return value
+def _initial_tui_workspace(workspace_override: str | None) -> Path:
+    """Use the launch directory unless the caller explicitly selects a workspace."""
+    workspace = Path(workspace_override) if workspace_override is not None else Path.cwd()
+    return workspace.expanduser().resolve(strict=False)

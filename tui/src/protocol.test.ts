@@ -259,6 +259,10 @@ describe("gateway protocol", () => {
       const client = new NanobotClient({
         url: "ws://nanobot.test/ws",
         chatId: "terminal",
+        initialWorkspaceScope: {
+          project_path: "/tmp/project",
+          access_mode: "restricted",
+        },
         onEvent: (event) => events.push(event),
         onStatus: () => undefined,
       })
@@ -319,6 +323,47 @@ describe("gateway protocol", () => {
         chat_id: "terminal",
         model_preset: "Deep Research",
       })
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("starts a fresh chat in the launch workspace", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        initialWorkspaceScope: {
+          project_path: "/tmp/launch-project",
+          access_mode: "restricted",
+        },
+        onEvent: () => undefined,
+        onStatus: () => undefined,
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      socket.emit("message", {
+        data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client" }),
+      })
+
+      expect(socket.sent.map((value) => JSON.parse(value))).toEqual([{
+        type: "new_chat",
+        workspace_scope: {
+          project_path: "/tmp/launch-project",
+          access_mode: "restricted",
+        },
+      }])
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
     }

@@ -59,7 +59,6 @@ import {
   type TranscriptNavigation,
   type TranscriptTheme,
 } from "./transcript"
-import { rememberChat } from "./session-state"
 import { ComposerDraft } from "./composer-draft"
 import { BranchMenu, branchPoints } from "./branch-menu"
 import {
@@ -95,7 +94,6 @@ interface AppOptions {
   version: string
   access: string
   theme: "auto" | ThemeMode
-  statePath?: string
 }
 
 interface ChatClient {
@@ -508,6 +506,10 @@ export class NanobotTui {
           }
         : { url: options.wsUrl }),
       chatId: options.chatId,
+      initialWorkspaceScope: {
+        project_path: options.workspace,
+        access_mode: options.access.toLocaleLowerCase().includes("full") ? "full" : "restricted",
+      },
       onEvent: (event) => this.accept(event),
       onStatus: (status, detail) => this.handleStatus(status, detail),
     })
@@ -914,7 +916,6 @@ export class NanobotTui {
 
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
-      void rememberChat(this.options.statePath, event.chat_id)
       this.host.reportSession(event.chat_id)
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {

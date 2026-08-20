@@ -157,6 +157,7 @@ export interface ClientOptions {
   connectionRetryLabel?: string
   startupRetryMaxDelayMs?: number
   chatId?: string
+  initialWorkspaceScope?: WorkspaceScopePayload
   reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
   onStatus: (status: ConnectionStatus, detail?: string) => void
@@ -995,7 +996,7 @@ export class NanobotClient {
         this.chatId = requestedChatId
         this.write({ type: "attach", chat_id: this.chatId })
       } else {
-        this.write({ type: "new_chat" })
+        this.newChat(this.options.initialWorkspaceScope)
       }
     } else if (event.event === "attached") {
       this.chatId = event.chat_id

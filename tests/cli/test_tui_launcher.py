@@ -16,7 +16,7 @@ from nanobot.cli.tui_launcher import (
     _download_release_tui,
     _ensure_gateway,
     _initial_tui_chat_id,
-    _read_tui_chat_id,
+    _initial_tui_workspace,
     _resolve_source_tui_command,
     _resolve_tui_command,
     _websocket_chat_id,
@@ -67,28 +67,22 @@ def test_native_tui_rejects_a_session_owned_by_another_channel() -> None:
         _websocket_chat_id("telegram:123")
 
 
-def test_tui_chat_state_is_optional_and_validated(tmp_path: Path) -> None:
-    path = tmp_path / "tui" / "state.json"
-    assert _read_tui_chat_id(path) is None
-
-    path.parent.mkdir()
-    path.write_text('{"schema_version": 1, "chat_id": "saved-chat"}', encoding="utf-8")
-    assert _read_tui_chat_id(path) == "saved-chat"
-
-    path.write_text('{"chat_id": "bad\\nchat"}', encoding="utf-8")
-    assert _read_tui_chat_id(path) is None
+def test_default_tui_starts_fresh_but_explicit_session_wins() -> None:
+    assert _initial_tui_chat_id(None) is None
+    assert _initial_tui_chat_id("websocket:chosen") == "chosen"
 
 
-def test_default_tui_resumes_but_explicit_session_wins(tmp_path: Path) -> None:
-    path = tmp_path / "tui" / "state.json"
-    path.parent.mkdir()
-    path.write_text('{"chat_id": "saved-chat"}', encoding="utf-8")
+def test_default_tui_workspace_is_the_launch_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    launch_directory = tmp_path / "project"
+    override = tmp_path / "override"
+    launch_directory.mkdir()
+    monkeypatch.chdir(launch_directory)
 
-    assert _initial_tui_chat_id(None, path) == "saved-chat"
-    assert _initial_tui_chat_id("websocket:chosen", path) == "chosen"
-
-    path.unlink()
-    assert _initial_tui_chat_id(None, path) is None
+    assert _initial_tui_workspace(None) == launch_directory.resolve()
+    assert _initial_tui_workspace(str(override)) == override.resolve()
 
 
 def test_launcher_passes_the_canonical_model_preset_to_the_tui(
@@ -144,6 +138,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert result == 0
     assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
     assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
+    assert captured["NANOBOT_TUI_WORKSPACE"] == str(Path.cwd().resolve())
     assert captured["NANOBOT_TUI_BOOTSTRAP_URL"] == (
         "http://127.0.0.1:8765/webui/bootstrap"
     )
@@ -151,6 +146,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert "NANOBOT_TUI_WS_URL" not in captured
     assert "NANOBOT_TUI_API_TOKEN" not in captured
     assert "NANOBOT_TUI_CHAT_ID" not in captured
+    assert "NANOBOT_TUI_STATE_PATH" not in captured
     assert events == ["spawned", "waited"]
     assert released == [True]
 
