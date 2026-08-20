@@ -5,9 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp import MCPError
 from mcp import types as mcp_types
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData
 
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
@@ -37,12 +36,16 @@ class _FakeEndOfStreamError(Exception):
 _FakeEndOfStreamError.__name__ = "EndOfStream"
 
 
-def _session_terminated_error() -> McpError:
-    return McpError(ErrorData(code=-32000, message="Session terminated"))
+def _session_terminated_error() -> MCPError:
+    return MCPError(code=-32000, message="Session terminated")
 
 
-def _connection_closed_error() -> McpError:
-    return McpError(ErrorData(code=-32000, message="Connection closed"))
+def _connection_closed_error() -> MCPError:
+    return MCPError(code=-32000, message="Connection closed")
+
+
+def _session_not_found_error() -> MCPError:
+    return MCPError(code=-32600, message="Session not found")
 
 
 def test_is_transient_recognizes_closed_resource():
@@ -85,6 +88,10 @@ def test_is_session_terminated_recognizes_connection_closed_mcp_error():
     assert _is_session_terminated(_connection_closed_error())
 
 
+def test_is_session_terminated_recognizes_session_not_found_mcp_error():
+    assert _is_session_terminated(_session_not_found_error())
+
+
 # ---------------------------------------------------------------------------
 # MCPToolWrapper retry behaviour
 # ---------------------------------------------------------------------------
@@ -94,7 +101,7 @@ def _make_tool_def(name="test_tool"):
     return SimpleNamespace(
         name=name,
         description="A test tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
 
 
@@ -266,6 +273,32 @@ async def test_tool_reconnects_on_transient_failure():
     mock_sleep.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_tool_reconnects_when_legacy_session_is_not_found():
+    """Legacy streamable HTTP servers report a stale session as -32600."""
+    old_session = AsyncMock()
+    old_session.call_tool = AsyncMock(side_effect=_session_not_found_error())
+    new_session = AsyncMock()
+    new_session.call_tool = AsyncMock(return_value=_make_tool_result("fresh"))
+
+    wrapper = MCPToolWrapper(old_session, "test_server", _make_tool_def(), tool_timeout=5)
+    replacement = MCPToolWrapper(new_session, "test_server", _make_tool_def(), tool_timeout=5)
+
+    async def reconnect(server_name: str, tool_name: str, stale_tool):
+        assert server_name == "test_server"
+        assert tool_name == "mcp_test_server_test_tool"
+        assert stale_tool is wrapper
+        return replacement
+
+    wrapper.set_reconnect_handler(reconnect)
+
+    output = await wrapper.execute(foo="bar")
+
+    assert output == "fresh"
+    assert old_session.call_tool.call_count == 1
+    assert new_session.call_tool.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # MCPResourceWrapper retry behaviour
 # ---------------------------------------------------------------------------
@@ -415,10 +448,10 @@ async def test_prompt_fails_after_retry_exhausted():
 
 @pytest.mark.asyncio
 async def test_prompt_no_retry_on_mcp_error():
-    """McpError (application-level) should NOT trigger retry."""
+    """MCPError (application-level) should NOT trigger retry."""
     session = AsyncMock()
     session.get_prompt = AsyncMock(
-        side_effect=McpError(ErrorData(code=-1, message="not found"))
+        side_effect=MCPError(code=-1, message="not found")
     )
 
     wrapper = MCPPromptWrapper(session, "test_server", _make_prompt_def())
@@ -443,7 +476,7 @@ async def test_prompt_no_retry_on_non_transient():
 
 @pytest.mark.asyncio
 async def test_prompt_reconnects_on_session_terminated():
-    """Prompt should reconnect once before falling back to McpError handling."""
+    """Prompt should reconnect once before falling back to MCPError handling."""
     old_session = AsyncMock()
     old_session.get_prompt = AsyncMock(side_effect=_session_terminated_error())
     new_session = AsyncMock()

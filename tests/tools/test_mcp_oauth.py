@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
+import httpx2
 import pytest
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import AuthorizationCodeResult, OAuthClientInformationFull, OAuthToken
 
 from nanobot.agent.tools.mcp_oauth import (
     MCPAuthorizationRequiredError,
@@ -188,7 +188,9 @@ async def test_create_mcp_oauth_auth_uses_browser_handlers_and_persists_redirect
         "webui/public/brand/nanobot_apple_touch.png"
     )
     assert auth.context.redirect_handler is redirect
-    assert auth.context.callback_handler is callback
+    sdk_callback = auth.context.callback_handler
+    assert sdk_callback is not None
+    assert await sdk_callback() == AuthorizationCodeResult(code="code", state="state")
     storage = MCPOAuthStorage("xmind", "https://app.xmind.example/api/mcp")
     assert await storage.redirect_uri() == "https://agent.example/auth/mcp/callback"
 
@@ -259,12 +261,12 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
         ),
     )
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         requests.append((request.method, str(request.url)))
         if str(request.url) == server_url:
             if request.headers.get("Authorization") == "Bearer access-token":
-                return httpx.Response(200, json={"ok": True})
-            return httpx.Response(
+                return httpx2.Response(200, json={"ok": True})
+            return httpx2.Response(
                 401,
                 headers={
                     "WWW-Authenticate": (
@@ -274,12 +276,12 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
                 },
             )
         if request.url.path == "/.well-known/oauth-protected-resource":
-            return httpx.Response(200, json={
+            return httpx2.Response(200, json={
                 "resource": server_url,
                 "authorization_servers": ["https://auth.example.com"],
             })
         if request.url.path == "/.well-known/oauth-authorization-server":
-            return httpx.Response(200, json={
+            return httpx2.Response(200, json={
                 "issuer": "https://auth.example.com",
                 "authorization_endpoint": "https://auth.example.com/authorize",
                 "token_endpoint": "https://auth.example.com/token",
@@ -293,22 +295,22 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
             assert registration["logo_uri"].endswith(
                 "/webui/public/brand/nanobot_apple_touch.png"
             )
-            return httpx.Response(201, json={
+            return httpx2.Response(201, json={
                 "client_id": "nanobot-client",
                 "redirect_uris": ["https://agent.example/auth/mcp/callback"],
                 "token_endpoint_auth_method": "none",
             })
         if request.url.path == "/token":
-            return httpx.Response(200, json={
+            return httpx2.Response(200, json={
                 "access_token": "access-token",
                 "refresh_token": "refresh-token",
                 "token_type": "Bearer",
                 "expires_in": 3600,
             })
-        return httpx.Response(404)
+        return httpx2.Response(404)
 
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(respond),
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(respond),
         auth=auth,
     ) as client:
         response = await client.get(server_url)

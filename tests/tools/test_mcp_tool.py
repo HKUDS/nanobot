@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-import httpx
+import httpx2
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
@@ -28,8 +28,8 @@ _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "http
 
 
 def test_type_checking_only_mcp_annotations_are_deferred() -> None:
-    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "ClientSession"
-    assert MCPToolWrapper.__init__.__annotations__["session"] == "ClientSession"
+    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "Client | ClientSession"
+    assert MCPToolWrapper.__init__.__annotations__["session"] == "Client | ClientSession"
     assert MCPResourceWrapper.__init__.__annotations__["resource_def"] == "Resource"
     assert MCPPromptWrapper.__init__.__annotations__["prompt_def"] == "Prompt"
     assert connect_mcp_servers.__annotations__["mcp_servers"] == "dict[str, MCPServerConfig]"
@@ -53,12 +53,12 @@ class _FakeBlobResourceContents:
 class _FakeImageContent:
     def __init__(self, data: str, mime_type: str = "image/png") -> None:
         self.data = data
-        self.mimeType = mime_type
+        self.mime_type = mime_type
 
 
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
-    return {"session": None}
+    return {"session": None, "client_modes": []}
 
 
 @pytest.fixture(autouse=True)
@@ -92,15 +92,19 @@ def _fake_mcp_module(
             self.env = env
             self.cwd = cwd
 
-    class _FakeClientSession:
-        def __init__(self, _read: object, _write: object) -> None:
-            self._session = fake_mcp_runtime["session"]
+    class _FakeClient:
+        def __init__(self, transport: object, *, mode: str = "auto") -> None:
+            self._transport = transport
+            self._transport_context = None
+            fake_mcp_runtime["client_modes"].append(mode)
 
         async def __aenter__(self) -> object:
-            return self._session
+            self._transport_context = self._transport
+            await self._transport_context.__aenter__()
+            return fake_mcp_runtime["session"]
 
         async def __aexit__(self, exc_type, exc, tb) -> bool:
-            return False
+            return await self._transport_context.__aexit__(exc_type, exc, tb)
 
     @asynccontextmanager
     async def _fake_stdio_client(_params: object):
@@ -112,9 +116,9 @@ def _fake_mcp_module(
 
     @asynccontextmanager
     async def _fake_streamable_http_client(_url: str, http_client=None):
-        yield object(), object(), object()
+        yield object(), object()
 
-    mod.ClientSession = _FakeClientSession
+    mod.Client = _FakeClient
     mod.StdioServerParameters = _FakeStdioServerParameters
     monkeypatch.setitem(sys.modules, "mcp", mod)
 
@@ -134,12 +138,12 @@ def _fake_mcp_module(
     shared_mod = ModuleType("mcp.shared")
     exc_mod = ModuleType("mcp.shared.exceptions")
 
-    class _FakeMcpError(Exception):
+    class _FakeMCPError(Exception):
         def __init__(self, code: int = -1, message: str = "error"):
             self.error = SimpleNamespace(code=code, message=message)
             super().__init__(message)
 
-    exc_mod.McpError = _FakeMcpError
+    mod.MCPError = _FakeMCPError
     monkeypatch.setitem(sys.modules, "mcp.shared", shared_mod)
     monkeypatch.setitem(sys.modules, "mcp.shared.exceptions", exc_mod)
 
@@ -148,9 +152,26 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
+
+
+def test_wrapper_accepts_legacy_input_schema_field() -> None:
+    tool_def = SimpleNamespace(
+        name="legacy",
+        description="legacy tool",
+        inputSchema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    )
+
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "test", tool_def)
+
+    assert wrapper.parameters["properties"]["query"] == {"type": "string"}
+    assert wrapper.parameters["required"] == ["query"]
 
 
 @pytest.mark.asyncio
@@ -183,22 +204,22 @@ async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch
 async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class OAuthAuth(httpx.Auth):
-        def auth_flow(self, request: httpx.Request):
+    class OAuthAuth(httpx2.Auth):
+        def auth_flow(self, request: httpx2.Request):
             request.headers["Authorization"] = "Bearer saved-oauth-secret"
             yield request
 
     class AuthorizationRequiredError(RuntimeError):
         pass
 
-    async def create_auth(_name: str, _url: str, _handlers=None) -> httpx.Auth:
+    async def create_auth(_name: str, _url: str, _handlers=None) -> httpx2.Auth:
         return OAuthAuth()
 
     @asynccontextmanager
     async def rejected_streamable_http(url: str, http_client=None):
-        request = httpx.Request("POST", f"{url}?access_token=saved-oauth-secret")
-        response = httpx.Response(403, request=request)
-        raise httpx.HTTPStatusError(
+        request = httpx2.Request("POST", f"{url}?access_token=saved-oauth-secret")
+        response = httpx2.Response(403, request=request)
+        raise httpx2.HTTPStatusError(
             "403 Forbidden for saved-oauth-secret",
             request=request,
             response=response,
@@ -244,7 +265,7 @@ def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "value": {
@@ -266,7 +287,7 @@ def test_wrapper_normalizes_nullable_property_type_union() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": ["string", "null"]},
@@ -283,7 +304,7 @@ def test_wrapper_normalizes_nullable_property_anyof() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "name": {
@@ -308,7 +329,7 @@ def test_wrapper_hoists_recursive_local_refs_into_defs() -> None:
     tool_def = SimpleNamespace(
         name="search_dataset",
         description="search tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "filter": {
@@ -341,7 +362,7 @@ def test_wrapper_hoists_root_self_ref_into_defs() -> None:
     tool_def = SimpleNamespace(
         name="tree",
         description="tree tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "children": {"type": "array", "items": {"$ref": "#"}},
@@ -363,7 +384,7 @@ def test_wrapper_preserves_existing_defs_refs() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "$defs": {"value": {"type": "string"}},
             "properties": {"value": {"$ref": "#/$defs/value"}},
@@ -380,7 +401,7 @@ def test_wrapper_resolves_uri_encoded_json_pointer() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "space name/value": {"type": "string"},
@@ -508,7 +529,7 @@ async def test_execute_wraps_mcp_is_error_result() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
             content=[_FakeTextContent("Error: server-side MCP failure")],
-            isError=True,
+            is_error=True,
         )
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
@@ -516,6 +537,22 @@ async def test_execute_wraps_mcp_is_error_result() -> None:
     result = await wrapper.execute()
 
     assert result == "Error: server-side MCP failure"
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_execute_accepts_legacy_is_error_field() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent("legacy failure")],
+            isError=True,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "legacy failure"
     assert is_tool_error_result(result)
 
 
@@ -553,7 +590,7 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
             content=[_FakeTextContent("Error: generated report successfully")],
-            isError=False,
+            is_error=False,
         )
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
@@ -600,6 +637,28 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
     # The base64 payload must NOT leak into the model-facing result.
     assert _PNG_B64 not in result
     assert "message tool" in payload["next_step"]
+
+
+@pytest.mark.asyncio
+async def test_execute_accepts_legacy_image_mime_type(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+    image = _FakeImageContent(_PNG_B64)
+    del image.mime_type
+    image.mimeType = "image/png"
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=[image])
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+    payload = json.loads(result)
+
+    artifact = payload["artifacts"][0]
+    assert artifact["mime"] == "image/png"
+    assert Path(artifact["path"]).is_file()
 
 
 @pytest.mark.asyncio
@@ -681,7 +740,7 @@ def _make_tool_def(name: str) -> SimpleNamespace:
     return SimpleNamespace(
         name=name,
         description=f"{name} tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
 
 
@@ -913,7 +972,7 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
 def test_transient_connection_group_logs_brief_warning_and_debug_trace() -> None:
     records: list[dict] = []
     sink = mcp_mod.logger.add(lambda message: records.append(message.record), level="DEBUG")
-    error = ExceptionGroup("transport failed", [httpx.ConnectError("")])
+    error = ExceptionGroup("transport failed", [httpx2.ConnectError("")])
     try:
         mcp_mod._log_mcp_connection_failure("notion", error)
     finally:
@@ -977,14 +1036,14 @@ async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
 
 
 @pytest.mark.asyncio
-async def test_validate_mcp_request_url_rejects_loopback_without_whitelist() -> None:
+async def test_validate_mcp_httpx2_request_url_rejects_loopback_without_whitelist() -> None:
     from nanobot.security.network import configure_ssrf_whitelist
 
     configure_ssrf_whitelist([])
-    request = httpx.Request("GET", "http://127.0.0.1/private")
+    request = httpx2.Request("GET", "http://127.0.0.1/private")
 
-    with pytest.raises(httpx.RequestError, match="Blocked unsafe MCP URL"):
-        await mcp_mod._validate_mcp_request_url(request)
+    with pytest.raises(httpx2.RequestError, match="Blocked unsafe MCP URL"):
+        await mcp_mod._validate_mcp_httpx2_request_url(request)
 
 
 @pytest.mark.asyncio
@@ -1020,7 +1079,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
             return False
 
     @asynccontextmanager
-    async def _capturing_sse_client(_url: str, httpx_client_factory=None):
+    async def _capturing_sse_client(_url: str, headers=None, httpx_client_factory=None):
         assert httpx_client_factory is not None
         async with httpx_client_factory():
             pass
@@ -1029,7 +1088,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     @asynccontextmanager
     async def _capturing_streamable_http_client(_url: str, http_client=None):
         assert http_client is not None
-        yield object(), object(), object()
+        yield object(), object()
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
@@ -1037,16 +1096,17 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
-        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        "Httpx2PinnedDNSAsyncTransport",
+        lambda: httpx2.MockTransport(lambda request: httpx2.Response(200, request=request)),
     )
     monkeypatch.setattr(
-        "nanobot.security.network.httpx.AsyncHTTPTransport",
-        lambda **_kwargs: httpx.MockTransport(
-            lambda request: httpx.Response(200, request=request)
+        mcp_mod.httpx2,
+        "AsyncHTTPTransport",
+        lambda **_kwargs: httpx2.MockTransport(
+            lambda request: httpx2.Response(200, request=request)
         ),
     )
-    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(mcp_mod.httpx2, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
@@ -1060,6 +1120,8 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
         await stack.aclose()
 
     assert client_kwargs
+    expected_mode = "legacy" if config.type == "sse" else "auto"
+    assert fake_mcp_runtime["client_modes"] == [expected_mode]
     assert all("transport" in kwargs for kwargs in client_kwargs)
     assert all("mounts" in kwargs for kwargs in client_kwargs)
 
@@ -1069,20 +1131,22 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "mcp.example.com")
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
-        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        "Httpx2PinnedDNSAsyncTransport",
+        lambda: httpx2.MockTransport(lambda request: httpx2.Response(200, request=request)),
     )
     monkeypatch.setattr(
-        "nanobot.security.network.httpx.AsyncHTTPTransport",
-        lambda **_kwargs: httpx.MockTransport(
-            lambda request: httpx.Response(200, request=request)
+        mcp_mod.httpx2,
+        "AsyncHTTPTransport",
+        lambda **_kwargs: httpx2.MockTransport(
+            lambda request: httpx2.Response(200, request=request)
         ),
     )
 
-    kwargs = mcp_mod._pinned_transport_kwargs()
+    transport, mounts = mcp_mod._httpx2_transport_config()
 
-    assert "transport" in kwargs
-    assert any(transport is None for transport in kwargs["mounts"].values())
+    assert transport is not None
+    assert mounts is not None
+    assert any(route is None for route in mounts.values())
 
 
 @pytest.mark.asyncio
@@ -1114,24 +1178,24 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     async def _reachable(_url: str) -> bool:
         return True
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _handler(request: httpx2.Request) -> httpx2.Response:
         sent_urls.append(str(request.url))
         if str(request.url) == "https://example.com/start":
-            return httpx.Response(
+            return httpx2.Response(
                 302,
                 headers={"Location": "http://127.0.0.1/private"},
                 request=request,
             )
         raise AssertionError("unsafe redirect target should be blocked before transport")
 
-    original_async_client = httpx.AsyncClient
+    original_async_client = httpx2.AsyncClient
 
-    def _async_client_with_mock_transport(*args: object, **kwargs: object) -> httpx.AsyncClient:
-        kwargs.setdefault("transport", httpx.MockTransport(_handler))
+    def _async_client_with_mock_transport(*args: object, **kwargs: object) -> httpx2.AsyncClient:
+        kwargs.setdefault("transport", httpx2.MockTransport(_handler))
         return original_async_client(*args, **kwargs)
 
     @asynccontextmanager
-    async def _fake_sse_client(_url: str, httpx_client_factory=None):
+    async def _fake_sse_client(_url: str, headers=None, httpx_client_factory=None):
         assert httpx_client_factory is not None
         used_transports.append("sse")
         async with httpx_client_factory() as client:
@@ -1143,16 +1207,16 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
         assert http_client is not None
         used_transports.append("streamableHttp")
         await http_client.get("https://example.com/start")
-        yield object(), object(), object()
+        yield object(), object()
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
-        mcp_mod,
-        "PinnedDNSAsyncTransport",
-        lambda **_kwargs: httpx.MockTransport(_handler),
+        mcp_mod.httpx2,
+        "AsyncHTTPTransport",
+        lambda **_kwargs: httpx2.MockTransport(_handler),
     )
-    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
+    monkeypatch.setattr(mcp_mod.httpx2, "AsyncClient", _async_client_with_mock_transport)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
@@ -1192,15 +1256,20 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
         "good": _make_fake_session(["demo"]),
     }
 
-    class _SelectiveClientSession:
-        def __init__(self, read: object, _write: object) -> None:
-            self._session = sessions[read]
+    class _SelectiveClient:
+        def __init__(self, transport: object, *, mode: str = "auto") -> None:
+            self._transport = transport
+            self._transport_context = None
 
         async def __aenter__(self) -> object:
-            return self._session
+            self._transport_context = self._transport
+            read, _write = await self._transport_context.__aenter__()
+            session = sessions[read]
+            await session.initialize()
+            return session
 
         async def __aexit__(self, exc_type, exc, tb) -> bool:
-            return False
+            return await self._transport_context.__aexit__(exc_type, exc, tb)
 
     @asynccontextmanager
     async def _selective_stdio_client(params: object):
@@ -1208,7 +1277,7 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
             raise RuntimeError("boom")
         yield params.command, object()
 
-    monkeypatch.setattr(sys.modules["mcp"], "ClientSession", _SelectiveClientSession)
+    monkeypatch.setattr(sys.modules["mcp"], "Client", _SelectiveClient)
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _selective_stdio_client)
 
     registry = ToolRegistry()
@@ -1264,15 +1333,18 @@ async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
     closed: list[str] = []
     sessions = {"fast": _make_fake_session(["demo"])}
 
-    class _SelectiveClientSession:
-        def __init__(self, read: object, _write: object) -> None:
-            self._session = sessions[str(read)]
+    class _SelectiveClient:
+        def __init__(self, transport: object, *, mode: str = "auto") -> None:
+            self._transport = transport
+            self._transport_context = None
 
         async def __aenter__(self) -> object:
-            return self._session
+            self._transport_context = self._transport
+            read, _write = await self._transport_context.__aenter__()
+            return sessions[str(read)]
 
         async def __aexit__(self, exc_type, exc, tb) -> bool:
-            return False
+            return await self._transport_context.__aexit__(exc_type, exc, tb)
 
     @asynccontextmanager
     async def _selective_stdio_client(params: object):
@@ -1285,7 +1357,7 @@ async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
         finally:
             closed.append(command)
 
-    monkeypatch.setattr(sys.modules["mcp"], "ClientSession", _SelectiveClientSession)
+    monkeypatch.setattr(sys.modules["mcp"], "Client", _SelectiveClient)
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _selective_stdio_client)
 
     registry = ToolRegistry()
@@ -1326,14 +1398,14 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     @asynccontextmanager
     async def _capturing_streamable_http_client(_url: str, http_client=None):
         captured["timeout"] = http_client.timeout
-        yield object(), object(), object()
+        yield object(), object()
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
-        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        "Httpx2PinnedDNSAsyncTransport",
+        lambda: httpx2.MockTransport(lambda request: httpx2.Response(200, request=request)),
     )
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
@@ -1409,7 +1481,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
-    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(mcp_mod.httpx2, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
@@ -1436,7 +1508,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
         client_kwargs = captured["client_kwargs"]
         assert isinstance(client_kwargs, dict)
         assert client_kwargs["auth"] is oauth_auth
-        assert client_kwargs["event_hooks"] == {"request": [mcp_mod._validate_mcp_request_url]}
+        assert client_kwargs["event_hooks"] == {"request": [mcp_mod._validate_mcp_httpx2_request_url]}
 
 
 @pytest.mark.asyncio
@@ -1696,10 +1768,10 @@ async def test_prompt_wrapper_execute_handles_timeout() -> None:
 
 @pytest.mark.asyncio
 async def test_prompt_wrapper_execute_handles_mcp_error() -> None:
-    from mcp.shared.exceptions import McpError
+    from mcp import MCPError
 
     async def get_prompt(name: str, arguments: dict | None = None) -> object:
-        raise McpError(code=42, message="invalid argument")
+        raise MCPError(code=42, message="invalid argument")
 
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt))
     result = await wrapper.execute()
@@ -1821,7 +1893,7 @@ def test_tool_wrapper_sanitizes_name() -> None:
     tool_def = SimpleNamespace(
         name="My Tool",
         description="tool with spaces",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
     assert wrapper.name == "mcp_srv_My_Tool"
@@ -1852,7 +1924,7 @@ def test_tool_wrapper_preserves_original_name_for_mcp_call() -> None:
     tool_def = SimpleNamespace(
         name="My Tool",
         description="tool with spaces",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
     # The sanitized API-facing name differs from the original MCP name
@@ -1930,12 +2002,12 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     tool_def = SimpleNamespace(
         name="search",
         description="search tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     other_tool_def = SimpleNamespace(
         name="search",
         description="other search tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), server_name, tool_def)
     other_wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "other", other_tool_def)

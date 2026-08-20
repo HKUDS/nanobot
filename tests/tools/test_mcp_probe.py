@@ -5,7 +5,7 @@ import asyncio
 import socket
 from unittest.mock import MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 from nanobot.agent.tools import mcp as mcp_mod
@@ -60,6 +60,7 @@ async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch)
         "nanobot.agent.tools.mcp.resolve_url_target",
         lambda _url: (True, "", ("93.184.216.34",)),
     )
+    monkeypatch.setattr("nanobot.agent.tools.mcp.env_proxy_applies_to_url", lambda _url: False)
 
     async def _open_connection(host: str, port: int):
         attempts.append((host, port))
@@ -121,6 +122,7 @@ async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypat
 
     monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _resolver)
     monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.env_proxy_applies_to_url", lambda _url: False)
 
     assert await _probe_http_url("http://mcp.example:8765/mcp") is True
     assert attempts == [
@@ -182,15 +184,15 @@ async def test_connect_isolates_streamable_http_status_failure(
     async def _reachable(_url: str) -> bool:
         return True
 
-    def _return_http_530(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(530, text="cloudflare error 1033", request=request)
+    def _return_http_530(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(530, text="cloudflare error 1033", request=request)
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
-        "PinnedDNSAsyncTransport",
-        lambda: httpx.MockTransport(_return_http_530),
+        "Httpx2PinnedDNSAsyncTransport",
+        lambda: httpx2.MockTransport(_return_http_530),
     )
 
     loop = asyncio.get_running_loop()

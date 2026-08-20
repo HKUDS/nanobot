@@ -21,7 +21,12 @@ from typing import Any, TypedDict, cast
 from filelock import FileLock
 from loguru import logger
 from mcp.client.auth import OAuthClientProvider
-from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
+from mcp.shared.auth import (
+    AuthorizationCodeResult,
+    OAuthClientInformationFull,
+    OAuthClientMetadata,
+    OAuthToken,
+)
 from pydantic import AnyHttpUrl, AnyUrl
 
 from nanobot.config.paths import get_data_dir
@@ -372,13 +377,16 @@ async def create_mcp_oauth_auth(
         logo_uri=_LOGO_URI,
         software_id="https://github.com/HKUDS/nanobot",
     )
+    async def sdk_callback_handler() -> AuthorizationCodeResult:
+        code, state = await callback_handler()
+        return AuthorizationCodeResult(code=code, state=state)
+
     return OAuthClientProvider(
         server_url,
         metadata,
         storage,
         redirect_handler=redirect_handler,
-        callback_handler=callback_handler,
-        timeout=300,
+        callback_handler=sdk_callback_handler,
     )
 
 
