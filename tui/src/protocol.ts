@@ -29,14 +29,14 @@ export interface FileEditEvent {
   diff?: FileDiff
 }
 
-export interface FileDiff {
+interface FileDiff {
   format: "unified" | string
   context?: number
   truncated?: boolean
   text?: string
 }
 
-export interface MediaAttachment {
+interface MediaAttachment {
   kind: "image" | "video" | "file"
   url: string
   name?: string
@@ -225,7 +225,7 @@ export interface SessionContextSnapshot {
   lastUsage: TokenUsage | null
 }
 
-export interface SessionMention {
+interface SessionMention {
   name: string
   session_key: string
   title?: string

@@ -155,7 +155,7 @@ function FileEditRow({
   );
 }
 
-export function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
+function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
   return edit.added > 0 || edit.deleted > 0;
 }
 
