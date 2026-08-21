@@ -59,6 +59,8 @@ _TUI_RELEASE_LIMITS = {
     "nanobot-tui-source.tar.gz": 20 * 1024 * 1024,
     "MANIFEST.sha256": 64 * 1024,
 }
+# Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
+_TUI_DETACH_EXIT_CODE = 90
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,13 @@ def launch_tui(
             workspace_override=workspace_override,
             wait_until_ready=False,
         )
-        return process.wait()
+        exit_code = process.wait()
+        if exit_code == _TUI_DETACH_EXIT_CODE:
+            lease = gateway.lease
+            if lease is not None:
+                lease.mark_persistent()
+            return 0
+        return exit_code
     except BaseException:
         if process is not None and process.poll() is None:
             process.terminate()

@@ -123,7 +123,7 @@ nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bo
 The command never deletes the external store and refuses to overwrite a different existing
 workspace file. Back up both the config directory and workspace before changing versions.
 
-Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. Only an explicit `nanobot gateway --background` promotes it to persistent mode. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
+Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 
 The default `--theme auto` mode paints first with the terminal's default background, probes the real foreground and background colors asynchronously, and follows supported live appearance changes. Use `--theme light` or `--theme dark` when a terminal or multiplexer does not report its colors reliably. The model preset and workspace access labels above the composer can be clicked to open their selectors; arrow keys, `Enter`, and `Esc` provide the same controls without a mouse. Access changes still pass through the gateway's local-trust and active-turn policy checks.
 
@@ -133,7 +133,7 @@ Packaged releases fetch a version-matched, checksummed terminal archive for macO
 
 Non-interactive input/output, `--logs`, and `--no-markdown` automatically retain the classic prompt so existing scripts and diagnostic workflows do not acquire terminal control sequences or silently ignore their options.
 
-Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`. Use `/detach` instead to close the TUI without stopping the shared gateway or its active agent work.
 
 ## WebUI
 

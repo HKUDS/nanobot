@@ -94,6 +94,7 @@ interface AppOptions {
   version: string
   access: string
   theme: "auto" | ThemeMode
+  onDetach?: (chatId?: string) => void
   onExit?: (chatId: string) => void
 }
 
@@ -192,6 +193,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     title: "Branch from reply",
     description: "Continue from an earlier completed reply",
     action: "branch",
+  },
+  {
+    command: "/detach",
+    title: "Detach",
+    description: "Close this terminal UI and keep the agent running",
+    action: "detach",
   },
   {
     command: "/exit",
@@ -835,6 +842,7 @@ export class NanobotTui {
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "diff") this.openDiff()
       else if (command.command.action === "branch") void this.openBranch()
+      else if (command.command.action === "detach") this.quit(true)
       else if (command.command.action === "exit") this.quit()
       else this.startNewChat()
       return
@@ -1771,7 +1779,7 @@ export class NanobotTui {
   }
 
   private syncCommandMenu(): void {
-    const limit = this.renderer.height >= 20 ? 6 : 3
+    const limit = this.renderer.height >= 20 ? 7 : 3
     this.commandMenu.update(this.composer.plainText, limit)
     this.updateMeta()
   }
@@ -2310,7 +2318,7 @@ export class NanobotTui {
     }
   }
 
-  private quit(): void {
+  private quit(detach = false): void {
     if (this.quitting) return
     this.quitting = true
     this.submitGeneration += 1
@@ -2319,7 +2327,8 @@ export class NanobotTui {
     this.client.close()
     this.renderer.destroy()
     const chatId = this.client.activeChatId || this.options.chatId
-    if (chatId) this.options.onExit?.(chatId)
+    if (detach) this.options.onDetach?.(chatId)
+    else if (chatId) this.options.onExit?.(chatId)
   }
 
   private handleDestroy = (): void => {

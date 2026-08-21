@@ -2153,6 +2153,65 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual([])
     expect(setup.renderer.isDestroyed).toBe(true)
   })
+
+  test("detaches without sending a message or reporting a normal exit", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const detached: string[] = []
+    const exited: string[] = []
+    let closed = false
+    const transport = client(sent)
+    transport.close = () => { closed = true }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      {
+        ...options,
+        onDetach: (chatId) => { if (chatId) detached.push(chatId) },
+        onExit: (chatId) => { exited.push(chatId) },
+      },
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      commandMenu: { visible: boolean }
+    }
+
+    await setup.mockInput.typeText("/detach")
+    await setup.flush()
+    expect(ui.commandMenu.visible).toBe(true)
+    expect(setup.captureCharFrame()).toContain("/detach")
+
+    ui.composer.submit()
+    await waitUntil(() => closed)
+
+    expect(sent).toEqual([])
+    expect(detached).toEqual(["chat"])
+    expect(exited).toEqual([])
+    expect(setup.renderer.isDestroyed).toBe(true)
+  })
+
+  test("detaches before the gateway assigns a chat ID", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    let detached = false
+    const transport = { ...client(), activeChatId: "" }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, onDetach: (chatId) => {
+        expect(chatId).toBeUndefined()
+        detached = true
+      } },
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    composer.setText("/detach")
+    composer.submit()
+    await waitUntil(() => detached)
+
+    expect(setup.renderer.isDestroyed).toBe(true)
+  })
 })
 
 describe("NanobotTui in a Herdr pane", () => {

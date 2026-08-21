@@ -191,6 +191,52 @@ def test_launcher_terminates_the_tui_when_gateway_start_fails(
     assert terminated == [True]
 
 
+def test_launcher_promotes_the_gateway_when_the_tui_detaches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    events: list[str] = []
+
+    class FakeLease:
+        def mark_persistent(self) -> bool:
+            events.append("promoted")
+            return True
+
+        def release(self, *, wait_for_stop: bool = True) -> None:
+            assert wait_for_stop is False
+            events.append("released")
+
+    class FakeProcess:
+        def wait(self) -> int:
+            events.append("waited")
+            return tui_launcher._TUI_DETACH_EXIT_CODE
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher.subprocess.Popen",
+        lambda *args, **kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._ensure_gateway",
+        lambda *args, **kwargs: SimpleNamespace(
+            base_url="http://127.0.0.1:8765",
+            lease=FakeLease(),
+        ),
+    )
+
+    result = launch_tui(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=None,
+        session_id=None,
+        theme="auto",
+    )
+
+    assert result == 0
+    assert events == ["waited", "promoted", "released"]
+
+
 def test_explicit_tui_binary_must_exist(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

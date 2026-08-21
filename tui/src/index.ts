@@ -1,6 +1,9 @@
 import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
 import { currentGitBranch } from "./host"
 
+// Keep in sync with _TUI_DETACH_EXIT_CODE in nanobot/cli/tui_launcher.py.
+const TUI_DETACH_EXIT_CODE = 90
+
 function themePreference(): AppOptions["theme"] {
   const value = process.env.NANOBOT_TUI_THEME?.trim() || "auto"
   if (value === "auto" || value === "dark" || value === "light") return value
@@ -32,6 +35,12 @@ const options: AppOptions = {
   version: process.env.NANOBOT_TUI_VERSION?.trim() || "dev",
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
   theme: themePreference(),
+  onDetach: (chatId) => {
+    process.exitCode = TUI_DETACH_EXIT_CODE
+    process.stdout.write("Detached; the agent continues in the background.\n")
+    if (chatId) process.stdout.write(sessionExitMessage(chatId))
+    process.stdout.write("Stop it with: nanobot gateway stop\n")
+  },
   onExit: (chatId) => {
     process.stdout.write(sessionExitMessage(chatId))
   },
