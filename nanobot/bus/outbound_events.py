@@ -100,7 +100,6 @@ class TurnModelUpdatedEvent(OutboundEvent):
     model: str
     model_preset: str | None = None
     context_window_tokens: int | None = None
-    is_fallback: bool = False
 
 
 def outbound_message_for_event(

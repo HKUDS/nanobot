@@ -400,7 +400,7 @@ function toModelBadgeInfo(
   );
   return {
     label,
-    model: toModelBadgeLabel(model),
+    model: model?.trim() || null,
     provider,
     providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
     needsSetup,
@@ -959,9 +959,12 @@ export function ThreadShell({
     setFallbackModelName(null);
     return client.onChat(chatId, (event) => {
       if (event.event !== "turn_model_updated") return;
-      setFallbackModelName(event.is_fallback ? event.model_name : null);
+      const activeModel = event.model_name.trim();
+      setFallbackModelName(
+        modelBadge.model && activeModel !== modelBadge.model ? activeModel : null,
+      );
     });
-  }, [chatId, client]);
+  }, [chatId, client, modelBadge.model]);
 
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
@@ -1451,7 +1454,7 @@ export function ThreadShell({
               : t("thread.composer.placeholderThread")
           }
           modelLabel={modelBadgeLabel}
-          modelDetail={modelBadge.model}
+          modelDetail={toModelBadgeLabel(modelBadge.model)}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
@@ -1498,7 +1501,7 @@ export function ThreadShell({
               : t("thread.composer.placeholderHero")
           }
           modelLabel={modelBadgeLabel}
-          modelDetail={modelBadge.model}
+          modelDetail={toModelBadgeLabel(modelBadge.model)}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}

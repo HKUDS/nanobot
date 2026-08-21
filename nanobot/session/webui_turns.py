@@ -495,7 +495,6 @@ def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserve
                         if context.runtime is not None
                         else None
                     ),
-                    is_fallback=True,
                 ),
                 metadata=context.metadata,
             )

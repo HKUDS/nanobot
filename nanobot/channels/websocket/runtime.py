@@ -1685,7 +1685,6 @@ class WebSocketChannel(BaseChannel):
                     model_name=event.model,
                     model_preset=event.model_preset,
                     context_window_tokens=event.context_window_tokens,
-                    is_fallback=event.is_fallback,
                 )
             return
         if isinstance(event, UserInputEvent):
@@ -2103,7 +2102,6 @@ class WebSocketChannel(BaseChannel):
         model_name: Any,
         model_preset: Any = None,
         context_window_tokens: Any = None,
-        is_fallback: Any = False,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -2117,7 +2115,6 @@ class WebSocketChannel(BaseChannel):
             "event": "turn_model_updated",
             "chat_id": chat_id,
             "model_name": model_name.strip(),
-            "is_fallback": is_fallback is True,
         }
         if isinstance(model_preset, str) and model_preset.strip():
             body["model_preset"] = model_preset.strip()

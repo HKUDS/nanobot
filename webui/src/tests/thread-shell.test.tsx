@@ -720,7 +720,6 @@ describe("ThreadShell", () => {
         event: "turn_model_updated",
         chat_id: "fallback-model",
         model_name: "openai-codex/gpt-5.5",
-        is_fallback: false,
       });
     });
 
@@ -731,7 +730,6 @@ describe("ThreadShell", () => {
         event: "turn_model_updated",
         chat_id: "fallback-model",
         model_name: "deepseek/deepseek-chat",
-        is_fallback: true,
       });
     });
 

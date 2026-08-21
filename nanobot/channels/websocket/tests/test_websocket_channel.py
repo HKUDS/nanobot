@@ -2061,7 +2061,6 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
                 model="deepseek/deepseek-chat",
                 model_preset="Deep Research",
                 context_window_tokens=128_000,
-                is_fallback=True,
             ),
         )
     )
@@ -2073,7 +2072,6 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "model_name": "deepseek/deepseek-chat",
         "model_preset": "Deep Research",
         "context_window_tokens": 128_000,
-        "is_fallback": True,
     }
     chat_two.send.assert_not_awaited()
 
