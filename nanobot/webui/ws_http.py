@@ -90,6 +90,7 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.path_evidence import extract_path_evidence
 from nanobot.webui.native_folder_picker import (
     NativeFolderPickerError,
     native_folder_picker_available,
@@ -850,15 +851,37 @@ class GatewayHTTPHandler:
         query = _parse_query(request.path)
         path = _query_first(query, "path")
         is_probe = _query_first(query, "probe") == "1"
+
+        def evidence_provider() -> list[Path]:
+            """Lazily read session tool activity for cross-directory resolution."""
+            if self.session_manager is None:
+                return []
+            session_data = self.session_manager.read_session_file(decoded_key)
+            raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
+            if not isinstance(raw_messages, list):
+                return []
+            return extract_path_evidence(cast(list[Any], raw_messages))
+
+        scope = self.workspaces.scope_for_session_key(decoded_key)
         try:
-            scope = self.workspaces.scope_for_session_key(decoded_key)
             if is_probe:
-                payload = file_preview_availability_payload(path, scope=scope)
+                payload = file_preview_availability_payload(
+                    path, scope=scope, evidence_provider=evidence_provider
+                )
             else:
-                payload = file_preview_payload(path, scope=scope)
+                payload = file_preview_payload(
+                    path, scope=scope, evidence_provider=evidence_provider
+                )
         except WebUIFilePreviewError as e:
             if is_probe and e.status in {400, 403, 404, 415}:
-                return _http_json_response({"available": False})
+                hint: dict[str, Any] = {"available": False}
+                if e.status == 404:
+                    hint["reason"] = "not_found"
+                    hint["project_path"] = str(scope.project_path)
+                    hint["requested"] = path or ""
+                elif e.status == 403:
+                    hint["reason"] = "outside_workspace"
+                return _http_json_response(hint)
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
 

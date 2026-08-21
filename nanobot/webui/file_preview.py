@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
 from nanobot.config.paths import get_media_dir
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
+from nanobot.webui.path_evidence import resolve_with_evidence
 
 MAX_FILE_PREVIEW_BYTES = 384 * 1024
 
@@ -27,11 +28,12 @@ def file_preview_payload(
     raw_path: str | None,
     *,
     scope: WorkspaceScope,
+    evidence_provider: Callable[[], list[Path]] | None = None,
     max_bytes: int = MAX_FILE_PREVIEW_BYTES,
 ) -> dict[str, Any]:
     """Return a text preview for a file allowed by the session workspace scope."""
 
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = _resolve_preview_path(raw_path, scope=scope, evidence_provider=evidence_provider)
 
     try:
         with open(resolved, "rb") as f:
@@ -65,10 +67,11 @@ def file_preview_availability_payload(
     raw_path: str | None,
     *,
     scope: WorkspaceScope,
+    evidence_provider: Callable[[], list[Path]] | None = None,
 ) -> dict[str, bool]:
     """Confirm that a path is a readable text preview candidate without loading it fully."""
 
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = _resolve_preview_path(raw_path, scope=scope, evidence_provider=evidence_provider)
     try:
         with open(resolved, "rb") as f:
             prefix = f.read(4096)
@@ -79,24 +82,65 @@ def file_preview_availability_payload(
     return {"available": True}
 
 
-def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Path:
+def _resolve_preview_path(
+    raw_path: str | None,
+    *,
+    scope: WorkspaceScope,
+    evidence_provider: Callable[[], list[Path]] | None = None,
+) -> Path:
     path = _clean_preview_path(raw_path)
     if not path:
         raise WebUIFilePreviewError(400, "missing path")
     if len(path) > 4096:
         raise WebUIFilePreviewError(400, "path is too long")
 
-    try:
+    def _resolve(candidate: str) -> Path:
         extra_roots = [get_media_dir()] if scope.restrict_to_workspace else None
-        resolved = resolve_allowed_path(
-            path,
+        return resolve_allowed_path(
+            candidate,
             workspace=scope.project_path,
             allowed_root=scope.project_path if scope.restrict_to_workspace else None,
             extra_allowed_roots=extra_roots,
             strict=True,
         )
-    except FileNotFoundError as e:
-        raise WebUIFilePreviewError(404, "file not found") from e
+
+    def _resolve_retry(candidate: str) -> Path:
+        try:
+            return _resolve(candidate)
+        except FileNotFoundError as e:
+            raise WebUIFilePreviewError(404, "file not found") from e
+        except WorkspaceBoundaryError as e:
+            raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
+        except OSError as e:
+            raise WebUIFilePreviewError(400, "invalid path") from e
+
+    def _fallback_evidence() -> Path:
+        """Try session tool-activity evidence dirs when the project-root base misses."""
+        evidence_dirs = evidence_provider() if evidence_provider is not None else None
+        if not evidence_dirs:
+            raise WebUIFilePreviewError(404, "file not found")
+        resolved = resolve_with_evidence(path, evidence_dirs, scope=scope)
+        if resolved is None:
+            raise WebUIFilePreviewError(404, "file not found")
+        return resolved
+
+    try:
+        resolved = _resolve(path)
+    except FileNotFoundError:
+        # Tolerate references that repeat the project directory name as a
+        # prefix (e.g. "qizicheng-skill管理删除优化/01_docs/..." when the
+        # session project_path is ".../qizicheng-skill管理删除优化"): strip
+        # one leading "<project name>/" and retry once.  First-resolution
+        # behavior for normal relative/absolute paths is unchanged.
+        project_name = scope.project_path.name
+        project_prefix = f"{project_name}/"
+        if project_name and path.startswith(project_prefix):
+            try:
+                resolved = _resolve_retry(path[len(project_prefix):])
+            except WebUIFilePreviewError:
+                resolved = _fallback_evidence()
+        else:
+            resolved = _fallback_evidence()
     except WorkspaceBoundaryError as e:
         raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
     except OSError as e:

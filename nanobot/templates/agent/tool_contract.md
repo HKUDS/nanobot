@@ -25,6 +25,12 @@
 - Use `output_mode="count"` to size a broad search before reading full matches.
 - Use `head_limit` and `offset` to page across large result sets.
 - Search tools enforce binary and file-size limits and report skipped files in the result.
+- When referencing a local file in your reply, always use a markdown link with an
+  absolute path: `[file name](/absolute/path/to/file.md)` (optionally with `:line`).
+  Do not use backtick-relative paths like `relative/path.md` — in the WebUI a
+  relative path is resolved against the session's bound project root, so a path
+  relative to any other directory will not open. Absolute paths are self-contained
+  and always work.
 
 ## File and Coding Workflows
 

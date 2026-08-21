@@ -5468,7 +5468,13 @@ def test_handle_file_preview_probe_reports_missing_file_as_unavailable(tmp_path)
     resp = gateway.http._handle_file_preview(req, enc)
 
     assert resp.status_code == 200
-    assert json.loads(resp.body.decode()) == {"available": False}
+    payload = json.loads(resp.body.decode())
+    assert payload == {
+        "available": False,
+        "reason": "not_found",
+        "project_path": str(workspace),
+        "requested": "notes/missing.md",
+    }
 
 
 def test_handle_file_preview_probe_reports_binary_file_as_unavailable(tmp_path) -> None:
