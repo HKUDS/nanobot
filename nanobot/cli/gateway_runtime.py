@@ -313,6 +313,8 @@ def _run_gateway(
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
+    from nanobot.llm_usage import record_llm_call
+    from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
         ProviderSnapshot,
         build_provider_snapshot,
@@ -330,7 +332,6 @@ def _run_gateway(
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
-    from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
     webui_url = _webui_browser_url(config)
@@ -361,7 +362,8 @@ def _run_gateway(
     runtime_events = RuntimeEventBus()
     fallback_model_observer = build_webui_fallback_model_observer(bus)
 
-    def _observe_fallback_models(snapshot: ProviderSnapshot) -> ProviderSnapshot:
+    def _observe_provider(snapshot: ProviderSnapshot) -> ProviderSnapshot:
+        snapshot.provider.set_llm_call_observer(record_llm_call)
         if isinstance(snapshot.provider, FallbackProvider):
             snapshot.provider.set_fallback_model_observer(fallback_model_observer)
         return snapshot
@@ -371,20 +373,19 @@ def _run_gateway(
         **kwargs: Any,
     ) -> ProviderSnapshot:
         try:
-            return _observe_fallback_models(load_provider_snapshot(*args, **kwargs))
+            return _observe_provider(load_provider_snapshot(*args, **kwargs))
         except ValueError as exc:
             if unconfigured_provider_error is None:
                 raise
-            return build_unconfigured_provider_snapshot(config, str(exc))
+            return _observe_provider(build_unconfigured_provider_snapshot(config, str(exc)))
 
     if unconfigured_provider_error is not None:
-        provider_snapshot = build_unconfigured_provider_snapshot(
-            config,
-            unconfigured_provider_error,
+        provider_snapshot = _observe_provider(
+            build_unconfigured_provider_snapshot(config, unconfigured_provider_error)
         )
     else:
         try:
-            provider_snapshot = _observe_fallback_models(build_provider_snapshot(config))
+            provider_snapshot = _observe_provider(build_provider_snapshot(config))
         except ValueError as exc:
             console.print(f"[red]Error: {exc}[/red]")
             raise typer.Exit(1) from exc
@@ -443,7 +444,6 @@ def _run_gateway(
         runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
-        hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
         tool_registry=tools,
@@ -564,13 +564,6 @@ def _run_gateway(
             except Exception:
                 logger.exception("Dream cron job failed")
             finally:
-                from nanobot.webui.token_usage import record_response_token_usage
-
-                record_response_token_usage(
-                    resp,
-                    source="dream",
-                    timezone_name=config.agents.defaults.timezone,
-                )
                 sha = _commit_dream_changes(store)
                 if sha:
                     logger.info("Dream commit: {}", sha)
@@ -630,14 +623,15 @@ def _run_gateway(
             evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
 
             # Fail closed: stay silent on evaluator failure instead of notifying.
-            should_notify = await evaluate_response(
-                response=response,
-                task_context=prompt,
-                provider=agent.provider,
-                model=agent.model,
-                evaluator_prompt=evaluator_prompt,
-                default_notify=False,
-            )
+            with llm_usage_source("cron"):
+                should_notify = await evaluate_response(
+                    response=response,
+                    task_context=prompt,
+                    provider=agent.provider,
+                    model=agent.model,
+                    evaluator_prompt=evaluator_prompt,
+                    default_notify=False,
+                )
 
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")

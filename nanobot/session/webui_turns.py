@@ -37,6 +37,7 @@ from nanobot.bus.runtime_events import (
     TurnRuntimeAdmitted,
     UserInputAccepted,
 )
+from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
@@ -208,24 +209,25 @@ async def maybe_generate_webui_title(
         prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
-        response = await provider.chat_with_retry(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            tools=None,
-            model=model,
-            max_tokens=TITLE_GENERATION_MAX_TOKENS,
-            temperature=0.2,
-            reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-            retry_mode="standard",
-        )
+        with llm_usage_source("system"):
+            response = await provider.chat_with_retry(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You write short, neutral chat titles. "
+                            "Return only the title text."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                tools=None,
+                model=model,
+                max_tokens=TITLE_GENERATION_MAX_TOKENS,
+                temperature=0.2,
+                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                retry_mode="standard",
+            )
     except Exception:
         logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
         return False

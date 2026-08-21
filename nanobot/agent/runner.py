@@ -20,6 +20,12 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+from nanobot.llm_usage.context import (
+    LLMUsageSource,
+    bind_llm_usage_source,
+    reset_llm_usage_source,
+    source_from_session_key,
+)
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -118,6 +124,7 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
+    llm_usage_source: LLMUsageSource | None = None
 
 
 @dataclass(slots=True)
@@ -392,6 +399,9 @@ class AgentRunner:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
         context = AgentRunHookContext(messages=deepcopy(messages))
+        llm_usage_source_token = bind_llm_usage_source(
+            spec.llm_usage_source or source_from_session_key(spec.session_key)
+        )
 
         try:
             await hook.before_run(context)
@@ -424,17 +434,20 @@ class AgentRunner:
             await hook.after_run(context)
             return result
         finally:
-            context.messages = deepcopy(messages)
-            if context.exception is None:
-                await hook.on_finally(context)
-            else:
-                try:
+            try:
+                context.messages = deepcopy(messages)
+                if context.exception is None:
                     await hook.on_finally(context)
-                except Exception:
-                    logger.exception(
-                        "AgentHook.on_finally error after {}",
-                        context.stop_reason or "run exception",
-                    )
+                else:
+                    try:
+                        await hook.on_finally(context)
+                    except Exception:
+                        logger.exception(
+                            "AgentHook.on_finally error after {}",
+                            context.stop_reason or "run exception",
+                        )
+            finally:
+                reset_llm_usage_source(llm_usage_source_token)
 
     async def _run_core(
         self,

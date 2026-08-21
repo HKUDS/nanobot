@@ -284,9 +284,9 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         if route == ("root", "settings"):
-            return self._handle_settings()
+            return await asyncio.to_thread(self._handle_settings)
         if route == ("root", "usage"):
-            return self._handle_settings_usage()
+            return await asyncio.to_thread(self._handle_settings_usage)
 
         domain, action = route
         domain_request = self._domain_request(

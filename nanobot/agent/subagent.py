@@ -8,7 +8,7 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, NotRequired, TypedDict
 
 from loguru import logger
 
@@ -28,6 +28,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.security.workspace_access import (
     WorkspaceScope,
@@ -43,6 +44,7 @@ class _SubagentOrigin(TypedDict):
     channel: str
     chat_id: str
     session_key: str | None
+    llm_usage_source: NotRequired[LLMUsageSource]
 
 
 @dataclass(slots=True)
@@ -252,6 +254,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "llm_usage_source": current_llm_usage_source(),
         }
 
         status = SubagentStatus(
@@ -315,6 +318,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "llm_usage_source": current_llm_usage_source(),
         }
         status = SubagentStatus(
             task_id=task_id,
@@ -417,6 +421,10 @@ class SubagentManager:
                     session_key=sess_key,
                     workspace=root,
                     llm_timeout_s=llm_timeout,
+                    llm_usage_source=origin.get(
+                        "llm_usage_source",
+                        current_llm_usage_source(),
+                    ),
                 ))
             finally:
                 if token is not None:

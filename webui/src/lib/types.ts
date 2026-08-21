@@ -724,6 +724,13 @@ export interface SettingsPayload {
       requests: number;
       reported_requests?: number;
       estimated_requests?: number;
+      successful_requests?: number;
+      failed_requests?: number;
+      generation_ms?: number;
+      measured_output_tokens?: number;
+      ttft_ms?: number;
+      timed_requests?: number;
+      duration_ms?: number;
       sources?: Record<
         "user" | "api" | "cron" | "dream" | "system" | string,
         {
@@ -739,6 +746,13 @@ export interface SettingsPayload {
           requests: number;
           reported_requests?: number;
           estimated_requests?: number;
+          successful_requests?: number;
+          failed_requests?: number;
+          generation_ms?: number;
+          measured_output_tokens?: number;
+          ttft_ms?: number;
+          timed_requests?: number;
+          duration_ms?: number;
         }
       >;
     }>;
@@ -750,6 +764,35 @@ export interface SettingsPayload {
     longest_streak_days: number;
     active_days_30d: number;
     requests_30d: number;
+    failed_requests_30d?: number;
+    reported_tokens_30d?: number;
+    estimated_tokens_30d?: number;
+    cache_read_tokens_30d?: number;
+    cache_read_observed_input_tokens_30d?: number;
+    cache_read_rate_30d?: number | null;
+    providers_30d?: Array<{
+      provider: string;
+      model: string;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      cache_read_observed_input_tokens: number;
+      cache_write_observed_input_tokens: number;
+      total_tokens: number;
+      reported_tokens: number;
+      estimated_tokens: number;
+      requests: number;
+      successful_requests: number;
+      failed_requests: number;
+      reported_requests: number;
+      estimated_requests: number;
+      generation_ms: number;
+      measured_output_tokens: number;
+      ttft_ms: number;
+      timed_requests: number;
+      duration_ms: number;
+    }>;
     updated_at?: string | null;
   };
   advanced: {

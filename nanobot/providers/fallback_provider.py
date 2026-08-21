@@ -13,6 +13,7 @@ from loguru import logger
 
 from nanobot.providers.base import (
     GenerationSettings,
+    LLMCallObserver,
     LLMProvider,
     LLMResponse,
     ProviderCallContext,
@@ -150,6 +151,11 @@ class FallbackProvider(LLMProvider):
     def set_fallback_model_observer(self, observer: FallbackModelObserver | None) -> None:
         """Attach a process-level observer without changing request call signatures."""
         self._fallback_model_observer = observer
+
+    def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
+        """Attach usage recording to the primary and future fallback leaves."""
+        super().set_llm_call_observer(observer)
+        self._primary.set_llm_call_observer(observer)
 
     @property
     def supports_progress_deltas(self) -> bool:
@@ -506,6 +512,7 @@ class FallbackProvider(LLMProvider):
                 )
             try:
                 fallback_provider = self._provider_factory(fallback)
+                fallback_provider.set_llm_call_observer(self._llm_call_observer)
             except Exception as exc:
                 logger.warning(
                     "Failed to create provider for fallback '{}': {}", fallback_model, exc

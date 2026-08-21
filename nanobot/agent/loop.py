@@ -49,6 +49,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -1202,6 +1203,11 @@ class AgentLoop:
                     message_metadata=metadata,
                 ),
                 provider_state=provider_state,
+                llm_usage_source=source_from_request(
+                    active_session_key,
+                    channel=channel,
+                    metadata=metadata,
+                ),
             ))
         finally:
             turn_scope_stack.close()

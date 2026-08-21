@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -13,12 +14,15 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import json_repair
 from loguru import logger
 
 from nanobot.utils.helpers import sanitize_surrogates_deep
+
+if TYPE_CHECKING:
+    from nanobot.llm_usage.models import LLMCallRecord
 
 STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
@@ -26,6 +30,7 @@ MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
 
 RetryEventCallback = Callable[[str], Awaitable[None]]
+LLMCallObserver = Callable[["LLMCallRecord"], None]
 
 
 def resolve_stream_idle_timeout_s(
@@ -682,6 +687,95 @@ class LLMProvider(ABC):
         self.api_base = api_base
         self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
+        self._llm_call_observer: LLMCallObserver | None = None
+
+    def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
+        """Attach a fail-open observer for each physical retry-managed call."""
+        self._llm_call_observer = observer
+
+    def _usage_for_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+    ) -> LLMUsage | None:
+        usage = response.usage
+        if usage is None or usage.total_tokens == 0:
+            if response.finish_reason in {"error", "cancelled"}:
+                return None
+            messages = kwargs.get("messages")
+            if not isinstance(messages, list):
+                return usage
+            tools_value = kwargs.get("tools")
+            tools = cast(list[dict[str, Any]], tools_value) if isinstance(tools_value, list) else None
+            model_value = kwargs.get("model")
+            model = model_value if isinstance(model_value, str) else self.get_default_model()
+            try:
+                from nanobot.utils.helpers import (
+                    build_assistant_message,
+                    estimate_message_tokens,
+                    estimate_prompt_tokens_chain,
+                )
+
+                input_tokens, _ = estimate_prompt_tokens_chain(
+                    self,
+                    model,
+                    cast(list[dict[str, Any]], messages),
+                    tools,
+                )
+                assistant_message = build_assistant_message(
+                    response.content or "",
+                    tool_calls=[call.to_openai_tool_call() for call in response.tool_calls],
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
+                )
+                usage = LLMUsage.estimated(
+                    input_tokens=max(0, input_tokens),
+                    output_tokens=max(0, estimate_message_tokens(assistant_message)),
+                )
+            except Exception:
+                logger.exception("failed to estimate usage for {}", self.provider_name)
+                return usage
+        return usage.with_timing(
+            generation_ms=response.generation_ms,
+            ttft_ms=response.ttft_ms,
+        )
+
+    def _observe_llm_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        started_at_ms: int,
+        started_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
+        observer = self._llm_call_observer
+        if observer is None:
+            return response
+        usage = self._usage_for_call(response, kwargs)
+        if usage is not None:
+            response.usage = usage
+        model_value = kwargs.get("model")
+        model = model_value if isinstance(model_value, str) and model_value else self.get_default_model()
+        try:
+            from nanobot.llm_usage.context import current_llm_usage_source
+            from nanobot.llm_usage.models import LLMCallRecord
+
+            observer(LLMCallRecord(
+                started_at_ms=started_at_ms,
+                duration_ms=max(0, (time.monotonic_ns() - started_at_ns) // 1_000_000),
+                provider=self.provider_name,
+                model=model,
+                source=current_llm_usage_source(),
+                stream=stream,
+                finish_reason=response.finish_reason,
+                usage=usage,
+                error_status_code=response.error_status_code,
+                error_kind=response.error_kind,
+            ))
+        except Exception:
+            logger.exception("LLM call observer failed for {}", self.provider_name)
+        return response
 
     def can_resume_conversation_state(
         self,
@@ -1068,18 +1162,39 @@ class LLMProvider(ABC):
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
+        started_at_ms = time.time_ns() // 1_000_000
+        started_at_ns = time.monotonic_ns()
         try:
             provider_context = kwargs.pop("provider_context", None)
             if isinstance(provider_context, ProviderCallContext):
-                return await self.chat_with_context(
+                response = await self.chat_with_context(
                     provider_context=provider_context,
                     **kwargs,
                 )
-            return await self.chat(**kwargs)
+            else:
+                response = await self.chat(**kwargs)
         except asyncio.CancelledError:
+            self._observe_llm_call(
+                LLMResponse(
+                    content=None,
+                    finish_reason="cancelled",
+                    error_kind="cancelled",
+                ),
+                kwargs,
+                started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns,
+                stream=False,
+            )
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+        return self._observe_llm_call(
+            response,
+            kwargs,
+            started_at_ms=started_at_ms,
+            started_at_ns=started_at_ns,
+            stream=False,
+        )
 
     async def chat_stream(
         self,
@@ -1142,18 +1257,39 @@ class LLMProvider(ABC):
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
         """Call chat_stream() and convert unexpected exceptions to error responses."""
+        started_at_ms = time.time_ns() // 1_000_000
+        started_at_ns = time.monotonic_ns()
         try:
             provider_context = kwargs.pop("provider_context", None)
             if isinstance(provider_context, ProviderCallContext):
-                return await self.chat_stream_with_context(
+                response = await self.chat_stream_with_context(
                     provider_context=provider_context,
                     **kwargs,
                 )
-            return await self.chat_stream(**kwargs)
+            else:
+                response = await self.chat_stream(**kwargs)
         except asyncio.CancelledError:
+            self._observe_llm_call(
+                LLMResponse(
+                    content=None,
+                    finish_reason="cancelled",
+                    error_kind="cancelled",
+                ),
+                kwargs,
+                started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns,
+                stream=True,
+            )
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+        return self._observe_llm_call(
+            response,
+            kwargs,
+            started_at_ms=started_at_ms,
+            started_at_ns=started_at_ns,
+            stream=True,
+        )
 
     async def chat_stream_with_retry(
         self,
