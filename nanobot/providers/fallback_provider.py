@@ -17,7 +17,7 @@ from nanobot.providers.base import (
     LLMResponse,
     ProviderCallContext,
     ProviderConversationState,
-    retry_exhaustion_callback,
+    RetryEventCallback,
 )
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
@@ -206,8 +206,9 @@ class FallbackProvider(LLMProvider):
         reasoning_effort: object = _UNSET,
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
     ) -> LLMResponse:
         """Exhaust each provider's retries before moving to the next fallback."""
         call_kwargs: dict[str, Any] = {
@@ -217,6 +218,7 @@ class FallbackProvider(LLMProvider):
             "tool_choice": tool_choice,
             "retry_mode": retry_mode,
             "on_retry_wait": on_retry_wait,
+            "on_retry_exhausted": on_retry_exhausted,
         }
         if max_tokens is not _UNSET:
             call_kwargs["max_tokens"] = max_tokens
@@ -235,6 +237,7 @@ class FallbackProvider(LLMProvider):
             lambda p, kw: p.chat_with_retry(**kw),
             call_kwargs,
             has_streamed=None,
+            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
         )
 
     async def chat_with_context(
@@ -292,8 +295,9 @@ class FallbackProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
     ) -> LLMResponse:
         """Exhaust streaming retries on one provider before failing over."""
         call_kwargs: dict[str, Any] = {
@@ -306,6 +310,7 @@ class FallbackProvider(LLMProvider):
             "on_tool_call_delta": on_tool_call_delta,
             "retry_mode": retry_mode,
             "on_retry_wait": on_retry_wait,
+            "on_retry_exhausted": on_retry_exhausted,
         }
         if max_tokens is not _UNSET:
             call_kwargs["max_tokens"] = max_tokens
@@ -350,6 +355,7 @@ class FallbackProvider(LLMProvider):
             has_streamed=has_streamed,
             on_stream_recover=_recover_stream if on_stream_recover is not None else None,
             persistent_retry_guard=lambda: not has_unrecovered_stream[0],
+            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
         )
 
     async def _route_with_retry_fallback(
@@ -359,16 +365,17 @@ class FallbackProvider(LLMProvider):
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         persistent_retry_guard: Callable[[], bool] | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
     ) -> LLMResponse:
         """Apply finite retries per provider and persistence to the whole chain."""
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = kwargs.get("on_retry_wait")
+        on_retry_wait: RetryEventCallback | None = kwargs.get("on_retry_wait")
         if kwargs.get("retry_mode", "standard") != "persistent":
             return await self._try_with_retry_fallback(
                 call,
                 kwargs,
                 has_streamed=has_streamed,
                 on_stream_recover=on_stream_recover,
-                on_retry_exhausted=on_retry_wait,
+                on_retry_exhausted=on_retry_exhausted,
             )
 
         async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
@@ -387,7 +394,7 @@ class FallbackProvider(LLMProvider):
             kwargs["messages"],
             retry_mode="persistent",
             on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
             should_retry_guard=persistent_retry_guard,
             on_stream_recover=on_stream_recover,
         )
@@ -398,7 +405,7 @@ class FallbackProvider(LLMProvider):
         kwargs: dict[str, Any],
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None,
-        on_retry_exhausted: Callable[[str], Awaitable[None]] | None,
+        on_retry_exhausted: RetryEventCallback | None,
     ) -> LLMResponse:
         """Defer a provider's terminal retry event until the chain fails."""
         last_exhausted_message: str | None = None
@@ -413,8 +420,11 @@ class FallbackProvider(LLMProvider):
         ) -> LLMResponse:
             nonlocal last_exhausted_message
             last_exhausted_message = None
-            with retry_exhaustion_callback(_capture_exhaustion):
-                return await call(provider, call_kwargs)
+            candidate_kwargs = {
+                **call_kwargs,
+                "on_retry_exhausted": _capture_exhaustion,
+            }
+            return await call(provider, candidate_kwargs)
 
         response = await self._try_with_fallback(
             _call_with_deferred_exhaustion,

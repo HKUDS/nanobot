@@ -7,9 +7,8 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Generator
-from contextlib import contextmanager, suppress
-from contextvars import ContextVar
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,24 +26,6 @@ MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
 
 RetryEventCallback = Callable[[str], Awaitable[None]]
-_RETRY_EXHAUSTED_CALLBACK: ContextVar[RetryEventCallback | None] = ContextVar(
-    "nanobot_retry_exhausted_callback",
-    default=None,
-)
-
-
-@contextmanager
-def retry_exhaustion_callback(callback: RetryEventCallback) -> Generator[None, None, None]:
-    """Redirect terminal retry events within one async call context.
-
-    Provider wrappers use this internal scope to defer a candidate's terminal
-    notification without changing the public retry-method signatures.
-    """
-    token = _RETRY_EXHAUSTED_CALLBACK.set(callback)
-    try:
-        yield
-    finally:
-        _RETRY_EXHAUSTED_CALLBACK.reset(token)
 
 
 def resolve_stream_idle_timeout_s(
@@ -893,8 +874,9 @@ class LLMProvider(ABC):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -931,16 +913,13 @@ class LLMProvider(ABC):
             kw["provider_context"] = provider_context
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
-        on_retry_exhausted = _RETRY_EXHAUSTED_CALLBACK.get()
         return await self._run_with_retry(
             self._safe_chat_stream,
             kw,
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
-            on_retry_exhausted=(
-                on_retry_exhausted if on_retry_exhausted is not None else on_retry_wait
-            ),
+            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
         )
@@ -955,8 +934,9 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -981,16 +961,13 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
-        on_retry_exhausted = _RETRY_EXHAUSTED_CALLBACK.get()
         return await self._run_with_retry(
             self._safe_chat,
             kw,
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
-            on_retry_exhausted=(
-                on_retry_exhausted if on_retry_exhausted is not None else on_retry_wait
-            ),
+            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
         )
 
     @classmethod
@@ -1095,8 +1072,8 @@ class LLMProvider(ABC):
         original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None,
-        on_retry_exhausted: Callable[[str], Awaitable[None]] | None,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:

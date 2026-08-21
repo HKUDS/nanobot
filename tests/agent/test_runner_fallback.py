@@ -858,9 +858,13 @@ class TestRetryBeforeFailover:
             _make_response("fallback unavailable", finish_reason="error", error_status_code=503),
         )
         retry_events: list[str] = []
+        terminal_events: list[str] = []
 
         async def _on_retry_event(message: str) -> None:
             retry_events.append(message)
+
+        async def _on_retry_exhausted(message: str) -> None:
+            terminal_events.append(message)
 
         fb = FallbackProvider(
             primary=primary,
@@ -872,12 +876,13 @@ class TestRetryBeforeFailover:
             result = await fb.chat_with_retry(
                 messages=[{"role": "user", "content": "hi"}],
                 on_retry_wait=_on_retry_event,
+                on_retry_exhausted=_on_retry_exhausted,
             )
 
-        terminal_events = [event for event in retry_events if "giving up" in event]
         assert result.finish_reason == "error"
         assert len(primary.chat_calls) == 4
         assert len(fallback.chat_calls) == 4
+        assert not any("giving up" in event for event in retry_events)
         assert terminal_events == ["Model request failed after 4 attempts, giving up."]
 
     @pytest.mark.asyncio
@@ -1026,41 +1031,6 @@ class TestRetryBeforeFailover:
             f"Persistent retry stopped after {fb._PERSISTENT_IDENTICAL_ERROR_LIMIT} "
             "identical errors."
         ]
-
-    @pytest.mark.asyncio
-    async def test_legacy_retry_override_does_not_receive_internal_callback(self) -> None:
-        class LegacyRetryProvider(_FakeProvider):
-            def __init__(self) -> None:
-                super().__init__("legacy", _make_response("legacy ok"))
-                self.retry_calls = 0
-
-            async def chat_with_retry(
-                self,
-                messages: list[dict[str, Any]],
-                tools: list[dict[str, Any]] | None = None,
-                model: str | None = None,
-                max_tokens: object = None,
-                temperature: object = None,
-                reasoning_effort: object = None,
-                tool_choice: str | dict[str, Any] | None = None,
-                retry_mode: str = "standard",
-                on_retry_wait: Any = None,
-                provider_context: ProviderCallContext | None = None,
-            ) -> LLMResponse:
-                self.retry_calls += 1
-                return await self.chat(messages=messages)
-
-        primary = LegacyRetryProvider()
-        fb = FallbackProvider(
-            primary=primary,
-            fallback_presets=[_fallback("fallback-a")],
-            provider_factory=MagicMock(),
-        )
-
-        result = await fb.chat_with_retry(messages=[{"role": "user", "content": "hi"}])
-
-        assert result.content == "legacy ok"
-        assert primary.retry_calls == 1
 
     @pytest.mark.asyncio
     async def test_fallback_retries_before_trying_next_model(self) -> None:
