@@ -27,6 +27,7 @@ from nanobot.session.manager import (
     SessionManager,
 )
 from nanobot.session.summary import session_summary_from_metadata
+from nanobot.trajectory.context import trajectory_source
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -915,15 +916,16 @@ class Consolidator:
         if not messages:
             return None
         try:
-            response = await runtime.provider.chat_with_retry(
-                model=runtime.model,
-                messages=request_messages,
-                tools=request_tools,
-                tool_choice="none",
-                temperature=runtime.generation.temperature,
-                max_tokens=runtime.generation.max_tokens,
-                reasoning_effort=runtime.generation.reasoning_effort,
-            )
+            with trajectory_source("dream"):
+                response = await runtime.provider.chat_with_retry(
+                    model=runtime.model,
+                    messages=request_messages,
+                    tools=request_tools,
+                    tool_choice="none",
+                    temperature=runtime.generation.temperature,
+                    max_tokens=runtime.generation.max_tokens,
+                    reasoning_effort=runtime.generation.reasoning_effort,
+                )
         except Exception:
             logger.warning("Consolidation provider call failed, raw-dumping to history")
             self.store.raw_archive(messages, session_key=session_key)

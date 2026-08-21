@@ -8,7 +8,7 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, NotRequired, TypedDict
 
 from loguru import logger
 
@@ -35,6 +35,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.trajectory.context import TrajectorySource, current_trajectory_source
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -43,6 +44,7 @@ class _SubagentOrigin(TypedDict):
     channel: str
     chat_id: str
     session_key: str | None
+    trajectory_source: NotRequired[TrajectorySource]
 
 
 @dataclass(slots=True)
@@ -252,6 +254,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "trajectory_source": current_trajectory_source(),
         }
 
         status = SubagentStatus(
@@ -315,6 +318,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "trajectory_source": current_trajectory_source(),
         }
         status = SubagentStatus(
             task_id=task_id,
@@ -417,6 +421,10 @@ class SubagentManager:
                     session_key=sess_key,
                     workspace=root,
                     llm_timeout_s=llm_timeout,
+                    trajectory_source=origin.get(
+                        "trajectory_source",
+                        current_trajectory_source(),
+                    ),
                 ))
             finally:
                 if token is not None:

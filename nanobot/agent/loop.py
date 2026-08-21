@@ -80,6 +80,7 @@ from nanobot.session.model_selection import (
     model_preset_from_metadata,
 )
 from nanobot.session.summary import SessionSummary
+from nanobot.trajectory.context import source_from_request
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
@@ -1184,6 +1185,11 @@ class AgentLoop:
                     message_metadata=metadata,
                 ),
                 provider_state=provider_state,
+                trajectory_source=source_from_request(
+                    active_session_key,
+                    channel=channel,
+                    metadata=metadata,
+                ),
             ))
         finally:
             turn_scope_stack.close()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -13,6 +14,8 @@ from nanobot.providers.base import LLMUsage
 from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.trajectory import get_trajectory_store
+from nanobot.trajectory.models import LLMCall
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     _docs_version,
@@ -1463,14 +1466,16 @@ def test_settings_payload_includes_token_usage_summary(
     config = Config()
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
-
-    from nanobot.webui.token_usage import record_token_usage
-
-    record_token_usage(
-        LLMUsage.reported(input_tokens=10, output_tokens=5),
-        timezone_name=config.agents.defaults.timezone,
-    )
+    get_trajectory_store().record(LLMCall(
+        started_at_ms=int(time.time() * 1000),
+        duration_ms=1,
+        provider="openai",
+        model="gpt-5",
+        source="user",
+        stream=False,
+        finish_reason="stop",
+        usage=LLMUsage.reported(input_tokens=10, output_tokens=5),
+    ))
 
     payload = settings_payload()
 
@@ -1491,14 +1496,16 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     config = Config()
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
-
-    from nanobot.webui.token_usage import record_token_usage
-
-    record_token_usage(
-        LLMUsage.reported(input_tokens=20, output_tokens=2),
-        timezone_name=config.agents.defaults.timezone,
-    )
+    get_trajectory_store().record(LLMCall(
+        started_at_ms=int(time.time() * 1000),
+        duration_ms=1,
+        provider="openai",
+        model="gpt-5",
+        source="user",
+        stream=False,
+        finish_reason="stop",
+        usage=LLMUsage.reported(input_tokens=20, output_tokens=2),
+    ))
 
     payload = settings_usage_payload()
 
