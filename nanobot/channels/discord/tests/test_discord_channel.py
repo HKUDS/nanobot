@@ -145,14 +145,9 @@ class _FakeChannel:
 class _FakeInteractionResponse:
     def __init__(self) -> None:
         self.messages: list[dict] = []
-        self._done = False
 
     async def send_message(self, content: str, *, ephemeral: bool = False) -> None:
         self.messages.append({"content": content, "ephemeral": ephemeral})
-        self._done = True
-
-    def is_done(self) -> bool:
-        return self._done
 
 
 def _make_interaction(

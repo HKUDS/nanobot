@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import type { ChannelConfigField } from "@/components/settings/channels/catalog";
 import { cn } from "@/lib/utils";
 
-export function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {
+function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {
   return values[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "";
 }
 

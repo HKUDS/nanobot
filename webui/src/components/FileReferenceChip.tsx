@@ -151,7 +151,7 @@ export function splitFilePath(path: string): { directory: string; name: string }
   };
 }
 
-export function fileKindForPath(path: string): FileReferenceKind {
+function fileKindForPath(path: string): FileReferenceKind {
   const normalized = path.toLowerCase();
   const name = normalized.split(/[\\/]/).pop() ?? normalized;
   const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
@@ -193,7 +193,7 @@ export function fileKindForPath(path: string): FileReferenceKind {
   }
 }
 
-export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
+function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
   if (kind === "python") {
     return (
       <svg

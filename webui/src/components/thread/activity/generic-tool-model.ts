@@ -3,7 +3,7 @@ import { compactActivityPath, redactActivityText } from "./activity-text";
 export type GenericToolStatus = "running" | "done" | "error";
 export type ToolFamily = "content-search" | "file-search" | "list" | "read" | "memory" | "generic";
 
-export interface ToolField {
+interface ToolField {
   key:
     | "query"
     | "pattern"

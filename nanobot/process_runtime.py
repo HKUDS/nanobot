@@ -96,22 +96,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         # it; poll() both reaps it and reports the real lifecycle state.
         self._owned_process: Any | None = None
 
-    @classmethod
-    def refresh_state_pid(cls, *, paths: ProcessRuntimePaths) -> None:
-        """Update a managed state file after the recorded process restarts."""
-        if not paths.state_path.exists():
-            return
-        try:
-            state = json.loads(paths.state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return
-        state["pid"] = os.getpid()
-        runtime = cls(paths=paths)
-        state.pop("stable_identity", None)
-        state.update(runtime.process_identity_record(os.getpid()))
-        state["started_at"] = _utc_now()
-        runtime._write_state(state)
-
     def start_background(self, options: _StartOptionsT) -> ProcessResult:
         """Start the configured command as a detached process."""
         with self._lifecycle_lock():

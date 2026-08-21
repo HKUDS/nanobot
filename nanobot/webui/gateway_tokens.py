@@ -63,9 +63,6 @@ class GatewayTokenStore:
         self.api_tokens[token_value] = expiry
         return token_value
 
-    def take_issued_token_if_valid(self, token_value: str | None) -> bool:
-        return self.take_issued_token_audience(token_value) is not None
-
     def take_issued_token_audience(
         self,
         token_value: str | None,
