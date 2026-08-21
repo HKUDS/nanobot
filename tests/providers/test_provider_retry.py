@@ -129,7 +129,7 @@ async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exh
     )
 
     assert response.content == "503 final server error"
-    assert progress[-1] == "Model request failed after 4 retries, giving up."
+    assert progress[-1] == "Model request failed after 4 attempts, giving up."
 
 
 @pytest.mark.asyncio
