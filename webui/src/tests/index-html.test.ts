@@ -20,4 +20,22 @@ describe("index.html", () => {
     expect(viewport).toContain("viewport-fit=auto");
     expect(viewport).not.toContain("viewport-fit=cover");
   });
+
+  it("matches dark PWA chrome to the app canvas", () => {
+    const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+    const manifest = JSON.parse(
+      readFileSync(resolve(process.cwd(), "public/manifest.json"), "utf8"),
+    ) as { background_color?: string; theme_color?: string };
+    const darkThemeColor = html.match(
+      /<meta\s+name="theme-color"\s+content="([^"]+)"\s+media="\(prefers-color-scheme:\s*dark\)"/i,
+    )?.[1];
+    const darkBodyBackground = html.match(
+      /html\.dark body\s*{[^}]*background:\s*([^;]+);/s,
+    )?.[1]?.trim();
+
+    expect(darkThemeColor).toBe("#303030");
+    expect(darkBodyBackground).toBe("#303030");
+    expect(manifest.background_color).toBe("#303030");
+    expect(manifest.theme_color).toBe("#303030");
+  });
 });
