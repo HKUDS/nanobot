@@ -660,7 +660,7 @@ async def test_stream_end_adds_done_emoji():
 
 @pytest.mark.asyncio
 async def test_stream_chunk_boundary_finalizes_and_creates_new():
-    channel, fake = _make_channel({"streamingMaxChars": 10})
+    channel, fake = _make_channel()
     channel._self_id = "bot_id"
     fake.set_post_response("/api/v4/posts", {"id": "post_1"})
 
