@@ -292,7 +292,7 @@ export function renderLatexAsUnicode(markdown: string): string {
     }
 
     const explicitOpening = explicitMathOpeningAt(markdown, cursor)
-    const math = mathSpanAt(markdown, cursor, missingClosers)
+    const math = mathSpanAt(markdown, cursor, explicitOpening, missingClosers)
     if (math) {
       const converted = convertMath(math.content)
       if (converted !== null) {
@@ -365,10 +365,9 @@ function explicitMathOpeningAt(markdown: string, start: number): string | null {
 function mathSpanAt(
   markdown: string,
   start: number,
+  explicitOpening: string | null,
   missingClosers: Set<string>,
 ): MathSpan | null {
-  const explicitOpening = explicitMathOpeningAt(markdown, start)
-
   if (explicitOpening === "\\[") {
     return delimitedMath(markdown, start, "\\[", "\\]", false, missingClosers)
   }
@@ -527,10 +526,14 @@ function markdownDestinationEnd(source: string, start: number): number | null {
     if (angle) return start + angle.length
   }
 
-  const remainder = source.slice(start)
-  if (/^(?:https?:\/\/|mailto:)/u.test(remainder)) {
-    const match = remainder.match(/^[^\s<>]+/u)
-    return match ? start + match[0].length : null
+  if (
+    source.startsWith("http://", start)
+    || source.startsWith("https://", start)
+    || source.startsWith("mailto:", start)
+  ) {
+    let end = start
+    while (end < source.length && !/[\s<>]/u.test(source[end] ?? "")) end += 1
+    return end
   }
   return null
 }
