@@ -29,7 +29,7 @@ describe("footerHints", () => {
     expect(active.chunks).toHaveLength(0)
   })
 
-  test("shows measured throughput, explicit token directions, and cache ratio", () => {
+  test("groups the cache ratio with input telemetry", () => {
     const result = footerTelemetry({
       prompt_tokens: 1200,
       completion_tokens: 80,
@@ -41,7 +41,7 @@ describe("footerHints", () => {
     }, 120, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("50 tok/s · 1.2K in · 80 out · 75% cached")
+      .toBe("50 tok/s · 1.2K in (75% cached) · 80 out")
     expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
   })
 
@@ -55,7 +55,7 @@ describe("footerHints", () => {
     }, 120, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("140 tok/s · 4.5M in · 19K out · 80% cached")
+      .toBe("140 tok/s · 4.5M in (80% cached) · 19K out")
   })
 
   test("degrades telemetry instead of guessing missing provider metrics", () => {
