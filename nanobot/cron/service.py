@@ -719,14 +719,7 @@ class CronService:
         return job
 
     def remove_system_job(self, job_id: str) -> bool:
-        """Remove an internal system job by id (startup reconciliation).
-
-        Unlike ``remove_job``, this bypasses the protected-system-job guard:
-        the gateway retires a persisted system job whose config has been
-        disabled, so e.g. ``gateway.heartbeat.enabled=false`` actually takes
-        effect after restart instead of the leftover job firing forever.
-        Returns True when a job was removed.
-        """
+        """Remove a protected system job during startup reconciliation."""
         store = self._require_store()
         before = len(store.jobs)
         store.jobs = [j for j in store.jobs if j.id != job_id]

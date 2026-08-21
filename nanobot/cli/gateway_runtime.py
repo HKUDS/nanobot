@@ -706,11 +706,6 @@ def _run_gateway(
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
-    cron_status = cron.status()
-    cron_job_count = cast(int, cron_status["jobs"])
-    if cron_job_count > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
-
     hb_cfg = config.gateway.heartbeat
     if hb_cfg.enabled:
         console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
@@ -785,8 +780,7 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
         console.print("[yellow]○[/yellow] Dream: disabled")
-        # Advance the cursor first: it must happen unconditionally (issue
-        # #4242), even if the cron store turns out to be corrupt below.
+        # Cursor repair must not depend on a healthy cron store.
         _advance_dream_cursor_if_behind(agent.context.memory)
         cron.remove_system_job("dream")
 
@@ -803,9 +797,12 @@ def _run_gateway(
             payload=CronPayload(kind="system_event"),
         ))
     else:
-        # Retire any previously persisted heartbeat job so that disabling
-        # gateway.heartbeat in config takes effect after restart.
         cron.remove_system_job("heartbeat")
+
+    cron_status = cron.status()
+    cron_job_count = cast(int, cron_status["jobs"])
+    if cron_job_count > 0:
+        console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
