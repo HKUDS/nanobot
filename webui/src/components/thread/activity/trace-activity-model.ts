@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 import type { GenericToolStatus } from "./generic-tool-model";
 import { safeActivityDetail, summarizeShellCommand } from "./activity-text";
 import { presentWebSearchAction } from "./web-search-model";
@@ -15,6 +17,7 @@ export interface TraceDescription {
 export function describeTraceLine(
   line: string,
   status: GenericToolStatus,
+  t: TFunction,
   result?: unknown,
 ): TraceDescription {
   const trimmed = line.trim();
@@ -30,7 +33,7 @@ export function describeTraceLine(
     const query = traceFieldFromArgs(args, ["query", "q", "text"]) || args;
     return {
       kind: "search",
-      label: presentWebSearchAction(query, status, name === "x_search" ? "x" : "web"),
+      label: presentWebSearchAction(query, status, name === "x_search" ? "x" : "web", t),
       detail: "",
     };
   }
@@ -39,20 +42,20 @@ export function describeTraceLine(
     const pageTitle = parsedUrl ? webPageTitle(result) : "";
     return {
       kind: "tool",
-      label: pageTitle || statusCopy(status, "Reading", "Read", "Could not read"),
+      label: pageTitle || activityStatus(t, status, "reading", "read", "readFailed"),
       detail: webDetail || (/^https?:\/\//i.test(rawTarget.trim())
-        ? "Private address"
+        ? t("message.agentActivity.privateAddress")
         : safeActivityDetail(rawTarget)),
       url: parsedUrl?.href,
       host: parsedUrl ? displayWebHost(parsedUrl.hostname) : undefined,
     };
   }
-  if (isShellTraceName(name)) return describeShellTrace(args, trimmed, status);
+  if (isShellTraceName(name)) return describeShellTrace(args, trimmed, status, t);
   if (name === "write_file") {
-    return describeFileMutationTrace(args, status, "Writing file", "Wrote file", "Could not write file");
+    return describeFileMutationTrace(args, status, t, "writingFile", "wroteFile", "writeFileFailed");
   }
   if (name === "edit_file" || name === "apply_patch") {
-    return describeFileMutationTrace(args, status, "Editing file", "Edited file", "Could not edit file");
+    return describeFileMutationTrace(args, status, t, "editingFile", "editedFile", "editFileFailed");
   }
   if (name) {
     const action = humanizeTraceToolName(name);
@@ -60,19 +63,19 @@ export function describeTraceLine(
       kind: "tool",
       label: statusCopy(
         status,
-        `Running ${action}`,
-        `Completed ${action}`,
-        `Could not complete ${action}`,
+        t("message.agentActivity.runningTool", { name: action }),
+        t("message.agentActivity.completedTool", { name: action }),
+        t("message.agentActivity.completeToolFailed", { name: action }),
       ),
       detail: "",
     };
   }
   if (/done|complete|success/i.test(trimmed)) {
-    return { kind: "done", label: "Completed step", detail: safeActivityDetail(trimmed) };
+    return { kind: "done", label: t("message.agentActivity.completedStep"), detail: safeActivityDetail(trimmed) };
   }
   return {
     kind: status === "done" ? "done" : "trace",
-    label: statusCopy(status, "Working", "Completed step", "Step failed"),
+    label: activityStatus(t, status, "working", "completedStep", "stepFailed"),
     detail: safeActivityDetail(trimmed),
   };
 }
@@ -91,31 +94,28 @@ function describeShellTrace(
   args: string,
   fallback: string,
   status: GenericToolStatus,
+  t: TFunction,
 ): TraceDescription {
   const command = shellCommandFromArgs(args) || fallback;
   if (/^(?:\/(?:usr\/)?bin\/)?date(?:\s|$)/i.test(command.trim())) {
     return {
       kind: "tool",
-      label: statusCopy(
-        status,
-        "Checking current time",
-        "Checked current time",
-        "Could not check current time",
-      ),
+      label: activityStatus(t, status, "checkingCurrentTime", "checkedCurrentTime", "checkCurrentTimeFailed"),
       detail: "",
       icon: "clock",
     };
   }
   return {
     kind: "tool",
-    label: statusCopy(status, "Running command", "Ran command", "Command failed"),
-    detail: summarizeShellCommand(command),
+    label: activityStatus(t, status, "runningCommand", "ranCommand", "commandFailed"),
+    detail: summarizeShellCommand(command, t),
   };
 }
 
 function describeFileMutationTrace(
   args: string,
   status: GenericToolStatus,
+  t: TFunction,
   running: string,
   done: string,
   failed: string,
@@ -123,7 +123,7 @@ function describeFileMutationTrace(
   const path = traceFieldFromArgs(args, ["path", "file_path"]);
   return {
     kind: "tool",
-    label: statusCopy(status, running, done, failed),
+    label: activityStatus(t, status, running, done, failed),
     detail: path ? safeActivityDetail(path) : "",
   };
 }
@@ -135,6 +135,21 @@ function statusCopy(
   failed: string,
 ): string {
   return status === "running" ? running : status === "error" ? failed : done;
+}
+
+function activityStatus(
+  t: TFunction,
+  status: GenericToolStatus,
+  running: string,
+  done: string,
+  failed: string,
+): string {
+  return statusCopy(
+    status,
+    t(`message.agentActivity.${running}`),
+    t(`message.agentActivity.${done}`),
+    t(`message.agentActivity.${failed}`),
+  );
 }
 
 function traceFieldFromArgs(args: string, keys: string[]): string {
