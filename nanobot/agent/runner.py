@@ -38,6 +38,12 @@ from nanobot.runtime_context import (
     reattach_runtime_context,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.trajectory.context import (
+    TrajectorySource,
+    bind_trajectory_source,
+    reset_trajectory_source,
+    source_from_session_key,
+)
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
@@ -117,6 +123,7 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
+    trajectory_source: TrajectorySource | None = None
 
 
 @dataclass(slots=True)
@@ -374,6 +381,9 @@ class AgentRunner:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
         context = AgentRunHookContext(messages=deepcopy(messages))
+        trajectory_source_token = bind_trajectory_source(
+            spec.trajectory_source or source_from_session_key(spec.session_key)
+        )
 
         try:
             await hook.before_run(context)
@@ -406,17 +416,20 @@ class AgentRunner:
             await hook.after_run(context)
             return result
         finally:
-            context.messages = deepcopy(messages)
-            if context.exception is None:
-                await hook.on_finally(context)
-            else:
-                try:
+            try:
+                context.messages = deepcopy(messages)
+                if context.exception is None:
                     await hook.on_finally(context)
-                except Exception:
-                    logger.exception(
-                        "AgentHook.on_finally error after {}",
-                        context.stop_reason or "run exception",
-                    )
+                else:
+                    try:
+                        await hook.on_finally(context)
+                    except Exception:
+                        logger.exception(
+                            "AgentHook.on_finally error after {}",
+                            context.stop_reason or "run exception",
+                        )
+            finally:
+                reset_trajectory_source(trajectory_source_token)
 
     async def _run_core(
         self,

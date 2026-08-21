@@ -48,6 +48,7 @@ from nanobot.session.session_messages import (
     SessionMessageEnvelope,
     session_message_envelope,
 )
+from nanobot.trajectory.context import trajectory_source
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import (
@@ -207,24 +208,25 @@ async def maybe_generate_webui_title(
         prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
-        response = await provider.chat_with_retry(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            tools=None,
-            model=model,
-            max_tokens=TITLE_GENERATION_MAX_TOKENS,
-            temperature=0.2,
-            reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-            retry_mode="standard",
-        )
+        with trajectory_source("system"):
+            response = await provider.chat_with_retry(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You write short, neutral chat titles. "
+                            "Return only the title text."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                tools=None,
+                model=model,
+                max_tokens=TITLE_GENERATION_MAX_TOKENS,
+                temperature=0.2,
+                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                retry_mode="standard",
+            )
     except Exception:
         logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
         return False
