@@ -107,6 +107,13 @@ class AutoCompact:
             self._archiving.discard(key)
             self._summaries.pop(key, None)
             return session, None
+        if not session.policy.persist:
+            # Non-persistent sessions (SDK ephemeral reads, temporary chats)
+            # are isolated views of the workspace: never swap them for stored
+            # state and never consume one-shot summaries reserved for the
+            # persistent session's next turn.
+            self._archiving.discard(key)
+            return session, self._peek_summary(session, key)
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)
@@ -118,6 +125,16 @@ class AutoCompact:
         # Persisted metadata may outlive schema changes; a malformed summary must
         # not abort turn preparation.
         return session, session_summary_from_metadata(
+            session.metadata,
+            fallback_last_active=session.updated_at,
+        )
+
+    def _peek_summary(self, session: Session, key: str) -> SessionSummary | None:
+        """Summary for an isolated session; consumes nothing."""
+        entry = self._summaries.get(key)
+        if entry is not None:
+            return entry
+        return session_summary_from_metadata(
             session.metadata,
             fallback_last_active=session.updated_at,
         )

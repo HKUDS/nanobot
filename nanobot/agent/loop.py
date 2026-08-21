@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import inspect
 import os
@@ -150,6 +151,7 @@ class TurnContext:
 
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
+    read_only_session: bool = False
     hooks: list[AgentHook] = field(default_factory=list)
     hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     turn_scopes: list[AbstractContextManager[Any]] = field(default_factory=list)
@@ -1513,6 +1515,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue[InboundMessage] | None = None,
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
+        read_only_session: bool = False,
         hooks: list[AgentHook] | None = None,
         hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
@@ -1564,6 +1567,7 @@ class AgentLoop:
             pending_queue=pending_queue,
             ephemeral=ephemeral,
             run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            read_only_session=read_only_session,
             hooks=list(hooks or []),
             hook_factories=list(hook_factories or []),
             tools=tools,
@@ -1706,7 +1710,17 @@ class AgentLoop:
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:
-                ctx.session = self.sessions.get_or_create(ctx.session_key)
+                base = self.sessions.get_or_create(ctx.session_key)
+                if ctx.read_only_session:
+                    # Read-only continuation (SDK ephemeral runs): turn against a
+                    # detached snapshot whose policy does not persist, so every
+                    # sessions.save() below is a no-op and the stored file plus
+                    # cached session remain byte-for-byte/semantically unchanged.
+                    working = copy.deepcopy(base)
+                    working.policy = dataclasses.replace(working.policy, persist=False)
+                    ctx.session = working
+                else:
+                    ctx.session = base
         session = ctx.session
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools or self.tools
@@ -2350,6 +2364,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
+        read_only_session: bool = False,
         _run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
         hook_factories: list[AgentTurnHookFactory] | None = None,
@@ -2359,7 +2374,13 @@ class AgentLoop:
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
     ) -> OutboundMessage | None:
-        """Process an external message directly and return the outbound payload."""
+        """Process an external message directly and return the outbound payload.
+
+        *read_only_session*: run against a detached snapshot of the session so
+        the stored file and cached entry are left unchanged. Callers must set
+        this explicitly; internal ephemeral turns (Dream) keep their own
+        save semantics.
+        """
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
         metadata: dict[str, Any] = {}
@@ -2380,6 +2401,8 @@ class AgentLoop:
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
                 }
+                if read_only_session:
+                    kwargs["read_only_session"] = True
                 if _run_extra_hooks_for_ephemeral:
                     kwargs["run_extra_hooks_for_ephemeral"] = True
                 if hooks is not None:
