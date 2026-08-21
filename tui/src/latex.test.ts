@@ -38,12 +38,16 @@ describe("terminal LaTeX rendering", () => {
     const source = [
       "Costs are $24 today or $10-20 later; variables $x$ and $2^n$ are math.",
       "Shipping costs $5+$10 and paths use $HOME/$USER.",
+      "Mixed currency and variables like $5+$x$ remain literal.",
+      "Commands and groups stay literal: $5+$\\alpha$, $5+${x}$, and $5+$(x)$.",
       "Matrix $A$ maps $V$ to $W$.",
     ].join("\n")
 
     expect(renderLatexAsUnicode(source)).toBe([
       "Costs are $24 today or $10-20 later; variables x and 2ⁿ are math.",
       "Shipping costs $5+$10 and paths use $HOME/$USER.",
+      "Mixed currency and variables like $5+$x$ remain literal.",
+      "Commands and groups stay literal: $5+$\\alpha$, $5+${x}$, and $5+$(x)$.",
       "Matrix A maps V to W.",
     ].join("\n"))
   })
@@ -70,6 +74,7 @@ describe("terminal LaTeX rendering", () => {
       "\\[\\frac{a}{b}\\]",
       "```",
     ].join("\n"))
+    expect(renderLatexAsUnicode("`$x$``")).toBe("`x``")
   })
 
   test("leaves fenced code inside block quotes and lists unchanged", () => {
@@ -101,9 +106,19 @@ describe("terminal LaTeX rendering", () => {
   test("handles many unmatched openers without changing them", () => {
     const openers = "\\(".repeat(20_000)
     const backslashes = "\\".repeat(20_000)
+    const backticks = `text ${"`".repeat(20_000)} then $x$`
+    const descendingBackticks = "text " + Array.from(
+      { length: 500 },
+      (_, index) => "`".repeat(500 - index),
+    ).join("x") + " $x$"
+    const linkDestinations = `${"](".repeat(20_000)} then $x$`
 
     expect(renderLatexAsUnicode(openers)).toBe(openers)
     expect(renderLatexAsUnicode(backslashes)).toBe(backslashes)
+    expect(renderLatexAsUnicode(backticks)).toBe(backticks.replace("$x$", "x"))
+    expect(renderLatexAsUnicode(descendingBackticks))
+      .toBe(descendingBackticks.replace("$x$", "x"))
+    expect(renderLatexAsUnicode(linkDestinations)).toBe(linkDestinations.replace("$x$", "x"))
   })
 
   test("leaves unsupported, malformed, and deeply nested math unchanged", () => {

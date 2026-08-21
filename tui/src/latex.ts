@@ -263,9 +263,16 @@ const MAX_GROUP_DEPTH = 64
 
 /** Converts supported LaTeX math spans without changing the stored Markdown source. */
 export function renderLatexAsUnicode(markdown: string): string {
+  if (!markdown.includes("$") && !markdown.includes("\\(") && !markdown.includes("\\[")) {
+    return markdown
+  }
   let rendered = ""
   let cursor = 0
   const missingClosers = new Set<string>()
+  const inlineCodeEnds = markdown.includes("`") ? markdownInlineCodeEnds(markdown) : null
+  const linkDestinationEnds = markdown.includes("](")
+    ? markdownLinkDestinationEnds(markdown)
+    : null
 
   while (cursor < markdown.length) {
     const fencedEnd = fencedCodeEnd(markdown, cursor)
@@ -276,15 +283,19 @@ export function renderLatexAsUnicode(markdown: string): string {
     }
 
     if (markdown[cursor] === "`") {
-      const inlineEnd = inlineCodeEnd(markdown, cursor)
-      if (inlineEnd !== null) {
+      const delimiterLength = repeatedCharacterCount(markdown, cursor, "`")
+      const inlineEnd = inlineCodeEnds?.get(cursor)
+      if (inlineEnd !== undefined) {
         rendered += markdown.slice(cursor, inlineEnd)
         cursor = inlineEnd
         continue
       }
+      rendered += markdown.slice(cursor, cursor + delimiterLength)
+      cursor += delimiterLength
+      continue
     }
 
-    const destinationEnd = markdownDestinationEnd(markdown, cursor)
+    const destinationEnd = markdownDestinationEnd(markdown, cursor, linkDestinationEnds)
     if (destinationEnd !== null) {
       rendered += markdown.slice(cursor, destinationEnd)
       cursor = destinationEnd
@@ -294,6 +305,11 @@ export function renderLatexAsUnicode(markdown: string): string {
     const explicitOpening = explicitMathOpeningAt(markdown, cursor)
     const math = mathSpanAt(markdown, cursor, explicitOpening, missingClosers)
     if (math) {
+      if (math.literal) {
+        rendered += markdown.slice(cursor, math.end)
+        cursor = math.end
+        continue
+      }
       const converted = convertMath(math.content)
       if (converted !== null) {
         rendered += escapeMarkdown(converted)
@@ -320,6 +336,7 @@ export function renderLatexAsUnicode(markdown: string): string {
 interface MathSpan {
   content: string
   end: number
+  literal?: boolean
 }
 
 interface ParseState {
@@ -389,7 +406,23 @@ function mathSpanAt(
   const span = delimitedMath(markdown, start, "$", "$", true, missingClosers)
   if (!span || isWhitespace(span.content.at(-1))) return null
   const first = span.content[0]
-  if (first && /[0-9]/u.test(first) && /[0-9]/u.test(markdown[span.end] ?? "")) return null
+  if (first && /[0-9]/u.test(first)) {
+    const following = markdown[span.end] ?? ""
+    if (!isWhitespace(following) && /[+\-*/]\s*$/u.test(span.content)) {
+      const adjacent = delimitedMath(
+        markdown,
+        span.end - 1,
+        "$",
+        "$",
+        true,
+        missingClosers,
+      )
+      if (adjacent && !isWhitespace(adjacent.content.at(-1))) {
+        return { content: "", end: adjacent.end, literal: true }
+      }
+    }
+    if (/[0-9]/u.test(following)) return null
+  }
   if (first && /[0-9]/u.test(first) && !/[\\^_={}|+<>]/u.test(span.content)) return null
   if (
     /^[A-Z_][A-Z0-9_]*(?:\/|\s.*)$/u.test(span.content)
@@ -491,32 +524,56 @@ function closingFenceOffset(line: string, context: FenceContext): number | null 
   return indent === undefined ? null : offset + indent.length
 }
 
-function inlineCodeEnd(source: string, start: number): number | null {
-  const count = repeatedCharacterCount(source, start, "`")
-  const delimiter = "`".repeat(count)
-  const close = source.indexOf(delimiter, start + count)
-  return close < 0 ? null : close + count
+function markdownInlineCodeEnds(source: string): ReadonlyMap<number, number> {
+  const ends = new Map<number, number>()
+  const previousRun = new Map<number, number>()
+  let cursor = 0
+  while (cursor < source.length) {
+    if (source[cursor] !== "`") {
+      cursor += 1
+      continue
+    }
+    const count = repeatedCharacterCount(source, cursor, "`")
+    const previous = previousRun.get(count)
+    if (previous !== undefined) ends.set(previous, cursor + count)
+    previousRun.set(count, cursor)
+    cursor += count
+  }
+  return ends
 }
 
-function markdownDestinationEnd(source: string, start: number): number | null {
-  if (source[start] === "(" && source[start - 1] === "]" && !isEscaped(source, start - 1)) {
-    let depth = 1
-    let cursor = start + 1
-    while (cursor < source.length) {
-      const value = source[cursor]
-      if (value === "\n") return null
-      if (value === "\\") {
-        cursor += 2
-        continue
-      }
-      if (value === "(") depth += 1
-      else if (value === ")") {
-        depth -= 1
-        if (depth === 0) return cursor + 1
-      }
-      cursor += 1
+function markdownLinkDestinationEnds(source: string): ReadonlyMap<number, number> {
+  const ends = new Map<number, number>()
+  const openParentheses: number[] = []
+  let cursor = 0
+  while (cursor < source.length) {
+    const value = source[cursor]
+    if (value === "\\") {
+      cursor += Math.min(2, source.length - cursor)
+      continue
     }
-    return null
+    if (value === "\n") {
+      openParentheses.length = 0
+    } else if (value === "(") {
+      openParentheses.push(cursor)
+    } else if (value === ")") {
+      const opening = openParentheses.pop()
+      if (opening !== undefined && source[opening - 1] === "]" && !isEscaped(source, opening - 1)) {
+        ends.set(opening, cursor + 1)
+      }
+    }
+    cursor += 1
+  }
+  return ends
+}
+
+function markdownDestinationEnd(
+  source: string,
+  start: number,
+  linkDestinationEnds: ReadonlyMap<number, number> | null,
+): number | null {
+  if (source[start] === "(" && source[start - 1] === "]" && !isEscaped(source, start - 1)) {
+    return linkDestinationEnds?.get(start) ?? null
   }
 
   if (source[start] === "<") {
