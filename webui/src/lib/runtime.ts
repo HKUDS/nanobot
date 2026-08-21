@@ -8,6 +8,7 @@ export interface RuntimeHost {
   restartEngine?: () => Promise<void>;
   openLogs?: () => Promise<void>;
   exportDiagnostics?: () => Promise<string>;
+  openFile?: (path: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export interface HostRuntimeInfo {
@@ -29,6 +30,7 @@ export interface NanobotHostApi {
   pickFolder?(): Promise<string | null>;
   openLogs?(): Promise<void>;
   exportDiagnostics?(): Promise<string>;
+  openFile?(path: string): Promise<{ ok: boolean; error?: string }>;
   openSocket?(url: string): Promise<string>;
   sendSocket?(id: string, data: string): Promise<void>;
   closeSocket?(id: string): Promise<void>;
@@ -116,6 +118,7 @@ export function createRuntimeHost(
     restartEngine: api?.restartEngine?.bind(api),
     openLogs: api?.openLogs?.bind(api),
     exportDiagnostics: api?.exportDiagnostics?.bind(api),
+    openFile: api?.openFile?.bind(api),
   };
 }
 

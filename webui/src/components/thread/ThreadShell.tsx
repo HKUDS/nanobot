@@ -1644,6 +1644,7 @@ export function ThreadShell({
           token={token}
           desktopWidth={filePreviewWidth}
           isClosing={filePreviewClosing}
+          canOpenSystem={workspaceScope?.access_mode !== "restricted"}
           onResizeStart={handleFilePreviewResizeStart}
           onClose={handleCloseFilePreview}
         />

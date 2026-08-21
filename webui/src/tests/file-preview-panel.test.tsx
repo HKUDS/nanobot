@@ -1,10 +1,24 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { setAppLanguage } from "@/i18n";
 import { fetchFilePreview } from "@/lib/api";
+
+const openFileMock = vi.fn(async (_path: string) => ({ ok: true }));
+
+vi.mock("@/lib/runtime", () => ({
+  getRuntimeHost: () => ({
+    openFile: openFileMock,
+  }),
+}));
+
+vi.mock("@/components/MarkdownText", () => ({
+  MarkdownText: ({ children }: { children: string }) => (
+    <div data-testid="mock-markdown-text">{children}</div>
+  ),
+}));
 
 vi.mock("@/components/CodeBlock", () => ({
   CodeBlock: ({
@@ -94,7 +108,7 @@ describe("FilePreviewPanel", () => {
       />,
     );
 
-    await screen.findByTestId("mock-code-block");
+    await screen.findByTestId("mock-markdown-text");
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -102,5 +116,121 @@ describe("FilePreviewPanel", () => {
     });
 
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the open-in-system button only when allowed", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      project_path: "",
+      language: "markdown",
+      content: "# Notes",
+      size: 0,
+      truncated: false,
+    });
+
+    const { unmount } = render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        canOpenSystem
+        onClose={() => {}}
+      />,
+    );
+    await screen.findByTestId("mock-markdown-text");
+    expect(screen.getByTestId("file-preview-open-system")).toBeInTheDocument();
+    unmount();
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        onClose={() => {}}
+      />,
+    );
+    await screen.findByTestId("mock-markdown-text");
+    expect(screen.queryByTestId("file-preview-open-system")).not.toBeInTheDocument();
+  });
+
+  it("calls the host openFile with the resolved path", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      project_path: "",
+      language: "markdown",
+      content: "# Notes",
+      size: 0,
+      truncated: false,
+    });
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        canOpenSystem
+        onClose={() => {}}
+      />,
+    );
+    await screen.findByTestId("mock-markdown-text");
+    await userEvent.click(screen.getByTestId("file-preview-open-system"));
+
+    await waitFor(() => expect(openFileMock).toHaveBeenCalledWith("/workspace/notes.md"));
+  });
+
+  it("shows an error banner when the host cannot open the file", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      project_path: "",
+      language: "markdown",
+      content: "# Notes",
+      size: 0,
+      truncated: false,
+    });
+    openFileMock.mockResolvedValueOnce({ ok: false, error: "no handler" });
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        canOpenSystem
+        onClose={() => {}}
+      />,
+    );
+    await screen.findByTestId("mock-markdown-text");
+    await userEvent.click(screen.getByTestId("file-preview-open-system"));
+
+    expect(await screen.findByTestId("file-preview-open-error")).toHaveTextContent("no handler");
+  });
+
+  it("shows a fallback error banner when openFile throws", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      project_path: "",
+      language: "markdown",
+      content: "# Notes",
+      size: 0,
+      truncated: false,
+    });
+    openFileMock.mockRejectedValueOnce(new Error("boom"));
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        canOpenSystem
+        onClose={() => {}}
+      />,
+    );
+    await screen.findByTestId("mock-markdown-text");
+    await userEvent.click(screen.getByTestId("file-preview-open-system"));
+
+    expect(await screen.findByTestId("file-preview-open-error")).toHaveTextContent("boom");
   });
 });

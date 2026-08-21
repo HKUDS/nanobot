@@ -447,6 +447,30 @@ describe("App layout", () => {
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
+  it("prevents file drag-and-drop from navigating the page (P5 guard)", async () => {
+    render(<App />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Simulate dragging a file over any non-composer region: the global guard
+    // must preventDefault so Electron does not navigate to the file:// path.
+    const fileEvent = new Event("dragover", { cancelable: true });
+    Object.defineProperty(fileEvent, "dataTransfer", {
+      value: { types: ["Files"], files: [new File(["x"], "x.txt")] },
+    });
+    const defaultPreventedFile = !document.dispatchEvent(fileEvent);
+    expect(defaultPreventedFile).toBe(true);
+
+    // Non-file drags (e.g. internal session-drag mentions) must not be blocked.
+    const textEvent = new Event("drop", { cancelable: true });
+    Object.defineProperty(textEvent, "dataTransfer", {
+      value: { types: ["text/plain"] },
+    });
+    const defaultPreventedText = !document.dispatchEvent(textEvent);
+    expect(defaultPreventedText).toBe(false);
+  });
+
   it("keeps sidebar layout out of the main thread width contract", async () => {
     const { container } = render(<App />);
 
