@@ -896,7 +896,47 @@ export async function updateSettings(
   if (update.toolHintMaxLength !== undefined) {
     payload.tool_hint_max_length = update.toolHintMaxLength;
   }
+  if (update.followUpSuggestionsEnabled !== undefined) {
+    payload.follow_up_suggestions_enabled = update.followUpSuggestionsEnabled;
+  }
   return mutation<SettingsPayload>(transport, "settings.agent.update", payload);
+}
+
+export interface FollowUpSuggestionsRequest {
+  chat_id: string;
+  turn_id: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+}
+
+export interface FollowUpSuggestionsResponse {
+  suggestions: string[];
+}
+
+export async function generateFollowUpSuggestions(
+  transport: WebUIMutationTransport,
+  request: FollowUpSuggestionsRequest,
+): Promise<FollowUpSuggestionsResponse> {
+  const response = await mutation<unknown>(
+    transport,
+    "follow_up_suggestions.generate",
+    { ...request },
+  );
+  if (typeof response !== "object" || response === null) {
+    throw new Error("Invalid follow-up suggestions response");
+  }
+  const suggestions = (response as Record<string, unknown>).suggestions;
+  if (
+    !Array.isArray(suggestions)
+    || suggestions.length > 3
+    || !suggestions.every((suggestion): suggestion is string => (
+      typeof suggestion === "string"
+      && suggestion.trim().length > 0
+      && !suggestion.trimStart().startsWith("/")
+    ))
+  ) {
+    throw new Error("Invalid follow-up suggestions response");
+  }
+  return { suggestions };
 }
 
 function modelGenerationSettingsPayload(

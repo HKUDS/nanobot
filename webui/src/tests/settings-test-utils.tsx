@@ -30,6 +30,9 @@ export function settingsPayload(): SettingsPayload {
       timezone: "UTC",
       tool_hint_max_length: 40,
     },
+    follow_up_suggestions: {
+      enabled: false,
+    },
     model_presets: [{
       name: "primary",
       label: "Primary",

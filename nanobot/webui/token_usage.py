@@ -235,10 +235,13 @@ def record_token_usage(
     source: str = "user",
     timezone_name: str | None = None,
     now: datetime | None = None,
+    count_request: bool = False,
 ) -> dict[str, Any]:
     normalized = _normalize_usage(usage)
-    if not normalized:
+    if not normalized and not count_request:
         return read_token_usage_state()
+    if not normalized:
+        normalized = {key: 0 for key in _USAGE_KEYS}
 
     with _WRITE_LOCK:
         state = read_token_usage_state()
@@ -279,12 +282,14 @@ def record_response_token_usage(
     *,
     source: str,
     timezone_name: str | None = None,
+    count_request: bool = False,
 ) -> None:
     try:
         record_token_usage(
             getattr(response, "usage", None),
             source=source,
             timezone_name=timezone_name,
+            count_request=count_request,
         )
     except Exception:
         logger.exception("failed to record {} token usage", source)

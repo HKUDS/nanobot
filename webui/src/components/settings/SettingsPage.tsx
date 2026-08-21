@@ -91,12 +91,14 @@ export function SettingsPage({
     error,
     expandedProvider,
     featureCatalog,
+    followUpSuggestionsSaving,
     form,
     handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
     handleCliAppAction,
     handleDeleteModelConfiguration,
+    handleFollowUpSuggestionsChange,
     handleImportMcpConfig,
     handleMcpOAuthCancel,
     handleMcpOAuthComplete,
@@ -493,7 +495,11 @@ export function SettingsPage({
             capabilitiesLoading={nanobotFeaturesLoading}
             capabilityAction={nanobotFeatureAction}
             capabilityError={nanobotFeaturesError}
+            followUpSuggestionsSaving={followUpSuggestionsSaving}
             onApiServiceAction={handleApiServiceAction}
+            onFollowUpSuggestionsChange={(enabled) =>
+              void handleFollowUpSuggestionsChange(enabled)
+            }
             onInstallCapability={(name) => void installCapabilities([name])}
           />
         );

@@ -58,6 +58,7 @@ class StreamedResponseEvent(OutboundEvent):
 class TurnEndEvent(OutboundEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
+    successful: bool | None = None
     usage: dict[str, int] | None = None
     context_window_tokens: int | None = None
 

@@ -126,6 +126,10 @@
       "hostSafety": "An toàn ứng dụng",
       "voiceInput": "Nhập bằng giọng nói"
     },
+    "followUpSuggestions": {
+      "label": "Gợi ý tin nhắn tiếp theo",
+      "description": "Đề xuất tối đa ba tin nhắn tiếp theo sau khi phản hồi thành công. Tính năng này gửi ngữ cảnh hội thoại gần đây trong một yêu cầu mô hình bổ sung."
+    },
     "rows": {
       "theme": "Chủ đề",
       "language": "Ngôn ngữ",
@@ -1067,6 +1071,14 @@
   },
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
+    "suggestions": {
+      "label": "Tin nhắn tiếp theo được đề xuất",
+      "dismiss": "Bỏ qua gợi ý tin nhắn tiếp theo",
+      "dialogTitle": "Dùng gợi ý này?",
+      "dialogDescription": "Tin nhắn của bạn đã có nội dung. Chọn cách tiếp tục.",
+      "appendAndSend": "Thêm và gửi",
+      "replaceAndSend": "Thay thế và gửi"
+    },
     "empty": {
       "greetings": {
         "workOn": "Mình cùng làm gì tiếp?",

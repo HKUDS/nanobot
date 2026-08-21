@@ -126,6 +126,10 @@
       "hostSafety": "Seguridad de la app",
       "voiceInput": "Entrada de voz"
     },
+    "followUpSuggestions": {
+      "label": "Sugerencias de seguimiento",
+      "description": "Sugiere hasta tres mensajes siguientes después de respuestas correctas. Esto envía el contexto reciente de la conversación en una solicitud adicional al modelo."
+    },
     "rows": {
       "theme": "Tema",
       "language": "Idioma",
@@ -1068,6 +1072,14 @@
   },
   "thread": {
     "loadingConversation": "Cargando conversación…",
+    "suggestions": {
+      "label": "Mensajes de seguimiento sugeridos",
+      "dismiss": "Descartar sugerencias de seguimiento",
+      "dialogTitle": "¿Usar esta sugerencia?",
+      "dialogDescription": "Tu mensaje ya contiene texto. Elige cómo continuar.",
+      "appendAndSend": "Añadir y enviar",
+      "replaceAndSend": "Reemplazar y enviar"
+    },
     "empty": {
       "greetings": {
         "workOn": "¿En qué trabajamos juntos?",

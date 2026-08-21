@@ -126,6 +126,10 @@
       "hostSafety": "アプリの安全性",
       "voiceInput": "音声入力"
     },
+    "followUpSuggestions": {
+      "label": "フォローアップ候補",
+      "description": "応答が正常に完了した後、次に送るメッセージを最大3件提案します。最近の会話コンテキストを使用して、追加のモデルリクエストを送信します。"
+    },
     "rows": {
       "theme": "テーマ",
       "language": "言語",
@@ -1067,6 +1071,14 @@
   },
   "thread": {
     "loadingConversation": "会話を読み込み中…",
+    "suggestions": {
+      "label": "おすすめのフォローアップメッセージ",
+      "dismiss": "フォローアップ候補を閉じる",
+      "dialogTitle": "この候補を使用しますか？",
+      "dialogDescription": "メッセージにはすでにテキストがあります。続行方法を選択してください。",
+      "appendAndSend": "追加して送信",
+      "replaceAndSend": "置き換えて送信"
+    },
     "empty": {
       "greetings": {
         "workOn": "一緒に何に取り組みましょうか？",

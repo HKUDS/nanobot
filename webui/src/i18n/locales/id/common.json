@@ -126,6 +126,10 @@
       "hostSafety": "Keamanan aplikasi",
       "voiceInput": "Input suara"
     },
+    "followUpSuggestions": {
+      "label": "Saran tindak lanjut",
+      "description": "Sarankan hingga tiga pesan berikutnya setelah respons berhasil. Ini mengirim konteks percakapan terbaru dalam permintaan model tambahan."
+    },
     "rows": {
       "theme": "Tema",
       "language": "Bahasa",
@@ -1067,6 +1071,14 @@
   },
   "thread": {
     "loadingConversation": "Memuat percakapan…",
+    "suggestions": {
+      "label": "Saran pesan tindak lanjut",
+      "dismiss": "Tutup saran tindak lanjut",
+      "dialogTitle": "Gunakan saran ini?",
+      "dialogDescription": "Pesan Anda sudah berisi teks. Pilih cara melanjutkan.",
+      "appendAndSend": "Tambahkan lalu kirim",
+      "replaceAndSend": "Ganti lalu kirim"
+    },
     "empty": {
       "greetings": {
         "workOn": "Apa yang kita kerjakan bersama?",

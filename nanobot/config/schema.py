@@ -50,6 +50,12 @@ class TranscriptionConfig(Base):
     max_upload_mb: int = Field(default=25, ge=1, le=100)
 
 
+class FollowUpSuggestionsConfig(Base):
+    """Optional follow-up suggestions for the WebUI."""
+
+    enabled: bool = False
+
+
 class DreamConfig(Base):
     """Dream memory consolidation configuration."""
 
@@ -437,6 +443,11 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
+    follow_up_suggestions: FollowUpSuggestionsConfig = Field(
+        default_factory=FollowUpSuggestionsConfig,
+        validation_alias=AliasChoices("followUpSuggestions", "follow_up_suggestions"),
+        serialization_alias="followUpSuggestions",
+    )
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

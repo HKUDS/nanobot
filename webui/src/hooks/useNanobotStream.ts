@@ -245,7 +245,7 @@ export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,
-  onTurnEnd?: () => void,
+  onTurnEnd?: (turnId: string | undefined, successful: boolean) => void,
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -296,6 +296,7 @@ export function useNanobotStream(
   const streamTimerRef = useRef<number | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
   const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
+  const rejectedTurnIdsRef = useRef<Set<string>>(new Set());
   /** Timer that defers ``isStreaming = false`` after ``stream_end``.
    *
    * When the model finishes a text segment and calls a tool, the server
@@ -383,6 +384,7 @@ export function useNanobotStream(
     if (!err.turnId) return;
 
     const rejectedTurnId = err.turnId;
+    rejectedTurnIdsRef.current.add(rejectedTurnId);
     pendingStreamEventsRef.current = pendingStreamEventsRef.current.filter(
       (event) => event.turn.turnId !== rejectedTurnId,
     );
@@ -689,6 +691,7 @@ export function useNanobotStream(
     clearActivitySegment();
     clearPendingStreamWork();
     sideChannelTurnIdsRef.current.clear();
+    rejectedTurnIdsRef.current.clear();
     suppressStreamUntilTurnEndRef.current = false;
     cancelStreamEndTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -895,7 +898,9 @@ export function useNanobotStream(
           return finalized;
         });
         suppressStreamUntilTurnEndRef.current = false;
-        onTurnEnd?.();
+        const rejected = ev.turn_id ? rejectedTurnIdsRef.current.delete(ev.turn_id) : false;
+        const successful = (ev.successful === undefined || ev.successful === true) && !rejected;
+        onTurnEnd?.(ev.turn_id, successful);
         return;
       }
 

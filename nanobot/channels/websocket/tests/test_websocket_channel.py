@@ -21,6 +21,7 @@ from nanobot.bus.events import (
     INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
@@ -43,12 +44,15 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
+from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.session_handles import session_handle_for_name
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
     http_error as _http_error,
@@ -75,6 +79,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
+from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.transcript import (
     append_transcript_object,
     build_webui_thread_response,
@@ -234,6 +239,7 @@ async def test_start_extends_http_open_timeout_for_slow_settings_routes(
 @pytest.fixture(autouse=True)
 def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._COMPLETED_WEBUI_TURN_RUNTIMES.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
     wth._WEBSOCKET_TURN_OWNERS.clear()
@@ -244,6 +250,7 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     )
     yield
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._COMPLETED_WEBUI_TURN_RUNTIMES.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
     wth._WEBSOCKET_TURN_OWNERS.clear()
@@ -1337,6 +1344,254 @@ async def test_webui_request_requires_bootstrap_authenticated_connection(
         "ok": False,
         "error": {"status": 403, "message": "access_denied"},
     }
+
+
+@pytest.mark.asyncio
+async def test_follow_up_suggestions_authenticated_request_uses_turn_model_and_records_usage(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    port = 29963
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "followUpSuggestions": {"enabled": True},
+        "providers": {"openrouter": {"apiKey": "${FOLLOW_UP_API_KEY}"}},
+        "modelPresets": {
+            "deep": {
+                "model": "openrouter/deep-model",
+                "provider": "openrouter",
+                "maxTokens": 321,
+                "temperature": 0.3,
+                "reasoningEffort": "high",
+            },
+            "cached": {
+                "model": "openrouter/cached-model",
+                "provider": "openrouter",
+            },
+        },
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    sessions = SessionManager(tmp_path / "workspace")
+    session = sessions.get_or_create("websocket:chat-1")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "deep"
+    sessions.save(session)
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "cached"
+    sessions.save(session)
+
+    primary_provider = SimpleNamespace(
+        chat=AsyncMock(
+            return_value=LLMResponse(
+                content="\n".join([
+                    "SUGGESTION:   Inspect logs  ",
+                    "SUGGESTION: Add a regression test",
+                    "SUGGESTION: Add a regression test",
+                    "SUGGESTION: Ship the fix",
+                    "SUGGESTION: Ignored fourth",
+                ]),
+                usage={"prompt_tokens": 8, "completion_tokens": 3},
+            )
+        )
+    )
+    fallback_factory = MagicMock()
+    runtime = LLMRuntime(
+        provider=FallbackProvider(
+            primary=cast(LLMProvider, primary_provider),
+            fallback_presets=[{"model": "openrouter/fallback-model"}],
+            provider_factory=fallback_factory,
+        ),
+        model="openrouter/deep-model",
+        generation=GenerationSettings(
+            temperature=0.3,
+            max_tokens=321,
+            reasoning_effort="high",
+        ),
+        context_window_tokens=100_000,
+        model_preset="deep",
+    )
+    turn_number = 0
+
+    def follow_up_payload(messages: list[dict[str, str]]) -> dict[str, Any]:
+        nonlocal turn_number
+        turn_number += 1
+        turn_id = f"turn-{turn_number}"
+        wth.remember_completed_websocket_turn_runtime("chat-1", turn_id, runtime)
+        return {"chat_id": "chat-1", "turn_id": turn_id, "messages": messages}
+
+    monkeypatch.setattr(
+        "nanobot.webui.follow_up_suggestions.build_provider_snapshot",
+        MagicMock(side_effect=AssertionError("must use the completed turn runtime")),
+        raising=False,
+    )
+
+    channel = _ch(bus, port=port)
+    channel.gateway.http.session_manager = sessions
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    client = None
+    try:
+        token = channel.gateway.tokens.issue_token(300, audience="webui")
+        client = await websockets.connect(
+            f"ws://127.0.0.1:{port}/ws?token={token}&client_id=follow-up-test"
+        )
+        assert json.loads(await asyncio.wait_for(client.recv(), timeout=5))["event"] == "ready"
+
+        first_payload = follow_up_payload([
+            {"role": "user", "content": "discarded oldest"},
+            {"role": "assistant", "content": "   "},
+            {"role": "assistant", "content": "one"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "three"},
+            {"role": "user", "content": "four"},
+            {"role": "assistant", "content": "five"},
+            {"role": "user", "content": "six"},
+        ])
+        response = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            first_payload,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "suggestions": ["Inspect logs", "Add a regression test", "Ship the fix"]
+        }
+        call = primary_provider.chat.await_args
+        assert call.kwargs == {
+            "tools": None,
+            "model": "openrouter/deep-model",
+            "max_tokens": 321,
+            "temperature": 0.3,
+            "reasoning_effort": "none",
+        }
+        assert call.args[0][:-1] == [
+            {"role": "assistant", "content": "one"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "three"},
+            {"role": "user", "content": "four"},
+            {"role": "assistant", "content": "five"},
+            {"role": "user", "content": "six"},
+        ]
+        assert call.args[0][-1]["role"] == "user"
+        assert "SUGGESTION:" in call.args[0][-1]["content"]
+        usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
+        assert usage["total_tokens"] == 11
+        assert usage["requests_30d"] == 1
+        assert usage["days"][0]["sources"]["user"]["requests"] == 1
+
+        repeated = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            first_payload,
+        )
+        assert repeated.json() == {"suggestions": []}
+        assert primary_provider.chat.await_count == 1
+
+        primary_provider.chat.return_value = LLMResponse(
+            content=(
+                "SUGGESTION: First must not survive\n"
+                "SUGGESTION: Second must not survive\n"
+                "SUGGESTION: Third must not survive\n"
+                "SUGGESTION:Missing required space"
+            ),
+            usage={"prompt_tokens": 2, "completion_tokens": 1},
+        )
+        malformed = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "user", "content": "next"}]),
+        )
+        assert malformed.json() == {"suggestions": []}
+        usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
+        assert usage["total_tokens"] == 14
+        assert usage["requests_30d"] == 2
+
+        primary_provider.chat.return_value = LLMResponse(
+            content="SUGGESTION: Never surface an error response",
+            finish_reason="error",
+            usage={"prompt_tokens": 4, "completion_tokens": 2},
+        )
+        provider_error = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "user", "content": "next"}]),
+        )
+        assert provider_error.json() == {"suggestions": []}
+        usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
+        assert usage["total_tokens"] == 20
+        assert usage["requests_30d"] == 3
+
+        primary_provider.chat.return_value = LLMResponse(content="NONE")
+        no_usage = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "user", "content": "next"}]),
+        )
+        assert no_usage.json() == {"suggestions": []}
+        usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
+        assert usage["total_tokens"] == 20
+        assert usage["requests_30d"] == 4
+
+        primary_provider.chat.side_effect = RuntimeError("provider unavailable")
+        failed = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "user", "content": "next"}]),
+        )
+        assert failed.json() == {"suggestions": []}
+        fallback_factory.assert_not_called()
+        usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
+        assert usage["requests_30d"] == 5
+
+        async def slow_chat(*_args: Any, **_kwargs: Any) -> LLMResponse:
+            await asyncio.sleep(1)
+            return LLMResponse(content="NONE")
+
+        primary_provider.chat.side_effect = slow_chat
+        monkeypatch.setattr(
+            "nanobot.webui.follow_up_suggestions._GENERATION_TIMEOUT_SECONDS",
+            0.01,
+        )
+        timed_out = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "user", "content": "next"}]),
+        )
+        assert timed_out.json() == {"suggestions": []}
+        usage = token_usage_payload(timezone_name=config.agents.defaults.timezone)
+        assert usage["requests_30d"] == 6
+        assert usage["days"][0]["sources"]["user"]["requests"] == 6
+
+        invalid = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "tool", "content": "hidden"}]),
+        )
+        assert invalid.status_code == 400
+
+        primary_provider.chat.side_effect = None
+        calls_before_disable = primary_provider.chat.await_count
+        disabled = await _webui_mutate(
+            client,
+            "settings.agent.update",
+            {"follow_up_suggestions_enabled": False},
+        )
+        assert disabled.json()["follow_up_suggestions"] == {"enabled": False}
+        no_suggestions = await _webui_mutate(
+            client,
+            "follow_up_suggestions.generate",
+            follow_up_payload([{"role": "user", "content": "next"}]),
+        )
+        assert no_suggestions.json() == {"suggestions": []}
+        assert primary_provider.chat.await_count == calls_before_disable
+    finally:
+        if client is not None:
+            await client.close()
+        await channel.stop()
+        await server_task
 
 
 @pytest.mark.asyncio
@@ -2622,6 +2877,111 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         {"event": "turn_end", "chat_id": "chat-1"},
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_canonical_webui_turn_end_defaults_missing_result_to_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    metadata = {
+        "webui": True,
+        WEBUI_TURN_METADATA_KEY: "turn-missing-result",
+        WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-missing-result",
+    }
+    channel._attach(mock_ws, "chat-missing-result")
+    monkeypatch.setattr(
+        channel._temporary_chats,
+        "should_persist_transcript",
+        lambda _chat_id: False,
+    )
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-missing-result",
+        content="",
+        metadata=metadata,
+        event=TurnEndEvent(),
+    ))
+
+    assert _sent_ws_payloads(mock_ws)[0] == {
+        "event": "turn_end",
+        "chat_id": "chat-missing-result",
+        "turn_id": "turn-missing-result",
+        "successful": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_temporary_webui_turn_end_carries_result_and_turn_id_from_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    chat_id = "temporary-result"
+    owner = "owner-temporary-result"
+    turn_id = "turn-temporary-result"
+    metadata = {
+        "webui": True,
+        WEBUI_TURN_METADATA_KEY: turn_id,
+        WEBSOCKET_TURN_OWNER_METADATA_KEY: owner,
+    }
+    channel._attach(mock_ws, chat_id)
+    monkeypatch.setattr(
+        channel._temporary_chats,
+        "should_persist_transcript",
+        lambda _chat_id: False,
+    )
+    await wth.publish_turn_run_status(
+        bus,
+        InboundMessage(
+            channel="websocket",
+            sender_id="u",
+            chat_id=chat_id,
+            content="hi",
+            metadata=metadata,
+        ),
+        "running",
+    )
+
+    completion = TurnEndEvent(successful=False)
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id=chat_id,
+        content="Done",
+        metadata={**metadata, "_stop_reason": "completed"},
+    ))
+    assert wth.websocket_turn_successful(chat_id, owner) is True
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id=chat_id,
+        content="",
+        metadata=metadata,
+        event=completion,
+    ))
+
+    turn_end = next(
+        payload for payload in _sent_ws_payloads(mock_ws) if payload["event"] == "turn_end"
+    )
+    assert turn_end == {
+        "event": "turn_end",
+        "chat_id": chat_id,
+        "turn_id": turn_id,
+        "successful": True,
+    }
 
 
 @pytest.mark.asyncio

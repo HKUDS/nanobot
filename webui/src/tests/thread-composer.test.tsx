@@ -360,6 +360,99 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("sends a suggestion immediately when the draft is empty", async () => {
+    const onSend = vi.fn();
+    const onDismissSuggestions = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        suggestions={["Inspect the logs"]}
+        onDismissSuggestions={onDismissSuggestions}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Inspect the logs" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "Inspect the logs",
+      undefined,
+      undefined,
+    ));
+    expect(onDismissSuggestions).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a draft on cancel and appends a suggestion only after confirmation", async () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer onSend={onSend} suggestions={["Add a regression test"]} />,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "Keep my draft" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a regression test" }));
+    expect(onSend).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Use this suggestion?" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(input).toHaveValue("Keep my draft");
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a regression test" }));
+    fireEvent.click(screen.getByRole("button", { name: "Append and send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "Keep my draft\nAdd a regression test",
+      undefined,
+      undefined,
+    ));
+  });
+
+  it("replaces a draft on confirmation and exposes wrapping dismissible suggestions", async () => {
+    const onSend = vi.fn();
+    const onDismissSuggestions = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        suggestions={["Ship the fix", "Document the behavior"]}
+        onDismissSuggestions={onDismissSuggestions}
+      />,
+    );
+    const group = screen.getByRole("group", { name: "Suggested follow-up messages" });
+    expect(group).toHaveClass("flex-wrap");
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "Discard this draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ship the fix" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace and send" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "Ship the fix",
+      undefined,
+      undefined,
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss follow-up suggestions" }));
+    expect(onDismissSuggestions).toHaveBeenCalled();
+  });
+
+  it("closes a draft conflict when its suggestion is cleared", () => {
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer onSend={onSend} suggestions={["Old suggestion"]} />,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "Keep this draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Old suggestion" }));
+    expect(screen.getByRole("dialog", { name: "Use this suggestion?" })).toBeInTheDocument();
+
+    rerender(<ThreadComposer onSend={onSend} suggestions={[]} />);
+
+    expect(screen.queryByRole("dialog", { name: "Use this suggestion?" })).not.toBeInTheDocument();
+    expect(input).toHaveValue("Keep this draft");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("locks an async send and keeps the draft when it is rejected", async () => {
     let resolveSend!: (accepted: boolean) => void;
     const onSend = vi.fn(() => new Promise<boolean>((resolve) => {

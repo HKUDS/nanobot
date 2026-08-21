@@ -21,6 +21,7 @@ import {
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
+  generateFollowUpSuggestions,
   listSlashCommands,
 } from "@/lib/api";
 import {
@@ -48,6 +49,10 @@ import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
 import { useClient } from "@/providers/ClientProvider";
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
+
+function isFollowUpEligible(content: string, options?: SendOptions): boolean {
+  return !options?.continueActiveTurn && !content.trimStart().startsWith("/");
+}
 
 interface PendingCanonicalHydrate {
   historyLineage: number;
@@ -693,6 +698,15 @@ export function ThreadShell({
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+  const [followUpSuggestionState, setFollowUpSuggestionState] = useState<{
+    chatId: string;
+    values: string[];
+  } | null>(null);
+  const [suggestionCompletion, setSuggestionCompletion] = useState<{
+    chatId: string;
+    turnId: string;
+    fence: number;
+  } | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
@@ -717,19 +731,44 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
   const uiRevisionRef = useRef(0);
+  const suggestionFenceRef = useRef(0);
+  const startedSuggestionFenceRef = useRef(0);
+  const suggestibleTurnIdRef = useRef<string | null>(null);
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
+  const followUpSuggestions = followUpSuggestionState?.chatId === chatId
+    ? followUpSuggestionState.values
+    : [];
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
-  const handleTurnEnd = useCallback(() => {
+  const clearFollowUpSuggestions = useCallback(() => {
+    suggestionFenceRef.current += 1;
+    setSuggestionCompletion(null);
+    setFollowUpSuggestionState(null);
+  }, []);
+  const handleTurnEnd = useCallback((turnId: string | undefined, successful: boolean) => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
     setSubmittedViewportTurnId(null);
     setFallbackModelName(null);
+    const suggestible = !!turnId && suggestibleTurnIdRef.current === turnId;
+    if (suggestible) {
+      suggestibleTurnIdRef.current = null;
+    }
+    if ((successful && turnId) || suggestible) {
+      clearFollowUpSuggestions();
+    }
+    if (chatId && successful && suggestible) {
+      setSuggestionCompletion({
+        chatId,
+        turnId,
+        fence: suggestionFenceRef.current,
+      });
+    }
     onTurnEnd?.();
-  }, [chatId, onTurnEnd]);
+  }, [chatId, clearFollowUpSuggestions, onTurnEnd]);
   const {
     messages,
     messagesReady,
@@ -775,7 +814,9 @@ export function ThreadShell({
     setFilePreviewPath(null);
     setQuotedContext(null);
     setSubmittedViewportTurnId(null);
-  }, [historyKey]);
+    suggestibleTurnIdRef.current = null;
+    clearFollowUpSuggestions();
+  }, [chatId, clearFollowUpSuggestions, historyKey]);
 
   useEffect(() => {
     const retained = new Set(temporaryChatIds);
@@ -796,6 +837,7 @@ export function ThreadShell({
 
   useEffect(() => {
     return () => {
+      suggestionFenceRef.current += 1;
       if (filePreviewCloseTimerRef.current !== null) {
         window.clearTimeout(filePreviewCloseTimerRef.current);
       }
@@ -803,6 +845,45 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  useEffect(() => {
+    const completion = suggestionCompletion;
+    if (!completion || startedSuggestionFenceRef.current === completion.fence) return;
+    if (
+      completion.chatId !== chatId
+      || settings?.follow_up_suggestions?.enabled !== true
+    ) return;
+    startedSuggestionFenceRef.current = completion.fence;
+    const recentMessages = displayMessages
+      .filter((message): message is UIMessage & { role: "user" | "assistant" } => (
+        (message.role === "user" || message.role === "assistant")
+        && !!message.content.trim()
+      ))
+      .slice(-6)
+      .map(({ role, content }) => ({ role, content: content.trim() }));
+    if (recentMessages.length === 0) return;
+    void generateFollowUpSuggestions(client, {
+      chat_id: completion.chatId,
+      turn_id: completion.turnId,
+      messages: recentMessages,
+    }).then((response) => {
+      if (suggestionFenceRef.current === completion.fence) {
+        setFollowUpSuggestionState({
+          chatId: completion.chatId,
+          values: response.suggestions,
+        });
+      }
+    }).catch(() => {});
+  }, [chatId, client, displayMessages, settings, suggestionCompletion]);
+  useEffect(() => {
+    if (settings === null || settings.follow_up_suggestions?.enabled === true) return;
+    if (!suggestionCompletion && followUpSuggestionState === null) return;
+    clearFollowUpSuggestions();
+  }, [
+    clearFollowUpSuggestions,
+    followUpSuggestionState,
+    settings?.follow_up_suggestions?.enabled,
+    suggestionCompletion,
+  ]);
   const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const currentGoalState = messagesReady ? goalState : undefined;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
@@ -1276,6 +1357,9 @@ export function ThreadShell({
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
       setSubmittedViewportTurnId(submitted.turnId);
+      if (isFollowUpEligible(pending.content, pending.options)) {
+        suggestibleTurnIdRef.current = submitted.turnId;
+      }
     }
     setBooting(false);
   }, [chatId, pendingFirstTargetChatId, send]);
@@ -1298,6 +1382,8 @@ export function ThreadShell({
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendAttachment[], options?: SendOptions) => {
       if (booting) return false;
+      suggestibleTurnIdRef.current = null;
+      clearFollowUpSuggestions();
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
@@ -1314,11 +1400,21 @@ export function ThreadShell({
       setPendingFirstTargetChatId(newId);
       return true;
     },
-    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
+    [
+      booting,
+      clearFollowUpSuggestions,
+      client,
+      localModelPreset,
+      onCreateChat,
+      withWorkspaceScope,
+      workspaceScope,
+    ],
   );
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      suggestibleTurnIdRef.current = null;
+      clearFollowUpSuggestions();
       setFallbackModelName(null);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
@@ -1329,10 +1425,19 @@ export function ThreadShell({
       ) {
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
         setSubmittedViewportTurnId(submitted.turnId);
+        if (isFollowUpEligible(content, options)) {
+          suggestibleTurnIdRef.current = submitted.turnId;
+        }
       }
     },
-    [chatId, send, withWorkspaceScope],
+    [chatId, clearFollowUpSuggestions, send, withWorkspaceScope],
   );
+
+  const handleStop = useCallback(() => {
+    suggestibleTurnIdRef.current = null;
+    clearFollowUpSuggestions();
+    stop();
+  }, [clearFollowUpSuggestions, stop]);
 
   const handleOpenFilePreview = useCallback((path: string) => {
     if (filePreviewCloseTimerRef.current !== null) {
@@ -1469,7 +1574,7 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
-          onStop={stop}
+          onStop={handleStop}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           workspaceScope={workspaceScope}
@@ -1488,6 +1593,8 @@ export function ThreadShell({
           quotedContext={quotedContext}
           focusRequest={composerFocusSignal}
           onQuotedContextChange={setQuotedContext}
+          suggestions={followUpSuggestions}
+          onDismissSuggestions={clearFollowUpSuggestions}
         />
       ) : (
         <ThreadComposer

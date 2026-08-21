@@ -28,6 +28,7 @@ Pick the row that matches what you want to accomplish next:
 | Goal | Guide |
 |---|---|
 | Learn the browser workbench | [WebUI](./webui.md) |
+| Show suggested next messages after WebUI replies | [WebUI Follow-Up Suggestions](./follow-up-suggestions.md) |
 | Connect Telegram, Discord, Slack, Feishu, WeChat, Email, or another chat app | [Chat Apps](./chat-apps.md) |
 | Choose a hosted, OAuth, company, or local model | [Provider Cookbook](./provider-cookbook.md) |
 | Add model fallbacks | [Configure Model Fallback](./guides/configure-model-fallback.md) |

@@ -126,6 +126,10 @@
       "hostSafety": "应用安全",
       "voiceInput": "语音识别"
     },
+    "followUpSuggestions": {
+      "label": "后续建议",
+      "description": "回复成功后建议最多三条可继续发送的消息。此功能会携带近期对话上下文发起一次额外的模型请求。"
+    },
     "models": {
       "selectModel": "选择模型",
       "addConfiguration": "添加配置",
@@ -1081,6 +1085,14 @@
   },
   "thread": {
     "loadingConversation": "正在加载话题…",
+    "suggestions": {
+      "label": "建议的后续消息",
+      "dismiss": "关闭后续建议",
+      "dialogTitle": "使用这条建议？",
+      "dialogDescription": "你的输入框已有内容。请选择如何继续。",
+      "appendAndSend": "追加并发送",
+      "replaceAndSend": "替换并发送"
+    },
     "empty": {
       "greetings": {
         "workOn": "我们要一起做点什么？",

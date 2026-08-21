@@ -58,9 +58,11 @@ from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
+    mark_websocket_turn_successful,
     mark_websocket_turn_transcript_persistence_failed,
     register_queued_websocket_turn_if_idle,
     websocket_turn_id,
+    websocket_turn_successful,
     websocket_turn_transcript_persistence_failed,
     websocket_turn_wall_started_at,
 )
@@ -1734,14 +1736,24 @@ class WebSocketChannel(BaseChannel):
                 else "thread"
             )
             turn_owner = (msg.metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+            current_turn_owner = turn_owner if isinstance(turn_owner, str) else None
+            successful = event.successful
+            if (msg.metadata or {}).get("webui") is True:
+                recorded_success = websocket_turn_successful(msg.chat_id, current_turn_owner)
+                successful = (
+                    recorded_success
+                    if recorded_success is not None
+                    else successful is True
+                )
             await self.send_turn_end(
                 msg.chat_id,
                 latency_ms=event.latency_ms,
                 goal_state=event.goal_state,
+                successful=successful,
                 usage=event.usage,
                 context_window_tokens=event.context_window_tokens,
                 metadata=msg.metadata,
-                turn_owner=turn_owner if isinstance(turn_owner, str) else None,
+                turn_owner=current_turn_owner,
             )
             await self.send_session_updated(msg.chat_id, scope=session_update_scope)
             return
@@ -1759,6 +1771,19 @@ class WebSocketChannel(BaseChannel):
                 msg.metadata,
             )
             return
+        response_metadata = msg.metadata or {}
+        response_owner = response_metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+        stop_reason = response_metadata.get("_stop_reason")
+        if (
+            response_metadata.get("webui") is True
+            and isinstance(response_owner, str)
+            and isinstance(stop_reason, str)
+        ):
+            mark_websocket_turn_successful(
+                msg.chat_id,
+                response_owner,
+                stop_reason == "completed",
+            )
         text = msg.content
         wire_text = self._media.rewrite_local_markdown_images(text)
         payload: dict[str, Any] = {
@@ -1957,6 +1982,7 @@ class WebSocketChannel(BaseChannel):
         latency_ms: int | None = None,
         *,
         goal_state: dict[str, Any] | None = None,
+        successful: bool | None = None,
         usage: dict[str, int] | None = None,
         context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
@@ -1972,6 +1998,8 @@ class WebSocketChannel(BaseChannel):
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
+        if successful is not None:
+            body["successful"] = successful
         if usage:
             body["usage"] = usage
         if context_window_tokens is not None:

@@ -126,6 +126,10 @@
       "hostSafety": "App safety",
       "voiceInput": "Voice input"
     },
+    "followUpSuggestions": {
+      "label": "Follow-up suggestions",
+      "description": "Suggest up to three next messages after successful replies. This sends recent conversation context in an additional model request."
+    },
     "models": {
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
@@ -1081,6 +1085,14 @@
   },
   "thread": {
     "loadingConversation": "Loading conversation…",
+    "suggestions": {
+      "label": "Suggested follow-up messages",
+      "dismiss": "Dismiss follow-up suggestions",
+      "dialogTitle": "Use this suggestion?",
+      "dialogDescription": "Your message already has text. Choose how to continue.",
+      "appendAndSend": "Append and send",
+      "replaceAndSend": "Replace and send"
+    },
     "empty": {
       "greetings": {
         "workOn": "What should we work on?",

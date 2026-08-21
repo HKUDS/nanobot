@@ -31,7 +31,7 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { fetchSettings, fetchSettingsUsage, updateSettings } from "@/lib/api";
 import {
   readLocalPreferences,
   writeLocalPreferences,
@@ -83,6 +83,7 @@ export function useSettingsController({
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [loading, setLoading] = useState(() => initialSettings === null);
   const [hostEngineApplying, setHostEngineApplying] = useState(false);
+  const [followUpSuggestionsSaving, setFollowUpSuggestionsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
@@ -375,6 +376,24 @@ export function useSettingsController({
     },
     [applyPayload, onNativeEngineRestart, settings],
   );
+  const handleFollowUpSuggestionsChange = useCallback(
+    async (enabled: boolean) => {
+      if (!settings || followUpSuggestionsSaving) return;
+      setFollowUpSuggestionsSaving(true);
+      try {
+        const payload = await updateSettings(client, {
+          followUpSuggestionsEnabled: enabled,
+        });
+        applyPayload(payload, { preserveAgentForm: true });
+        setError(null);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setFollowUpSuggestionsSaving(false);
+      }
+    },
+    [applyPayload, client, followUpSuggestionsSaving, settings],
+  );
   const systemActions = createSystemSettingsActions({
     state: systemState,
     featureCatalog,
@@ -492,12 +511,14 @@ export function useSettingsController({
     error,
     expandedProvider,
     featureCatalog,
+    followUpSuggestionsSaving,
     form,
     handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
     handleCliAppAction,
     handleDeleteModelConfiguration,
+    handleFollowUpSuggestionsChange,
     handleImportMcpConfig,
     handleMcpOAuthCancel,
     handleMcpOAuthComplete,

@@ -126,6 +126,10 @@
       "hostSafety": "應用程式安全",
       "voiceInput": "語音輸入"
     },
+    "followUpSuggestions": {
+      "label": "後續建議",
+      "description": "回覆成功後建議最多三則可繼續傳送的訊息。此功能會攜帶近期對話內容發出一次額外的模型請求。"
+    },
     "rows": {
       "theme": "主題",
       "language": "語言",
@@ -1067,6 +1071,14 @@
   },
   "thread": {
     "loadingConversation": "正在載入話題…",
+    "suggestions": {
+      "label": "建議的後續訊息",
+      "dismiss": "關閉後續建議",
+      "dialogTitle": "使用這則建議？",
+      "dialogDescription": "你的輸入框已有內容，請選擇如何繼續。",
+      "appendAndSend": "追加並傳送",
+      "replaceAndSend": "取代並傳送"
+    },
     "empty": {
       "greetings": {
         "workOn": "我們要一起做點什麼？",

@@ -539,6 +539,9 @@ export interface SettingsPayload {
     timezone: string;
     tool_hint_max_length: number;
   };
+  follow_up_suggestions?: {
+    enabled: boolean;
+  };
   model_presets: Array<{
     name: string;
     /** @deprecated Compatibility alias. New clients must use `name`. */
@@ -1102,6 +1105,7 @@ export interface SettingsUpdate {
   contextWindowTokens?: number;
   timezone?: string;
   toolHintMaxLength?: number;
+  followUpSuggestionsEnabled?: boolean;
 }
 
 export interface ModelConfigurationCreate {
@@ -1317,6 +1321,7 @@ export type InboundEvent =
   | ({
       event: "turn_end";
       chat_id: string;
+      successful?: boolean;
       latency_ms?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;

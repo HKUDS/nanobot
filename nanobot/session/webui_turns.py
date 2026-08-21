@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.agent.hook import AgentHook, AgentRunHookContext, AgentTurnHookContext
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.turn_delivery import TurnRoute
 from nanobot.bus import progress as bus_progress
@@ -68,6 +69,8 @@ TITLE_GENERATION_REASONING_EFFORT = "none"
 _WEBSOCKET_TURN_WALL_STARTED_AT: dict[str, float] = {}
 _WEBSOCKET_TURN_IDS: dict[str, str] = {}
 _WEBSOCKET_TURN_OWNERS: dict[str, str] = {}
+_COMPLETED_WEBUI_TURN_RUNTIMES: dict[str, tuple[str, LLMRuntime]] = {}
+_MAX_COMPLETED_WEBUI_TURN_RUNTIMES = 256
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,7 @@ class _WebsocketTurn:
     started_at: float
     turn_id: str | None
     transcript_persistence_failed: bool = False
+    successful: bool | None = None
 
 
 # All in-flight lifecycle owners per chat, in admission order. The three maps
@@ -271,6 +275,30 @@ def websocket_turn_id(chat_id: str) -> str | None:
     return _WEBSOCKET_TURN_IDS.get(chat_id)
 
 
+def remember_completed_websocket_turn_runtime(
+    chat_id: str,
+    turn_id: str,
+    runtime: LLMRuntime,
+) -> None:
+    """Keep one completed runtime until its matching suggestion request arrives."""
+    _COMPLETED_WEBUI_TURN_RUNTIMES.pop(chat_id, None)
+    _COMPLETED_WEBUI_TURN_RUNTIMES[chat_id] = (turn_id, runtime)
+    if len(_COMPLETED_WEBUI_TURN_RUNTIMES) > _MAX_COMPLETED_WEBUI_TURN_RUNTIMES:
+        _COMPLETED_WEBUI_TURN_RUNTIMES.pop(next(iter(_COMPLETED_WEBUI_TURN_RUNTIMES)))
+
+
+def take_completed_websocket_turn_runtime(
+    chat_id: str,
+    turn_id: str,
+) -> LLMRuntime | None:
+    """Consume the runtime captured for this exact completed WebUI turn."""
+    completed = _COMPLETED_WEBUI_TURN_RUNTIMES.get(chat_id)
+    if completed is None or completed[0] != turn_id:
+        return None
+    _COMPLETED_WEBUI_TURN_RUNTIMES.pop(chat_id, None)
+    return completed[1]
+
+
 def register_queued_websocket_turn_if_idle(
     chat_id: str,
     turn_id: str | None,
@@ -278,6 +306,7 @@ def register_queued_websocket_turn_if_idle(
     """Track an accepted WebUI turn while it waits for AgentLoop admission."""
     if websocket_turn_wall_started_at(chat_id) is not None:
         return None
+    _COMPLETED_WEBUI_TURN_RUNTIMES.pop(chat_id, None)
     owner = uuid4().hex
     _WEBSOCKET_ACTIVE_TURNS.setdefault(chat_id, {})[owner] = _WebsocketTurn(
         started_at=time.time(),
@@ -308,6 +337,56 @@ def websocket_turn_transcript_persistence_failed(
     selected_owner = owner or next(reversed(turns))
     turn = turns.get(selected_owner)
     return turn.transcript_persistence_failed if turn is not None else False
+
+
+def mark_websocket_turn_successful(
+    chat_id: str,
+    owner: str | None,
+    successful: bool,
+) -> bool:
+    """Record the runner outcome for one canonical WebUI turn."""
+    if not owner:
+        return False
+    turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
+    if turns is None or owner not in turns:
+        return False
+    turns[owner] = replace(turns[owner], successful=successful)
+    return True
+
+
+def websocket_turn_successful(chat_id: str, owner: str | None) -> bool | None:
+    """Return the recorded runner outcome, if the turn reached the runner."""
+    if not owner:
+        return None
+    turn = _WEBSOCKET_ACTIVE_TURNS.get(chat_id, {}).get(owner)
+    return turn.successful if turn is not None else None
+
+
+class _WebuiTurnResultHook(AgentHook):
+    def __init__(self, chat_id: str, owner: str) -> None:
+        super().__init__()
+        self.chat_id = chat_id
+        self.owner = owner
+
+    async def on_finally(self, context: AgentRunHookContext) -> None:
+        mark_websocket_turn_successful(
+            self.chat_id,
+            self.owner,
+            context.stop_reason == "completed",
+        )
+
+
+def create_webui_turn_result_hook(context: AgentTurnHookContext) -> AgentHook | None:
+    """Capture runner success for canonical, persistent WebUI turns."""
+    owner = context.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+    if (
+        context.channel != "websocket"
+        or context.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+        or not isinstance(owner, str)
+        or not owner
+    ):
+        return None
+    return _WebuiTurnResultHook(context.chat_id, owner)
 
 
 def mark_websocket_turn_transcript_persistence_failed(
@@ -359,6 +438,7 @@ def clear_websocket_turn_if_current(
 def clear_websocket_turns(chat_id: str) -> None:
     """Forget every in-process turn projection for a discarded chat."""
     _WEBSOCKET_ACTIVE_TURNS.pop(chat_id, None)
+    _COMPLETED_WEBUI_TURN_RUNTIMES.pop(chat_id, None)
     _sync_websocket_turn_projection(chat_id)
 
 
@@ -648,6 +728,7 @@ class WebuiTurnCoordinator:
             msg,
             session_key=event.context.session_key,
             latency_ms=event.latency_ms,
+            runtime=_validated_llm_runtime(event.runtime),
             usage=event.usage,
             context_window_tokens=(
                 event.runtime.context_window_tokens if event.runtime is not None else None
@@ -699,6 +780,7 @@ class WebuiTurnCoordinator:
         *,
         session_key: str,
         latency_ms: int | None,
+        runtime: LLMRuntime | None = None,
         usage: dict[str, int] | None = None,
         context_window_tokens: int | None = None,
     ) -> None:
@@ -706,6 +788,19 @@ class WebuiTurnCoordinator:
             return
 
         session = self.sessions.get_or_create(session_key)
+        owner = msg.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+        successful = (
+            websocket_turn_successful(
+                str(msg.chat_id),
+                owner if isinstance(owner, str) else None,
+            )
+            is True
+            if msg.metadata.get(WEBUI_SESSION_METADATA_KEY) is True
+            else None
+        )
+        turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
+        if successful is True and runtime is not None and isinstance(turn_id, str) and turn_id:
+            remember_completed_websocket_turn_runtime(str(msg.chat_id), turn_id, runtime)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,
@@ -713,6 +808,7 @@ class WebuiTurnCoordinator:
                 event=TurnEndEvent(
                     latency_ms=latency_ms,
                     goal_state=goal_state_ws_blob(session.metadata),
+                    successful=successful,
                     usage=usage or None,
                     context_window_tokens=context_window_tokens,
                 ),
