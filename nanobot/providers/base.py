@@ -913,10 +913,10 @@ class LLMProvider(ABC):
             kw["provider_context"] = provider_context
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
-        return await self._run_with_retry(
-            self._safe_chat_stream,
+        return await self._run_chat_with_retry(
             kw,
             messages,
+            stream=True,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted or on_retry_wait,
@@ -961,13 +961,38 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
-        return await self._run_with_retry(
-            self._safe_chat,
+        return await self._run_chat_with_retry(
             kw,
             messages,
+            stream=False,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted or on_retry_wait,
+        )
+
+    async def _run_chat_with_retry(
+        self,
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        stream: bool,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        should_retry_guard: Callable[[], bool] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Run one chat entry point through this provider's retry policy."""
+        call = self._safe_chat_stream if stream else self._safe_chat
+        return await self._run_with_retry(
+            call,
+            kw,
+            original_messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            should_retry_guard=should_retry_guard,
+            on_stream_recover=on_stream_recover,
         )
 
     @classmethod

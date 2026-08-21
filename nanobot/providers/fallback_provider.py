@@ -92,7 +92,6 @@ _FALLBACK_ERROR_TOKENS = (
 
 
 FallbackModelObserver = Callable[[str], Awaitable[None]]
-_UNSET = object()
 
 
 class FallbackProvider(LLMProvider):
@@ -196,48 +195,78 @@ class FallbackProvider(LLMProvider):
             lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
         )
 
-    async def chat_with_retry(
+    async def _run_chat_with_retry(
         self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: object = _UNSET,
-        temperature: object = _UNSET,
-        reasoning_effort: object = _UNSET,
-        tool_choice: str | dict[str, Any] | None = None,
-        retry_mode: str = "standard",
-        on_retry_wait: RetryEventCallback | None = None,
-        provider_context: ProviderCallContext | None = None,
-        on_retry_exhausted: RetryEventCallback | None = None,
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        stream: bool,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        should_retry_guard: Callable[[], bool] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Exhaust each provider's retries before moving to the next fallback."""
-        call_kwargs: dict[str, Any] = {
-            "messages": messages,
-            "tools": tools,
-            "model": model,
-            "tool_choice": tool_choice,
-            "retry_mode": retry_mode,
-            "on_retry_wait": on_retry_wait,
-            "on_retry_exhausted": on_retry_exhausted,
-        }
-        if max_tokens is not _UNSET:
-            call_kwargs["max_tokens"] = max_tokens
-        if temperature is not _UNSET:
-            call_kwargs["temperature"] = temperature
-        if reasoning_effort is not _UNSET:
-            call_kwargs["reasoning_effort"] = reasoning_effort
-        if provider_context is not None:
+        """Retry each provider before advancing through the fallback chain."""
+        call_kwargs = dict(kw)
+        provider_context = call_kwargs.get("provider_context")
+        if isinstance(provider_context, ProviderCallContext):
             call_kwargs["provider_context"] = self._primary_call_context(
                 provider_context,
-                model,
+                call_kwargs.get("model"),
             )
         if not self._has_fallbacks:
+            call_kwargs.update({
+                "retry_mode": retry_mode,
+                "on_retry_wait": on_retry_wait,
+                "on_retry_exhausted": on_retry_exhausted,
+            })
+            if stream:
+                return await self._primary.chat_stream_with_retry(**call_kwargs)
             return await self._primary.chat_with_retry(**call_kwargs)
-        return await self._route_with_retry_fallback(
-            lambda p, kw: p.chat_with_retry(**kw),
+
+        has_streamed: list[bool] | None = None
+        recover_stream = on_stream_recover
+        if stream:
+            streamed = [False]
+            has_streamed = streamed
+            original_delta = call_kwargs.get("on_content_delta")
+
+            async def _tracking_delta(text: str) -> None:
+                if text:
+                    streamed[0] = True
+                if original_delta:
+                    await original_delta(text)
+
+            async def _recover_stream() -> None:
+                streamed[0] = False
+                if on_stream_recover:
+                    await on_stream_recover()
+
+            if original_delta is not None:
+                call_kwargs["on_content_delta"] = _tracking_delta
+            if on_stream_recover is not None:
+                call_kwargs["on_stream_recover"] = _recover_stream
+                recover_stream = _recover_stream
+
+        async def _call_provider(
+            provider: LLMProvider,
+            provider_kwargs: dict[str, Any],
+        ) -> LLMResponse:
+            if stream:
+                return await provider.chat_stream_with_retry(**provider_kwargs)
+            return await provider.chat_with_retry(**provider_kwargs)
+
+        return await self._retry_with_fallback(
+            _call_provider,
             call_kwargs,
-            has_streamed=None,
-            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
+            original_messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            has_streamed=has_streamed,
+            on_stream_recover=recover_stream,
+            persistent_retry_guard=should_retry_guard,
         )
 
     async def chat_with_context(
@@ -281,160 +310,68 @@ class FallbackProvider(LLMProvider):
             on_stream_recover=on_stream_recover,
         )
 
-    async def chat_stream_with_retry(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: object = _UNSET,
-        temperature: object = _UNSET,
-        reasoning_effort: object = _UNSET,
-        tool_choice: str | dict[str, Any] | None = None,
-        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
-        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
-        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
-        retry_mode: str = "standard",
-        on_retry_wait: RetryEventCallback | None = None,
-        provider_context: ProviderCallContext | None = None,
-        on_retry_exhausted: RetryEventCallback | None = None,
-    ) -> LLMResponse:
-        """Exhaust streaming retries on one provider before failing over."""
-        call_kwargs: dict[str, Any] = {
-            "messages": messages,
-            "tools": tools,
-            "model": model,
-            "tool_choice": tool_choice,
-            "on_content_delta": on_content_delta,
-            "on_thinking_delta": on_thinking_delta,
-            "on_tool_call_delta": on_tool_call_delta,
-            "retry_mode": retry_mode,
-            "on_retry_wait": on_retry_wait,
-            "on_retry_exhausted": on_retry_exhausted,
-        }
-        if max_tokens is not _UNSET:
-            call_kwargs["max_tokens"] = max_tokens
-        if temperature is not _UNSET:
-            call_kwargs["temperature"] = temperature
-        if reasoning_effort is not _UNSET:
-            call_kwargs["reasoning_effort"] = reasoning_effort
-        if provider_context is not None:
-            call_kwargs["provider_context"] = self._primary_call_context(
-                provider_context,
-                model,
-            )
-        if not self._has_fallbacks:
-            if on_stream_recover is not None:
-                call_kwargs["on_stream_recover"] = on_stream_recover
-            return await self._primary.chat_stream_with_retry(**call_kwargs)
-
-        has_streamed: list[bool] = [False]
-        has_unrecovered_stream: list[bool] = [False]
-        original_delta = call_kwargs.get("on_content_delta")
-
-        async def _tracking_delta(text: str) -> None:
-            if text:
-                has_streamed[0] = True
-                has_unrecovered_stream[0] = True
-            if original_delta:
-                await original_delta(text)
-
-        async def _recover_stream() -> None:
-            has_streamed[0] = False
-            has_unrecovered_stream[0] = False
-            if on_stream_recover:
-                await on_stream_recover()
-
-        if original_delta is not None:
-            call_kwargs["on_content_delta"] = _tracking_delta
-        if on_stream_recover is not None:
-            call_kwargs["on_stream_recover"] = _recover_stream
-        return await self._route_with_retry_fallback(
-            lambda p, kw: p.chat_stream_with_retry(**kw),
-            call_kwargs,
-            has_streamed=has_streamed,
-            on_stream_recover=_recover_stream if on_stream_recover is not None else None,
-            persistent_retry_guard=lambda: not has_unrecovered_stream[0],
-            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
-        )
-
-    async def _route_with_retry_fallback(
+    async def _retry_with_fallback(
         self,
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
         kwargs: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
         has_streamed: list[bool] | None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
-        persistent_retry_guard: Callable[[], bool] | None = None,
-        on_retry_exhausted: RetryEventCallback | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None,
+        persistent_retry_guard: Callable[[], bool] | None,
     ) -> LLMResponse:
-        """Apply finite retries per provider and persistence to the whole chain."""
-        on_retry_wait: RetryEventCallback | None = kwargs.get("on_retry_wait")
-        if kwargs.get("retry_mode", "standard") != "persistent":
-            return await self._try_with_retry_fallback(
-                call,
-                kwargs,
-                has_streamed=has_streamed,
-                on_stream_recover=on_stream_recover,
-                on_retry_exhausted=on_retry_exhausted,
-            )
+        """Retry each candidate, deferring terminal events until the chain fails."""
 
         async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
-            chain_kwargs["retry_mode"] = "standard"
-            return await self._try_with_retry_fallback(
-                call,
+            last_exhausted_message: str | None = None
+
+            async def _capture_exhaustion(message: str) -> None:
+                nonlocal last_exhausted_message
+                last_exhausted_message = message
+
+            async def _call_candidate(
+                provider: LLMProvider,
+                candidate_kwargs: dict[str, Any],
+            ) -> LLMResponse:
+                nonlocal last_exhausted_message
+                last_exhausted_message = None
+                return await call(provider, {
+                    **candidate_kwargs,
+                    "retry_mode": "standard",
+                    "on_retry_wait": on_retry_wait,
+                    "on_retry_exhausted": _capture_exhaustion,
+                })
+
+            response = await self._try_with_fallback(
+                _call_candidate,
                 chain_kwargs,
                 has_streamed=has_streamed,
                 on_stream_recover=on_stream_recover,
-                on_retry_exhausted=None,
             )
+            if (
+                retry_mode != "persistent"
+                and response.finish_reason == "error"
+                and last_exhausted_message
+                and on_retry_exhausted
+            ):
+                await on_retry_exhausted(last_exhausted_message)
+            return response
 
+        if retry_mode != "persistent":
+            return await _call_chain(**kwargs)
         return await self._run_with_retry(
             _call_chain,
             dict(kwargs),
-            kwargs["messages"],
+            original_messages,
             retry_mode="persistent",
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
             should_retry_guard=persistent_retry_guard,
             on_stream_recover=on_stream_recover,
         )
-
-    async def _try_with_retry_fallback(
-        self,
-        call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
-        kwargs: dict[str, Any],
-        has_streamed: list[bool] | None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None,
-        on_retry_exhausted: RetryEventCallback | None,
-    ) -> LLMResponse:
-        """Defer a provider's terminal retry event until the chain fails."""
-        last_exhausted_message: str | None = None
-
-        async def _capture_exhaustion(message: str) -> None:
-            nonlocal last_exhausted_message
-            last_exhausted_message = message
-
-        async def _call_with_deferred_exhaustion(
-            provider: LLMProvider,
-            call_kwargs: dict[str, Any],
-        ) -> LLMResponse:
-            nonlocal last_exhausted_message
-            last_exhausted_message = None
-            candidate_kwargs = {
-                **call_kwargs,
-                "on_retry_exhausted": _capture_exhaustion,
-            }
-            return await call(provider, candidate_kwargs)
-
-        response = await self._try_with_fallback(
-            _call_with_deferred_exhaustion,
-            kwargs,
-            has_streamed=has_streamed,
-            on_stream_recover=on_stream_recover,
-        )
-        if response.finish_reason == "error" and last_exhausted_message and on_retry_exhausted:
-            await on_retry_exhausted(last_exhausted_message)
-        return response
 
     async def chat_stream_with_context(
         self,
