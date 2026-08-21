@@ -309,6 +309,14 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
         assert "workspace" in result.lower() or "python" in result.lower()
 
+    def test_default_identity_uses_relative_agent_paths(self, tmp_path):
+        result = ContextBuilder(tmp_path)._get_identity()
+
+        assert str(tmp_path.resolve()) not in result
+        assert "Agent profile: SOUL.md and USER.md" in result
+        assert "History log: memory/history.jsonl" in result
+        assert "Custom skills: skills/{skill-name}/SKILL.md" in result
+
     def test_selected_project_identity_keeps_agent_data_in_agent_workspace(self, tmp_path):
         agent_home = tmp_path / "agent-home"
         project = tmp_path / "project"
@@ -317,7 +325,7 @@ class TestBuildSystemPrompt:
 
         result = ContextBuilder(agent_home)._get_identity(workspace=project)
 
-        assert f"current project workspace is at: {project.resolve()}" in result
+        assert str(project.resolve()) not in result
         assert f"agent workspace is at: {agent_home.resolve()}" in result
         assert f"{agent_home.resolve()}/SOUL.md" in result
         assert f"{project.resolve()}/SOUL.md" not in result

@@ -84,7 +84,10 @@ def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
     assert loader.get_explicitly_invoked_skills("Use $shared") == ["shared"]
     assert loader.get_always_skills() == ["shared"]
     assert "Plugin body" in (loader.load_skill("shared") or "")
-    assert "`demo/skills/shared/SKILL.md`" in loader.build_skills_summary()
+    summary = loader.build_skills_summary()
+    assert "### Agent Plugin skills (`plugins`)" in summary
+    assert "`demo/skills/shared/SKILL.md`" in summary
+    assert str(tmp_path.resolve()) not in summary
 
     set_agent_plugin_enabled(tmp_path, "demo", False)
     assert [entry["source"] for entry in loader.list_skills()] == ["builtin"]

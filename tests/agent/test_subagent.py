@@ -83,7 +83,7 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
     assert file_tools.isdisjoint(tools.tool_names)
 
 
-def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
+def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
     global_skill = agent_workspace / "skills" / "global-custom" / "SKILL.md"
@@ -100,13 +100,30 @@ def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
 
     prompt = manager._build_subagent_prompt(workspace=project)
 
-    assert "one absolute root and relative SKILL.md paths" in prompt
+    assert "one root and relative SKILL.md paths" in prompt
     assert "Join them when using `read_file`" in prompt
-    assert f"Current project workspace: {project.resolve()}" in prompt
+    assert str(project.resolve()) not in prompt
     assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
     assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt
+
+
+def test_subagent_prompt_uses_relative_paths_in_agent_workspace(tmp_path):
+    skill = tmp_path / "skills" / "custom" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\ndescription: custom skill\n---\nCustom", encoding="utf-8")
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+
+    prompt = manager._build_subagent_prompt()
+
+    assert str(tmp_path.resolve()) not in prompt
+    assert "History log: memory/history.jsonl" in prompt
+    assert "### Workspace skills (`skills`)" in prompt
 
 
 @pytest.mark.asyncio
