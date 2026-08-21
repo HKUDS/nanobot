@@ -20,6 +20,7 @@ from nanobot import __version__
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
     _gateway_health_ready,
+    _gateway_instance_command,
     _host_for_local_browser,
     _webui_endpoint_reachable,
 )
@@ -100,6 +101,11 @@ def launch_tui(
                     "workspace access" if config.tools.restrict_to_workspace else "full access"
                 ),
                 "NANOBOT_TUI_THEME": theme,
+                "NANOBOT_TUI_GATEWAY_STOP_COMMAND": _gateway_instance_command(
+                    "stop",
+                    config_path=config_path,
+                    workspace=workspace_override,
+                ),
             }
         )
         if bootstrap_secret:

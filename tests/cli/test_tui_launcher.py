@@ -197,6 +197,7 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
 ) -> None:
     config = Config()
     events: list[str] = []
+    captured: dict[str, str] = {}
 
     class FakeLease:
         def mark_persistent(self) -> bool:
@@ -213,10 +214,12 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
             return tui_launcher._TUI_DETACH_EXIT_CODE
 
     monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher.subprocess.Popen",
-        lambda *args, **kwargs: FakeProcess(),
-    )
+    def popen(command: list[str], *, env: dict[str, str]) -> FakeProcess:
+        assert command == ["nanobot-tui"]
+        captured.update(env)
+        return FakeProcess()
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.Popen", popen)
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._ensure_gateway",
         lambda *args, **kwargs: SimpleNamespace(
@@ -225,16 +228,21 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
         ),
     )
 
+    config_path = tmp_path / "custom config" / "config.json"
+    workspace = tmp_path / "custom workspace"
     result = launch_tui(
         config,
-        config_path=tmp_path / "config.json",
-        workspace_override=None,
+        config_path=config_path,
+        workspace_override=str(workspace),
         session_id=None,
         theme="auto",
     )
 
     assert result == 0
     assert events == ["waited", "promoted", "released"]
+    assert captured["NANOBOT_TUI_GATEWAY_STOP_COMMAND"] == (
+        f"nanobot gateway stop --config '{config_path}' --workspace '{workspace.resolve()}'"
+    )
 
 
 def test_explicit_tui_binary_must_exist(

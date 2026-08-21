@@ -14,6 +14,8 @@ const workspace = process.env.NANOBOT_TUI_WORKSPACE?.trim() || ""
 const hostWorkspace = process.cwd()
 const bootstrapUrl = process.env.NANOBOT_TUI_BOOTSTRAP_URL?.trim() || ""
 const wsUrl = process.env.NANOBOT_TUI_WS_URL?.trim() || ""
+const gatewayStopCommand = process.env.NANOBOT_TUI_GATEWAY_STOP_COMMAND?.trim()
+  || "nanobot gateway stop"
 if (!bootstrapUrl && !wsUrl) {
   throw new Error("NANOBOT_TUI_BOOTSTRAP_URL or NANOBOT_TUI_WS_URL is required")
 }
@@ -39,7 +41,7 @@ const options: AppOptions = {
     process.exitCode = TUI_DETACH_EXIT_CODE
     process.stdout.write("Detached; the agent continues in the background.\n")
     if (chatId) process.stdout.write(sessionExitMessage(chatId))
-    process.stdout.write("Stop it with: nanobot gateway stop\n")
+    process.stdout.write(`Stop it with: ${gatewayStopCommand}\n`)
   },
   onExit: (chatId) => {
     process.stdout.write(sessionExitMessage(chatId))
