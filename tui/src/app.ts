@@ -47,7 +47,7 @@ import {
   type TuiCommand,
 } from "./command-menu"
 import { SessionMenu, sessionLabel } from "./session-menu"
-import { ContextPanel, formatTokenCount, type ContextPanelTheme } from "./context-panel"
+import { ContextPanel, type ContextPanelTheme } from "./context-panel"
 import {
   DiffViewer,
   latestTurnFileEdits,
@@ -423,8 +423,6 @@ export class NanobotTui {
   private sessionModelPreset: string | null | undefined
   private sessionTitle = ""
   private sessionMetadataId = 0
-  private contextTokens: number | null = null
-  private contextWindowTokens: number | null = null
   private lastUsage: TokenUsage | null = null
   private readyDetail = ""
   private mentionCandidates: MentionCandidate[] = []
@@ -627,7 +625,6 @@ export class NanobotTui {
     if (!host.hosted) {
       this.title.add(this.runtimeControls.modelText)
       this.title.add(this.runtimeControls.accessText)
-      this.title.add(this.runtimeControls.contextText)
     }
     const composerSurface = this.composerSurface()
     this.composerFrame = new BoxRenderable(renderer, {
@@ -1049,9 +1046,6 @@ export class NanobotTui {
         this.turnHadAnswer = false
         this.activeTurnId = null
         if (event.usage) this.lastUsage = event.usage
-        if (typeof event.context_window_tokens === "number") {
-          this.contextWindowTokens = event.context_window_tokens
-        }
         this.applyHostGoalState(event.goal_state)
         this.updateTitle()
         this.setActive(false)
@@ -1063,7 +1057,6 @@ export class NanobotTui {
           : ""
         this.status.content = this.readyStatus()
         this.reportHostResting()
-        if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
         this.sendNextFollowUp()
         return
       case "goal_status":
@@ -1084,9 +1077,6 @@ export class NanobotTui {
         if (!this.activeTurn) this.reportHostResting()
         return
       case "turn_model_updated":
-        if (typeof event.context_window_tokens === "number") {
-          this.contextWindowTokens = event.context_window_tokens
-        }
         this.setTurnModel(event.model_name, event.model_preset)
         return
       case "runtime_model_updated":
@@ -1665,13 +1655,7 @@ export class NanobotTui {
     const identity = this.sessionTitle.trim() || "nanobot"
     this.titleText.maxWidth = Math.max(8, Math.floor(this.renderer.width * 0.38))
     this.titleText.content = identity
-    const context = this.contextTokens === null
-      ? ""
-      : `  ·  ~${formatTokenCount(this.contextTokens)}${this.contextWindowTokens
-        ? `/${formatTokenCount(this.contextWindowTokens)}`
-        : ""} ctx`
     this.runtimeControls.updateModel(this.modelName, this.modelPreset)
-    this.runtimeControls.updateContext(context)
     this.syncHostMetadata()
   }
 
@@ -1949,7 +1933,6 @@ export class NanobotTui {
       this.sessionTitle = `Fork · ${preview.slice(0, 48)}`
       this.clearHostContext()
       this.setCurrentTask(preview)
-      this.contextTokens = null
       this.lastUsage = null
       this.readyDetail = ""
       this.updateTitle()
@@ -2045,7 +2028,6 @@ export class NanobotTui {
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
       this.applySessionScope(session)
-      this.contextTokens = null
       this.lastUsage = null
       this.readyDetail = ""
       this.updateTitle()
@@ -2080,7 +2062,6 @@ export class NanobotTui {
       this.sessionModelPreset = null
       this.modelName = this.defaultModelName
       this.modelPreset = this.defaultModelPreset
-      this.contextTokens = null
       this.lastUsage = null
       this.readyDetail = ""
       this.updateTitle()
@@ -2200,9 +2181,7 @@ export class NanobotTui {
         this.status.content = "Context unavailable · new session or older gateway"
         return
       }
-      this.contextTokens = context.estimatedSessionTokens
       this.lastUsage = context.lastUsage
-      this.updateTitle()
       this.contextPanel.show(context)
       this.status.content = "Context snapshot"
       this.updateMeta()
@@ -2232,25 +2211,6 @@ export class NanobotTui {
       this.updateTitle()
     } catch {
       // Session metadata is decorative; conversation transport stays authoritative.
-    }
-  }
-
-  private async refreshContextEstimate(chatId: string): Promise<void> {
-    try {
-      const context = await fetchSessionContext(
-        this.options.apiUrl,
-        this.options.apiToken,
-        chatId,
-        this.apiReauthenticator,
-      )
-      if (!context || chatId !== this.client.activeChatId) return
-      this.contextTokens = context.estimatedSessionTokens
-      this.lastUsage = context.lastUsage || this.lastUsage
-      this.updateTitle()
-      if (!this.activeTurn) this.status.content = this.readyStatus()
-      this.updateMeta()
-    } catch {
-      // Keep the last known estimate; it is intentionally informational.
     }
   }
 

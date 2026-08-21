@@ -1066,10 +1066,16 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # Usage should be accumulated across iterations
+    # Accounting remains cumulative, while UI telemetry retains the latest
+    # provider-reported request instead of presenting the sum as context size.
     assert result.usage["prompt_tokens"] == 300  # 100 + 200
     assert result.usage["completion_tokens"] == 30  # 10 + 20
     assert result.usage["cached_tokens"] == 230  # 80 + 150
+    assert result.usage["last_request_prompt_tokens"] == 200
+    assert result.usage["last_request_completion_tokens"] == 20
+    assert result.usage["last_request_cached_tokens"] == 150
+    assert result.usage["last_request_provider_tokens"] == 220
+    assert result.usage["last_request_context_window_tokens"] == 200_000
 
 
 @pytest.mark.asyncio
@@ -1204,3 +1210,26 @@ async def test_runner_passes_reasoning_effort_to_provider():
     ))
 
     assert captured["reasoning_effort"] == "high"
+
+
+def test_runner_last_request_usage_drops_stale_optional_metrics():
+    """A later uncached/untimed response must not inherit older request telemetry."""
+    from nanobot.agent.runner import AgentRunner
+
+    usage: dict[str, int] = {}
+    AgentRunner._accumulate_usage(usage, {
+        "prompt_tokens": 100,
+        "completion_tokens": 10,
+        "cached_tokens": 80,
+        "provider_tokens": 110,
+    })
+    AgentRunner._accumulate_usage(usage, {
+        "prompt_tokens": 200,
+        "completion_tokens": 20,
+        "provider_tokens": 220,
+    })
+
+    assert usage["prompt_tokens"] == 300
+    assert usage["cached_tokens"] == 80
+    assert usage["last_request_prompt_tokens"] == 200
+    assert "last_request_cached_tokens" not in usage

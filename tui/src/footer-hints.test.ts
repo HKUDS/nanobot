@@ -29,44 +29,57 @@ describe("footerHints", () => {
     expect(active.chunks).toHaveLength(0)
   })
 
-  test("groups the cache ratio with input telemetry", () => {
+  test("shows the latest measured request instead of aggregate turn usage", () => {
     const result = footerTelemetry({
-      prompt_tokens: 1200,
-      completion_tokens: 80,
-      cached_tokens: 900,
-      generation_ms: 1600,
-      measured_completion_tokens: 80,
-      ttft_ms: 500,
-      timed_requests: 2,
+      prompt_tokens: 1_400_000,
+      completion_tokens: 3200,
+      cached_tokens: 1_330_000,
+      generation_ms: 49_000,
+      measured_completion_tokens: 3200,
+      last_request_prompt_tokens: 148_000,
+      last_request_completion_tokens: 400,
+      last_request_cached_tokens: 140_600,
+      last_request_provider_tokens: 148_400,
+      last_request_generation_ms: 6154,
+      last_request_measured_completion_tokens: 400,
+      last_request_context_window_tokens: 300_000,
     }, 120, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("50 tok/s · 1.2K in (75% cached) · 80 out")
+      .toBe("65 tok/s · 148K/300K ctx (95% cached) · 400 out")
     expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
   })
 
-  test("uses familiar compact units for large token counts", () => {
-    const result = footerTelemetry({
-      prompt_tokens: 4_500_000,
-      completion_tokens: 19_000,
-      cached_tokens: 3_600_000,
-      generation_ms: 135_714,
-      measured_completion_tokens: 19_000,
-    }, 120, theme)
+  test("keeps real context visible while compacting secondary metrics", () => {
+    const usage = {
+      last_request_prompt_tokens: 148_000,
+      last_request_completion_tokens: 400,
+      last_request_cached_tokens: 140_600,
+      last_request_provider_tokens: 148_400,
+      last_request_generation_ms: 6154,
+      last_request_measured_completion_tokens: 400,
+      last_request_context_window_tokens: 300_000,
+    }
+
+    const result = footerTelemetry(usage, 60, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("140 tok/s · 4.5M in (80% cached) · 19K out")
+      .toBe("65 tok/s · 148K/300K ctx")
   })
 
-  test("degrades telemetry instead of guessing missing provider metrics", () => {
-    const compact = footerTelemetry({
-      prompt_tokens: 1000,
-      completion_tokens: 20,
-      cached_tokens: 0,
-    }, 60, theme)
-    const unsupported = footerTelemetry({ prompt_tokens: 1000, completion_tokens: 20 }, 60, theme)
+  test("does not present aggregate or estimated usage as real context", () => {
+    const aggregate = footerTelemetry({
+      prompt_tokens: 1_400_000,
+      completion_tokens: 3200,
+      cached_tokens: 1_330_000,
+    }, 120, theme)
+    const estimated = footerTelemetry({
+      last_request_prompt_tokens: 148_000,
+      estimated_tokens: 148_400,
+      last_request_context_window_tokens: 300_000,
+    }, 120, theme)
 
-    expect(compact.chunks.map(({ text }) => text).join("")).toBe("0% cached")
-    expect(unsupported.chunks).toHaveLength(0)
+    expect(aggregate.chunks).toHaveLength(0)
+    expect(estimated.chunks).toHaveLength(0)
   })
 })

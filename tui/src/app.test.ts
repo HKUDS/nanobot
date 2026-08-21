@@ -752,7 +752,6 @@ describe("NanobotTui layout", () => {
       runtimeControls: {
         modelText: TextRenderable
         accessText: TextRenderable
-        contextText: TextRenderable
         visible: boolean
         menuRoot: { getChildren(): unknown[] }
       }
@@ -771,7 +770,6 @@ describe("NanobotTui layout", () => {
       })
       expect(ui.runtimeControls.modelText.selectable).toBe(false)
       expect(ui.runtimeControls.accessText.selectable).toBe(false)
-      expect(ui.runtimeControls.contextText.selectable).toBe(false)
       expect(ui.titleText.selectable).toBe(false)
       expect(ui.status.selectable).toBe(false)
       expect(ui.meta.selectable).toBe(false)
@@ -1074,7 +1072,6 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       contextPanel: { visible: boolean }
-      runtimeControls: { contextText: { plainText: string } }
     }
 
     try {
@@ -1082,9 +1079,9 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => ui.contextPanel.visible)
       await setup.flush()
-      expect(ui.runtimeControls.contextText.plainText).toContain("~2.2k ctx")
       const frame = setup.captureCharFrame()
 
+      expect(frame).not.toContain("~2.2k ctx")
       expect(frame).toContain("~2.2k tokens · 10 replay · 16 archived")
       expect(frame).toContain("The earlier turns agreed on a release plan.")
       expect(frame).not.toContain("Agent context")
@@ -1514,13 +1511,19 @@ describe("NanobotTui layout", () => {
       chat_id: "chat",
       latency_ms: 1700,
       usage: {
-        prompt_tokens: 1200,
-        completion_tokens: 80,
-        cached_tokens: 900,
-        generation_ms: 1600,
-        measured_completion_tokens: 80,
-        ttft_ms: 240,
-        timed_requests: 1,
+        prompt_tokens: 12_000,
+        completion_tokens: 400,
+        cached_tokens: 9000,
+        generation_ms: 8000,
+        measured_completion_tokens: 400,
+        timed_requests: 5,
+        last_request_prompt_tokens: 1200,
+        last_request_completion_tokens: 80,
+        last_request_cached_tokens: 900,
+        last_request_provider_tokens: 1280,
+        last_request_context_window_tokens: 128_000,
+        last_request_generation_ms: 1600,
+        last_request_measured_completion_tokens: 80,
       },
       context_window_tokens: 128_000,
     })
@@ -1529,7 +1532,8 @@ describe("NanobotTui layout", () => {
     const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
     expect(footer).toContain("Ready · 1.7s")
     expect(footer).toContain("50 tok/s")
-    expect(footer).toContain("1.2K in (75% cached) · 80 out")
+    expect(footer).toContain("1.2K/128K ctx (75% cached) · 80 out")
+    expect(footer).not.toContain("12K")
     expect(footer).not.toContain("TTFT")
     expect(footer).not.toContain("enter send")
 

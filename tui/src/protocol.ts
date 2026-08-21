@@ -211,6 +211,13 @@ export interface TokenUsage {
   measured_completion_tokens?: number
   ttft_ms?: number
   timed_requests?: number
+  last_request_prompt_tokens?: number
+  last_request_completion_tokens?: number
+  last_request_cached_tokens?: number
+  last_request_provider_tokens?: number
+  last_request_generation_ms?: number
+  last_request_measured_completion_tokens?: number
+  last_request_context_window_tokens?: number
 }
 
 export interface SessionContextSnapshot {
@@ -359,6 +366,13 @@ function isTokenUsage(value: unknown): value is TokenUsage {
     "measured_completion_tokens",
     "ttft_ms",
     "timed_requests",
+    "last_request_prompt_tokens",
+    "last_request_completion_tokens",
+    "last_request_cached_tokens",
+    "last_request_provider_tokens",
+    "last_request_generation_ms",
+    "last_request_measured_completion_tokens",
+    "last_request_context_window_tokens",
   ].every((key) => optional(value[key], "number"))
 }
 

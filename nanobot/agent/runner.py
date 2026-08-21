@@ -75,6 +75,14 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_LAST_REQUEST_USAGE_KEYS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "provider_tokens",
+    "generation_ms",
+    "measured_completion_tokens",
+)
 
 
 def _restore_outer_whitespace(content: str, original: str | None) -> str:
@@ -860,6 +868,9 @@ class AgentRunner:
                 final_content = terminal_content
             self._append_final_message(messages, terminal_content)
 
+        if usage.get("last_request_provider_tokens", 0) > 0:
+            usage["last_request_context_window_tokens"] = spec.runtime.context_window_tokens
+
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -1386,8 +1397,19 @@ class AgentRunner:
 
     @staticmethod
     def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:
+        if not addition:
+            return
         for key, value in addition.items():
             target[key] = target.get(key, 0) + value
+        # Billing/accounting stays turn-aggregate, while latency-sensitive UIs
+        # need the provider-reported shape of the most recent model request.
+        # Clear optional fields first so an older request's cache/timing data
+        # cannot be mistaken for the latest request's telemetry.
+        for key in _LAST_REQUEST_USAGE_KEYS:
+            target.pop(f"last_request_{key}", None)
+        for key in _LAST_REQUEST_USAGE_KEYS:
+            if key in addition:
+                target[f"last_request_{key}"] = addition[key]
 
     @staticmethod
     def _merge_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:

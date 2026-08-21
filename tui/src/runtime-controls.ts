@@ -44,7 +44,6 @@ interface RuntimeControlsOptions {
 export class RuntimeControls {
   readonly modelText: TextRenderable
   readonly accessText: TextRenderable
-  readonly contextText: TextRenderable
   readonly menuRoot: BoxRenderable
   private readonly menu: PickerMenu<Choice>
   private kind: Choice["kind"] | null = null
@@ -80,14 +79,6 @@ export class RuntimeControls {
     this.menuRoot = this.menu.root
     this.modelText = this.controlText(renderer, "model", () => void this.openModel())
     this.accessText = this.controlText(renderer, "access", () => void this.openAccess())
-    this.contextText = new TextRenderable(renderer, {
-      id: "nanobot-tui-context-text",
-      content: "",
-      height: 1,
-      flexShrink: 0,
-      fg: theme.faint,
-      selectable: false,
-    })
     this.render()
   }
 
@@ -103,10 +94,6 @@ export class RuntimeControls {
     this.model = model
     this.modelPreset = preset
     this.render()
-  }
-
-  updateContext(text: string): void {
-    this.contextText.content = text
   }
 
   /** Warm the small settings payload while the user is reading the first frame. */
@@ -129,7 +116,6 @@ export class RuntimeControls {
 
   resize(width: number): void {
     this.accessText.visible = width >= 58
-    this.contextText.visible = width >= 96
   }
 
   choose(): boolean {
@@ -163,7 +149,6 @@ export class RuntimeControls {
   setTheme(theme: RuntimeControlsTheme): void {
     this.theme = theme
     this.menu.setTheme(theme)
-    this.contextText.fg = theme.faint
     this.renderColors()
   }
 

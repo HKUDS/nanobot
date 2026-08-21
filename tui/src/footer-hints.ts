@@ -36,44 +36,45 @@ export function contextualFooterHints(
   return footerHints(hintsFor(mode, width), theme)
 }
 
-/** Last-turn model telemetry. Passive chrome reports the system, not its manual. */
+/** Latest provider-measured request telemetry, never turn-aggregate accounting. */
 export function footerTelemetry(
   usage: TokenUsage | null,
   width: number,
   theme: FooterHintTheme,
 ): StyledText {
-  if (!usage) return new StyledText([])
+  if (!usage || (usage.last_request_provider_tokens || 0) <= 0) {
+    return new StyledText([])
+  }
   const parts: string[] = []
-  const duration = usage.generation_ms
-  const measured = usage.measured_completion_tokens
+  const duration = usage.last_request_generation_ms
+  const measured = usage.last_request_measured_completion_tokens
   if (typeof duration === "number" && duration > 0 && typeof measured === "number") {
     const rate = measured * 1000 / duration
     const value = rate < 10 ? rate.toFixed(1) : String(Math.round(rate))
-    const estimated = (usage.estimated_tokens || 0) > 0 ? "~" : ""
-    parts.push(`${estimated}${value} tok/s`)
+    parts.push(`${value} tok/s`)
   }
+  const prompt = usage.last_request_prompt_tokens
+  const cached = usage.last_request_cached_tokens
   const cacheHitRate = (
-    typeof usage.cached_tokens === "number"
-    && typeof usage.prompt_tokens === "number"
-    && usage.prompt_tokens > 0
+    typeof cached === "number"
+    && typeof prompt === "number"
+    && prompt > 0
   )
-    ? Math.min(100, Math.max(0, Math.round(
-        usage.cached_tokens * 100 / usage.prompt_tokens,
-      )))
+    ? Math.min(100, Math.max(0, Math.round(cached * 100 / prompt)))
     : null
-  if (width >= 72) {
-    const prompt = usage.prompt_tokens
-    const completion = usage.completion_tokens
-    if (typeof prompt === "number" || typeof completion === "number") {
-      const cache = cacheHitRate === null ? "" : ` (${cacheHitRate}% cached)`
-      parts.push(`${formatTelemetryTokens(prompt || 0)} in${cache}`)
-      parts.push(`${formatTelemetryTokens(completion || 0)} out`)
-    }
-  } else if (cacheHitRate !== null) {
-    parts.push(`${cacheHitRate}% cached`)
+  if (typeof prompt === "number") {
+    const contextWindowTokens = usage.last_request_context_window_tokens
+    const window = contextWindowTokens && contextWindowTokens > 0
+      ? `/${formatTelemetryTokens(contextWindowTokens)}`
+      : ""
+    const cache = width >= 72 && cacheHitRate !== null
+      ? ` (${cacheHitRate}% cached)`
+      : ""
+    parts.push(`${formatTelemetryTokens(prompt)}${window} ctx${cache}`)
   }
-  if (width >= 128 && typeof usage.cost_usd === "number" && usage.cost_usd > 0) {
-    parts.push(`$${usage.cost_usd < 0.01 ? usage.cost_usd.toFixed(4) : usage.cost_usd.toFixed(2)}`)
+  const completion = usage.last_request_completion_tokens
+  if (width >= 72 && typeof completion === "number") {
+    parts.push(`${formatTelemetryTokens(completion)} out`)
   }
   return footerMetrics(parts, theme)
 }
