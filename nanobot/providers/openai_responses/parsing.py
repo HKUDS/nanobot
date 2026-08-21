@@ -10,7 +10,7 @@ from typing import Any, AsyncGenerator, cast
 import httpx
 from loguru import logger
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest, parse_tool_arguments
+from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest, parse_tool_arguments
 from nanobot.providers.openai_responses.state import build_responses_state
 
 FINISH_REASON_MAP = {
@@ -186,33 +186,40 @@ def _response_finish_reason(
     return map_finish_reason(terminal_status)
 
 
-def _usage_from_response_obj(response: object) -> dict[str, int]:
+def _usage_from_response_obj(response: object) -> LLMUsage | None:
     response_object = _response_object(response)
     usage_raw: object = (
         response_object.get("usage")
         if response_object is not None
         else getattr(response, "usage", None)
     )
-    if not usage_raw:
-        return {}
+    if usage_raw is None:
+        return None
     usage = _response_object(usage_raw)
     if usage is None:
-        return {}
-    prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-    completion_tokens = int(
-        usage.get("output_tokens") or usage.get("completion_tokens") or 0
-    )
-    total_tokens = int(usage.get("total_tokens") or prompt_tokens + completion_tokens)
-    result = {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens,
-    }
+        return None
+
+    def _usage_int(container: dict[str, Any] | None, key: str) -> int | None:
+        if container is None:
+            return None
+        raw = container.get(key)
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    input_tokens = _usage_int(usage, "input_tokens") or 0
+    output_tokens = _usage_int(usage, "output_tokens") or 0
     input_details = _response_object(usage.get("input_tokens_details"))
-    cached_tokens = int(input_details.get("cached_tokens") or 0) if input_details else 0
-    if cached_tokens > 0:
-        result["cached_tokens"] = cached_tokens
-    return result
+    return LLMUsage.reported(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=_usage_int(usage, "total_tokens"),
+        cache_read_tokens=_usage_int(input_details, "cached_tokens"),
+        cache_write_tokens=_usage_int(input_details, "cache_write_tokens"),
+    )
 
 
 def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
@@ -352,14 +359,14 @@ async def consume_sse_with_reasoning(
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
-    usage: dict[str, int] = {}
+    usage: LLMUsage | None = None
     reasoning_content: str | None = None
     streamed_reasoning = False
     reasoning_summary_key: tuple[str | None, int] | None = None
@@ -657,14 +664,14 @@ async def consume_sdk_stream(
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
     """Consume an SDK async stream from ``client.responses.create(stream=True)``."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
-    usage: dict[str, int] = {}
+    usage: LLMUsage | None = None
     reasoning_content: str | None = None
     streamed_reasoning = False
     refusal_seen = False
@@ -823,20 +830,7 @@ async def consume_sdk_stream(
                 if on_content_delta and remaining_text:
                     await on_content_delta(remaining_text)
             if resp:
-                usage_obj = getattr(resp, "usage", None)
-                if usage_obj:
-                    usage = {
-                        "prompt_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-                        "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
-                        "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
-                    }
-                    usage_data = _response_object(usage_obj) or {}
-                    input_details = _response_object(usage_data.get("input_tokens_details"))
-                    cached_tokens = (
-                        int(input_details.get("cached_tokens") or 0) if input_details else 0
-                    )
-                    if cached_tokens > 0:
-                        usage["cached_tokens"] = cached_tokens
+                usage = _usage_from_response_obj(resp) or usage
                 if not reasoning_content:
                     reasoning_content = _extract_reasoning_summary_from_output(
                         getattr(resp, "output", None)

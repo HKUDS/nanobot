@@ -15,19 +15,23 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.config.paths import get_webui_dir
+from nanobot.providers.base import LLMUsage
 
-TOKEN_USAGE_SCHEMA_VERSION = 1
+TOKEN_USAGE_SCHEMA_VERSION = 2
 _MAX_STATE_FILE_BYTES = 512 * 1024
 _MAX_DAYS_RETAINED = 400
 _USAGE_KEYS = (
-    "prompt_tokens",
-    "completion_tokens",
-    "cached_tokens",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_read_observed_input_tokens",
+    "cache_write_observed_input_tokens",
     "total_tokens",
-    "provider_tokens",
+    "reported_tokens",
     "estimated_tokens",
 )
-_REQUEST_KEYS = ("requests", "provider_requests", "estimated_requests")
+_REQUEST_KEYS = ("requests", "reported_requests", "estimated_requests")
 _SOURCE_KEYS = ("user", "api", "cron", "dream", "system")
 _WRITE_LOCK = threading.Lock()
 
@@ -88,38 +92,43 @@ def _source_from_session_key(session_key: str | None) -> str:
     return "user"
 
 
-def _normalize_usage(raw: dict[str, Any] | None) -> dict[str, int]:
-    if not isinstance(raw, dict):
+def _normalize_usage(raw: LLMUsage | None) -> dict[str, int]:
+    if raw is None:
         return {}
-    usage = {key: _clean_int(raw.get(key)) for key in _USAGE_KEYS}
-    fallback_total = usage["prompt_tokens"] + usage["completion_tokens"]
-    if usage["total_tokens"] <= 0:
-        usage["total_tokens"] = fallback_total
-    if usage["estimated_tokens"] <= 0 and usage["provider_tokens"] <= 0:
-        usage["provider_tokens"] = usage["total_tokens"]
-    elif usage["estimated_tokens"] > 0 and usage["provider_tokens"] <= 0:
-        usage["estimated_tokens"] = min(usage["estimated_tokens"], usage["total_tokens"])
-    elif usage["provider_tokens"] > 0 and usage["estimated_tokens"] <= 0:
-        usage["provider_tokens"] = min(usage["provider_tokens"], usage["total_tokens"])
+    usage = {
+        "input_tokens": raw.input_tokens,
+        "output_tokens": raw.output_tokens,
+        "cache_read_tokens": raw.cache_read_tokens or 0,
+        "cache_write_tokens": raw.cache_write_tokens or 0,
+        "cache_read_observed_input_tokens": (
+            raw.input_tokens if raw.cache_read_tokens is not None else 0
+        ),
+        "cache_write_observed_input_tokens": (
+            raw.input_tokens if raw.cache_write_tokens is not None else 0
+        ),
+        "total_tokens": raw.total_tokens,
+        "reported_tokens": raw.reported_tokens,
+        "estimated_tokens": raw.estimated_tokens,
+    }
     return usage if usage["total_tokens"] > 0 else {}
 
 
 def _normalize_usage_row(row: dict[str, Any]) -> dict[str, int]:
     cleaned = {key: _clean_int(row.get(key)) for key in _USAGE_KEYS}
     if cleaned["total_tokens"] <= 0:
-        cleaned["total_tokens"] = cleaned["prompt_tokens"] + cleaned["completion_tokens"]
-    if cleaned["provider_tokens"] <= 0 and cleaned["estimated_tokens"] <= 0:
-        cleaned["provider_tokens"] = cleaned["total_tokens"]
+        cleaned["total_tokens"] = cleaned["input_tokens"] + cleaned["output_tokens"]
+    if cleaned["reported_tokens"] <= 0 and cleaned["estimated_tokens"] <= 0:
+        cleaned["reported_tokens"] = cleaned["total_tokens"]
     requests = {key: _clean_int(row.get(key)) for key in _REQUEST_KEYS}
     if (
         requests["requests"] > 0
-        and requests["provider_requests"] <= 0
+        and requests["reported_requests"] <= 0
         and requests["estimated_requests"] <= 0
     ):
-        if cleaned["estimated_tokens"] > 0 and cleaned["provider_tokens"] <= 0:
+        if cleaned["estimated_tokens"] > 0 and cleaned["reported_tokens"] <= 0:
             requests["estimated_requests"] = requests["requests"]
         else:
-            requests["provider_requests"] = requests["requests"]
+            requests["reported_requests"] = requests["requests"]
     return {**cleaned, **requests}
 
 
@@ -150,6 +159,8 @@ def normalize_token_usage_state(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return state
     raw = cast(dict[str, Any], raw)
+    if raw.get("schema_version") != TOKEN_USAGE_SCHEMA_VERSION:
+        return state
     days_raw = raw.get("days")
     if not isinstance(days_raw, dict):
         return state
@@ -197,24 +208,35 @@ def read_token_usage_state() -> dict[str, Any]:
     return normalize_token_usage_state(raw)
 
 
-def write_token_usage_state(raw: dict[str, Any]) -> dict[str, Any]:
-    state = normalize_token_usage_state(raw)
-    state["updated_at"] = _utc_now_iso()
-    encoded = json.dumps(
+def _encode_token_usage_state(state: dict[str, Any]) -> bytes:
+    """Encode the persisted state compactly, including its trailing newline."""
+    payload = json.dumps(
         state,
         ensure_ascii=False,
-        indent=2,
+        separators=(",", ":"),
         sort_keys=True,
-    ).encode("utf-8")
+    )
+    return f"{payload}\n".encode("utf-8")
+
+
+def write_token_usage_state(raw: dict[str, Any]) -> dict[str, Any]:
+    # Day-count retention is applied by normalization first.  The byte budget
+    # then trims only the oldest remaining days, preserving a contiguous suffix.
+    state = normalize_token_usage_state(raw)
+    state["updated_at"] = _utc_now_iso()
+    days = cast(dict[str, dict[str, Any]], state["days"])
+    encoded = _encode_token_usage_state(state)
+    while len(encoded) > _MAX_STATE_FILE_BYTES and len(days) > 1:
+        del days[min(days)]
+        encoded = _encode_token_usage_state(state)
     if len(encoded) > _MAX_STATE_FILE_BYTES:
-        raise ValueError("token usage state is too large")
+        raise ValueError("latest token usage day exceeds the state byte limit")
 
     path = token_usage_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "wb") as f:
         f.write(encoded)
-        f.write(b"\n")
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
@@ -230,7 +252,7 @@ def write_token_usage_state(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def record_token_usage(
-    usage: dict[str, Any] | None,
+    usage: LLMUsage | None,
     *,
     source: str = "user",
     timezone_name: str | None = None,
@@ -248,10 +270,10 @@ def record_token_usage(
         for key in _USAGE_KEYS:
             row[key] = _clean_int(row.get(key)) + normalized.get(key, 0)
         row["requests"] = _clean_int(row.get("requests")) + 1
-        if normalized.get("estimated_tokens", 0) > 0 and normalized.get("provider_tokens", 0) <= 0:
+        if normalized.get("estimated_tokens", 0) > 0 and normalized.get("reported_tokens", 0) <= 0:
             row["estimated_requests"] = _clean_int(row.get("estimated_requests")) + 1
         else:
-            row["provider_requests"] = _clean_int(row.get("provider_requests")) + 1
+            row["reported_requests"] = _clean_int(row.get("reported_requests")) + 1
 
         source_key = _clean_source(source)
         sources: dict[str, dict[str, Any]] = dict(
@@ -261,10 +283,10 @@ def record_token_usage(
         for key in _USAGE_KEYS:
             source_row[key] = _clean_int(source_row.get(key)) + normalized.get(key, 0)
         source_row["requests"] = _clean_int(source_row.get("requests")) + 1
-        if normalized.get("estimated_tokens", 0) > 0 and normalized.get("provider_tokens", 0) <= 0:
+        if normalized.get("estimated_tokens", 0) > 0 and normalized.get("reported_tokens", 0) <= 0:
             source_row["estimated_requests"] = _clean_int(source_row.get("estimated_requests")) + 1
         else:
-            source_row["provider_requests"] = _clean_int(source_row.get("provider_requests")) + 1
+            source_row["reported_requests"] = _clean_int(source_row.get("reported_requests")) + 1
         sources[source_key] = source_row
         row["sources"] = sources
 

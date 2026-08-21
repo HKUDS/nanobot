@@ -44,6 +44,7 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
@@ -2190,16 +2191,12 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
 
 
 def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
+    usage = LLMUsage.reported(input_tokens=120, output_tokens=8, total_tokens=175)
     manager = MagicMock()
     manager.read_session_metadata.return_value = {
         "metadata": {
             SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
-            "_last_usage": {
-                "prompt_tokens": 120,
-                "completion_tokens": 8,
-                "negative": -1,
-                "boolean": True,
-            },
+            "_last_usage": usage.to_dict(),
         }
     }
     bus = MagicMock()
@@ -2211,7 +2208,7 @@ def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
 
     assert channel._attached_model_fields("chat-1") == {
         "model_preset": "Deep Research",
-        "usage": {"prompt_tokens": 120, "completion_tokens": 8},
+        "usage": usage.to_turn_dict(),
     }
 
 
@@ -3329,7 +3326,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         content="",
         event=TurnEndEvent(
             latency_ms=1500,
-            usage={"prompt_tokens": 80, "completion_tokens": 20, "cached_tokens": 40},
+            usage=LLMUsage.reported(input_tokens=80, output_tokens=20, cache_read_tokens=40),
             context_window_tokens=128_000,
         ),
     ))
@@ -3339,7 +3336,11 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
             "event": "turn_end",
             "chat_id": "chat-1",
             "latency_ms": 1500,
-            "usage": {"prompt_tokens": 80, "completion_tokens": 20, "cached_tokens": 40},
+            "usage": LLMUsage.reported(
+                input_tokens=80,
+                output_tokens=20,
+                cache_read_tokens=40,
+            ).to_turn_dict(),
             "context_window_tokens": 128_000,
         },
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
@@ -5306,10 +5307,11 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
 
     from nanobot.session import Session
 
+    usage = LLMUsage.reported(input_tokens=12, output_tokens=3, total_tokens=175)
     session = Session(
         key="websocket:context-route",
         messages=[{"role": "user", "content": "hello"}],
-        metadata={"_last_usage": {"prompt_tokens": 12, "completion_tokens": 3}},
+        metadata={"_last_usage": usage.to_dict()},
     )
     manager = MagicMock()
     manager.read_session_snapshot.return_value = session
@@ -5326,7 +5328,7 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
     assert response.status_code == 200
     body = json.loads(response.body.decode())
     assert body["replay_messages"] == 1
-    assert body["last_usage"] == {"prompt_tokens": 12, "completion_tokens": 3}
+    assert body["last_usage"] == usage.to_dict()
     manager.read_session_snapshot.assert_called_once_with(session.key)
 
 

@@ -78,7 +78,7 @@ class _FakeProvider(LLMProvider):
         *,
         responses: list[LLMResponse] | None = None,
     ):
-        super().__init__()
+        super().__init__(provider_name=name)
         self.name = name
         self._response = response or _make_response()
         self._responses = iter(responses) if responses is not None else None
@@ -258,6 +258,41 @@ def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
     assert snapshot.context_window_tokens == 64000
     assert isinstance(snapshot.provider, FallbackProvider)
     assert snapshot.provider._primary_context_window_tokens == 128000
+
+
+def test_factory_injects_configured_identity_into_primary_and_fallback_leaves() -> None:
+    from nanobot.config.schema import Config
+    from nanobot.providers.factory import build_provider_snapshot
+
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "modelPreset": "primary",
+                "fallbackModels": ["backup"],
+            }
+        },
+        "modelPresets": {
+            "primary": {"model": "primary-model", "provider": "primary_edge"},
+            "backup": {"model": "backup-model", "provider": "backup_edge"},
+        },
+        "providers": {
+            "primary_edge": {
+                "apiKey": "primary-key",
+                "apiBase": "https://primary.example/v1",
+            },
+            "backup_edge": {
+                "apiKey": "backup-key",
+                "apiBase": "https://backup.example/v1",
+            },
+        },
+    })
+
+    snapshot = build_provider_snapshot(config)
+
+    assert isinstance(snapshot.provider, FallbackProvider)
+    assert snapshot.provider._primary.provider_name == "primary_edge"
+    fallback = snapshot.provider._provider_factory(snapshot.provider._fallback_presets[0])
+    assert fallback.provider_name == "backup_edge"
 
 
 def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:

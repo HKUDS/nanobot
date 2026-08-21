@@ -20,7 +20,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from nanobot.providers.base import LLMProvider, LLMResponse, ProviderConversationState
+from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -1883,7 +1883,7 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        loop._last_usage = {"prompt_tokens": 64, "completion_tokens": 9}
+        loop._last_usage = LLMUsage.reported(input_tokens=64, output_tokens=9)
         return (
             "done",
             [],
@@ -1898,10 +1898,9 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
     )
 
     loop.sessions.invalidate("cli:usage")
-    assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == {
-        "prompt_tokens": 64,
-        "completion_tokens": 9,
-    }
+    assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == (
+        LLMUsage.reported(input_tokens=64, output_tokens=9).to_dict()
+    )
 
 
 @pytest.mark.asyncio

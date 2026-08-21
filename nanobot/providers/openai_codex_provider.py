@@ -51,8 +51,10 @@ class OpenAICodexProvider(LLMProvider):
         default_model: str = "openai-codex/gpt-5.6-sol",
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        *,
+        provider_name: str = "openai_codex",
     ):
-        super().__init__(api_key=None, api_base=None)
+        super().__init__(api_key=None, api_base=None, provider_name=provider_name)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})

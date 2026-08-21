@@ -106,7 +106,7 @@ async def _run_optional_tool_response(response: LLMResponse):
         calls["n"] += 1
         if calls["n"] == 1:
             return response
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = ToolRegistry()
@@ -272,10 +272,10 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
                     )
                 ],
                 finish_reason="tool_calls",
-                usage={},
+                usage=None,
             )
         captured_second_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = ToolRegistry()
@@ -403,7 +403,7 @@ async def test_runner_treats_legacy_entry_point_error_prefix_as_tool_error(tmp_p
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
         tool_calls=[ToolCallRequest(id="call_1", name="legacy_plugin", arguments={})],
-        usage={},
+        usage=None,
     ))
 
     result = await AgentRunner().run(make_run_spec(provider,
@@ -430,9 +430,9 @@ async def test_runner_preserves_structured_plugin_success_that_starts_with_error
             tool_calls=[
                 ToolCallRequest(id="call_1", name="structured_success_plugin", arguments={})
             ],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", tool_calls=[], usage={}),
+        LLMResponse(content="done", tool_calls=[], usage=None),
     ])
 
     result = await AgentRunner().run(make_run_spec(provider,
@@ -466,10 +466,10 @@ async def test_runner_blocks_repeated_external_fetches():
             return LLMResponse(
                 content="working",
                 tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": "https://example.com"})],
-                usage={},
+                usage=None,
             )
         captured_final_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()

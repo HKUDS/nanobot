@@ -266,7 +266,8 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             runtime=runtime,
         )
     if ctx_est <= 0:
-        ctx_est = loop._last_usage.get("prompt_tokens", 0)  # pyright: ignore[reportPrivateUsage]
+        last_usage = loop._last_usage  # pyright: ignore[reportPrivateUsage]
+        ctx_est = last_usage.input_tokens if last_usage is not None else 0
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None

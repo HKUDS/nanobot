@@ -128,7 +128,7 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
         nonlocal call_count
         call_count += 1
         captured_messages.append([dict(message) for message in messages])
-        return LLMResponse(content=f"answer-{call_count}", tool_calls=[], usage={})
+        return LLMResponse(content=f"answer-{call_count}", tool_calls=[], usage=None)
 
     loop = _make_loop(workspace)
     loop.provider.chat_with_retry = chat_with_retry

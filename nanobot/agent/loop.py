@@ -49,7 +49,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.providers.base import LLMProvider, ProviderConversationState
+from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -167,7 +167,7 @@ class TurnContext:
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
 
     def require_runtime(self) -> LLMRuntime:
         """Return the runtime established by the BUILD stage."""
@@ -203,7 +203,7 @@ class AgentLoop:
         return self.tools.tool_names
 
     @property
-    def last_usage(self) -> Mapping[str, int]:
+    def last_usage(self) -> LLMUsage | None:
         """Latest aggregate usage exposed through the runtime-control snapshot."""
         return self._last_usage
 
@@ -378,7 +378,7 @@ class AgentLoop:
             default_restrict_to_workspace=restrict_to_workspace,
         )
         self._start_time = time.time()
-        self._last_usage: dict[str, int] = {}
+        self._last_usage: LLMUsage | None = None
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
@@ -2031,7 +2031,7 @@ class AgentLoop:
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
-        ctx.usage = dict(self._last_usage)
+        ctx.usage = self._last_usage
         ctx.delivery.record_usage(ctx.usage)
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)
@@ -2058,8 +2058,8 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
-        if ctx.usage and not ctx.ephemeral:
-            session.metadata["_last_usage"] = dict(ctx.usage)
+        if ctx.usage is not None and not ctx.ephemeral:
+            session.metadata["_last_usage"] = ctx.usage.to_dict()
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,

@@ -16,7 +16,7 @@ Concrete scenarios showing when and how to use the my tool effectively.
 → my(action="check", key="max_iterations")
   → 40
 → my(action="check", key="_last_usage")
-  → {"prompt_tokens": 62000, "completion_tokens": 3000}
+  → {"input_tokens": 62000, "output_tokens": 3000}
 → "I hit the iteration limit (40). The task was complex. I can ask the user if they want to increase it."
 ```
 
@@ -72,6 +72,6 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ### Token-conscious behavior
 ```
 → my(action="check", key="_last_usage")
-  → {"prompt_tokens": 58000, "completion_tokens": 12000}
+  → {"input_tokens": 58000, "output_tokens": 12000}
 → "I've consumed ~70k tokens. I'll keep my remaining responses focused."
 ```

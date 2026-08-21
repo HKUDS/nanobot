@@ -15,7 +15,7 @@ from nanobot.providers.base import (
 
 class ScriptedProvider(LLMProvider):
     def __init__(self, responses):
-        super().__init__()
+        super().__init__(provider_name="scripted")
         self._responses = list(responses)
         self.calls = 0
         self.last_kwargs: dict = {}

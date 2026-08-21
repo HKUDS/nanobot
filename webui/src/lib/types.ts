@@ -712,26 +712,32 @@ export interface SettingsPayload {
   usage?: {
     days: Array<{
       date: string;
-      prompt_tokens: number;
-      completion_tokens: number;
-      cached_tokens: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      cache_read_observed_input_tokens: number;
+      cache_write_observed_input_tokens: number;
       total_tokens: number;
-      provider_tokens?: number;
+      reported_tokens?: number;
       estimated_tokens?: number;
       requests: number;
-      provider_requests?: number;
+      reported_requests?: number;
       estimated_requests?: number;
       sources?: Record<
         "user" | "api" | "cron" | "dream" | "system" | string,
         {
-          prompt_tokens: number;
-          completion_tokens: number;
-          cached_tokens: number;
+          input_tokens: number;
+          output_tokens: number;
+          cache_read_tokens: number;
+          cache_write_tokens: number;
+          cache_read_observed_input_tokens: number;
+          cache_write_observed_input_tokens: number;
           total_tokens: number;
-          provider_tokens?: number;
+          reported_tokens?: number;
           estimated_tokens?: number;
           requests: number;
-          provider_requests?: number;
+          reported_requests?: number;
           estimated_requests?: number;
         }
       >;

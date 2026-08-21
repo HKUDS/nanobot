@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.providers.base import LLMUsage
 
 
 class OutboundEvent:
@@ -58,7 +59,7 @@ class StreamedResponseEvent(OutboundEvent):
 class TurnEndEvent(OutboundEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
-    usage: dict[str, int] | None = None
+    usage: LLMUsage | None = None
     context_window_tokens: int | None = None
 
 
@@ -197,11 +198,6 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
         return TurnEndEvent(
             latency_ms=_metadata_int(meta, "latency_ms"),
             goal_state=cast(dict[str, Any], goal_state) if isinstance(goal_state, dict) else None,
-            usage=(
-                cast(dict[str, int], meta.get("usage"))
-                if isinstance(meta.get("usage"), dict)
-                else None
-            ),
             context_window_tokens=_metadata_int(meta, "context_window_tokens"),
         )
     if meta.get("_session_updated"):

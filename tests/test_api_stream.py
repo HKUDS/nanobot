@@ -77,7 +77,7 @@ def _make_streaming_agent(tokens: list[str]) -> MagicMock:
         return " ".join(tokens)
 
     agent.process_direct = fake_process_direct
-    agent._last_usage = {}
+    agent._last_usage = None
     return agent
 
 
@@ -136,7 +136,7 @@ async def test_stream_false_returns_json(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="normal reply")
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -159,7 +159,7 @@ async def test_stream_default_is_false(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="default reply")
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -215,7 +215,7 @@ async def test_stream_passes_on_stream_callbacks(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = fake_process_direct
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -248,7 +248,7 @@ async def test_stream_segment_end_does_not_close_sse(aiohttp_client) -> None:
 
     agent.process_direct = fake_process_direct
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -287,7 +287,7 @@ async def test_stream_uses_final_response_when_no_deltas(aiohttp_client) -> None
 
     agent.process_direct = fake_process_direct
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -329,7 +329,7 @@ async def test_stream_with_session_id(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = fake_process_direct
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -358,7 +358,7 @@ async def test_streaming_backend_failure_does_not_emit_success_terminator(aiohtt
 
     agent.process_direct = boom
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
+    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
