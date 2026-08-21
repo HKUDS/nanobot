@@ -15,7 +15,7 @@ Standalone terminals use OpenTUI's retained full-screen layout: the transcript r
 
 ## Herdr host mode
 
-When Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`, nanobot becomes a quiet hosted client. It uses OpenTUI's main-screen mode instead of hiding the whole run in a temporary alternate screen, removes the launch card and persistent session/model chrome, and keeps only the transcript, last user task, current progress, and composer. Herdr remains responsible for workspace, tab, pane, and attention navigation, while nanobot keeps its application-level session, new-chat, and branch commands.
+When Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`, nanobot becomes a quiet hosted client. It uses OpenTUI's main-screen mode instead of hiding the whole run in a temporary alternate screen, removes the launch card and persistent session/model/task chrome, and keeps only the transcript, compact progress, and composer. Herdr remains responsible for workspace, tab, pane, task, and attention navigation, while nanobot keeps its application-level session, new-chat, and branch commands.
 
 The TUI reports its WebSocket session ID, model, Git branch, workspace, last task, and current action through Herdr's supported pane CLI. Sending work reports `working`; a persisted explicit nanobot goal block reports `blocked`; a completed turn reports `idle`; exit releases lifecycle authority. The gateway session remains the durable transcript and resume path. Standalone terminals keep the richer full-screen navigation described below.
 
@@ -26,6 +26,10 @@ Changes reuse the gateway's normal model command and workspace policy checks.
 When you scroll away from the latest output, the scrollbar and `Ctrl+End` hint appear only until
 you return to the bottom. Large pastes are represented by a short editable placeholder in the
 composer; nanobot sends the original text unchanged.
+
+While a turn is running, the composer remains available for steering and uses `Steer this turn…`
+as its prompt. The footer shows the lifecycle and elapsed time without repeating the latest tool
+activity already visible in the transcript.
 
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.

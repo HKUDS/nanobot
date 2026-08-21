@@ -160,6 +160,7 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
+const ACTIVE_COMPOSER_PLACEHOLDER = "Steer this turn…"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
@@ -476,6 +477,7 @@ export class NanobotTui {
       treeSitterClient,
       (state) => this.handleTranscriptNavigation(state),
       !host.hosted,
+      options.workspace,
     )
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
     this.commandMenu.setCommands([], LOCAL_COMMANDS)
@@ -719,7 +721,7 @@ export class NanobotTui {
     this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
     this.shell.add(this.runtimeControls.menuRoot)
-    this.shell.add(this.title)
+    if (!host.hosted) this.shell.add(this.title)
     this.shell.add(this.queuePreview.root)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
@@ -1262,6 +1264,7 @@ export class NanobotTui {
     }
     this.activeTurn = active
     this.updateMeta()
+    this.syncComposerPlaceholder()
     if (active) {
       this.activeStartedAt = startedAt ?? Date.now()
       this.shimmerFrame = 0
@@ -1280,14 +1283,11 @@ export class NanobotTui {
 
   private renderActiveStatus(): void {
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
-    const progress = this.lastProgress
-      ? ` · ${this.lastProgress.replace(/^\s*[·›✓×]\s*/u, "")}`
-      : ""
     const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
     const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
     this.status.content = shimmerStatus(
       this.activeLabel,
-      `  ${elapsed}${progress}${queued}${navigation}`,
+      `  ${elapsed}${queued}${navigation}`,
       this.shimmerFrame,
       this.palette,
     )
@@ -1659,11 +1659,6 @@ export class NanobotTui {
 
   private updateTitle(): void {
     if (this.host.hosted) {
-      this.titleText.maxWidth = Math.max(8, this.renderer.width - 4)
-      this.titleText.content = this.currentTask ? `› ${this.currentTask}` : ""
-      // In a hosted pane this is the resume anchor, not decorative chrome.
-      // Keep it visible even when Herdr temporarily makes the pane very short.
-      this.title.visible = Boolean(this.currentTask)
       this.syncHostMetadata()
       return
     }
@@ -1774,7 +1769,9 @@ export class NanobotTui {
       ? null
       : this.sessionMenu.visible
         ? "Search sessions"
-        : this.branchMenu.visible ? "Search branch points" : COMPOSER_PLACEHOLDER
+        : this.branchMenu.visible
+          ? "Search branch points"
+          : this.activeTurn ? ACTIVE_COMPOSER_PLACEHOLDER : COMPOSER_PLACEHOLDER
     if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
   }
 

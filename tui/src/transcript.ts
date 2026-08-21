@@ -44,7 +44,13 @@ interface Activity {
   events: Map<string, ToolProgressEvent>
 }
 
-const ACTIVITY_PREVIEW_LINES = 6
+interface ActivityPreviewItem {
+  text: string
+  steps: number
+  group?: string
+}
+
+const ACTIVITY_PREVIEW_LINES = 4
 // OpenTUI renders at 30 FPS. Re-parsing the entire Markdown buffer for every
 // provider token turns long answers into quadratic work without producing any
 // additional visible frames. Paint the first token immediately, then coalesce
@@ -78,6 +84,7 @@ export class Transcript {
     private readonly treeSitterClient: TreeSitterClient,
     private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
     private readonly showHeader = true,
+    private readonly workspace = "",
   ) {
     this.root = new ScrollBoxRenderable(renderer, {
       id: "nanobot-tui-transcript",
@@ -424,7 +431,7 @@ export class Transcript {
       const key = event.call_id ? `tool:${event.call_id}` : ""
       const merged = key ? mergeToolEvent(activity.events.get(key), event) : event
       if (key) activity.events.set(key, merged)
-      return { key, line: renderToolEvent(merged) }
+      return { key, line: renderToolEvent(merged, { workspace: this.workspace }) }
     })
     const lines = events.length > 0
       ? projected.map(({ line }) => line).filter(Boolean)
@@ -448,9 +455,14 @@ export class Transcript {
       activity.text.content = activity.lines.join("\n")
       return
     }
-    const visible = activity.lines.slice(-(ACTIVITY_PREVIEW_LINES - 1))
-    const hidden = activity.lines.length - visible.length
-    activity.text.content = [`  … ${hidden} earlier steps · Ctrl+O expand`, ...visible].join("\n")
+    const visible = activityPreview(activity.lines).slice(-(ACTIVITY_PREVIEW_LINES - 1))
+    const visibleSteps = visible.reduce((total, item) => total + item.steps, 0)
+    const hidden = activity.lines.length - visibleSteps
+    const disclosure = hidden > 0 ? `${hidden} earlier steps` : `${activity.lines.length} steps`
+    activity.text.content = [
+      `  … ${disclosure} · Ctrl+O expand`,
+      ...visible.map((item) => item.text),
+    ].join("\n")
   }
 
   private createText(
@@ -540,6 +552,22 @@ export class Transcript {
 function cleanProgress(value: string): string {
   const text = value.trim().replace(/^\*\*(.*?)\*\*$/u, "$1").replace(/\s+/gu, " ")
   return text ? `  · ${text}` : ""
+}
+
+function activityPreview(lines: readonly string[]): ActivityPreviewItem[] {
+  const preview: ActivityPreviewItem[] = []
+  for (const line of lines) {
+    const match = line.match(/^  ([›✓]) (Read|Edited|Editing)  /u)
+    const group = match ? `${match[1]}:${match[2]}` : undefined
+    const previous = preview.at(-1)
+    if (match && group && previous?.group === group) {
+      previous.steps += 1
+      previous.text = `  ${match[1]} ${match[2]} ${previous.steps} files`
+      continue
+    }
+    preview.push({ text: line, steps: 1, ...(group ? { group } : {}) })
+  }
+  return preview
 }
 
 function formatDiffStat(edit: FileEditEvent): string {
