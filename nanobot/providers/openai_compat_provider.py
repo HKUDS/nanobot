@@ -114,6 +114,9 @@ _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
 })
+_DEEPSEEK_MULTIMODAL_MODELS: frozenset[str] = frozenset({
+    "deepseek-v4-flash-vision-exp",
+})
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -678,12 +681,20 @@ class OpenAICompatProvider(LLMProvider):
             dumped = str(content)
         return dumped or "(empty)"
 
-    def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sanitize_messages(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
-        force_string_content = bool(self._spec and self._spec.name == "deepseek")
+        is_deepseek = bool(self._spec and self._spec.name == "deepseek")
+        model_name = model or self.default_model
+        force_string_content = (
+            is_deepseek and _model_slug(model_name) not in _DEEPSEEK_MULTIMODAL_MODELS
+        )
         normalize_tool_ids = self._should_normalize_tool_call_ids()
         strip_reasoning = bool(
             self._spec
@@ -910,7 +921,10 @@ class OpenAICompatProvider(LLMProvider):
 
         kwargs: dict[str, Any] = {
             "model": model_name,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(messages),
+                model_name,
+            ),
         }
 
         # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
@@ -1225,7 +1239,10 @@ class OpenAICompatProvider(LLMProvider):
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         model_name = self._request_model_name(model_name)
-        sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
+        sanitized_messages = self._sanitize_messages(
+            self._sanitize_empty_content(messages),
+            model_name,
+        )
         sanitized_state = (
             provider_context.conversation_state
             if provider_context is not None
@@ -1234,7 +1251,8 @@ class OpenAICompatProvider(LLMProvider):
         if sanitized_state is not None:
             sanitized_state = sanitized_state.with_pending_messages(
                 self._sanitize_messages(
-                    self._sanitize_empty_content(sanitized_state.pending_messages)
+                    self._sanitize_empty_content(sanitized_state.pending_messages),
+                    model_name,
                 )
             )
         is_deepseek = bool(self._spec and self._spec.name == "deepseek")
