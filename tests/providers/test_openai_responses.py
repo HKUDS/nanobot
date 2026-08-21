@@ -1278,14 +1278,24 @@ class TestConsumeSse:
                 "type": "response.completed",
                 "response": {
                     "status": "completed",
-                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 8},
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
                 },
             },
         ])
 
         _, _, _, usage, _ = await consume_sse_with_reasoning(response)
 
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "cached_tokens": 8,
+        }
 
     @pytest.mark.asyncio
     async def test_tool_call_done_arguments_callback(self):
@@ -1752,7 +1762,12 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_usage_extracted(self):
-        usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
+        usage_obj = MagicMock(
+            input_tokens=10,
+            input_tokens_details=MagicMock(cached_tokens=8),
+            output_tokens=5,
+            total_tokens=15,
+        )
         resp_obj = MagicMock(status="completed", usage=usage_obj, output=[])
         ev = MagicMock(type="response.completed", response=resp_obj)
 
@@ -1760,7 +1775,12 @@ class TestConsumeSdkStream:
             yield ev
 
         _, _, _, usage, _ = await consume_sdk_stream(stream())
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "cached_tokens": 8,
+        }
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
