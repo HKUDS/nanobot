@@ -466,6 +466,10 @@ describe("MarkdownTextRenderer", () => {
     expect(surface).toHaveAttribute("tabindex", "0");
     expect(surface).toHaveAccessibleName("Data table");
     expect(screen.getByRole("table")).toHaveTextContent("nanobot");
+    // The table itself must opt out of the parent's overflow-wrap:anywhere so
+    // wide columns stretch the table and the surface scrolls horizontally
+    // instead of squeezing content (regression guard for table scrollbars).
+    expect(screen.getByRole("table")).toHaveClass("[overflow-wrap:normal]");
     expect(container.firstElementChild).toHaveClass("space-y-4");
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });

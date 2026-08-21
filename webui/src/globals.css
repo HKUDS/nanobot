@@ -118,11 +118,11 @@
     overflow: hidden;
   }
 
-  * {
-    scrollbar-color: var(--scrollbar-thumb) transparent;
-    scrollbar-width: thin;
-  }
-
+  /* Custom scrollbars everywhere. Keep these as ::-webkit-scrollbar only: setting
+     the standard scrollbar-width/scrollbar-color properties makes Chromium ignore
+     ::-webkit-scrollbar entirely and fall back to the macOS overlay scrollbar,
+     which hides until the user actively scrolls (2026-08-13 实测：thin → delta=0
+     隐藏，仅 webkit 样式 → delta=10 常驻可见). */
   *::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -247,15 +247,55 @@
     }
   }
 
+  /* Desktop shell scrollbars: custom always-rendered scrollbars (overlay, so no
+     layout space is taken on macOS) whose thumb is hidden at rest and fades in
+     while the user scrolls — App.tsx toggles `native-scrolling` on <html> on any
+     scroll event (debounced ~400ms). Component-level `scrollbar-width:none` is
+     neutralised via scrollbar-width:auto (Chromium still honours the
+     ::-webkit-scrollbar rules below), and the message list's component-level
+     `::-webkit-scrollbar:hidden` is dropped for native hosts in ThreadViewport.
+     Wide tables and the file preview keep their always-visible thumb via the
+     more specific rules further down. */
   html.native-host * {
-    scrollbar-width: none;
+    scrollbar-width: auto;
     scrollbar-gutter: auto !important;
   }
-
   html.native-host *::-webkit-scrollbar {
-    display: none;
-    width: 0;
-    height: 0;
+    display: block;
+    width: 10px;
+    height: 10px;
+  }
+  html.native-host *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html.native-host *::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, currentColor 22%, transparent);
+    border-radius: 6px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  html.native-host.native-scrolling *::-webkit-scrollbar-thumb {
+    opacity: 1;
+  }
+  html.native-host [data-testid="markdown-data-table"]::-webkit-scrollbar-thumb,
+  html.native-host [data-file-preview-scroll]::-webkit-scrollbar-thumb {
+    opacity: 1 !important;
+  }
+
+  /* In the desktop shell, the native-host rule above hides every scrollbar.
+     Restore always-visible scrollbars for wide markdown tables and the file
+     preview panel so overflow stays reachable. Specificity (0,2,1) beats
+     `html.native-host *` (0,1,1), regardless of source order. */
+  html.native-host [data-testid="markdown-data-table"],
+  html.native-host [data-file-preview-scroll] {
+    scrollbar-width: auto;
+    scrollbar-gutter: auto !important;
+  }
+  html.native-host [data-testid="markdown-data-table"]::-webkit-scrollbar,
+  html.native-host [data-file-preview-scroll]::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+    height: 10px;
   }
 
   /* Keep the outer document rhythm clean at message boundaries. */

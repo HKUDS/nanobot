@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { ArrowDown } from "lucide-react";
+import { isNativeRuntime } from "@/lib/runtime";
 import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
@@ -721,8 +722,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             ? "overflow-hidden"
             : cn(
                 "thread-viewport-scrollbar scroll-auto",
-                "[overflow-anchor:none] [scrollbar-width:none]",
-                "[&::-webkit-scrollbar]:hidden",
+                "[overflow-anchor:none]",
+                !isNativeRuntime() && "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               ),
         )}
@@ -735,7 +736,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           className={cn(
             "thread-layout mx-auto grid min-h-full w-full",
             hasMessages
-              ? "h-full max-w-[64rem]"
+              ? "h-full"
               : "max-w-[72rem] px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-6 sm:px-4 sm:py-12",
           )}
         >
@@ -746,8 +747,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               className={cn(
                 "thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
                 "scroll-auto justify-start overflow-x-hidden px-3 pb-4 pt-4 sm:px-4",
-                "[overflow-anchor:none] [scrollbar-width:none]",
-                "[&::-webkit-scrollbar]:hidden",
+                "[overflow-anchor:none]",
+                !isNativeRuntime() && "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >

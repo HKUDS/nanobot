@@ -688,6 +688,7 @@ export default function MarkdownTextRenderer({
             <table
               className={cn(
                 "w-full min-w-max border-collapse text-[13px] leading-5",
+                "[overflow-wrap:normal]",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
                 "[&_th]:text-left [&_th]:font-medium",
