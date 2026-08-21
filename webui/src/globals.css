@@ -674,7 +674,7 @@
 /*
  * Composer controls compress against their actual container, not the viewport.
  * Permission state has priority over the model label; both retain their full
- * accessible names and title text when their visible labels are shortened.
+ * accessible names and tooltip text when their visible labels are shortened.
  */
 .thread-composer-surface {
   container-name: thread-composer;

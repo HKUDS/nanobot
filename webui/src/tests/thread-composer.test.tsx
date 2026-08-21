@@ -571,6 +571,53 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
 
+  it("shows model details in the shared tooltip without a native title", async () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        modelLabel="gpt-4o"
+        modelDetail="gpt-4o"
+        modelProvider="openai"
+        modelProviderLabel="OpenAI"
+        placeholder="Type your message..."
+      />,
+    );
+
+    const badge = screen.getByLabelText("gpt-4o");
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(badge);
+
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("gpt-4o · OpenAI");
+  });
+
+  it("smoothly cycles to the next preset on click", () => {
+    vi.useFakeTimers();
+    let runFrame: FrameRequestCallback | null = null;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      runFrame = callback;
+      return 1;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const { badge, onPresetChange } = renderPresetComposer();
+
+    fireEvent.click(badge);
+
+    expect(badge).toHaveAttribute("data-switching", "true");
+    const track = screen.getByTestId("composer-model-pill-track");
+    expect(track).not.toHaveAttribute("data-settling");
+    expect(track).toHaveStyle({ transform: "translate3d(0, -40px, 0)" });
+
+    act(() => runFrame?.(16));
+
+    expect(onPresetChange).toHaveBeenCalledWith("dflash");
+    expect(badge).toHaveAttribute("data-settling", "true");
+    expect(track).toHaveAttribute("data-settling", "true");
+    expect(track).toHaveStyle({ transform: "translate3d(0, -80px, 0)" });
+
+    act(() => vi.advanceTimersByTime(260));
+    expect(badge).not.toHaveAttribute("data-switching");
+  });
+
   it("scrolls complete preset pills after a left-button long press and wraps", () => {
     vi.useFakeTimers();
     const { badge, onPresetChange } = renderPresetComposer();
@@ -582,7 +629,6 @@ describe("ThreadComposer", () => {
     });
     badge.dispatchEvent(idleTouchMove);
     expect(idleTouchMove.defaultPrevented).toBe(false);
-    fireEvent.click(badge);
     pointerDown(badge);
     fireEvent.pointerMove(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
     act(() => vi.advanceTimersByTime(500));
@@ -639,6 +685,8 @@ describe("ThreadComposer", () => {
     });
 
     expect(onPresetChange).toHaveBeenCalledWith("dspro");
+    fireEvent.click(badge);
+    expect(onPresetChange).toHaveBeenCalledTimes(1);
     expect(badge).toHaveAttribute("data-settling", "true");
     expect(track).toHaveAttribute("data-settling", "true");
     act(() => {
