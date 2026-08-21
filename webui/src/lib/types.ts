@@ -1313,6 +1313,7 @@ export type InboundEvent =
       chat_id: string;
       model_name: string;
       model_preset?: string | null;
+      is_fallback?: boolean;
     }
   | ({
       event: "turn_end";

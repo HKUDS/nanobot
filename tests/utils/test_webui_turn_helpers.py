@@ -179,6 +179,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
     assert outbound.event.model_preset == "Deep Research"
+    assert outbound.event.is_fallback is True
 
 
 @pytest.mark.asyncio
@@ -218,6 +219,7 @@ async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path)
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "openai-codex/gpt-5.6"
     assert outbound.event.model_preset == "Codex"
+    assert outbound.event.is_fallback is False
 
 
 @pytest.mark.asyncio

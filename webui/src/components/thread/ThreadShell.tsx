@@ -959,7 +959,7 @@ export function ThreadShell({
     setFallbackModelName(null);
     return client.onChat(chatId, (event) => {
       if (event.event !== "turn_model_updated") return;
-      setFallbackModelName(event.model_name);
+      setFallbackModelName(event.is_fallback ? event.model_name : null);
     });
   }, [chatId, client]);
 

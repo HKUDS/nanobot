@@ -696,7 +696,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
-  it("highlights the configured model badge without replacing the preset label", async () => {
+  it("only highlights fallback model updates without replacing the preset label", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -719,7 +719,19 @@ describe("ThreadShell", () => {
       client._emitChat("fallback-model", {
         event: "turn_model_updated",
         chat_id: "fallback-model",
+        model_name: "openai-codex/gpt-5.5",
+        is_fallback: false,
+      });
+    });
+
+    expect(configuredBadge).not.toHaveAttribute("data-fallback");
+
+    act(() => {
+      client._emitChat("fallback-model", {
+        event: "turn_model_updated",
+        chat_id: "fallback-model",
         model_name: "deepseek/deepseek-chat",
+        is_fallback: true,
       });
     });
 
