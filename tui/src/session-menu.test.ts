@@ -63,6 +63,34 @@ describe("SessionMenu", () => {
     )
   })
 
+  test("keeps keyboard selection when the pointer stays over the previous row", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+    })
+    setup.renderer.root.add(menu.root)
+    menu.open(sessions, "one", 6)
+    await setup.renderOnce()
+
+    const firstRow = menu.root.getChildren()[0]
+    const secondRow = menu.root.getChildren()[1]
+    if (!firstRow || !secondRow) throw new Error("session rows were not rendered")
+    const firstPosition = { x: firstRow.x + 2, y: firstRow.y }
+    await setup.mockMouse.moveTo(secondRow.x + 2, secondRow.y)
+    await setup.flush()
+    expect(menu.choose()?.chatId).toBe("two")
+
+    await setup.mockMouse.moveTo(firstPosition.x, firstPosition.y)
+    await setup.flush()
+    expect(menu.choose()?.chatId).toBe("one")
+
+    expect(menu.move(1)).toBe(true)
+    await setup.flush()
+    expect(menu.choose()?.chatId).toBe("two")
+  })
+
   test("shows compact workspace names only when they distinguish sessions", async () => {
     setup = await createTestRenderer({ width: 100, height: 18, screenMode: "alternate-screen" })
     const menu = new SessionMenu(setup.renderer, {
