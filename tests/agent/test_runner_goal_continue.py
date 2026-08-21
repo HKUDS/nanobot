@@ -25,7 +25,7 @@ async def test_runner_exits_normally_without_predicate():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="all done", tool_calls=[], usage={},
+        content="all done", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -50,7 +50,7 @@ async def test_runner_exits_normally_with_inactive_goal():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="all done", tool_calls=[], usage={},
+        content="all done", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -82,7 +82,7 @@ async def test_runner_forces_continue_when_goal_active():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -112,7 +112,7 @@ async def test_runner_respects_max_iterations_even_with_active_goal():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -137,7 +137,7 @@ async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -165,7 +165,7 @@ async def test_runner_does_not_force_continue_on_error():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content=None, tool_calls=[], usage={},
+        content=None, tool_calls=[], usage=None,
         finish_reason="error",
     ))
     tools = MagicMock()
@@ -191,7 +191,7 @@ async def test_runner_uses_custom_goal_continue_message():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -220,7 +220,7 @@ async def test_runner_resolves_goal_continue_message_lazily():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []

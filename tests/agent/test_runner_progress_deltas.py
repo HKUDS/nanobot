@@ -23,7 +23,7 @@ async def test_runner_can_disable_provider_progress_delta_streaming():
     provider = MagicMock()
     provider.supports_progress_deltas = True
     provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+        return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     provider.chat_stream_with_retry = AsyncMock()
     tools = MagicMock()
@@ -59,7 +59,7 @@ async def test_runner_streams_provider_progress_deltas_by_default():
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("he")
         await on_content_delta("llo")
-        return LLMResponse(content="hello", tool_calls=[], usage={})
+        return LLMResponse(content="hello", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -113,7 +113,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
             "result": {"name": "x_semantic_search"},
         })
         await on_content_delta("done")
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -264,9 +264,9 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
                         arguments={"path": "big.txt", "content": "line\n" * 24},
                     )
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -338,9 +338,9 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
                         },
                     )
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -404,9 +404,9 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
                         arguments={"path": "aborted.txt"},
                     )
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -469,7 +469,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
                     arguments={"path": "cancelled.txt", "content": "new\n"},
                 )
             ],
-            usage={},
+            usage=None,
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry

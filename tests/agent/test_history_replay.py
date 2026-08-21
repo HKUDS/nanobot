@@ -69,7 +69,7 @@ def test_explicit_message_limit_still_starts_at_user_turn() -> None:
 async def test_process_message_replays_with_token_budget_only(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path, context_window_tokens=32_768)
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="ok", tool_calls=[], usage={})
+        return_value=LLMResponse(content="ok", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
@@ -91,7 +91,7 @@ async def test_process_message_replays_with_token_budget_only(tmp_path: Path) ->
 async def test_token_budget_keeps_current_user_as_replay_boundary(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path, context_window_tokens=8_000)
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="ok", tool_calls=[], usage={})
+        return_value=LLMResponse(content="ok", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]

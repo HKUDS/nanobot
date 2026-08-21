@@ -9,6 +9,7 @@ import pytest
 
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
@@ -1467,7 +1468,7 @@ def test_settings_payload_includes_token_usage_summary(
     from nanobot.webui.token_usage import record_token_usage
 
     record_token_usage(
-        {"prompt_tokens": 10, "completion_tokens": 5},
+        LLMUsage.reported(input_tokens=10, output_tokens=5),
         timezone_name=config.agents.defaults.timezone,
     )
 
@@ -1495,7 +1496,7 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     from nanobot.webui.token_usage import record_token_usage
 
     record_token_usage(
-        {"prompt_tokens": 20, "completion_tokens": 2},
+        LLMUsage.reported(input_tokens=20, output_tokens=2),
         timezone_name=config.agents.defaults.timezone,
     )
 

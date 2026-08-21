@@ -393,9 +393,9 @@ class TestToolEventProgress:
                             },
                         )
                     ],
-                    usage={},
+                    usage=None,
                 )
-            return LLMResponse(content="Done", tool_calls=[], usage={})
+            return LLMResponse(content="Done", tool_calls=[], usage=None)
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()

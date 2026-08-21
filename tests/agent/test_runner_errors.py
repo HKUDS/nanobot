@@ -90,7 +90,7 @@ async def test_llm_error_not_appended_to_session_messages():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={},
+        content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -158,7 +158,7 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
         content="Request blocked by provider policy.",
         finish_reason=finish_reason,
         tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={"command": "echo nope"})],
-        usage={},
+        usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -189,7 +189,7 @@ async def test_runner_tool_error_sets_final_content():
         return LLMResponse(
             content="working",
             tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
-            usage={},
+            usage=None,
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -224,9 +224,9 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
                 tool_calls=[
                     ToolCallRequest(id="call_1", name="exec", arguments={"command": "report"})
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", usage={})
+        return LLMResponse(content="done", usage=None)
 
     provider.chat_with_retry = chat_with_retry
     output = "Error: generated report successfully\n\nExit code: 0"
@@ -266,7 +266,7 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
                 ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a"}),
                 ToolCallRequest(id="tc2", name="exec", arguments={"cmd": "bad"}),
             ],
-            usage={},
+            usage=None,
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -333,9 +333,9 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
             content="",
             finish_reason="length",
             tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={})],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage={}),
+        LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage=None),
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []

@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from nanobot.config.schema import Config
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.factory import make_provider
 from nanobot.providers.registry import find_by_name
 from nanobot.providers.xai_grok_provider import (
@@ -454,7 +455,7 @@ async def test_raw_response_request_streams_text_usage_and_inline_citations(monk
 
     assert result[0] == "Live result [[1]](https://x.com/example/status/1)"
     assert result[2] == "stop"
-    assert result[3] == {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
+    assert result[3] == LLMUsage.reported(input_tokens=8, output_tokens=4)
     assert deltas == ["Live result ", "[[1]](https://x.com/example/status/1)"]
     assert captured["json"]["tools"] == [{"type": "x_search"}]
 

@@ -28,7 +28,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
@@ -56,7 +56,7 @@ class SubagentStatus:
     phase: str = "initializing"  # initializing | awaiting_tools | tools_completed | final_response | done | error
     iteration: int = 0
     tool_events: list[dict[str, str]] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     stop_reason: str | None = None
     error: str | None = None
 
@@ -82,7 +82,7 @@ class _SubagentHook(AgentHook):
             return
         self._status.iteration = context.iteration
         self._status.tool_events = list(context.tool_events)
-        self._status.usage = dict(context.usage)
+        self._status.usage = context.usage
         if context.error:
             self._status.error = str(context.error)
 

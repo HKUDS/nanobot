@@ -43,6 +43,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.config.schema import Base
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -452,18 +453,9 @@ class WebSocketChannel(BaseChannel):
             self.logger.warning("ignoring invalid model preset metadata for chat_id={}", chat_id)
             fields["model_preset"] = None
         if isinstance(metadata, dict):
-            usage = metadata.get("_last_usage")
-            if isinstance(usage, dict):
-                sanitized_usage: dict[str, int | float] = {}
-                for key, value in cast(dict[object, object], usage).items():
-                    if (
-                        isinstance(key, str)
-                        and isinstance(value, (int, float))
-                        and not isinstance(value, bool)
-                        and value >= 0
-                    ):
-                        sanitized_usage[key] = value
-                fields["usage"] = sanitized_usage
+            usage = LLMUsage.from_dict(metadata.get("_last_usage"))
+            if usage is not None:
+                fields["usage"] = usage.to_dict()
         return fields
 
     def _detach(self, connection: ServerConnection, chat_id: str) -> None:
@@ -1957,7 +1949,7 @@ class WebSocketChannel(BaseChannel):
         latency_ms: int | None = None,
         *,
         goal_state: dict[str, Any] | None = None,
-        usage: dict[str, int] | None = None,
+        usage: LLMUsage | None = None,
         context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
@@ -1972,8 +1964,8 @@ class WebSocketChannel(BaseChannel):
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
-        if usage:
-            body["usage"] = usage
+        if usage is not None:
+            body["usage"] = usage.to_dict()
         if context_window_tokens is not None:
             body["context_window_tokens"] = int(context_window_tokens)
         canonical_webui_turn = (metadata or {}).get("webui") is True

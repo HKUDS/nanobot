@@ -16,7 +16,7 @@ from nanobot.agent.subagent import (
 )
 from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings, LLMProvider
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMUsage
 from nanobot.utils.llm_runtime import LLMRuntime
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ def _make_hook_context(**overrides) -> AgentHookContext:
         tool_calls=[],
         tool_events=[],
         messages=[],
-        usage={},
+        usage=None,
         error=None,
         stop_reason="completed",
         final_content="ok",
@@ -97,7 +97,7 @@ class TestSubagentStatus:
         assert s.phase == "initializing"
         assert s.iteration == 0
         assert s.tool_events == []
-        assert s.usage == {}
+        assert s.usage is None
         assert s.stop_reason is None
         assert s.error is None
 
@@ -677,12 +677,12 @@ class TestSubagentHook:
         ctx = _make_hook_context(
             iteration=3,
             tool_events=[{"name": "read_file", "status": "ok", "detail": ""}],
-            usage={"prompt_tokens": 100},
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=0),
         )
         await hook.after_iteration(ctx)
         assert status.iteration == 3
         assert len(status.tool_events) == 1
-        assert status.usage == {"prompt_tokens": 100}
+        assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=0)
 
     @pytest.mark.asyncio
     async def test_after_iteration_no_status_noop(self):
