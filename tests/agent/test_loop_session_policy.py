@@ -30,7 +30,7 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_with_retry = AsyncMock(
-        side_effect=[LLMResponse(content=response, usage={}) for response in responses]
+        side_effect=[LLMResponse(content=response, usage=None) for response in responses]
     )
     return AgentLoop(
         bus=MessageBus(),

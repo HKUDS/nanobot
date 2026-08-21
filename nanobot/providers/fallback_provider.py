@@ -124,7 +124,10 @@ class FallbackProvider(LLMProvider):
         fallback_model_observer: FallbackModelObserver | None = None,
         primary_context_window_tokens: int | None = None,
     ):
+        primary_generation = primary.generation
         self._primary = primary
+        super().__init__(provider_name=primary.provider_name)
+        self._primary.generation = primary_generation
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
         self._fallback_model_observer = fallback_model_observer

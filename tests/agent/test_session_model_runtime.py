@@ -18,7 +18,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 
 class RecordingProvider(LLMProvider):
     def __init__(self, name: str) -> None:
-        super().__init__()
+        super().__init__(provider_name=name)
         self.name = name
         self.generation = GenerationSettings(max_tokens=256, temperature=0.1)
         self.calls: list[str | None] = []

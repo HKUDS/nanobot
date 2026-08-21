@@ -690,11 +690,7 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
                 "content": [{"type": "output_text", "text": "old answer"}],
             },
         ],
-        usage={
-            "prompt_tokens": 90,
-            "completion_tokens": 5,
-            "total_tokens": 95,
-        },
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
     )
     bodies: list[dict[str, Any]] = []
 
@@ -730,11 +726,10 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
                     model="gpt-5.6-sol",
                     input_items=body["input"],
                     output_items=[compact_item],
-                    usage={
-                        "prompt_tokens": 95,
-                        "completion_tokens": 2,
-                        "total_tokens": 97,
-                    },
+                    usage=provider_base.LLMUsage.reported(
+                        input_tokens=95,
+                        output_tokens=2,
+                    ),
                 ),
             )
         return provider_base.LLMResponse(content="done")
@@ -788,7 +783,7 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
         model="gpt-5.6-sol",
         input_items=[{"type": "message", "role": "user", "content": "old"}],
         output_items=[{"type": "reasoning", "encrypted_content": "opaque"}],
-        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
     )
     bodies: list[dict[str, Any]] = []
 
@@ -872,7 +867,7 @@ async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
         return provider_base.LLMResponse(
             content="answer",
             finish_reason="stop",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
+            usage=provider_base.LLMUsage.reported(input_tokens=10, output_tokens=5),
             reasoning_content="summary",
         )
 
@@ -892,7 +887,7 @@ async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
     assert content_deltas == ["answer"]
     assert thinking_deltas == ["summary"]
     assert response.content == "answer"
-    assert response.usage == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert response.usage == provider_base.LLMUsage.reported(input_tokens=10, output_tokens=5)
     assert response.reasoning_content == "summary"
 
 

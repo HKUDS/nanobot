@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
     from nanobot.config.schema import ModelPresetConfig
+    from nanobot.providers.base import LLMUsage
     from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -65,7 +66,7 @@ class RuntimeSnapshot:
     web_config: dict[str, object]
     exec_config: dict[str, object]
     subagent_statuses: dict[str, dict[str, object]]
-    last_usage: dict[str, int]
+    last_usage: Mapping[str, JsonScalar]
     scratchpad: dict[str, JsonValue]
 
     def as_mapping(self) -> Mapping[str, object]:
@@ -151,7 +152,7 @@ class _RuntimeControlTarget(Protocol):
     def tool_names(self) -> list[str]: ...
 
     @property
-    def last_usage(self) -> Mapping[str, int]: ...
+    def last_usage(self) -> LLMUsage | None: ...
 
     def set_runtime_model(self, model: str) -> LLMRuntime: ...
 
@@ -190,7 +191,7 @@ class AgentRuntimeControl:
             web_config=_snapshot_web_config(target.web_config),
             exec_config=_snapshot_exec_config(target.exec_config),
             subagent_statuses=_snapshot_subagent_statuses(target.subagents),
-            last_usage=dict(target.last_usage),
+            last_usage=target.last_usage.to_dict() if target.last_usage is not None else {},
             scratchpad=_snapshot_json_mapping(self.__scratchpad),
         )
 
@@ -297,7 +298,7 @@ def _snapshot_subagent_status(status: SubagentStatus) -> dict[str, object]:
         "phase": status.phase,
         "iteration": status.iteration,
         "tool_events": [dict(event) for event in status.tool_events],
-        "usage": dict(status.usage),
+        "usage": status.usage.to_dict() if status.usage is not None else None,
         "stop_reason": status.stop_reason,
         "error": status.error,
     }

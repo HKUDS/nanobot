@@ -111,9 +111,12 @@ describe("Settings overview and appearance", () => {
         days: [
           {
             date: "2026-06-03",
-            prompt_tokens: 1200,
-            completion_tokens: 300,
-            cached_tokens: 500,
+            input_tokens: 1200,
+            output_tokens: 300,
+            cache_read_tokens: 500,
+            cache_write_tokens: 0,
+            cache_read_observed_input_tokens: 1200,
+            cache_write_observed_input_tokens: 1200,
             total_tokens: 1500,
             requests: 2,
           },
@@ -214,9 +217,12 @@ describe("Settings overview and appearance", () => {
         days: [
           {
             date: "2026-06-03",
-            prompt_tokens: 1200,
-            completion_tokens: 300,
-            cached_tokens: 500,
+            input_tokens: 1200,
+            output_tokens: 300,
+            cache_read_tokens: 500,
+            cache_write_tokens: 0,
+            cache_read_observed_input_tokens: 1200,
+            cache_write_observed_input_tokens: 1200,
             total_tokens: 1500,
             requests: 2,
           },

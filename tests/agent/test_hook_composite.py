@@ -453,7 +453,7 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
 
     loop = _make_loop(tmp_path, hooks=[TrackingHook()])
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+        return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -494,7 +494,7 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
 
     loop = _make_loop(tmp_path, hook_factories=[factory("registered")])
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+        return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -541,7 +541,7 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
 
     loop = _make_loop(tmp_path, hooks=[BadHook()])
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="still works", tool_calls=[], usage={})
+        return_value=LLMResponse(content="still works", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -562,7 +562,7 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
         tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
-        usage={},
+        usage=None,
     ))
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.tools.execute = AsyncMock(return_value="ok")

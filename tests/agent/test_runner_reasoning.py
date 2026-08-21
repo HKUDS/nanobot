@@ -16,7 +16,7 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -53,10 +53,10 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
                 tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
                 reasoning_content="hidden reasoning",
                 thinking_blocks=[{"type": "thinking", "thinking": "step"}],
-                usage={"prompt_tokens": 5, "completion_tokens": 3},
+                usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
             )
         captured_second_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -99,7 +99,7 @@ async def test_runner_emits_anthropic_thinking_blocks():
                 {"type": "thinking", "thinking": "After careful consideration.", "signature": "sig2"},
             ],
             tool_calls=[],
-            usage={"prompt_tokens": 5, "completion_tokens": 3},
+            usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -135,7 +135,7 @@ async def test_runner_emits_inline_think_content_as_reasoning():
         return LLMResponse(
             content="<think>Let me think about this...\nThe answer is 42.</think>The answer is 42.",
             tool_calls=[],
-            usage={"prompt_tokens": 5, "completion_tokens": 3},
+            usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -171,7 +171,7 @@ async def test_runner_prefers_reasoning_content_over_inline_think():
             content="<think>inline thinking</think>The answer.",
             reasoning_content="dedicated reasoning field",
             tool_calls=[],
-            usage={"prompt_tokens": 5, "completion_tokens": 3},
+            usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -211,7 +211,7 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
             content="The answer.",
             reasoning_content="step-by-step deduction",
             tool_calls=[],
-            usage={"prompt_tokens": 5, "completion_tokens": 3},
+            usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -257,7 +257,7 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
         return LLMResponse(
             content="<think>working...</think>The answer.",
             tool_calls=[],
-            usage={"prompt_tokens": 5, "completion_tokens": 3},
+            usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -299,7 +299,7 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
             content="answer",
             reasoning_content="hidden thought",
             tool_calls=[],
-            usage={"prompt_tokens": 5, "completion_tokens": 3},
+            usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -350,7 +350,7 @@ async def test_runner_streams_native_thinking_deltas_without_post_hoc_dup():
             content="done",
             tool_calls=[],
             thinking_blocks=[{"type": "thinking", "thinking": "part1part2"}],
-            usage={"prompt_tokens": 1, "completion_tokens": 2},
+            usage=LLMUsage.reported(input_tokens=1, output_tokens=2),
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -387,7 +387,7 @@ async def test_runner_strips_thinking_tags_from_native_thinking_deltas():
             await on_thinking_delta("</thinking>")
         if on_content_delta:
             await on_content_delta("done")
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
@@ -425,7 +425,7 @@ async def test_runner_ignores_empty_thinking_marker_before_final_reasoning():
             content="done",
             reasoning_content="Preparing final response",
             tool_calls=[],
-            usage={},
+            usage=None,
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry

@@ -106,8 +106,10 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        *,
+        provider_name: str = "azure_openai",
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self._native_compaction_available = True
 

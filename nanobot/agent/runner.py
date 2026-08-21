@@ -23,6 +23,7 @@ from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
@@ -125,7 +126,7 @@ class AgentRunResult:
     final_content: str | None
     messages: list[dict[str, Any]]
     tools_used: list[str] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     stop_reason: str = "completed"
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
@@ -394,7 +395,7 @@ class AgentRunner:
             context.messages = deepcopy(result.messages)
             context.final_content = result.final_content
             context.tools_used = list(result.tools_used)
-            context.usage = dict(result.usage)
+            context.usage = result.usage
             context.stop_reason = result.stop_reason
             context.error = result.error
             context.tool_events = deepcopy(result.tool_events)
@@ -425,7 +426,7 @@ class AgentRunner:
     ) -> AgentRunResult:
         final_content: str | None = None
         tools_used: list[str] = []
-        usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
+        usage: LLMUsage | None = None
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
@@ -501,8 +502,8 @@ class AgentRunner:
             )
             response.content = cleaned_content
             raw_usage = self._usage_or_estimate(spec, messages_for_model, response)
-            context.usage = dict(raw_usage)
-            self._accumulate_usage(usage, raw_usage)
+            context.usage = raw_usage
+            usage = self._merge_usage(usage, raw_usage)
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
                 await hook.emit_reasoning_end()
@@ -665,10 +666,10 @@ class AgentRunner:
                     conversation_state=conversation_state,
                 )
                 retry_usage = self._usage_or_estimate(spec, retry_messages, response)
-                self._accumulate_usage(usage, retry_usage)
+                usage = self._merge_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
                 context.response = response
-                context.usage = dict(raw_usage)
+                context.usage = raw_usage
                 context.tool_calls = list(response.tool_calls)
                 original_content = response.content
                 clean = hook.finalize_content(context, response.content)
@@ -841,7 +842,7 @@ class AgentRunner:
                 had_injections = True
             terminal_content = None
             if spec.finalize_on_max_iterations:
-                terminal_content = await self._try_finalize_after_max_iterations(
+                terminal_content, usage = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
                     messages,
@@ -1229,9 +1230,9 @@ class AgentRunner:
         spec: AgentRunSpec,
         hook: AgentHook,
         messages: list[dict[str, Any]],
-        usage: dict[str, int],
+        usage: LLMUsage | None,
         conversation_state: ProviderConversationStateController,
-    ) -> str | None:
+    ) -> tuple[str | None, LLMUsage | None]:
         retry_messages = self._budget_exhausted_finalization_messages(messages)
         try:
             response = await self._request_no_tools(
@@ -1246,10 +1247,10 @@ class AgentRunner:
                 "Budget-exhausted finalization failed for {}; using fallback",
                 spec.session_key or "default",
             )
-            return None
+            return None, usage
 
         raw_usage = self._usage_or_estimate(spec, retry_messages, response)
-        self._accumulate_usage(usage, raw_usage)
+        usage = self._merge_usage(usage, raw_usage)
         if response.finish_reason == "error" or response.has_tool_calls:
             logger.warning(
                 "Budget-exhausted finalization returned finish_reason='{}' "
@@ -1258,19 +1259,19 @@ class AgentRunner:
                 len(response.tool_calls),
                 spec.session_key or "default",
             )
-            return None
+            return None, usage
 
         context = AgentHookContext(
             iteration=spec.max_iterations,
             messages=messages,
             response=response,
-            usage=dict(raw_usage),
+            usage=raw_usage,
             session_key=spec.session_key,
         )
         clean = hook.finalize_content(context, response.content)
         if is_blank_text(clean):
-            return None
-        return clean
+            return None, usage
+        return clean, usage
 
     async def _request_no_tools(
         self,
@@ -1314,31 +1315,23 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         response: LLMResponse,
-    ) -> dict[str, int]:
-        usage = self._usage_dict(response.usage)
-        total = self._usage_total(usage)
-        if total > 0:
-            usage["total_tokens"] = total
-            usage.setdefault("provider_tokens", total)
-        elif response.finish_reason == "error":
-            return {}
-        else:
+    ) -> LLMUsage | None:
+        usage = response.usage
+        if usage is None or usage.total_tokens == 0:
+            if response.finish_reason == "error":
+                return None
             usage = self._estimate_response_usage(spec, messages, response)
-        completion = usage.get("completion_tokens", 0)
-        if response.generation_ms is not None and completion > 0:
-            usage["generation_ms"] = response.generation_ms
-            usage["measured_completion_tokens"] = completion
-        if response.ttft_ms is not None:
-            usage["ttft_ms"] = response.ttft_ms
-            usage["timed_requests"] = 1
-        return usage
+        return usage.with_timing(
+            generation_ms=response.generation_ms,
+            ttft_ms=response.ttft_ms,
+        )
 
     def _estimate_response_usage(
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         response: LLMResponse,
-    ) -> dict[str, int]:
+    ) -> LLMUsage:
         try:
             tools = spec.tools.get_definitions()
         except Exception:
@@ -1356,45 +1349,21 @@ class AgentRunner:
             thinking_blocks=response.thinking_blocks,
         )
         completion_tokens = estimate_message_tokens(assistant_message)
-        total_tokens = max(0, prompt_tokens) + max(0, completion_tokens)
-        if total_tokens <= 0:
-            return {}
-        return {
-            "prompt_tokens": max(0, prompt_tokens),
-            "completion_tokens": max(0, completion_tokens),
-            "total_tokens": total_tokens,
-            "estimated_tokens": total_tokens,
-        }
+        return LLMUsage.estimated(
+            input_tokens=max(0, prompt_tokens),
+            output_tokens=max(0, completion_tokens),
+        )
 
     @staticmethod
-    def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
-        if not usage:
-            return {}
-        result: dict[str, int] = {}
-        for key, value in usage.items():
-            try:
-                result[key] = int(value or 0)
-            except (TypeError, ValueError):
-                continue
-        return result
-
-    @staticmethod
-    def _usage_total(usage: dict[str, int]) -> int:
-        return max(0, usage.get("total_tokens", 0) or (
-            usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
-        ))
-
-    @staticmethod
-    def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:
-        for key, value in addition.items():
-            target[key] = target.get(key, 0) + value
-
-    @staticmethod
-    def _merge_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
-        merged = dict(left)
-        for key, value in right.items():
-            merged[key] = merged.get(key, 0) + value
-        return merged
+    def _merge_usage(
+        left: LLMUsage | None,
+        right: LLMUsage | None,
+    ) -> LLMUsage | None:
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return left + right
 
     async def _execute_tools(
         self,

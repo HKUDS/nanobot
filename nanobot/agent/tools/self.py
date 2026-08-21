@@ -150,7 +150,7 @@ class MyTool(Tool):
             "Actions: check, set.\n"
             "- check (no key): full config overview — start here.\n"
             "- check (key): drill into a value. Dot-paths allowed "
-            "(e.g. '_last_usage.prompt_tokens', 'web_config.enable').\n"
+            "(e.g. '_last_usage.input_tokens', 'web_config.enable').\n"
             "- set (key, value): change config or store notes in your scratchpad. "
             "Scratchpad keys persist across turns but not restarts.\n"
             "Key values: _current_iteration (current progress), "

@@ -273,7 +273,7 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
 
     async def chat_with_retry(*, messages, **kwargs):
         captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -312,7 +312,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    response = LLMResponse(content="new answer", tool_calls=[], usage={})
+    response = LLMResponse(content="new answer", tool_calls=[], usage=None)
     provider.chat_with_retry = AsyncMock(return_value=response)
     provider.chat_stream_with_retry = AsyncMock(return_value=response)
 
@@ -397,7 +397,7 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
 
     async def chat_with_retry(*, messages, **kwargs):
         captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()

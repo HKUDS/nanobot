@@ -48,7 +48,7 @@ async def test_ephemeral_runner_enters_and_restores_turn_scopes(tmp_path):
 
     async def chat_with_retry(**_kwargs):
         assert goal_mutation_allowed() is True
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     loop.provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -83,7 +83,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     },
                 )
             ],
-            usage={},
+            usage=None,
         ),
         LLMResponse(
             content="closing goal",
@@ -94,7 +94,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     arguments={"action": "complete", "recap": "Implemented and tested."},
                 )
             ],
-            usage={},
+            usage=None,
         ),
         LLMResponse(
             content="trying to start another goal",
@@ -105,9 +105,9 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     arguments={"objective": "Start an unrelated follow-up."},
                 )
             ],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", tool_calls=[], usage={}),
+        LLMResponse(content="done", tool_calls=[], usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
@@ -160,8 +160,8 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="first answer", usage={}),
-        LLMResponse(content="second answer", usage={}),
+        LLMResponse(content="first answer", usage=None),
+        LLMResponse(content="second answer", usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
@@ -216,7 +216,7 @@ async def test_webui_quote_reaches_model_without_leaking_into_public_history(tmp
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="answer", usage={}))
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="answer", usage=None))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     session = loop.sessions.get_or_create("websocket:chat")
@@ -258,9 +258,9 @@ async def test_runtime_context_provider_runs_once_across_tool_iterations(tmp_pat
                 name="read_file",
                 arguments={"path": "note.txt"},
             )],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", usage={}),
+        LLMResponse(content="done", usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
@@ -303,9 +303,9 @@ async def test_non_goal_direct_turn_cannot_reuse_prior_goal_command(tmp_path):
                     arguments={"objective": "Unauthorized persistent objective."},
                 )
             ],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="handled as a one-time task", tool_calls=[], usage={}),
+        LLMResponse(content="handled as a one-time task", tool_calls=[], usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
@@ -383,7 +383,7 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("<think>hidden")
         await on_content_delta("</think>Hello")
-        return LLMResponse(content="<think>hidden</think>Hello", tool_calls=[], usage={})
+        return LLMResponse(content="<think>hidden</think>Hello", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry
 
@@ -413,7 +413,7 @@ async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("Hello <thin")
         await on_content_delta("k>hidden</think>World")
-        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry
 
@@ -436,7 +436,7 @@ async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("Hello <think>")
         await on_content_delta("hidden</think>World")
-        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry
 
@@ -459,8 +459,8 @@ async def test_loop_retries_think_only_final_response(tmp_path):
     async def chat_with_retry(**kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            return LLMResponse(content="<think>hidden</think>", tool_calls=[], usage={})
-        return LLMResponse(content="Recovered answer", tool_calls=[], usage={})
+            return LLMResponse(content="<think>hidden</think>", tool_calls=[], usage=None)
+        return LLMResponse(content="Recovered answer", tool_calls=[], usage=None)
 
     loop.provider.chat_with_retry = chat_with_retry
 
@@ -485,7 +485,7 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     error_resp = LLMResponse(
-        content="503 service unavailable", finish_reason="error", tool_calls=[], usage={},
+        content="503 service unavailable", finish_reason="error", tool_calls=[], usage=None,
     )
     loop.provider.chat_with_retry = AsyncMock(return_value=error_resp)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=error_resp)
@@ -523,14 +523,14 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
             name="exec",
             arguments={"command": "curl http://169.254.169.254/latest/meta-data/"},
         )],
-        usage={},
+        usage=None,
     )
     responses = iter([
         tool_call_resp,
         LLMResponse(
             content="I cannot access private URLs. Please share the local file.",
             tool_calls=[],
-            usage={},
+            usage=None,
         ),
     ])
 
@@ -569,8 +569,8 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={}),
-        LLMResponse(content="Recovered answer", tool_calls=[], usage={}),
+        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage=None),
+        LLMResponse(content="Recovered answer", tool_calls=[], usage=None),
     ])
 
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
