@@ -137,9 +137,6 @@ export class PickerMenu<T> {
           ? { backgroundColor: RGBA.fromHex(this.theme.selectedBackground) }
           : {}),
         attributes: selected ? TextAttributes.BOLD : 0,
-        // OpenTUI rechecks hover after rows are rebuilt. Treating that synthetic
-        // `over` as pointer intent would undo a keyboard move whenever the mouse
-        // remains over the previously selected row.
         onMouseMove: () => {
           if (this.selected === index) return
           this.selected = index
