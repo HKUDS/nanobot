@@ -1368,6 +1368,35 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("renders assistant LaTeX as Unicode text without changing code", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({
+      event: "delta",
+      chat_id: "chat",
+      text: [
+        "缓存率：",
+        "\\[\\text{缓存率}=\\frac{\\text{cached input tokens}}{\\text{total input tokens}}\\]",
+        "结果：\\(66{,}000 \\times 94\\% \\approx 62{,}040\\)",
+        "`\\(code\\)`",
+      ].join("\n"),
+    })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    const transcript = (app as unknown as {
+      transcript: { assistant(content: string): void }
+    }).transcript
+    transcript.assistant("历史公式：\\(x_1^2 + y_2^2 = z^2\\)")
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("缓存率 = cached input tokens / total input tokens")
+    expect(frame).toContain("66,000 × 94% ≈ 62,040")
+    expect(frame).toContain("历史公式：x₁² + y₂² = z²")
+    expect(frame).toContain("\\(code\\)")
+    expect(frame).not.toContain("\\frac")
+    expect(frame).not.toContain("\\text")
+  })
+
   test("rethemes the complete retained interface when the terminal appearance changes", async () => {
     setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
     const app = mount(setup)

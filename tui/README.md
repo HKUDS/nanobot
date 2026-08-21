@@ -13,6 +13,10 @@ bun run --cwd tui build
 
 Standalone terminals use OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
 
+Assistant math written with `$...$`, `$$...$$`, `\\(...\\)`, or `\\[...\\]` is presented as
+Unicode plain text so formulas remain readable in terminals without a math renderer. Currency and
+LaTeX inside inline or fenced code remain literal.
+
 ## Herdr host mode
 
 When Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`, nanobot becomes a quiet hosted client. It uses OpenTUI's main-screen mode instead of hiding the whole run in a temporary alternate screen, removes the launch card and persistent session/model/task chrome, and keeps only the transcript, compact progress, and composer. Herdr remains responsible for workspace, tab, pane, task, and attention navigation, while nanobot keeps its application-level session, new-chat, and branch commands.

@@ -11,6 +11,7 @@ import {
 } from "@opentui/core"
 
 import type { FileEditEvent, HistoryMessage, ToolProgressEvent } from "./protocol"
+import { renderLatexAsUnicode } from "./latex"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
@@ -255,7 +256,7 @@ export class Transcript {
     }
     if (!this.live.content && !this.pendingStream) {
       this.live.content = delta
-      this.live.markdown.content = delta
+      this.live.markdown.content = renderLatexAsUnicode(delta)
       return
     }
     this.pendingStream += delta
@@ -269,7 +270,7 @@ export class Transcript {
       const content = fallback || this.live.content
       // Finalize the retained Markdown node in place. This preserves scroll
       // anchors and avoids the one-frame jump caused by replacing the row.
-      this.live.markdown.content = content
+      this.live.markdown.content = renderLatexAsUnicode(content)
       this.live.markdown.streaming = false
       this.live = null
     } else if (fallback.trim()) {
@@ -282,7 +283,7 @@ export class Transcript {
     this.clearStreamTimer()
     this.pendingStream = ""
     this.live.content = content
-    this.live.markdown.content = content
+    this.live.markdown.content = renderLatexAsUnicode(content)
   }
 
   progress(content: string, events: ToolProgressEvent[] = []): string {
@@ -342,7 +343,7 @@ export class Transcript {
     if (!this.live || !this.pendingStream) return
     this.live.content += this.pendingStream
     this.pendingStream = ""
-    this.live.markdown.content = this.live.content
+    this.live.markdown.content = renderLatexAsUnicode(this.live.content)
   }
 
   private clearStreamTimer(): void {
@@ -512,7 +513,7 @@ export class Transcript {
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
-      content,
+      content: renderLatexAsUnicode(content),
       width: "auto",
       minWidth: 0,
       flexGrow: 1,
