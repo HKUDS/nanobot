@@ -416,14 +416,16 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import DreamRunProgress, MemoryStore
+        from nanobot.agent.memory import MemoryStore
+
+        async def _silent(*_args: Any, **_kwargs: Any) -> None:
+            pass
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
         prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
-        progress = DreamRunProgress()
         content = ""
         resp = None
         diff_body = ""
@@ -445,18 +447,14 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
-                on_progress=progress,
+                on_progress=_silent,
                 runtime=dream_runtime,
             )
             elapsed = time.monotonic() - t0
-            # The real file delta grounds the audit record; clean completion
+            # The real file delta grounds the audit record; normal completion
             # decides whether this history batch has finished processing.
             diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(
-                resp,
-                had_tool_errors=progress.had_tool_errors,
-                recovered_tool_errors=progress.recovered_from_tool_errors,
-            )
+            completed = MemoryStore.dream_run_completed(resp)
             if completed:
                 store.set_last_dream_cursor(last_cursor)
                 if diff_body:
@@ -464,11 +462,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 else:
                     content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
-                reason = MemoryStore.dream_incompletion_reason(
-                    resp,
-                    had_tool_errors=progress.had_tool_errors,
-                    recovered_tool_errors=progress.recovered_from_tool_errors,
-                )
+                reason = MemoryStore.dream_incompletion_reason(resp)
                 content = (
                     f"Dream did not complete after {elapsed:.1f}s ({reason}); "
                     "memory cursor was not advanced."

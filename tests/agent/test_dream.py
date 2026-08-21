@@ -2,7 +2,7 @@
 
 import pytest
 
-from nanobot.agent.memory import DreamRunProgress, MemoryStore
+from nanobot.agent.memory import MemoryStore
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
 from nanobot.security.workspace_access import (
@@ -187,95 +187,29 @@ class TestBuildDreamPrompt:
 
 
 class TestDreamRunCompletion:
-    """DreamRunProgress + dream_run_completed gate cursor advancement."""
+    """The runner's terminal state gates Dream cursor advancement."""
 
     class _Resp:
         def __init__(self, stop_reason: str = "completed") -> None:
             self.metadata = {"_stop_reason": stop_reason}
 
-    @staticmethod
-    async def _feed(progress: DreamRunProgress, *batches: list[dict]) -> None:
-        for batch in batches:
-            await progress("", tool_events=batch)
+    def test_completed_stop_reason_completes(self):
+        assert MemoryStore.dream_run_completed(self._Resp())
 
-    @pytest.mark.asyncio
-    async def test_clean_run_completes(self):
-        progress = DreamRunProgress()
-        await self._feed(
-            progress,
-            [{"phase": "start"}, {"phase": "end"}],
-        )
-        assert not progress.had_tool_errors
-        assert not progress.recovered_from_tool_errors
-        assert MemoryStore.dream_run_completed(
-            self._Resp(), had_tool_errors=progress.had_tool_errors,
-        )
+    @pytest.mark.parametrize(
+        "stop_reason",
+        ["error", "tool_error", "max_iterations", "cancelled"],
+    )
+    def test_non_completed_stop_reason_blocks(self, stop_reason: str):
+        assert not MemoryStore.dream_run_completed(self._Resp(stop_reason))
 
-    @pytest.mark.asyncio
-    async def test_recovered_tool_error_completes(self):
-        """A failed edit_file retry that later succeeds must not block the cursor."""
-        progress = DreamRunProgress()
-        await self._feed(
-            progress,
-            [{"phase": "start"}, {"phase": "error"}],
-            [{"phase": "start"}, {"phase": "end"}],
-        )
-        assert progress.had_tool_errors
-        assert progress.recovered_from_tool_errors
-        assert MemoryStore.dream_run_completed(
-            self._Resp(),
-            had_tool_errors=progress.had_tool_errors,
-            recovered_tool_errors=progress.recovered_from_tool_errors,
-        )
-
-    @pytest.mark.asyncio
-    async def test_error_in_final_tool_round_blocks(self):
-        """An error the model never corrected still invalidates the run."""
-        progress = DreamRunProgress()
-        await self._feed(
-            progress,
-            [{"phase": "start"}, {"phase": "end"}],
-            [{"phase": "start"}, {"phase": "error"}],
-        )
-        assert progress.had_tool_errors
-        assert not progress.recovered_from_tool_errors
-        assert not MemoryStore.dream_run_completed(
-            self._Resp(),
-            had_tool_errors=progress.had_tool_errors,
-            recovered_tool_errors=progress.recovered_from_tool_errors,
-        )
-
-    @pytest.mark.asyncio
-    async def test_start_only_events_do_not_close_a_round(self):
-        progress = DreamRunProgress()
-        await self._feed(progress, [{"phase": "start"}])
-        assert not progress.had_tool_errors
-        assert progress.last_tool_round_had_errors is None
-        assert not progress.recovered_from_tool_errors
-
-    @pytest.mark.asyncio
-    async def test_thought_progress_calls_are_ignored(self):
-        progress = DreamRunProgress()
-        await progress("thinking...", tool_hint=True)
-        await progress("", file_edit_events=[{"phase": "edit"}])
-        assert not progress.had_tool_errors
-        assert progress.last_tool_round_had_errors is None
-
-    def test_non_completed_stop_reason_blocks_despite_clean_tools(self):
-        assert not MemoryStore.dream_run_completed(self._Resp("max_iterations"))
+    def test_missing_response_metadata_blocks(self):
         assert not MemoryStore.dream_run_completed(None)
 
     def test_incompletion_reason_names_the_cause(self):
-        reason = MemoryStore.dream_incompletion_reason(
-            self._Resp("max_iterations"),
-            had_tool_errors=True,
-            recovered_tool_errors=False,
-        )
-        assert "stop_reason: max_iterations" in reason
-        assert "unrecovered tool errors" in reason
         assert MemoryStore.dream_incompletion_reason(
-            self._Resp(), had_tool_errors=True, recovered_tool_errors=True,
-        ) == "stop_reason: completed"
+            self._Resp("max_iterations")
+        ) == "stop_reason: max_iterations"
         assert MemoryStore.dream_incompletion_reason(None) == (
             "stop_reason: missing response metadata"
         )
@@ -601,6 +535,45 @@ class TestEphemeralDirect:
         assert resp is not None
         assert resp.metadata["_stop_reason"] == "error"
         assert MemoryStore.dream_run_completed(resp) is False
+
+    async def test_completed_response_after_tool_error_is_success(self, _make_loop):
+        """A soft tool error is model input, not a second run-level failure state."""
+        from unittest.mock import AsyncMock
+
+        from nanobot.providers.base import ToolCallRequest
+
+        loop, store = _make_loop
+        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+            LLMResponse(
+                content="trying an edit",
+                finish_reason="tool_calls",
+                tool_calls=[ToolCallRequest(
+                    id="call_edit",
+                    name="edit_file",
+                    arguments={
+                        "path": "SOUL.md",
+                        "old_text": "text that is not present",
+                        "new_text": "replacement",
+                    },
+                )],
+                usage={},
+            ),
+            LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage={}),
+        ])
+
+        resp = await loop.process_direct(
+            "test",
+            session_key="dream:handled-tool-error",
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        assert resp is not None
+        assert resp.metadata["_stop_reason"] == "completed"
+        assert MemoryStore.dream_run_completed(resp) is True
+        second_request = loop.provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        tool_result = next(message for message in second_request if message["role"] == "tool")
+        assert "Error" in tool_result["content"]
 
     async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
         """Dream must only see the batch selected by build_dream_prompt."""

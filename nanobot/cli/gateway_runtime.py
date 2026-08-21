@@ -504,13 +504,12 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import DreamRunProgress, MemoryStore
+            from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
-            progress = DreamRunProgress()
             resp = None
             diff_body = ""
             try:
@@ -527,17 +526,13 @@ def _run_gateway(
                     session_key=key,
                     ephemeral=True,
                     tools=store.build_dream_tools(),
-                    on_progress=progress,
+                    on_progress=_silent,
                     runtime=dream_runtime,
                 )
-                # The real file delta grounds the audit record; clean completion
+                # The real file delta grounds the audit record; normal completion
                 # decides whether this history batch has finished processing.
                 diff_body = store.dream_content_diff()
-                completed = MemoryStore.dream_run_completed(
-                    resp,
-                    had_tool_errors=progress.had_tool_errors,
-                    recovered_tool_errors=progress.recovered_from_tool_errors,
-                )
+                completed = MemoryStore.dream_run_completed(resp)
                 if completed:
                     store.set_last_dream_cursor(last_cursor)
                     if diff_body:
@@ -554,11 +549,7 @@ def _run_gateway(
                 else:
                     logger.warning(
                         "Dream cron job did not complete ({}); cursor remains at {}",
-                        MemoryStore.dream_incompletion_reason(
-                            resp,
-                            had_tool_errors=progress.had_tool_errors,
-                            recovered_tool_errors=progress.recovered_from_tool_errors,
-                        ),
+                        MemoryStore.dream_incompletion_reason(resp),
                         store.get_last_dream_cursor(),
                     )
             except Exception:
