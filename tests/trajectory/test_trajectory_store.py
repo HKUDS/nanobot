@@ -1,3 +1,5 @@
+"""Tests for the SQLite LLM trajectory store."""
+
 from __future__ import annotations
 
 import sqlite3
