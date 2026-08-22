@@ -17,6 +17,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     monkeypatch.delitem(sys.modules, "nanobot.providers.github_copilot_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.azure_openai_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.bedrock_provider", raising=False)
+    monkeypatch.delitem(sys.modules, "nanobot.providers.dashscope_provider", raising=False)
 
     try:
         providers = importlib.import_module("nanobot.providers")
@@ -29,6 +30,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
         assert "nanobot.providers.github_copilot_provider" not in sys.modules
         assert "nanobot.providers.azure_openai_provider" not in sys.modules
         assert "nanobot.providers.bedrock_provider" not in sys.modules
+        assert "nanobot.providers.dashscope_provider" not in sys.modules
         assert providers.__all__ == [
             "LLMProvider",
             "LLMResponse",
@@ -39,6 +41,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
             "GitHubCopilotProvider",
             "AzureOpenAIProvider",
             "BedrockProvider",
+            "DashScopeProvider",
         ]
     finally:
         # Importing a replacement subpackage also replaces nanobot.providers on the
