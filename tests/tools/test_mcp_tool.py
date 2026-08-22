@@ -564,6 +564,40 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     assert not is_tool_error_result(result)
 
 
+@pytest.mark.asyncio
+async def test_execute_flags_error_envelope_returned_with_is_error_false() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent('{"code": 404, "msg": "data not exist", "data": null}')
+            ],
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == '{"code": 404, "msg": "data not exist", "data": null}'
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_execute_keeps_success_envelope_as_success() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent('{"code": 0, "msg": "ok", "data": {"id": 1}}')],
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == '{"code": 0, "msg": "ok", "data": {"id": 1}}'
+    assert not is_tool_error_result(result)
+
+
 # Smallest valid 1x1 PNG, base64 without the data: prefix.
 _PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
