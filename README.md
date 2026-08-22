@@ -332,8 +332,8 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 
 <table>
   <tr>
-    <td align="center"><a href="https://github.com/re-bin"><img src="https://avatars.githubusercontent.com/u/52506698?v=4&s=80" width="80" height="80" alt="Xubin Ren"><br><strong>Xubin Ren</strong></a></td>
-    <td align="center"><a href="https://github.com/chengyongru"><img src="https://avatars.githubusercontent.com/u/61816729?v=4&s=80" width="80" height="80" alt="Yongru Chen"><br><strong>Yongru Chen</strong></a></td>
+    <td align="center"><a href="https://github.com/re-bin"><img src="https://avatars.githubusercontent.com/u/52506698?v=4&s=80" width="80" height="80" alt="Xubin Ren"><br><strong>Xubin Ren</strong></a><br><a href="https://x.com/xubinrencs"><img src="https://img.shields.io/badge/@xubinrencs-000000?style=flat&logo=x&logoColor=white" alt="Xubin Ren on X"></a></td>
+    <td align="center"><a href="https://github.com/chengyongru"><img src="https://avatars.githubusercontent.com/u/61816729?v=4&s=80" width="80" height="80" alt="Yongru Chen"><br><strong>Yongru Chen</strong></a><br><a href="https://x.com/chengyongru"><img src="https://img.shields.io/badge/@chengyongru-000000?style=flat&logo=x&logoColor=white" alt="Yongru Chen on X"></a></td>
   </tr>
 </table>
 
