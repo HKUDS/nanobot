@@ -85,15 +85,23 @@ def test_default_tui_workspace_is_the_launch_directory(
     assert _initial_tui_workspace(str(override)) == override.resolve()
 
 
-def test_launcher_passes_the_canonical_model_preset_to_the_tui(
+@pytest.mark.parametrize(
+    ("use_config_override", "use_workspace_override"),
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+def test_launcher_passes_the_canonical_context_to_the_tui(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    use_config_override: bool,
+    use_workspace_override: bool,
 ) -> None:
     config = Config(
         channels={"websocket": {"tokenIssueSecret": "bootstrap-secret"}},
     )
     config.model_presets["Deep Research"] = ModelPresetConfig(model="openai/gpt-5.6")
     config.agents.defaults.model_preset = "Deep Research"
+    monkeypatch.setenv("NANOBOT_TUI_RESUME_CONFIG", "stale-config")
+    monkeypatch.setenv("NANOBOT_TUI_RESUME_WORKSPACE", "stale-workspace")
     captured: dict[str, str] = {}
     events: list[str] = []
     released: list[bool] = []
@@ -127,18 +135,33 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
 
     monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.Popen", popen)
 
+    config_path = tmp_path / "config.json"
+    config_override = str(config_path) if use_config_override else None
+    workspace_override = str(tmp_path / "workspace") if use_workspace_override else None
     result = launch_tui(
         config,
-        config_path=tmp_path / "config.json",
-        workspace_override=None,
+        config_path=config_path,
+        workspace_override=workspace_override,
         session_id=None,
         theme="auto",
+        config_override=config_override,
     )
 
     assert result == 0
     assert captured["NANOBOT_TUI_MODEL"] == "openai/gpt-5.6"
     assert captured["NANOBOT_TUI_MODEL_PRESET"] == "Deep Research"
-    assert captured["NANOBOT_TUI_WORKSPACE"] == str(Path.cwd().resolve())
+    expected_workspace = (
+        Path(workspace_override).resolve() if workspace_override else Path.cwd().resolve()
+    )
+    if config_override:
+        assert captured["NANOBOT_TUI_RESUME_CONFIG"] == str(config_path.resolve())
+    else:
+        assert "NANOBOT_TUI_RESUME_CONFIG" not in captured
+    assert captured["NANOBOT_TUI_WORKSPACE"] == str(expected_workspace)
+    if workspace_override:
+        assert captured["NANOBOT_TUI_RESUME_WORKSPACE"] == str(expected_workspace)
+    else:
+        assert "NANOBOT_TUI_RESUME_WORKSPACE" not in captured
     assert captured["NANOBOT_TUI_BOOTSTRAP_URL"] == (
         "http://127.0.0.1:8765/webui/bootstrap"
     )
@@ -328,7 +351,7 @@ def test_interactive_agent_uses_native_tui(
         message=None,
         session_id="websocket:terminal-chat",
         workspace=None,
-        config=None,
+        config=str(config_path),
         markdown=True,
         logs=False,
         classic=False,
@@ -341,6 +364,7 @@ def test_interactive_agent_uses_native_tui(
         "workspace_override": None,
         "session_id": "websocket:terminal-chat",
         "theme": "light",
+        "config_override": str(config_path),
     }
 
 
