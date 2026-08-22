@@ -51,7 +51,7 @@ import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessag
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 
-export { isAgentActivityMember, isReasoningOnlyAssistant };
+export { isAgentActivityMember };
 
 interface ActivityCounts {
   reasoningSteps: number;

@@ -967,7 +967,7 @@ interface ReasoningBubbleProps {
   hasBodyBelow: boolean;
 }
 
-export function ReasoningBubble({
+function ReasoningBubble({
   text,
   streaming,
   hasBodyBelow,
@@ -993,7 +993,7 @@ interface TraceGroupProps {
  * collapsed because tool traces are supporting evidence, not the answer.
  * A single click expands the exact calls when the user wants details.
  */
-export function TraceGroup({ message }: TraceGroupProps) {
+function TraceGroup({ message }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];
   const count = lines.length;

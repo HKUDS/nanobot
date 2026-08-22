@@ -14,7 +14,7 @@ export type SettingsSectionKey =
   | "runtime"
   | "advanced";
 
-export type PendingRestartSection = "runtime" | "browser" | "image";
+type PendingRestartSection = "runtime" | "browser" | "image";
 export type PendingRestartSections = Record<PendingRestartSection, boolean>;
 
 export type RestartAwarePayload = {

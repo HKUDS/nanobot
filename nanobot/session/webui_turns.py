@@ -685,15 +685,6 @@ class WebuiTurnCoordinator:
             )
         )
 
-    async def publish_run_status(
-        self,
-        msg: InboundMessage,
-        status: str,
-        *,
-        started_at: float | None = None,
-    ) -> None:
-        await publish_turn_run_status(self.bus, msg, status, started_at=started_at)
-
     async def handle_turn_end(
         self,
         msg: InboundMessage,

@@ -12,7 +12,7 @@ export type {
 
 export const MAX_WORKBENCH_PANES = 4;
 
-export const WORKBENCH_LAYOUTS = [
+const WORKBENCH_LAYOUTS = [
   "columns",
   "rows",
   "grid",

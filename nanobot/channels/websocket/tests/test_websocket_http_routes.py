@@ -1244,39 +1244,6 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     assert "Missing pairing code" in missing_code.text
 
 
-def test_api_service_settings_read_api_key_from_webui_payload(bus: MagicMock) -> None:
-    channel = _ch(bus)
-    request = _FakeReq(path="/api/settings/api-service/start")
-    setattr(
-        request,
-        "_nanobot_webui_mutation_payload",
-        {"host": "0.0.0.0", "port": 8900, "timeout": 120, "api_key": "secret-token"},
-    )
-
-    query = channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
-
-    assert query == {
-        "host": ["0.0.0.0"],
-        "port": ["8900"],
-        "timeout": ["120"],
-        "api_key": ["secret-token"],
-    }
-
-
-def test_api_service_settings_reject_non_string_api_key(bus: MagicMock) -> None:
-    from nanobot.webui.settings_api import WebUISettingsError
-
-    channel = _ch(bus)
-    request = _FakeReq(path="/api/settings/api-service/start")
-    setattr(
-        request,
-        "_nanobot_webui_mutation_payload",
-        {"host": "127.0.0.1", "api_key": 123},
-    )
-
-    with pytest.raises(WebUISettingsError, match="API key must be a string"):
-        channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
-
 @pytest.mark.asyncio
 async def test_nanobot_feature_remote_install_requires_opt_in(
     bus: MagicMock,

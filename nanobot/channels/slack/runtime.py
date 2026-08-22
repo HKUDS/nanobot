@@ -69,7 +69,6 @@ class SlackConfig(Base):
     webhook_path: str = "/slack/events"
     bot_token: str = ""
     app_token: str = ""
-    user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
