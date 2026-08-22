@@ -109,6 +109,41 @@ async def test_deleted_queued_session_message_does_not_recreate_target(
 
 
 @pytest.mark.asyncio
+async def test_session_deleted_after_existence_check_does_not_recreate_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = _loop(tmp_path)
+    target_key = "telegram:target"
+    loop.sessions.save(loop.sessions.get_or_create(target_key))
+    loop.sessions.invalidate(target_key)
+
+    original_read_metadata = loop.sessions.read_session_metadata
+
+    def read_then_delete(key: str) -> dict[str, object] | None:
+        metadata = original_read_metadata(key)
+        assert metadata is not None
+        assert loop.sessions.delete_session(key)
+        return metadata
+
+    read_metadata = MagicMock(side_effect=read_then_delete)
+    monkeypatch.setattr(loop.sessions, "read_session_metadata", read_metadata)
+    await loop.bus.publish_inbound(_message())
+
+    run_task = asyncio.create_task(loop.run())
+    try:
+        response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
+    finally:
+        loop.stop()
+        await asyncio.wait_for(run_task, timeout=2)
+
+    read_metadata.assert_called_once_with(target_key)
+    assert response.content == "Sorry, I encountered an error."
+    loop.provider.chat_with_retry.assert_not_awaited()
+    assert loop.sessions.read_session_file(target_key) is None
+
+
+@pytest.mark.asyncio
 async def test_session_message_text_is_not_dispatched_as_a_slash_command(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
