@@ -7,17 +7,25 @@ import argparse
 import json
 import os
 from pathlib import Path
+from typing import TypedDict, cast
 from urllib.request import Request, urlopen
 
 REPOSITORY = "HKUDS/nanobot"
 README = Path(__file__).resolve().parents[1] / "README.md"
 START = "<!-- contributors:start -->"
 END = "<!-- contributors:end -->"
-MAX_CONTRIBUTORS = 100
+PER_PAGE = 100
 MAINTAINERS = {"re-bin", "chengyongru"}
 
 
-def fetch_contributors() -> list[dict[str, str]]:
+class Contributor(TypedDict):
+    login: str
+    type: str
+    html_url: str
+    avatar_url: str
+
+
+def fetch_contributors() -> list[Contributor]:
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "nanobot-readme",
@@ -26,9 +34,16 @@ def fetch_contributors() -> list[dict[str, str]]:
     if token := os.environ.get("GITHUB_TOKEN"):
         headers["Authorization"] = f"Bearer {token}"
 
-    url = f"https://api.github.com/repos/{REPOSITORY}/contributors?per_page={MAX_CONTRIBUTORS}"
-    with urlopen(Request(url, headers=headers), timeout=30) as response:  # noqa: S310
-        contributors = json.load(response)
+    contributors: list[Contributor] = []
+    page = 1
+    while True:
+        url = f"https://api.github.com/repos/{REPOSITORY}/contributors?per_page={PER_PAGE}&page={page}"
+        with urlopen(Request(url, headers=headers), timeout=30) as response:  # noqa: S310
+            batch = cast(list[Contributor], json.load(response))
+        contributors.extend(batch)
+        if len(batch) < PER_PAGE:
+            break
+        page += 1
 
     return [
         contributor
@@ -40,7 +55,7 @@ def fetch_contributors() -> list[dict[str, str]]:
     ]
 
 
-def render_wall(contributors: list[dict[str, str]]) -> str:
+def render_wall(contributors: list[Contributor]) -> str:
     avatars = [
         (
             f'<a href="{contributor["html_url"]}">'
