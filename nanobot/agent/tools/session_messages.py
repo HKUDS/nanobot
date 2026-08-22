@@ -256,6 +256,7 @@ class SendSessionMessageTool(Tool):
                 content=content,
                 metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
                 session_key_override=target.session_key,
+                require_existing_session=True,
                 input_role="user",
             ))
             sent_at.append(now)
@@ -336,5 +337,6 @@ class SendSessionMessageTool(Tool):
                     f"{expected.timeout_seconds} seconds."
                 ),
                 session_key_override=source_session_key,
+                require_existing_session=True,
                 input_role="user",
             ))

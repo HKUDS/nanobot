@@ -44,6 +44,7 @@ def _message(content: str = "Please review") -> InboundMessage:
         content=content,
         metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
         session_key_override="telegram:target",
+        require_existing_session=True,
         input_role="user",
     )
 
@@ -56,6 +57,7 @@ async def test_session_message_runs_as_user_input_and_replies_on_target_route(
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "state")
     loop = _loop(tmp_path)
     loop.sessions.save(loop.sessions.get_or_create("telegram:target"))
+    loop.sessions.invalidate("telegram:target")
     msg = _message()
 
     response = await loop._process_message(msg)
@@ -78,6 +80,32 @@ async def test_session_message_runs_as_user_input_and_replies_on_target_route(
     user_row = next(row for row in stored if row.get("role") == "user")
     assert public_history_message(user_row)["content"] == "Please review"
     assert SESSION_MESSAGE_METADATA_KEY not in user_row
+
+
+@pytest.mark.asyncio
+async def test_deleted_queued_session_message_does_not_recreate_target(
+    tmp_path: Path,
+) -> None:
+    loop = _loop(tmp_path)
+    target_key = "telegram:target"
+    loop.sessions.save(loop.sessions.get_or_create(target_key))
+    await loop.bus.publish_inbound(_message())
+
+    assert loop.sessions.delete_session(target_key)
+
+    run_task = asyncio.create_task(loop.run())
+    try:
+        async def wait_for_queue_to_drain() -> None:
+            while not loop.bus.inbound.empty():
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_queue_to_drain(), timeout=2)
+    finally:
+        loop.stop()
+        await asyncio.wait_for(run_task, timeout=2)
+
+    loop.provider.chat_with_retry.assert_not_awaited()
+    assert loop.sessions.read_session_file(target_key) is None
 
 
 @pytest.mark.asyncio

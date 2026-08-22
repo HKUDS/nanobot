@@ -113,6 +113,7 @@ async def test_send_publishes_user_input_to_the_existing_target(
     assert inbound.channel == "system"
     assert inbound.chat_id == "telegram:target"
     assert inbound.session_key_override == "telegram:target"
+    assert inbound.require_existing_session is True
     assert inbound.is_user_input
     assert inbound.content == "Please review this."
     assert envelope is not None
@@ -206,6 +207,7 @@ async def test_reply_timeout_injects_a_user_input_back_into_the_source(
         reply_timeout_seconds=5,
     )
     await bus.consume_inbound()
+    assert sessions.delete_session("websocket:source")
     delay, timer = scheduler.calls[0]
 
     assert delay == 5
@@ -213,6 +215,7 @@ async def test_reply_timeout_injects_a_user_input_back_into_the_source(
     await asyncio.sleep(0)
     timeout = await bus.consume_inbound()
     assert timeout.chat_id == "websocket:source"
+    assert timeout.require_existing_session is True
     assert timeout.is_user_input
     assert timeout.content == f"No reply from @{target.name} after 5 seconds."
 
