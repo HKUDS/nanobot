@@ -1485,7 +1485,7 @@ def test_replay_keeps_every_file_from_one_apply_patch_call() -> None:
     assert [edit["path"] for edit in msgs[0]["fileEdits"]] == ["USER.md", "MEMORY.md"]
 
 
-def test_replay_keeps_interrupted_pre_tool_text_in_activity() -> None:
+def test_replay_keeps_interrupted_pre_tool_text_as_answer() -> None:
     msgs = replay_transcript_to_ui_messages([
         {"event": "delta", "chat_id": "t-stream", "text": "I will inspect first."},
         {"event": "stream_end", "chat_id": "t-stream"},
@@ -1504,8 +1504,10 @@ def test_replay_keeps_interrupted_pre_tool_text_in_activity() -> None:
 
     assert len(msgs) == 3
     assert msgs[0]["role"] == "assistant"
-    assert msgs[0]["content"] == ""
-    assert msgs[0]["reasoning"] == "I will inspect first."
+    assert msgs[0]["content"] == "I will inspect first."
+    assert msgs[0]["turnPhase"] == "answer"
+    assert "reasoning" not in msgs[0]
+    assert "activitySegmentId" not in msgs[0]
     assert "isStreaming" not in msgs[0]
     assert msgs[1]["kind"] == "trace"
     assert msgs[1]["traces"] == ['exec({"cmd":"ls"})']

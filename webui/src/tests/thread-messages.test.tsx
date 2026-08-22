@@ -334,18 +334,31 @@ describe("ThreadMessages", () => {
   it("renders a fork boundary divider after the copied history", () => {
     const messages: UIMessage[] = [
       { id: "u1", role: "user", content: "original", createdAt: 1 },
-      { id: "a1", role: "assistant", content: "answer", createdAt: 2 },
-      { id: "u2", role: "user", content: "branch prompt", createdAt: 3 },
+      { id: "a1", role: "assistant", content: "first answer", createdAt: 2 },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        createdAt: 3,
+      },
+      { id: "a2", role: "assistant", content: "second answer", createdAt: 4 },
+      { id: "u2", role: "user", content: "branch prompt", createdAt: 5 },
     ];
 
-    render(
+    const { container } = render(
       <ThreadMessages
         messages={messages}
-        forkBoundaryMessageCount={2}
+        forkBoundaryMessageCount={4}
       />,
     );
 
-    expect(screen.getByText("Forked from history")).toBeInTheDocument();
+    const rows = Array.from(container.firstElementChild?.children ?? []);
+    const dividerIndex = rows.findIndex((row) => row.textContent?.includes("Forked from history"));
+    const branchPromptIndex = rows.findIndex((row) => row.textContent?.includes("branch prompt"));
+    expect(dividerIndex).toBeGreaterThan(0);
+    expect(dividerIndex).toBe(branchPromptIndex - 1);
   });
 
   it("keeps turn unit keys stable across replayed ids and mutable turn sequence", () => {
@@ -379,7 +392,6 @@ describe("ThreadMessages", () => {
     expect(unitKeysForDisplay(liveUnits)).toEqual(unitKeysForDisplay(replayUnits));
     expect(unitKeysForDisplay(liveUnits)).toEqual([
       "turn-turn-1-user",
-      "turn-turn-1-activity-1",
       "turn-turn-1-answer-1",
     ]);
   });
@@ -764,7 +776,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
   });
 
-  it("keeps late activity after the live assistant answer while streaming", () => {
+  it("keeps a streamed answer outside late activity when the prompt snapshot is absent", () => {
     const messages: UIMessage[] = [
       {
         id: "t0",
@@ -795,17 +807,21 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages, true);
 
-    expect(units).toHaveLength(1);
+    expect(units).toHaveLength(2);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
       "t0",
-      "a1-activity",
       "t1",
     ]);
+    expect(units[1]).toMatchObject({
+      type: "message",
+      message: { id: "a1", content: "partial answer" },
+    });
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
     const answer = screen.getByText("partial answer");
     const liveActivity = screen.getByRole("button", { name: /working/i });
+    expect(answer.closest("[data-testid='activity-model-message']")).toBeNull();
     expect(liveActivity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -1075,7 +1091,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
-  it("projects assistant slices into one answer with one action set", () => {
+  it("keeps all assistant answer slices outside activity with one action set", () => {
     const messages: UIMessage[] = [
       {
         id: "early",
@@ -1099,6 +1115,18 @@ describe("ThreadMessages", () => {
       },
     ];
 
+    const units = buildDisplayUnits(messages);
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "t1",
+    ]);
+    expect(units[0].sourceMessageCount).toBe(1);
+    expect(units[1]).toMatchObject({
+      type: "message",
+      message: { id: "early", content: "starting…\n\nfinal reply" },
+      sourceMessageCount: 2,
+    });
+
     render(
       <ThreadMessages
         messages={messages}
@@ -1109,8 +1137,57 @@ describe("ThreadMessages", () => {
 
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
-    expect(screen.getByText("starting…")).toBeInTheDocument();
-    expect(screen.getByText("final reply")).toBeInTheDocument();
+    expect(screen.getByText("starting…").closest("[data-testid='activity-model-message']")).toBeNull();
+    expect(screen.getByText("final reply").closest("[data-testid='activity-model-message']")).toBeNull();
+  });
+
+  it("keeps a media-only answer slice outside the activity surface", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "early",
+        role: "assistant",
+        content: "generated the file",
+        turnPhase: "answer",
+        createdAt: 1,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "write_file()",
+        traces: ["write_file()"],
+        turnPhase: "activity",
+        createdAt: 2,
+      },
+      {
+        id: "attachment",
+        role: "assistant",
+        content: "",
+        media: [{ kind: "file", url: "/api/media/result.csv", name: "result.csv" }],
+        turnPhase: "answer",
+        isStreaming: true,
+        createdAt: 3,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "t1",
+    ]);
+    expect(units[1]).toMatchObject({
+      type: "message",
+      message: {
+        id: "early",
+        content: "generated the file",
+        media: [{ kind: "file", url: "/api/media/result.csv", name: "result.csv" }],
+      },
+      sourceMessageCount: 2,
+    });
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    expect(screen.getByText("result.csv")).toBeInTheDocument();
   });
 
   it("hides current turn actions until turn_end", () => {
@@ -1340,7 +1417,7 @@ describe("ThreadMessages", () => {
       .filter(Boolean);
 
     expect(assistantFlags).toEqual([
-      ["a2", true],
+      ["a1", true],
       ["a3", true],
     ]);
   });

@@ -1,20 +1,32 @@
 import type { UIMessage } from "@/lib/types";
 
 /** A completed turn has two surfaces: one activity container and one final
- * answer. An active turn temporarily preserves arrival order so visible
- * Markdown never moves when a later tool starts. */
+ * answer. Answer text is never inferred to be activity merely because a later
+ * tool event arrived; explicit reasoning/activity fields own that distinction. */
 export type TurnUnit =
   | {
       type: "activity";
       messages: UIMessage[];
+      /** Number of raw UI messages represented by this display unit. */
+      sourceMessageCount: number;
       turnLatencyMs?: number;
       startedAtMs?: number;
     }
-  | { type: "message"; message: UIMessage };
+  | {
+      type: "message";
+      message: UIMessage;
+      /** Number of raw UI messages represented by this display unit. */
+      sourceMessageCount: number;
+    };
 
 export function isReasoningOnlyAssistant(message: UIMessage): boolean {
   if (message.role !== "assistant" || message.kind === "trace") return false;
-  if (message.activityKind === "model" || message.content.trim().length > 0) return false;
+  if (
+    message.activityKind === "model"
+    || message.content.trim().length > 0
+    || !!message.media?.length
+    || !!message.images?.length
+  ) return false;
   return !!(message.reasoning?.length || message.reasoningStreaming || message.isStreaming);
 }
 
@@ -42,10 +54,9 @@ export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
  *
  *   user → [one live/completed activity surface] → [one final answer]
  *
- * Assistant text that is followed by another activity is an intermediate model
- * segment. It remains in the activity timeline, where the renderer keeps its
- * normal Markdown surface, but it never creates a second answer bubble. This
- * is the same causal model used by Codex-style transcripts.
+ * A provider may emit multiple answer segments around tool activity. They are
+ * merged into the one final answer instead of being reclassified as reasoning;
+ * only explicit reasoning, trace, and model-activity rows enter the fold.
  */
 export function normalizeActivityTimeline(
   messages: UIMessage[],
@@ -63,50 +74,41 @@ export function normalizeActivityTimeline(
     }
 
     const ordered = orderMessagesByTurnSeq(turnMessages);
-    const lastActivityIndex = ordered.reduce(
-      (index, message, current) => isRawActivity(message) ? current : index,
-      -1,
-    );
-    const answerIndices = ordered
-      .map((message, index) => ({ message, index }))
-      .filter(({ message }) => isAssistantAnswer(message));
-    const finalAnswerIndex = answerIndices.at(-1)?.index;
-    // A replay can deliver a completed answer before a late trace row. Keep
-    // that answer visible, but place the late activity in the single activity
-    // surface before it. An answer followed by more activity is an
-    // intermediate model segment and stays in that surface in turn order.
-    const hasFinalAnswer = finalAnswerIndex !== undefined
-      && (finalAnswerIndex > lastActivityIndex || ordered[finalAnswerIndex].isStreaming !== true);
-
     const activity: UIMessage[] = [];
     const answers: UIMessage[] = [];
-    ordered.forEach((message, index) => {
+    let activitySourceMessageCount = 0;
+    for (const message of ordered) {
       if (isRawActivity(message)) {
         activity.push(message);
+        activitySourceMessageCount += 1;
       } else if (isAssistantAnswer(message)) {
         if (message.reasoning?.trim() || message.reasoningStreaming) {
+          // The synthetic reasoning row and answer both come from one raw
+          // message, so account for that source on the answer unit only.
           activity.push(reasoningOnlyMessageFromAnswer(message));
         }
-        if (hasFinalAnswer && index === finalAnswerIndex) {
-          answers.push(stripInlineReasoning(message));
-        } else {
-          activity.push(modelActivitySnippet(message));
-        }
+        answers.push(stripInlineReasoning(message));
       } else {
         activity.push(message);
+        activitySourceMessageCount += 1;
       }
-    });
+    }
 
     if (activity.length) {
       units.push({
         type: "activity",
         messages: activity,
+        sourceMessageCount: activitySourceMessageCount,
         turnLatencyMs: activityTurnLatencyMs(activity, ordered),
         startedAtMs: activeTurnStartedAtMs,
       });
     }
     if (answers.length) {
-      units.push({ type: "message", message: mergeAssistantAnswers(answers) });
+      units.push({
+        type: "message",
+        message: mergeAssistantAnswers(answers),
+        sourceMessageCount: answers.length,
+      });
     }
 
     turnMessages = [];
@@ -117,7 +119,7 @@ export function normalizeActivityTimeline(
   for (const message of messages) {
     if (message.role === "user") {
       flushTurn();
-      units.push({ type: "message", message });
+      units.push({ type: "message", message, sourceMessageCount: 1 });
       activeTurnId = message.turnId;
       activeTurnStartedAtMs = validCreatedAtMs(message.createdAt);
       continue;
@@ -132,15 +134,16 @@ export function normalizeActivityTimeline(
 }
 
 /**
- * Keep an in-flight turn in arrival order. Until ``turn_end`` there is no
- * reliable way to know whether an assistant text segment is the final answer
- * or commentary before another tool call. Reclassifying it when that tool
- * arrives makes an already-visible Markdown tree jump between containers.
+ * Keep an in-flight turn in arrival order. Answer, reasoning, and activity
+ * semantics are explicit, but a later tool event can still arrive after
+ * already-visible answer Markdown. Reparenting on each event would make that
+ * Markdown tree jump between containers.
  *
  * Completed turns still use ``normalizeActivityTimeline`` and collapse into
- * one audit surface plus the final answer. While the turn is active, text and
- * contiguous activity phases stay in arrival order. A later tool therefore
- * appends a Working surface after existing Markdown instead of reparenting it.
+ * one audit surface plus the merged answer. While the turn is active, answer
+ * text and contiguous activity phases stay in arrival order. A later tool
+ * therefore appends a Working surface after existing Markdown instead of
+ * reparenting it.
  */
 export function projectActivityTimeline(
   messages: UIMessage[],
@@ -176,23 +179,29 @@ function projectLiveTurn(messages: UIMessage[]): TurnUnit[] {
   const prompt = messages[0];
   const startedAtMs = prompt?.role === "user" ? validCreatedAtMs(prompt.createdAt) : undefined;
   let activity: UIMessage[] = [];
+  let activitySourceMessageCount = 0;
 
-  if (prompt?.role === "user") units.push({ type: "message", message: prompt });
+  if (prompt?.role === "user") {
+    units.push({ type: "message", message: prompt, sourceMessageCount: 1 });
+  }
 
   const flushActivity = () => {
     if (!activity.length) return;
     units.push({
       type: "activity",
       messages: activity,
+      sourceMessageCount: activitySourceMessageCount,
       turnLatencyMs: activityTurnLatencyMs(activity, activity),
       startedAtMs,
     });
     activity = [];
+    activitySourceMessageCount = 0;
   };
 
   for (const message of messages.slice(prompt?.role === "user" ? 1 : 0)) {
     if (isRawActivity(message)) {
       activity.push(message);
+      activitySourceMessageCount += 1;
       continue;
     }
     if (isAssistantAnswer(message)) {
@@ -200,10 +209,15 @@ function projectLiveTurn(messages: UIMessage[]): TurnUnit[] {
         activity.push(reasoningOnlyMessageFromAnswer(message));
       }
       flushActivity();
-      units.push({ type: "message", message: stripInlineReasoning(message) });
+      units.push({
+        type: "message",
+        message: stripInlineReasoning(message),
+        sourceMessageCount: 1,
+      });
       continue;
     }
     activity.push(message);
+    activitySourceMessageCount += 1;
   }
 
   flushActivity();
@@ -215,7 +229,16 @@ function isRawActivity(message: UIMessage): boolean {
 }
 
 function isAssistantAnswer(message: UIMessage): boolean {
-  return message.role === "assistant" && message.kind !== "trace" && message.content.trim().length > 0;
+  if (message.role !== "assistant" || message.kind === "trace" || message.activityKind === "model") {
+    return false;
+  }
+  if (message.turnPhase === "reasoning" || message.turnPhase === "activity") return false;
+  return (
+    message.turnPhase === "answer"
+    || message.content.trim().length > 0
+    || !!message.media?.length
+    || !!message.images?.length
+  );
 }
 
 function orderMessagesByTurnSeq(messages: UIMessage[]): UIMessage[] {
@@ -246,18 +269,6 @@ function mergeAssistantAnswers(answers: UIMessage[]): UIMessage {
   if (images.length) merged.images = images;
   else delete merged.images;
   return merged;
-}
-
-function modelActivitySnippet(message: UIMessage): UIMessage {
-  return {
-    ...stripInlineReasoning(message),
-    id: `${message.id}-activity`,
-    activityKind: "model",
-    turnPhase: "activity",
-    // Keep the source stream state so the activity surface can render this
-    // segment with the same Markdown streaming semantics as a normal answer.
-    isStreaming: message.isStreaming,
-  };
 }
 
 function reasoningOnlyMessageFromAnswer(message: UIMessage): UIMessage {

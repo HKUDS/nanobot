@@ -1870,7 +1870,14 @@ def replay_transcript_to_ui_messages(
             return None
         return str(last.get("id"))
 
-    def demote_interrupted_assistant(segment: str) -> None:
+    def close_interrupted_assistant() -> None:
+        """Close an answer segment before tool activity without changing its semantics.
+
+        The wire protocol already marks answer, reasoning, and activity phases.
+        A later tool event does not turn previously emitted answer text into
+        reasoning; preserving ``content`` also keeps live and replay projections
+        equivalent.
+        """
         nonlocal buffer_message_id, buffer_parts
         for i in range(len(messages) - 1, -1, -1):
             candidate = messages[i]
@@ -1886,19 +1893,7 @@ def replay_transcript_to_ui_messages(
                 or candidate.get("media")
             ):
                 continue
-            reasoning_parts = [
-                part
-                for part in (candidate.get("reasoning"), content)
-                if isinstance(part, str) and part.strip()
-            ]
-            messages[i] = {
-                **candidate,
-                "content": "",
-                "reasoning": "\n\n".join(reasoning_parts),
-                "reasoningStreaming": False,
-                "isStreaming": False,
-                "activitySegmentId": candidate.get("activitySegmentId") or segment,
-            }
+            messages[i] = {**candidate, "isStreaming": False}
             if buffer_message_id == candidate.get("id"):
                 buffer_message_id = None
                 buffer_parts = []
@@ -2069,7 +2064,7 @@ def replay_transcript_to_ui_messages(
         if not segment:
             segment = _new_activity_segment(activate=False)
             active_file_edit_segment_id = segment
-        demote_interrupted_assistant(segment)
+        close_interrupted_assistant()
         strip_covered_file_edit_tool_hints_from_recent_messages(edits, turn_fields)
         target_index = find_file_edit_trace_index(segment, edits)
         if target_index is not None:
@@ -2363,7 +2358,7 @@ def replay_transcript_to_ui_messages(
                 if not trace_lines:
                     continue
                 segment = _ensure_activity_segment()
-                demote_interrupted_assistant(segment)
+                close_interrupted_assistant()
                 last = messages[-1] if messages else None
                 if (
                     last
