@@ -14,7 +14,6 @@ README = Path(__file__).resolve().parents[1] / "README.md"
 START = "<!-- contributors:start -->"
 END = "<!-- contributors:end -->"
 MAX_CONTRIBUTORS = 100
-AVATARS_PER_ROW = 10
 MAINTAINERS = {"re-bin", "chengyongru"}
 
 
@@ -50,12 +49,8 @@ def render_wall(contributors: list[dict[str, str]]) -> str:
         )
         for contributor in contributors
     ]
-    rows = [
-        "".join(avatars[index : index + AVATARS_PER_ROW])
-        for index in range(0, len(avatars), AVATARS_PER_ROW)
-    ]
-    wall = "<br>\n".join(rows)
-    return f"{START}\n{wall}\n{END}"
+    wall = "\n".join(avatars)
+    return f"{START}\n<p>\n{wall}\n</p>\n{END}"
 
 
 def update_readme(*, check: bool) -> bool:
