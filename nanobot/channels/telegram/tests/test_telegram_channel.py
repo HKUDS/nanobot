@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 # Check optional Telegram dependencies before running tests
 try:
@@ -2735,3 +2736,56 @@ def test_markdown_to_html_code_block_same_line_no_newline() -> None:
 
     stripped = _strip_md_block(text)
     assert stripped == "Use <tag> here"
+
+
+@pytest.mark.asyncio
+async def test_start_forwards_custom_api_base_and_headers_to_both_pools(monkeypatch) -> None:
+    """A custom Bot API base URL and extra headers reach both HTTPXRequest pools.
+
+    Lets the Telegram channel target a self-hosted Bot API server or an
+    enterprise gateway (#4702). Both the send and the long-polling pools must
+    carry base_url/extra_headers so every Bot API request is redirected.
+    """
+    _FakeHTTPXRequest.clear()
+    headers = {"X-Gateway-Auth": "secret"}
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        api_base="https://my-bot-api.example.com",
+        extra_headers=headers,
+    )
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    assert len(_FakeHTTPXRequest.instances) == 2
+    api_req, poll_req = _FakeHTTPXRequest.instances
+    assert api_req.kwargs["base_url"] == "https://my-bot-api.example.com"
+    assert poll_req.kwargs["base_url"] == "https://my-bot-api.example.com"
+    assert api_req.kwargs["extra_headers"] == headers
+    assert poll_req.kwargs["extra_headers"] == headers
+
+
+@pytest.mark.asyncio
+async def test_api_base_must_be_https_url() -> None:
+    """api_base rejects non-HTTPS / bare values and normalizes empties to None."""
+    # None / empty stay None (no error).
+    assert TelegramConfig(token="123:abc", api_base=None).api_base is None
+    assert TelegramConfig(token="123:abc", api_base="   ").api_base is None
+
+    valid = TelegramConfig(token="123:abc", api_base="https://my-bot-api.example.com")
+    assert valid.api_base == "https://my-bot-api.example.com"
+
+    for bad in ("http://insecure.example.com", "ftp://host", "not-a-url", "my-bot-api.example.com"):
+        with pytest.raises(ValidationError):
+            TelegramConfig(token="123:abc", api_base=bad)
