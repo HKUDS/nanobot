@@ -1620,6 +1620,17 @@ class SessionManager:
         self._remember(session)
         return session
 
+    def get_existing(self, key: str) -> Session | None:
+        """Return a cached or persisted session without creating one."""
+        session = self._cached(key)
+        if session is not None:
+            return session
+
+        session = self._load(key)
+        if session is not None:
+            self._remember(session)
+        return session
+
     def get_or_create_transient(
         self,
         key: str,
