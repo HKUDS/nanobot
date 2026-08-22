@@ -93,6 +93,34 @@ class GoalStateChanged:
 
 
 @dataclass(frozen=True)
+class SubagentStatusChanged:
+    """A subagent lifecycle state changed."""
+
+    context: RuntimeEventContext
+    subagent_id: str
+    label: str
+    status: str
+    turn_id: str | None = None
+    revision: int = 0
+    stop_reason: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class SubagentTraceChanged:
+    """A bounded, user-visible subagent execution trace item."""
+
+    context: RuntimeEventContext
+    subagent_id: str
+    label: str
+    turn_id: str | None
+    seq: int
+    revision: int
+    kind: str
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RuntimeModelChanged:
     """The active runtime model/preset changed."""
 
@@ -108,6 +136,8 @@ RuntimeEvent = (
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
+    | SubagentStatusChanged
+    | SubagentTraceChanged
     | RuntimeModelChanged
 )
 RuntimeEventType = (
@@ -118,6 +148,8 @@ RuntimeEventType = (
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
     | type[GoalStateChanged]
+    | type[SubagentStatusChanged]
+    | type[SubagentTraceChanged]
     | type[RuntimeModelChanged]
 )
 RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]

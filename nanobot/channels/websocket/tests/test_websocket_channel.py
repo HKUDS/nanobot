@@ -29,6 +29,7 @@ from nanobot.bus.outbound_events import (
     ProgressEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
+    SubagentStateEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
     UserInputEvent,
@@ -2284,6 +2285,39 @@ async def test_send_progress_includes_agent_ui_blob() -> None:
     assert payload["event"] == "message"
     assert payload["kind"] == "progress"
     assert payload["agent_ui"] == blob
+
+
+def test_send_subagent_state_uses_safe_runtime_projection() -> None:
+    async def run() -> None:
+        bus = MagicMock()
+        channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+        mock_ws = AsyncMock()
+        channel._attach(mock_ws, "chat-1")
+
+        await channel.send(OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            event=SubagentStateEvent(tasks=[{
+                "task_id": "a1",
+                "label": "检查 WebUI",
+                "status": "running",
+                "phase": "awaiting_tools",
+                "iteration": 2,
+                "elapsed_ms": 1800,
+                "latest_tool": {"name": "read_file", "phase": "start"},
+                "recent_tools": [{"name": "read_file", "phase": "start"}],
+                "error": None,
+            }]),
+        ))
+
+        payload = json.loads(mock_ws.send.await_args.args[0])
+        assert payload["event"] == "subagent_state"
+        assert payload["tasks"][0]["task_id"] == "a1"
+        assert "arguments" not in payload["tasks"][0]
+        assert "result" not in payload["tasks"][0]
+
+    asyncio.run(run())
 
 
 @pytest.mark.asyncio

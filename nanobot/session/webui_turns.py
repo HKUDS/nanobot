@@ -20,6 +20,8 @@ from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
+    SubagentStatusEvent,
+    SubagentTraceEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
     UserInputEvent,
@@ -32,6 +34,8 @@ from nanobot.bus.runtime_events import (
     RuntimeEventContext,
     RuntimeModelChanged,
     SessionTurnStarted,
+    SubagentStatusChanged,
+    SubagentTraceChanged,
     TurnCompleted,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
@@ -539,6 +543,14 @@ class WebuiTurnCoordinator:
                 GoalStateChanged,
             ),
             runtime_events.subscribe(
+                self._handle_subagent_status_changed,
+                SubagentStatusChanged,
+            ),
+            runtime_events.subscribe(
+                self._handle_subagent_trace_changed,
+                SubagentTraceChanged,
+            ),
+            runtime_events.subscribe(
                 self._handle_runtime_model_changed,
                 RuntimeModelChanged,
             ),
@@ -681,6 +693,52 @@ class WebuiTurnCoordinator:
                     model=event.model,
                     model_preset=event.model_preset,
                 ),
+            )
+        )
+
+    async def _handle_subagent_status_changed(self, event: SubagentStatusChanged) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        chat_id = str(event.context.chat_id or "").strip()
+        if not chat_id:
+            return
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=event.context.channel,
+                chat_id=chat_id,
+                event=SubagentStatusEvent(
+                    subagent_id=event.subagent_id,
+                    label=event.label,
+                    status=event.status,
+                    turn_id=event.turn_id,
+                    revision=event.revision,
+                    stop_reason=event.stop_reason,
+                    error=event.error,
+                ),
+                metadata=event.context.metadata,
+            )
+        )
+
+    async def _handle_subagent_trace_changed(self, event: SubagentTraceChanged) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        chat_id = str(event.context.chat_id or "").strip()
+        if not chat_id:
+            return
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=event.context.channel,
+                chat_id=chat_id,
+                event=SubagentTraceEvent(
+                    subagent_id=event.subagent_id,
+                    label=event.label,
+                    turn_id=event.turn_id,
+                    seq=event.seq,
+                    revision=event.revision,
+                    kind=event.kind,
+                    payload=event.payload,
+                ),
+                metadata=event.context.metadata,
             )
         )
 

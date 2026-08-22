@@ -14,6 +14,8 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel.gateway.subagent_statuses_for_chat = None
+    channel.gateway.subagent_detail_snapshot = None
     channel._turn_models = {}
 
     sent_events = []
@@ -40,6 +42,8 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel.gateway.subagent_statuses_for_chat = None
+    channel.gateway.subagent_detail_snapshot = None
     channel._turn_models = {}
 
     sent_events = []
@@ -69,3 +73,31 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     assert len(running_events) == 1
     assert running_events[0][3]["started_at"] == 1234567890.0
     assert running_events[0][3]["turn_id"] == "turn-active"
+
+
+@pytest.mark.asyncio
+async def test_hydrate_after_subscribe_replays_details_from_websocket_session_key():
+    """Persisted detail records use the full session key, not the wire chat UUID."""
+    channel = WebSocketChannel.__new__(WebSocketChannel)
+    channel.gateway = MagicMock()
+    channel.gateway.session_manager = MagicMock()
+    channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel.gateway.subagent_statuses_for_chat = None
+    channel.gateway.subagent_detail_snapshot = MagicMock(
+        return_value=[{"task_id": "task-1", "label": "第一轮任务", "status": "completed"}],
+    )
+    channel._turn_models = {}
+
+    sent_events = []
+
+    async def mock_send_detail_snapshot(chat_id, *, items):
+        sent_events.append((chat_id, items))
+
+    channel.send_subagent_detail_snapshot = mock_send_detail_snapshot
+
+    await channel._hydrate_after_subscribe("test-chat")
+
+    channel.gateway.subagent_detail_snapshot.assert_called_once_with("websocket:test-chat")
+    assert sent_events == [
+        ("test-chat", [{"task_id": "task-1", "label": "第一轮任务", "status": "completed"}]),
+    ]

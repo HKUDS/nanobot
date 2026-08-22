@@ -34,6 +34,10 @@ from nanobot.bus.outbound_events import (
     ProgressEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
+    SubagentDetailSnapshotEvent,
+    SubagentStateEvent,
+    SubagentStatusEvent,
+    SubagentTraceEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
     UserInputEvent,
@@ -575,6 +579,18 @@ class WebSocketChannel(BaseChannel):
         """Replay persisted or actively running per-chat state after subscribe."""
         await self._maybe_push_persisted_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
+        snapshot = self.gateway.subagent_statuses_for_chat
+        if snapshot is not None:
+            tasks = snapshot(chat_id)
+            if tasks:
+                await self.send_subagent_state(chat_id, tasks, snapshot=True)
+        details = self.gateway.subagent_detail_snapshot
+        if details is not None:
+            # Detail records are persisted under the full WebSocket session key,
+            # while the wire protocol identifies a chat by its bare UUID.
+            items = details(f"websocket:{chat_id}")
+            if items:
+                await self.send_subagent_detail_snapshot(chat_id, items=items)
 
     async def _send_event(
         self,
@@ -1656,15 +1672,53 @@ class WebSocketChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         event = outbound_event_from_message(msg)
         progress_event = event if isinstance(event, ProgressEvent) else None
+        # Snapshot the subscriber set before handling specialized events.
+        conns = list(self._subs.get(msg.chat_id, ()))
         if isinstance(event, RuntimeModelUpdatedEvent):
             await self.send_runtime_model_updated(
                 model_name=event.model,
                 model_preset=event.model_preset,
             )
             return
+        if isinstance(event, SubagentStateEvent):
+            await self.send_subagent_state(
+                msg.chat_id,
+                event.tasks,
+                snapshot=event.snapshot,
+            )
+            return
+        if isinstance(event, SubagentStatusEvent):
+            if conns:
+                await self.send_subagent_status(
+                    msg.chat_id,
+                    subagent_id=event.subagent_id,
+                    label=event.label,
+                    status=event.status,
+                    turn_id=event.turn_id,
+                    revision=event.revision,
+                    stop_reason=event.stop_reason,
+                    error=event.error,
+                )
+            return
+        if isinstance(event, SubagentTraceEvent):
+            if conns:
+                await self.send_subagent_trace(
+                    msg.chat_id,
+                    subagent_id=event.subagent_id,
+                    label=event.label,
+                    turn_id=event.turn_id,
+                    seq=event.seq,
+                    revision=event.revision,
+                    kind=event.kind,
+                    payload=event.payload,
+                )
+            return
+        if isinstance(event, SubagentDetailSnapshotEvent):
+            if conns:
+                await self.send_subagent_detail_snapshot(msg.chat_id, items=event.items)
+            return
 
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
-        conns = list(self._subs.get(msg.chat_id, ()))
         if not conns:
             if isinstance(
                 event,
@@ -2012,6 +2066,107 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_state ")
+
+    async def send_subagent_state(
+        self,
+        chat_id: str,
+        tasks: list[dict[str, Any]],
+        *,
+        snapshot: bool = False,
+    ) -> None:
+        """Push an allowlisted subagent runtime projection to one chat."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body = {
+            "event": "subagent_state_sync" if snapshot else "subagent_state",
+            "chat_id": chat_id,
+            "tasks": tasks,
+        }
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_state ")
+
+    async def send_subagent_status(
+        self,
+        chat_id: str,
+        *,
+        subagent_id: str,
+        label: str,
+        status: str,
+        turn_id: str | None = None,
+        revision: int = 0,
+        stop_reason: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "subagent_status",
+            "chat_id": chat_id,
+            "subagent_id": subagent_id,
+            "label": label,
+            "status": status,
+        }
+        if turn_id:
+            body["turn_id"] = turn_id
+        if revision:
+            body["revision"] = revision
+        if stop_reason:
+            body["stop_reason"] = stop_reason
+        if error:
+            body["error"] = error
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_status ")
+
+    async def send_subagent_trace(
+        self,
+        chat_id: str,
+        *,
+        subagent_id: str,
+        label: str,
+        turn_id: str | None,
+        seq: int,
+        revision: int,
+        kind: str,
+        payload: dict[str, Any],
+    ) -> None:
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "subagent_trace",
+            "chat_id": chat_id,
+            "subagent_id": subagent_id,
+            "label": label,
+            "seq": seq,
+            "revision": revision,
+            "kind": kind,
+            "payload": payload,
+        }
+        if turn_id:
+            body["turn_id"] = turn_id
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_trace ")
+
+    async def send_subagent_detail_snapshot(
+        self,
+        chat_id: str,
+        *,
+        items: list[dict[str, Any]],
+    ) -> None:
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        raw = json.dumps(
+            {"event": "subagent_detail_snapshot", "chat_id": chat_id, "items": items},
+            ensure_ascii=False,
+        )
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_detail_snapshot ")
 
     async def send_goal_status(
         self,

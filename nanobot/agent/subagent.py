@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 import warnings
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TypedDict
@@ -26,7 +26,14 @@ from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import SubagentStateEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import (
+    RuntimeEventBus,
+    RuntimeEventContext,
+    SubagentStatusChanged,
+    SubagentTraceChanged,
+)
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
@@ -35,6 +42,8 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.session.manager import SessionManager
+from nanobot.session.subagent_state import SubagentDetailRecord, SubagentDetailStore
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -43,6 +52,22 @@ class _SubagentOrigin(TypedDict):
     channel: str
     chat_id: str
     session_key: str | None
+    turn_id: str | None
+
+
+@dataclass(slots=True)
+class _SubagentDetail:
+    task_id: str
+    label: str
+    task: str
+    turn_id: str | None
+    status: str = "running"
+    revision: int = 0
+    seq: int = 0
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    output: str = ""
+    stop_reason: str | None = None
+    error: str | None = None
 
 
 @dataclass(slots=True)
@@ -59,23 +84,118 @@ class SubagentStatus:
     usage: dict[str, int] = field(default_factory=dict)
     stop_reason: str | None = None
     error: str | None = None
+    origin_channel: str = "cli"
+    origin_chat_id: str = "direct"
+    finished_at: float | None = None
+
+
+def _subagent_status_snapshot(status: SubagentStatus) -> dict[str, Any]:
+    """Project only bounded, non-sensitive fields for the WebUI."""
+    terminal = status.phase == "error" or status.stop_reason in {"error", "tool_error"}
+    state = "failed" if terminal else "completed" if status.phase == "done" else "running"
+    now = status.finished_at or time.monotonic()
+    recent_tools: list[dict[str, str]] = []
+    for event in status.tool_events[-5:]:
+        name = event.get("name")
+        phase = event.get("phase")
+        if isinstance(name, str) and name:
+            recent_tools.append({
+                "name": name[:80],
+                "phase": phase[:20] if isinstance(phase, str) else "",
+            })
+    safe_label = " ".join(status.label.split())[:120] or "Subagent"
+    latest_tool = recent_tools[-1] if recent_tools else None
+    return {
+        "task_id": status.task_id,
+        "label": safe_label,
+        "status": state,
+        "phase": status.phase[:32],
+        "iteration": max(0, int(status.iteration)),
+        "elapsed_ms": max(0, round((now - status.started_at) * 1000)),
+        "latest_tool": latest_tool,
+        "recent_tools": recent_tools,
+        "error": "Subagent failed" if terminal else None,
+    }
 
 
 class _SubagentHook(AgentHook):
     """Hook for subagent execution — logs tool calls and updates status."""
 
-    def __init__(self, task_id: str, status: SubagentStatus | None = None) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        status: SubagentStatus | None = None,
+        on_status: Callable[[SubagentStatus], Any] | None = None,
+        trace: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> None:
         super().__init__()
         self._task_id = task_id
         self._status = status
+        self._on_status = on_status
+        self._trace = trace
+        self._reasoning_seen = False
+
+    def wants_streaming(self) -> bool:
+        return self._trace is not None
+
+    async def _emit(self, kind: str, payload: dict[str, Any]) -> None:
+        if self._trace is not None:
+            await self._trace(kind, payload)
+
+    async def _notify(self) -> None:
+        if self._status is None or self._on_status is None:
+            return
+        result = self._on_status(self._status)
+        if asyncio.iscoroutine(result):
+            await result
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
+        await self._emit("phase", {"name": "tools", "iteration": context.iteration})
+        if self._status is not None:
+            self._status.phase = "awaiting_tools"
+            await self._notify()
         for tool_call in context.tool_calls:
             args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
             logger.debug(
                 "Subagent [{}] executing: {} with arguments: {}",
                 self._task_id, tool_call.name, args_str,
             )
+            await self._emit("tool_start", {"call_id": tool_call.id, "name": tool_call.name})
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        await self._emit("phase", {"name": "thinking", "iteration": context.iteration})
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        if delta:
+            await self._emit("delta", {"text": delta})
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        await self._emit("phase", {"name": "final_response", "resuming": resuming})
+
+    async def emit_reasoning(self, reasoning_content: str | None) -> None:
+        if reasoning_content and not self._reasoning_seen:
+            self._reasoning_seen = True
+            await self._emit("phase", {"name": "reasoning"})
+
+    async def after_execute_tool(
+        self,
+        context: AgentHookContext,
+        tool_call: Any,
+        tool: Any,
+        params: Any,
+        result: Any,
+    ) -> None:
+        await self._emit("tool_end", {"call_id": tool_call.id, "name": tool_call.name, "status": "ok"})
+
+    async def on_execute_tool_error(
+        self,
+        context: AgentHookContext,
+        tool_call: Any,
+        tool: Any,
+        params: Any,
+        error: Any,
+    ) -> None:
+        await self._emit("tool_end", {"call_id": tool_call.id, "name": tool_call.name, "status": "error"})
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         if self._status is None:
@@ -85,6 +205,7 @@ class _SubagentHook(AgentHook):
         self._status.usage = dict(context.usage)
         if context.error:
             self._status.error = str(context.error)
+        await self._notify()
 
 
 class SubagentManager:
@@ -104,6 +225,8 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        runtime_events: RuntimeEventBus | None = None,
+        session_manager: SessionManager | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -151,12 +274,15 @@ class SubagentManager:
             if fail_on_tool_error is not None
             else defaults.fail_on_tool_error
         )
+        self.runtime_events = runtime_events
+        self._detail_store = SubagentDetailStore(session_manager)
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._detail_states: dict[str, _SubagentDetail] = {}
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
         """Return the observable task statuses used by runtime-control snapshots."""
@@ -228,6 +354,107 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
+    def _runtime_context(self, origin: _SubagentOrigin) -> RuntimeEventContext:
+        channel = origin.get("channel") or "cli"
+        chat_id = origin.get("chat_id") or "direct"
+        return RuntimeEventContext(
+            channel=channel,
+            chat_id=chat_id,
+            session_key=origin.get("session_key") or f"{channel}:{chat_id}",
+        )
+
+    def _publish_status_event(
+        self,
+        origin: _SubagentOrigin,
+        task_id: str,
+        label: str,
+        status: str,
+        *,
+        stop_reason: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        if self.runtime_events is None:
+            return
+        self.runtime_events.publish_nowait(SubagentStatusChanged(
+            context=self._runtime_context(origin),
+            subagent_id=task_id,
+            label=label,
+            status=status,
+            turn_id=origin.get("turn_id"),
+            stop_reason=stop_reason,
+            error=error,
+        ))
+
+    async def _publish_trace(
+        self,
+        origin: _SubagentOrigin,
+        detail: _SubagentDetail,
+        kind: str,
+        payload: dict[str, Any],
+    ) -> None:
+        detail.seq += 1
+        text = payload.get("text")
+        if kind == "delta" and isinstance(text, str):
+            detail.output = (detail.output + text)[-12000:]
+        elif kind in {"phase", "tool_start", "tool_end"}:
+            detail.steps = [*detail.steps, {"kind": kind, **payload}][-100:]
+        if kind in {"completed", "failed", "cancelled"}:
+            self._persist_detail(origin, detail)
+        if self.runtime_events is not None:
+            self.runtime_events.publish_nowait(SubagentTraceChanged(
+                context=self._runtime_context(origin),
+                subagent_id=detail.task_id,
+                label=detail.label,
+                turn_id=detail.turn_id,
+                seq=detail.seq,
+                revision=detail.revision,
+                kind=kind,
+                payload=payload,
+            ))
+
+    def _detail_snapshot(self, detail: _SubagentDetail) -> dict[str, Any]:
+        return {
+            "task_id": detail.task_id,
+            "label": detail.label,
+            "turn_id": detail.turn_id,
+            "status": detail.status,
+            "revision": detail.revision,
+            "seq": detail.seq,
+            "input": detail.task[-12000:],
+            "steps": detail.steps[-100:],
+            "output": detail.output[-12000:],
+            "stop_reason": detail.stop_reason,
+            "error": detail.error,
+        }
+
+    def _persist_detail(self, origin: _SubagentOrigin, detail: _SubagentDetail) -> None:
+        session_key = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
+        self._detail_store.upsert(
+            session_key,
+            SubagentDetailRecord(
+                task_id=detail.task_id,
+                label=detail.label,
+                turn_id=detail.turn_id,
+                status=detail.status,
+                revision=detail.revision,
+                seq=detail.seq,
+                input=detail.task,
+                steps=list(detail.steps),
+                output=detail.output,
+                stop_reason=detail.stop_reason,
+                error=detail.error,
+            ),
+        )
+
+    def webui_detail_snapshot(self, session_key: str) -> list[dict[str, Any]]:
+        result = self._detail_store.snapshot(session_key)
+        known = {str(item.get("task_id")) for item in result}
+        for task_id in self._session_tasks.get(session_key, set()):
+            detail = self._detail_states.get(task_id)
+            if detail is not None and task_id not in known:
+                result.insert(0, self._detail_snapshot(detail))
+        return result[:50]
+
     async def spawn(
         self,
         task: str,
@@ -236,6 +463,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_turn_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
@@ -252,13 +480,21 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "turn_id": origin_turn_id,
         }
+        detail = _SubagentDetail(task_id, display_label, task, origin_turn_id)
+        self._detail_states[task_id] = detail
+        self._persist_detail(origin, detail)
+        self._publish_status_event(origin, task_id, display_label, "started")
+        await self._publish_trace(origin, detail, "input", {"text": task})
 
         status = SubagentStatus(
             task_id=task_id,
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
         )
         self._task_statuses[task_id] = status
 
@@ -272,11 +508,14 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                detail=detail,
             )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
+
+        await self._notify_status(status)
 
         def _cleanup(_: asyncio.Task[str]) -> None:
             self._running_tasks.pop(task_id, None)
@@ -299,6 +538,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_turn_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
@@ -315,14 +555,23 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "turn_id": origin_turn_id,
         }
+        detail = _SubagentDetail(task_id, display_label, task, origin_turn_id)
+        self._detail_states[task_id] = detail
+        self._persist_detail(origin, detail)
+        self._publish_status_event(origin, task_id, display_label, "started")
+        await self._publish_trace(origin, detail, "input", {"text": task})
         status = SubagentStatus(
             task_id=task_id,
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
         )
         self._task_statuses[task_id] = status
+        await self._notify_status(status)
         logger.info("Running inline subagent [{}]: {}", task_id, display_label)
         inline_task = asyncio.create_task(
             self._run_subagent(
@@ -335,6 +584,7 @@ class SubagentManager:
                 origin_message_id,
                 workspace_scope,
                 announce=False,
+                detail=detail,
             )
         )
         self._running_tasks[task_id] = inline_task
@@ -365,6 +615,7 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         announce: bool = True,
+        detail: _SubagentDetail | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -372,6 +623,7 @@ class SubagentManager:
         async def _on_checkpoint(payload: dict[str, Any]) -> None:
             status.phase = payload.get("phase", status.phase)
             status.iteration = payload.get("iteration", status.iteration)
+            await self._notify_status(status)
 
         try:
             root = workspace_scope.project_path if workspace_scope is not None else self.workspace
@@ -399,6 +651,7 @@ class SubagentManager:
                 message_id=origin_message_id,
                 session_key=sess_key,
                 runtime=runtime,
+                turn_id=origin.get("turn_id"),
             ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
@@ -408,7 +661,15 @@ class SubagentManager:
                     runtime=runtime,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
-                    hook=_SubagentHook(task_id, status),
+                    hook=_SubagentHook(
+                        task_id,
+                        status,
+                        self._notify_status,
+                        trace=(
+                            lambda kind, payload: self._publish_trace(origin, detail, kind, payload)
+                            if detail is not None else None
+                        ),
+                    ),
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,
                     error_message=None,
@@ -424,6 +685,8 @@ class SubagentManager:
                 reset_request_context(request_token)
             status.phase = "done"
             status.stop_reason = result.stop_reason
+            status.finished_at = time.monotonic()
+            await self._notify_status(status)
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
@@ -436,6 +699,23 @@ class SubagentManager:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 final_status = "ok"
                 logger.info("Subagent [{}] completed successfully", task_id)
+            if detail is not None:
+                detail.status = "failed" if final_status != "ok" else "completed"
+                detail.stop_reason = result.stop_reason
+                detail.output = final_result[-12000:]
+                await self._publish_trace(
+                    origin,
+                    detail,
+                    "failed" if final_status != "ok" else "completed",
+                    {"status": detail.status, "text": final_result, "stop_reason": result.stop_reason},
+                )
+            self._publish_status_event(
+                origin,
+                task_id,
+                label,
+                "failed" if final_status != "ok" else "completed",
+                stop_reason=result.stop_reason,
+            )
             if announce:
                 await self._announce_result(
                     task_id,
@@ -451,8 +731,21 @@ class SubagentManager:
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
-            logger.exception("Subagent [{}] failed", task_id)
+            status.finished_at = time.monotonic()
+            await self._notify_status(status)
             final_result = f"Error: {e}"
+            if detail is not None:
+                detail.status = "failed"
+                detail.error = str(e)
+                detail.output = final_result[-12000:]
+                await self._publish_trace(
+                    origin,
+                    detail,
+                    "failed",
+                    {"status": "failed", "text": final_result, "error": str(e)},
+                )
+            self._publish_status_event(origin, task_id, label, "failed", error=str(e))
+            logger.exception("Subagent [{}] failed", task_id)
             if announce:
                 await self._announce_result(
                     task_id,
@@ -464,6 +757,29 @@ class SubagentManager:
                     origin_message_id,
                 )
             return final_result
+
+    async def _notify_status(self, status: SubagentStatus) -> None:
+        """Publish a fail-open, redacted status projection for WebUI clients."""
+        if status.origin_channel != "websocket":
+            return
+        try:
+            await self.bus.publish_outbound(
+                outbound_message_for_event(
+                    channel=status.origin_channel,
+                    chat_id=status.origin_chat_id,
+                    event=SubagentStateEvent(tasks=[_subagent_status_snapshot(status)]),
+                    metadata={"subagent_task_id": status.task_id},
+                )
+            )
+        except Exception:
+            logger.exception("Subagent [{}] status observer failed", status.task_id)
+
+    def status_snapshot_for_chat(self, chat_id: str) -> list[dict[str, Any]]:
+        return [
+            _subagent_status_snapshot(status)
+            for status in self._task_statuses.values()
+            if status.origin_channel == "websocket" and status.origin_chat_id == chat_id
+        ]
 
     async def _announce_result(
         self,

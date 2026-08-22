@@ -74,6 +74,47 @@ class GoalStateSyncEvent(OutboundEvent):
 
 
 @dataclass(frozen=True)
+class SubagentStateEvent(OutboundEvent):
+    """Safe runtime projection for one WebUI-visible subagent update."""
+
+    tasks: list[dict[str, Any]]
+    snapshot: bool = False
+
+
+@dataclass(frozen=True)
+class SubagentStatusEvent(OutboundEvent):
+    """Lifecycle status of a WebUI-visible subagent."""
+
+    subagent_id: str
+    label: str
+    status: str
+    turn_id: str | None = None
+    revision: int = 0
+    stop_reason: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class SubagentTraceEvent(OutboundEvent):
+    """Live bounded trace item for a WebUI-visible subagent."""
+
+    subagent_id: str
+    label: str
+    turn_id: str | None
+    seq: int
+    revision: int
+    kind: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SubagentDetailSnapshotEvent(OutboundEvent):
+    """Persisted detail snapshot sent on WebSocket attach/reconnect."""
+
+    items: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class SessionUpdatedEvent(OutboundEvent):
     scope: str | None = None
 

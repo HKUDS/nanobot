@@ -1577,6 +1577,28 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_spawn_tool_uses_webui_turn_id_for_subagent_events(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
+
+    with request_context(RequestContext(
+        channel="websocket",
+        chat_id="web-chat",
+        session_key="websocket:web-chat",
+        runtime=runtime,
+        turn_id="websocket:web-chat:internal-turn",
+        metadata={"webui_turn_id": "client-turn-42"},
+    )):
+        await spawn_tool.execute(task="inspect context")
+
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["origin_turn_id"] == "client-turn-42"
+
+
+@pytest.mark.asyncio
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]

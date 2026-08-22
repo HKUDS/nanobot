@@ -394,6 +394,8 @@ class AgentLoop:
             max_concurrent_subagents=max_concurrent_subagents,
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            runtime_events=self.runtime_events,
+            session_manager=self.sessions,
         )
         self._unified_session = unified_session
         self._running = False

@@ -15,6 +15,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.security.workspace_access import current_workspace_scope
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -96,6 +97,11 @@ class SpawnTool(Tool):
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
         session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
+        origin_turn_id = request_ctx.turn_id
+        if origin_channel == "websocket":
+            webui_turn_id = request_ctx.metadata.get(WEBUI_TURN_METADATA_KEY)
+            if isinstance(webui_turn_id, str) and webui_turn_id:
+                origin_turn_id = webui_turn_id
         method = self._manager.run_inline if wait else self._manager.spawn
         return await method(
             task=task,
@@ -105,6 +111,7 @@ class SpawnTool(Tool):
             origin_chat_id=origin_chat_id,
             session_key=session_key,
             origin_message_id=request_ctx.message_id,
+            origin_turn_id=origin_turn_id,
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
         )

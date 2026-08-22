@@ -686,6 +686,8 @@ def _run_gateway(
         webui_mcp_runtime_status=mcp_provider.runtime_status,
         webui_mcp_reload=mcp_provider.reload,
         webui_skill_state_action=_webui_skill_state_action,
+        webui_subagent_statuses_for_chat=agent.subagents.status_snapshot_for_chat,
+        webui_subagent_detail_snapshot=agent.subagents.webui_detail_snapshot,
         config_path=Path(config_path),
     )
 

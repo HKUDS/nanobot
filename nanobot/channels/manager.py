@@ -104,6 +104,8 @@ class ChannelManager:
         webui_mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         webui_mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
+        webui_subagent_statuses_for_chat: Callable[[str], list[dict[str, Any]]] | None = None,
+        webui_subagent_detail_snapshot: Callable[[str], list[dict[str, Any]]] | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -126,6 +128,8 @@ class ChannelManager:
         self._webui_mcp_runtime_status = webui_mcp_runtime_status
         self._webui_mcp_reload = webui_mcp_reload
         self._webui_skill_state_action = webui_skill_state_action
+        self._webui_subagent_statuses_for_chat = webui_subagent_statuses_for_chat
+        self._webui_subagent_detail_snapshot = webui_subagent_detail_snapshot
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -197,6 +201,8 @@ class ChannelManager:
                 mcp_runtime_status=self._webui_mcp_runtime_status,
                 mcp_reload=self._webui_mcp_reload,
                 skill_state_action=self._webui_skill_state_action,
+                subagent_statuses_for_chat=self._webui_subagent_statuses_for_chat,
+                subagent_detail_snapshot=self._webui_subagent_detail_snapshot,
                 logger=logger,
             )
             kwargs["gateway"] = gateway

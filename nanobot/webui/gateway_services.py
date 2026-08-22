@@ -44,6 +44,8 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    subagent_statuses_for_chat: Callable[[str], list[dict[str, Any]]] | None
+    subagent_detail_snapshot: Callable[[str], list[dict[str, Any]]] | None
 
 
 def build_gateway_services(
@@ -64,6 +66,8 @@ def build_gateway_services(
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+    subagent_statuses_for_chat: Callable[[str], list[dict[str, Any]]] | None = None,
+    subagent_detail_snapshot: Callable[[str], list[dict[str, Any]]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
@@ -147,4 +151,6 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        subagent_statuses_for_chat=subagent_statuses_for_chat,
+        subagent_detail_snapshot=subagent_detail_snapshot,
     )
