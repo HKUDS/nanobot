@@ -324,6 +324,8 @@ export interface ToolProgressEvent {
   name?: string;
   arguments?: unknown;
   result?: unknown;
+  /** Structured data kept out of model-facing tool-result text. */
+  data?: unknown;
   error?: unknown;
   files?: unknown[];
   embeds?: unknown[];
