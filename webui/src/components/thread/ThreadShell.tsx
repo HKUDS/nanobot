@@ -7,6 +7,7 @@ import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailab
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import {
   ThreadComposer,
@@ -763,6 +764,9 @@ export function ThreadShell({
     isStreaming,
     runStartedAt,
     goalState,
+    recoveryState,
+    continueRecovery,
+    dismissRecovery,
     send,
     transcribeAudio,
     stop,
@@ -835,8 +839,15 @@ export function ThreadShell({
     [displayMessages],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
-  const currentRunStartedAt = messagesReady ? runStartedAt : null;
-  const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
+  // Decision states freeze the interrupted turn and hand the next action to
+  // the recovery notice. ``resuming`` remains active; ``recovered`` is only
+  // historical metadata and must not suppress a later normal turn.
+  const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
+    || recoveryState?.status === "failed";
+  const currentRunStartedAt = messagesReady && !recoveryNeedsDecision ? runStartedAt : null;
+  const turnActive = messagesReady
+    && !recoveryNeedsDecision
+    && (isStreaming || currentRunStartedAt !== null);
   const restoredViewportTurnId = useMemo(
     () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
     [currentRunStartedAt, displayMessages, turnActive],
@@ -1472,6 +1483,13 @@ export function ThreadShell({
 
   const composer = (
     <>
+      {recoveryState ? (
+        <RecoveryNotice
+          state={recoveryState}
+          onContinue={continueRecovery}
+          onDismiss={dismissRecovery}
+        />
+      ) : null}
       {streamError && !hasInlineDeliveryError(messages, streamError) ? (
         <StreamErrorNotice
           error={streamError}

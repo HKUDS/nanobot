@@ -73,6 +73,7 @@ function fakeClient() {
   const runStartedAtByChatId = new Map<string, number>();
   const unsettledRunByChatId = new Map<string, boolean>();
   const goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  const requestMutation = vi.fn().mockResolvedValue({});
   let status: ConnectionStatus = "open";
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
@@ -133,6 +134,7 @@ function fakeClient() {
         return () => set!.delete(h);
       },
       sendMessage: vi.fn(),
+      requestMutation,
       finishRunLocally: vi.fn(),
       newChat: vi.fn(),
       forkChat: vi.fn(),
@@ -157,6 +159,7 @@ function fakeClient() {
     setUnsettled(chatId: string, unsettled: boolean) {
       unsettledRunByChatId.set(chatId, unsettled);
     },
+    requestMutation,
   };
 }
 
@@ -393,6 +396,101 @@ describe("useNanobotStream", () => {
         request_count: 3,
       },
     });
+  });
+
+  it("exposes typed recovery state and validates actions with its recovery id", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-recovery", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-recovery", {
+        event: "goal_status",
+        chat_id: "chat-recovery",
+        status: "running",
+        started_at: 1_700,
+      });
+    });
+    expect(result.current.runStartedAt).toBe(1_700);
+
+    act(() => {
+      fake.emit("chat-recovery", {
+        event: "recovery_state",
+        chat_id: "chat-recovery",
+        recovery_id: "recovery-1",
+        status: "awaiting_user",
+        reason: "tool_state_uncertain",
+        can_continue: false,
+      });
+    });
+
+    expect(result.current.recoveryState).toEqual({
+      recovery_id: "recovery-1",
+      status: "awaiting_user",
+      reason: "tool_state_uncertain",
+      can_continue: false,
+    });
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.runStartedAt).toBeNull();
+    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-recovery");
+
+    act(() => {
+      fake.emit("chat-recovery", {
+        event: "recovery_state",
+        chat_id: "chat-recovery",
+        recovery_id: "recovery-1",
+        status: "awaiting_user",
+        reason: "tool_state_uncertain",
+        can_continue: true,
+      });
+    });
+
+    await act(async () => result.current.continueRecovery());
+    expect(fake.requestMutation).toHaveBeenCalledWith("recovery.continue", {
+      chat_id: "chat-recovery",
+      recovery_id: "recovery-1",
+    });
+
+    act(() => {
+      fake.emit("chat-recovery", {
+        event: "recovery_state",
+        chat_id: "chat-recovery",
+        recovery_id: "recovery-1",
+        status: "recovered",
+      });
+    });
+    expect(result.current.isStreaming).toBe(false);
+    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-recovery");
+  });
+
+  it("does not let historical recovered state clear a later active turn", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-recovered-history", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-recovered-history", {
+        event: "goal_status",
+        chat_id: "chat-recovered-history",
+        status: "running",
+        started_at: 1_700,
+      });
+      fake.emit("chat-recovered-history", {
+        event: "attached",
+        chat_id: "chat-recovered-history",
+        recovery_state: {
+          recovery_id: "old-recovery",
+          status: "recovered",
+        },
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.runStartedAt).toBe(1_700);
+    expect(fake.client.finishRunLocally).not.toHaveBeenCalled();
   });
 
   it("preserves proactive automation source metadata on complete assistant messages", () => {

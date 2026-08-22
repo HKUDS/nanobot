@@ -69,6 +69,7 @@ def build_gateway_services(
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
     mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
+    recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -131,6 +132,7 @@ def build_gateway_services(
         mcp_runtime_status=mcp_runtime_status,
         mcp_reload=mcp_reload,
         skill_state_action=skill_state_action,
+        recovery_action=recovery_action,
         log=logger,
     )
     return GatewayServices(

@@ -24,6 +24,11 @@ const sessions: SessionSummary[] = [
     updatedAt: "2026-08-12T10:00:00Z",
     runStartedAt: null,
     modelPreset: null,
+    recoveryState: {
+      status: "awaiting_user",
+      recovery_id: "recovery-two",
+      reason: "tool execution interrupted",
+    },
     pinned: false,
     archived: false,
   },
@@ -53,7 +58,7 @@ describe("SessionMenu", () => {
 
     menu.update("release stable", 6)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("Release checklist")
+    expect(setup.captureCharFrame()).toContain("△ Release checklist")
     expect(menu.choose()?.chatId).toBe("two")
   })
 

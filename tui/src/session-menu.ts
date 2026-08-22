@@ -42,6 +42,8 @@ export class SessionMenu {
         session.chatId,
         session.workspaceScope?.project_name || "",
         session.workspaceScope?.project_path || "",
+        session.recoveryState?.status || "",
+        session.recoveryState?.reason || "",
       ].join(" "),
       render: (session) => {
         const age = updatedLabel(session.updatedAt)
@@ -54,7 +56,11 @@ export class SessionMenu {
         ]
           .filter(Boolean)
           .join(" · ")
-        const marker = session.active ? "● " : session.pinned ? "◆ " : session.archived ? "◇ " : ""
+        const interrupted = session.recoveryState?.status === "awaiting_user"
+          || session.recoveryState?.status === "failed"
+        const marker = interrupted
+          ? "△ "
+          : session.active ? "● " : session.pinned ? "◆ " : session.archived ? "◇ " : ""
         return `${marker}${sessionLabel(session)}${detail ? `  ${detail}` : ""}`
       },
       emptyText: "No matching sessions",

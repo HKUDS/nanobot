@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import nanobot.session as session_api
+from nanobot.providers.base import ProviderConversationState
 from nanobot.session import Session, SessionManager
 from nanobot.session.manager import SessionStore
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
@@ -123,3 +124,93 @@ def test_manager_preserves_full_session_before_store_save(tmp_path) -> None:
     assert session.messages[0]["content"] == "0"
     assert session.messages[-1]["content"] == "2000"
     store.save.assert_called_once_with(session, fsync=False)
+
+
+def test_runtime_checkpoint_does_not_rewrite_long_session(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:long")
+    for index in range(256):
+        session.add_message("user", f"{index}:" + "x" * 4096)
+    manager.save(session)
+
+    main_path = manager._get_session_path(session.key)
+    main_before = main_path.read_bytes()
+    stat_before = main_path.stat()
+    session.metadata["runtime_checkpoint"] = {
+        "phase": "tools_completed",
+        "assistant_message": {"role": "assistant", "content": "working"},
+        "completed_tool_results": [],
+        "pending_tool_calls": [],
+    }
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"response_id": "private-response"},
+    )
+
+    manager.save_runtime_checkpoint(session)
+
+    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
+    assert main_path.read_bytes() == main_before
+    assert main_path.stat().st_ino == stat_before.st_ino
+    assert main_path.stat().st_mtime_ns == stat_before.st_mtime_ns
+    assert checkpoint_path.stat().st_size < len(main_before) // 100
+
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+    assert restored.metadata["runtime_checkpoint"]["phase"] == "tools_completed"
+    assert restored.provider_state is not None
+    assert restored.provider_state.payload == {"response_id": "private-response"}
+
+
+def test_completed_session_supersedes_stale_checkpoint(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:completed")
+    session.add_message("user", "question")
+    manager.save(session)
+    session.metadata["runtime_checkpoint"] = {"phase": "awaiting_tools"}
+    manager.save_runtime_checkpoint(session)
+    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
+    stale_checkpoint = checkpoint_path.read_bytes()
+
+    session.metadata.pop("runtime_checkpoint")
+    session.add_message("assistant", "answer")
+    manager.save(session)
+    assert not checkpoint_path.exists()
+
+    # Emulate a process dying after the main record was committed but before an
+    # obsolete sidecar could be removed. The base fingerprint keeps it stale.
+    checkpoint_path.write_bytes(stale_checkpoint)
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+    assert "runtime_checkpoint" not in restored.metadata
+    assert restored.messages[-1]["content"] == "answer"
+    assert not checkpoint_path.exists()
+
+
+def test_delete_session_removes_runtime_checkpoint(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:delete")
+    session.add_message("user", "question")
+    manager.save(session)
+    session.metadata["runtime_checkpoint"] = {"phase": "awaiting_tools"}
+    manager.save_runtime_checkpoint(session)
+    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
+    assert checkpoint_path.exists()
+
+    assert manager.delete_session(session.key) is True
+    assert not checkpoint_path.exists()
+
+
+def test_invalid_runtime_checkpoint_is_discarded(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:invalid-checkpoint")
+    session.add_message("user", "question")
+    manager.save(session)
+    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
+    checkpoint_path.write_text("{truncated", encoding="utf-8")
+
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+
+    assert "runtime_checkpoint" not in restored.metadata
+    assert not checkpoint_path.exists()

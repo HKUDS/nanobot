@@ -4007,4 +4007,32 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
+  it("allows a new turn after a completed recovery state", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("recovered-chat")}
+        title="Recovered chat"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    act(() => {
+      client._emitChat("recovered-chat", {
+        event: "recovery_state",
+        chat_id: "recovered-chat",
+        recovery_id: "recovery-1",
+        status: "recovered",
+      });
+    });
+
+    fireEvent.change(input, { target: { value: "start the next task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(client.sendMessage).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+  });
+
 });

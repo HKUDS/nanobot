@@ -2541,6 +2541,19 @@ def has_pending_tool_calls(
     return False
 
 
+def has_unfinished_transcript_tail(session_key: str) -> bool:
+    """Return whether the active transcript ends in an unfinished turn.
+
+    Recovery runs at gateway startup and only needs the newest, still-active
+    turn. Completed turns are rotated into immutable segment files, so reading
+    every historical segment here would make restart cost grow with the full
+    conversation history.
+    """
+    return has_pending_tool_calls(
+        _read_transcript_file(webui_transcript_path(session_key))
+    )
+
+
 def completed_turn_ids(lines: list[dict[str, Any]]) -> list[str]:
     """Return stable identities for turns with an explicitly persisted completion."""
     completed: list[str] = []

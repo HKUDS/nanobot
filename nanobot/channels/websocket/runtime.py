@@ -32,6 +32,7 @@ from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
+    RecoveryStateEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -55,6 +56,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
+from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -453,6 +455,9 @@ class WebSocketChannel(BaseChannel):
             self.logger.warning("ignoring invalid model preset metadata for chat_id={}", chat_id)
             fields["model_preset"] = None
         if isinstance(metadata, dict):
+            recovery_state = recovery_state_from_metadata(metadata)
+            if recovery_state is not None:
+                fields["recovery_state"] = recovery_state
             usage = metadata.get("_last_usage")
             if isinstance(usage, dict):
                 sanitized_usage: dict[str, int | float] = {}
@@ -1740,6 +1745,10 @@ class WebSocketChannel(BaseChannel):
                     provenance=event.provenance,
                 )
             return
+        if isinstance(event, RecoveryStateEvent):
+            if conns:
+                await self.send_recovery_state(msg.chat_id, event)
+            return
         if isinstance(event, GoalStateSyncEvent):
             if conns:
                 await self.send_goal_state(msg.chat_id, event.goal_state or {"active": False})
@@ -2056,6 +2065,27 @@ class WebSocketChannel(BaseChannel):
             return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
+
+    async def send_recovery_state(
+        self,
+        chat_id: str,
+        event: RecoveryStateEvent,
+    ) -> None:
+        """Publish one structured recovery transition without chat pollution."""
+        body: dict[str, Any] = {
+            "event": "recovery_state",
+            "chat_id": chat_id,
+            "status": event.status,
+            "recovery_id": event.recovery_id,
+            "attempts": event.attempts,
+        }
+        if event.reason:
+            body["reason"] = event.reason
+        if event.can_continue is not None:
+            body["can_continue"] = event.can_continue
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in list(self._subs.get(chat_id, ())):
+            await self._safe_send_to(connection, raw, label=" recovery_state ")
 
     async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
         """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""

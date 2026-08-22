@@ -31,8 +31,9 @@ from nanobot.session.manager import (
     _metadata_title,  # pyright: ignore[reportPrivateUsage]
 )
 from nanobot.session.model_selection import model_preset_from_metadata
+from nanobot.session.recovery import recovery_state_from_metadata
 
-_INDEX_VERSION = 7
+_INDEX_VERSION = 8
 _INDEX_FILENAME = ".webui_session_index.json"
 _MODEL_PRESET_FIELD = "model_preset"
 _ROW_SOURCE_FIELD = "_source"
@@ -245,6 +246,7 @@ def _public_row(sessions_dir: Path, webui_dir: Path, row: dict[str, Any]) -> dic
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
         _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
+        "recovery_state": row.get("recovery_state"),
         _WORKSPACE_SCOPE_PRESENT_FIELD: row.get(_WORKSPACE_SCOPE_PRESENT_FIELD, False),
         _WORKSPACE_SCOPE_VALUE_FIELD: row.get(_WORKSPACE_SCOPE_VALUE_FIELD),
         "path": str(path),
@@ -485,6 +487,7 @@ def _indexed_row_for_session(session: Session, path: Path, webui_dir: Path) -> d
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
+        "recovery_state": recovery_state_from_metadata(session.metadata),
         **_indexed_workspace_scope_fields(session.metadata),
         _ROW_SOURCE_FIELD: _SESSION_SOURCE,
         "file": path.name,
@@ -601,6 +604,7 @@ def _scan_transcript_row(
         "title": "",
         "preview": preview or fallback_preview,
         _MODEL_PRESET_FIELD: None,
+        "recovery_state": None,
         **_indexed_workspace_scope_fields({}),
         _ROW_SOURCE_FIELD: _TRANSCRIPT_SOURCE,
         "file": stem,
@@ -687,6 +691,7 @@ def _scan_session_row(
                 "title": _metadata_title(metadata),
                 "preview": preview or fallback_preview,
                 _MODEL_PRESET_FIELD: model_preset_from_metadata(metadata),
+                "recovery_state": recovery_state_from_metadata(metadata),
                 **_indexed_workspace_scope_fields(metadata),
                 _ROW_SOURCE_FIELD: _SESSION_SOURCE,
                 "file": path.name,

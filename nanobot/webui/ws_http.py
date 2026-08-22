@@ -29,6 +29,7 @@ from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import SessionManager
+from nanobot.session.recovery import RecoveryActionError
 from nanobot.session.session_handles import (
     SessionHandleResolver,
 )
@@ -145,6 +146,8 @@ _WEBUI_MUTATION_PATHS = {
     "skill.delete": "/api/webui/skills/delete",
     "sidebar.update": "/api/webui/sidebar-state/update",
     "workspace.pick_folder": "/api/workspaces/pick-folder",
+    "recovery.continue": "/api/webui/recovery/continue",
+    "recovery.dismiss": "/api/webui/recovery/dismiss",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
     "settings.model_configuration.update": "/api/settings/model-configurations/update",
@@ -323,6 +326,9 @@ class GatewayHTTPHandler:
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
+        recovery_action: (
+            Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -340,6 +346,7 @@ class GatewayHTTPHandler:
             disabled_skills if disabled_skills is not None else set()
         )
         self.skill_state_action = skill_state_action
+        self.recovery_action = recovery_action
         self._skill_install_lock = asyncio.Lock()
         self._folder_picker_lock = asyncio.Lock()
         self.cron_service = cron_service
@@ -454,6 +461,8 @@ class GatewayHTTPHandler:
             return True
         if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", path):
             return True
+        if path in {"/api/webui/recovery/continue", "/api/webui/recovery/dismiss"}:
+            return True
         return path in {
             "/api/webui/skills/install",
             "/api/webui/skills/update",
@@ -504,6 +513,11 @@ class GatewayHTTPHandler:
 
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(connection, request, got)
+        if response is not None:
+            return response
+
+        # Recovery routes
+        response = await self._dispatch_recovery_route(request, got)
         if response is not None:
             return response
 
@@ -700,6 +714,27 @@ class GatewayHTTPHandler:
 
         return None
 
+    async def _dispatch_recovery_route(
+        self,
+        request: WsRequest,
+        path: str,
+    ) -> Response | None:
+        match = re.fullmatch(r"/api/webui/recovery/(continue|dismiss)", path)
+        if match is None:
+            return None
+        if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
+            return _http_error(405, "WebUI recovery actions require an authenticated WebSocket")
+        if self.recovery_action is None:
+            return _http_error(503, "WebUI recovery is unavailable")
+        payload = _mutation_payload(request)
+        if payload is None:
+            return _http_error(400, "invalid recovery payload")
+        try:
+            result = await self.recovery_action(match.group(1), payload)
+        except RecoveryActionError as exc:
+            return _http_error(exc.status, str(exc))
+        return _http_json_response(result)
+
     async def _handle_session_context_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -746,6 +781,10 @@ class GatewayHTTPHandler:
                 for k, v in s.items()
                 if k != "path" and k not in WEBUI_SESSION_INDEX_INTERNAL_FIELDS
             }
+            # Keep the additive recovery field absent for ordinary sessions so
+            # older clients and compact list responses stay unchanged.
+            if row.get("recovery_state") is None:
+                row.pop("recovery_state", None)
             chat_id = key.split(":", 1)[1]
             started_at = websocket_turn_wall_started_at(chat_id)
             if started_at is not None:

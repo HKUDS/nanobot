@@ -103,6 +103,24 @@ describe("ChatList", () => {
     );
   });
 
+  it("marks a conversation that needs recovery attention with a warning indicator", () => {
+    render(
+      <ChatList
+        sessions={[session({ chatId: "recovery", title: "Interrupted task" })]}
+        recoveryChatIds={["recovery"]}
+        activeKey="websocket:other"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "This conversation needs your attention" }))
+      .toBeInTheDocument();
+  });
+
   it("keeps handle columns intact inside grouped panes", () => {
     render(
       <ChatList
@@ -149,6 +167,26 @@ describe("ChatList", () => {
     for (const handle of document.querySelectorAll("[data-sidebar-session-handle]")) {
       expect(handle).toHaveClass("max-w-20", "shrink-0");
     }
+  });
+
+  it("shows the running indicator while a recovery continuation is active", () => {
+    render(
+      <ChatList
+        sessions={[session({ chatId: "recovery", title: "Interrupted task" })]}
+        runningChatIds={["recovery"]}
+        recoveryChatIds={["recovery"]}
+        activeKey="websocket:other"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Agent running" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "This conversation needs your attention" }))
+      .not.toBeInTheDocument();
   });
 
   it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {

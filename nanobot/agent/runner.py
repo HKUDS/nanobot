@@ -37,6 +37,7 @@ from nanobot.runtime_context import (
     reattach_runtime_context,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
@@ -234,6 +235,23 @@ class AgentRunner:
                         merged.get("content"),
                         injection.get("content"),
                     )
+                followup_id = injection.get(PENDING_FOLLOWUP_ID_KEY)
+                if isinstance(followup_id, str) and followup_id:
+                    existing = cast(object, merged.get(PENDING_FOLLOWUP_ID_KEY))
+                    followup_ids = (
+                        [existing]
+                        if isinstance(existing, str)
+                        else [
+                            item
+                            for item in cast(list[object], existing)
+                            if isinstance(item, str)
+                        ]
+                        if isinstance(existing, list)
+                        else []
+                    )
+                    if followup_id not in followup_ids:
+                        followup_ids.append(followup_id)
+                    merged[PENDING_FOLLOWUP_ID_KEY] = followup_ids
                 messages[-1] = merged
                 continue
             messages.append(injection)

@@ -27,6 +27,7 @@ from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
+    RecoveryStateEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -2718,6 +2719,39 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         {"event": "turn_end", "chat_id": "chat-1"},
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        event=RecoveryStateEvent(
+            status="awaiting_user",
+            recovery_id="recovery-1",
+            reason="tool_state_unknown",
+            attempts=1,
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "recovery_state",
+        "chat_id": "chat-1",
+        "status": "awaiting_user",
+        "recovery_id": "recovery-1",
+        "reason": "tool_state_unknown",
+        "attempts": 1,
+    }]
 
 
 @pytest.mark.asyncio

@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "Quyền mặc định",
       "currentModel": "Cấu hình hiện tại",
       "brandLogos": "Logo thương hiệu",
+      "browserNotifications": "Thông báo tác vụ",
       "cliAppsCatalog": "Danh mục",
       "cliAppsFilter": "Bộ lọc",
       "engine": "Bộ máy",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
       "brandLogos": "Hiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
+      "browserNotifications": "Chỉ thông báo khi trang này ở nền. Mặc định tắt.",
       "cliAppsCatalog": "Chỉ cài đặt các bộ chuyển đổi CLI ứng dụng mà nanobot có thể chạy cục bộ; ứng dụng gốc không bị thay đổi.",
       "cliAppsFilter": "Tìm theo ứng dụng, danh mục hoặc khả năng.",
       "logs": "Mở thư mục nhật ký của bộ máy gốc.",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "Tác nhân đang chạy",
       "complete": "Tác nhân đã hoàn tất",
-      "updated": "Hoạt động mới"
+      "updated": "Hoạt động mới",
+      "recovery": "Cuộc trò chuyện này cần bạn xử lý"
     },
     "pin": "Ghim",
     "unpin": "Bỏ ghim",
@@ -1421,6 +1424,18 @@
     "cliRunFailed": "Thất bại",
     "automationSourceFallback": "Tự động hóa",
     "automationTriggered": "Tự động kích hoạt"
+  },
+  "recovery": {
+    "actionFailed": "Khôi phục thất bại. Hãy thử lại.",
+    "interrupted": "Tác vụ bị gián đoạn",
+    "completed": "Tác vụ đã hoàn tất",
+    "failed": "Khôi phục tác vụ thất bại",
+    "failedHelp": "Không thể khôi phục an toàn tác vụ đã lưu. Hãy xem lại trước khi tiếp tục.",
+    "resuming": "Đang khôi phục tác vụ bị gián đoạn…",
+    "review": "Hãy xem lại tác vụ trước khi tiếp tục. Công cụ sẽ không tự động chạy lại.",
+    "safeResume": "Đang tiếp tục từ ngữ cảnh hội thoại đã lưu.",
+    "dismiss": "Bỏ qua",
+    "continue": "Tiếp tục"
   },
   "lightbox": {
     "title": "Xem trước ảnh",

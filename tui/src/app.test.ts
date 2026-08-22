@@ -7,7 +7,12 @@ import {
 } from "@opentui/core/testing"
 
 import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
-import type { MessageOptions, SlashCommand, WorkspaceScopePayload } from "./protocol"
+import type {
+  MessageOptions,
+  RecoveryState,
+  SlashCommand,
+  WorkspaceScopePayload,
+} from "./protocol"
 import type { HostAgentState, HostMetadata, TuiHost } from "./host"
 
 const options: AppOptions = {
@@ -90,6 +95,13 @@ function client(
     },
     setWorkspaceScope(scope: WorkspaceScopePayload) {
       scopes.push(scope)
+    },
+    updateRecovery(
+      _action: "continue" | "dismiss",
+      _chatId: string,
+      recoveryId: string,
+    ): Promise<RecoveryState> {
+      return Promise.resolve({ status: "recovered" as const, recovery_id: recoveryId })
     },
   }
 }
@@ -901,6 +913,112 @@ describe("NanobotTui layout", () => {
     } finally {
       globalThis.fetch = original
     }
+  })
+
+  test("offers clickable recovery actions without letting a late response revive stale state", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const calls: Array<{ action: string; chatId: string; recoveryId: string }> = []
+    let deferredResolve: ((state: RecoveryState) => void) | undefined
+    const recoveryClient = client()
+    recoveryClient.updateRecovery = (action, chatId, recoveryId) => {
+      calls.push({ action, chatId, recoveryId })
+      if (recoveryId === "recovery-1") {
+        return Promise.resolve({ status: "resuming", recovery_id: recoveryId })
+      }
+      if (action === "dismiss") {
+        return Promise.resolve({ status: "recovered", recovery_id: recoveryId })
+      }
+      return new Promise((resolve) => { deferredResolve = resolve })
+    }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      recoveryClient,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({
+      event: "attached",
+      chat_id: "chat",
+      recovery_state: {
+        status: "awaiting_user",
+        recovery_id: "recovery-1",
+        reason: "tool execution interrupted",
+      },
+    })
+    const ui = app as unknown as {
+      activeTurn: boolean
+      composer: TextareaRenderable
+      recoveryNotice: {
+        visible: boolean
+        dismiss: TextRenderable
+        resume: TextRenderable
+      }
+      status: TextRenderable
+    }
+
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Task interrupted")
+    expect(ui.activeTurn).toBe(false)
+    expect(ui.composer.focused).toBe(true)
+
+    await setup.mockMouse.click(ui.recoveryNotice.resume.x + 1, ui.recoveryNotice.resume.y)
+    await waitUntil(() => calls.length === 1 && ui.activeTurn)
+    expect(calls[0]).toEqual({
+      action: "continue",
+      chatId: "chat",
+      recoveryId: "recovery-1",
+    })
+    expect(ui.recoveryNotice.visible).toBe(false)
+    expect(ui.status.plainText).toContain("Continuing")
+
+    app.accept({
+      event: "recovery_state",
+      chat_id: "chat",
+      status: "awaiting_user",
+      recovery_id: "recovery-2",
+    })
+    await setup.renderOnce()
+    await setup.mockMouse.click(ui.recoveryNotice.resume.x + 1, ui.recoveryNotice.resume.y)
+    await waitUntil(() => calls.length === 2)
+    app.accept({
+      event: "recovery_state",
+      chat_id: "chat",
+      status: "recovered",
+      recovery_id: "recovery-2",
+    })
+    deferredResolve?.({ status: "resuming", recovery_id: "recovery-2" })
+    await Bun.sleep(1)
+
+    expect(ui.recoveryNotice.visible).toBe(false)
+    expect(ui.activeTurn).toBe(false)
+    expect(ui.composer.focused).toBe(true)
+
+    app.accept({
+      event: "recovery_state",
+      chat_id: "chat",
+      status: "awaiting_user",
+      recovery_id: "recovery-3",
+    })
+    await setup.renderOnce()
+    await setup.mockMouse.click(ui.recoveryNotice.dismiss.x + 1, ui.recoveryNotice.dismiss.y)
+    await waitUntil(() => calls.length === 3 && !ui.recoveryNotice.visible)
+    expect(calls[2]).toEqual({
+      action: "dismiss",
+      chatId: "chat",
+      recoveryId: "recovery-3",
+    })
+
+    app.accept({
+      event: "recovery_state",
+      chat_id: "chat",
+      status: "awaiting_user",
+      recovery_id: "recovery-4",
+      can_continue: false,
+    })
+    await setup.renderOnce()
+    expect(ui.recoveryNotice.resume.visible).toBe(false)
+    expect(ui.recoveryNotice.dismiss.visible).toBe(true)
   })
 
   test("preserves gateway slash lifecycle while local navigation stays in the same menu", async () => {

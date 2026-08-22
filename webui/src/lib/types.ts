@@ -49,6 +49,16 @@ export interface TurnUsage {
   [key: string]: number | undefined;
 }
 
+export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed";
+
+export interface RecoveryState {
+  status: RecoveryStatus;
+  recovery_id: string;
+  reason?: string;
+  attempts?: number;
+  can_continue?: boolean;
+}
+
 export interface UIMessage {
   id: string;
   role: Role;
@@ -368,6 +378,8 @@ export interface ChatSummary {
   modelPreset?: string | null;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
+  /** Durable recovery state that needs attention after an interrupted turn. */
+  recoveryState?: RecoveryState | null;
   workspaceScope?: WorkspaceScopePayload | null;
   /** Stable, server-owned @handle for this session. */
   handle?: SessionHandle | null;
@@ -1246,6 +1258,7 @@ export type InboundEvent =
       event: "attached";
       chat_id: string;
       temporary?: boolean;
+      recovery_state?: RecoveryState;
       usage?: TurnUsage;
     }
   | {
@@ -1289,6 +1302,10 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
+  | ({
+      event: "recovery_state";
+      chat_id: string;
+    } & RecoveryState)
   | ({
       event: "file_edit";
       chat_id: string;
