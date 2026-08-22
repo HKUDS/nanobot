@@ -55,16 +55,26 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
+    {"name": "mst", "label": "Meta-Search (mst) [requires mst-python]", "credential": "none"},
 )
 
 
 class WebSearchConfig(Base):
-    """Web search configuration."""
+    """Web search configuration.
+
+    For the ``mst`` provider, configure available engines via
+    ``mst_engines`` (e.g. ``["ddg", "google", "brave"]``) or the
+    ``MST_ENGINES`` environment variable (comma-separated). Override engine
+    ranking weights via ``mst_weights`` or ``MST_WEIGHTS`` (JSON object).
+    """
     provider: str = "duckduckgo"
     api_key: str = ""
     base_url: str = ""
     max_results: int = 5
     timeout: int = 30
+    # mst-specific options (only used when provider == "mst")
+    mst_engines: list[str] = Field(default_factory=list)
+    mst_weights: dict[str, float] = Field(default_factory=dict)
 
 
 class WebFetchConfig(Base):
@@ -454,6 +464,8 @@ class WebSearchTool(Tool):
             return "volcengine" if api_key else "duckduckgo"
         if provider == "keenable":
             return "keenable"
+        if provider == "mst":
+            return "mst"
         if provider == "serper":
             api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
             return "serper" if api_key else "duckduckgo"
@@ -513,6 +525,8 @@ class WebSearchTool(Tool):
             )
         elif provider == "keenable":
             return await self._search_keenable(query, n)
+        elif provider == "mst":
+            return await self._search_mst(query, n)
         elif provider == "serper":
             return await self._search_serper(query, n)
         else:
@@ -677,6 +691,80 @@ class WebSearchTool(Tool):
             return ToolResult.error(f"Error: Keenable search failed ({e.response.status_code}): {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Keenable search failed: {e}")
+
+    async def _search_mst(self, query: str, n: int) -> str:
+        """Search via the Meta-Search Tool (mst) Python package.
+
+        mst aggregates results from multiple search engines using RRF ranking,
+        providing richer coverage than any single provider.
+        Inspired by [SearXNG](https://github.com/searxng/searxng); package at
+        https://github.com/openmtx/meta-search-tool. Engines like ddg and
+        google work out-of-the-box; others require API keys.
+
+        Configure engines via ``mst_engines`` (list of engine names) or the
+        ``MST_ENGINES`` env var (comma-separated). Override weights via
+        ``mst_weights`` or ``MST_WEIGHTS`` env var (JSON object).
+        """
+        try:
+            import mst as mst_lib  # pyright: ignore[reportMissingImports, reportMissingTypeStubs]
+            from mst import (
+                MSTError,  # pyright: ignore[reportMissingImports, reportMissingTypeStubs, reportUnknownVariableType]
+            )
+        except ImportError:
+            return ToolResult.error(
+                "mst support is not installed. Run `nanobot plugins enable mst`."
+            )
+
+        mst_error_cls: type[Exception] = cast(type[Exception], MSTError)
+
+        try:
+            # Resolve engines: config > env var > None (uses all ready engines)
+            engines = self.config.mst_engines if self.config.mst_engines else None
+            if not engines:
+                env_engines = os.environ.get("MST_ENGINES", "").strip()
+                if env_engines:
+                    engines = [e.strip() for e in env_engines.split(",") if e.strip()]
+            if engines:
+                logger.info("mst search using engines: {}", engines)
+
+            # Resolve weights: config > env var > None
+            weights = self.config.mst_weights if self.config.mst_weights else None
+            if not weights:
+                env_weights = os.environ.get("MST_WEIGHTS", "").strip()
+                if env_weights:
+                    try:
+                        weights = json.loads(env_weights)
+                    except (json.JSONDecodeError, ValueError):
+                        logger.warning("Invalid MST_WEIGHTS JSON, ignoring")
+
+            timeout = f"{self.config.timeout}s"
+
+            mst_search = cast(Callable[..., dict[str, Any]], mst_lib.search)
+            result: dict[str, Any] = mst_search(
+                query=query,
+                engines=list(engines) if isinstance(engines, list) else engines,
+                limit=n,
+                rrf_k=60,
+                timeout=timeout,
+                weights=weights,
+            )
+
+            # Format mst results into shared output
+            items: list[dict[str, Any]] = [
+                {
+                    "title": r.get("title") or "",
+                    "url": r.get("url") or "",
+                    "content": r.get("snippet") or r.get("description") or "",
+                }
+                for r in result.get("results", [])
+            ]
+            return _format_results(query, items, n)
+        except mst_error_cls as e:
+            logger.warning("mst search failed: {}", e)
+            return ToolResult.error(f"Error: mst search failed ({e})")
+        except Exception as e:
+            logger.warning("mst search failed: {}", e)
+            return ToolResult.error(f"Error: mst search failed ({e})")
 
     async def _search_searxng(self, query: str, n: int) -> str:
         base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()

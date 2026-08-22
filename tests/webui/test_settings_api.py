@@ -1215,6 +1215,65 @@ def test_update_web_search_settings_can_clear_optional_api_key(
     assert saved.tools.web.search.api_key == ""
 
 
+def test_update_web_search_settings_mst_engines(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    update_web_search_settings({
+        "provider": ["mst"],
+        "mst_engines": [json.dumps(["ddg", "google"])],
+    })
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "mst"
+    assert saved.tools.web.search.mst_engines == ["ddg", "google"]
+
+
+def test_update_web_search_settings_mst_weights(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    weights = json.dumps({"brave": 2.0, "ddg": 1.0})
+    update_web_search_settings({
+        "provider": ["mst"],
+        "mst_weights": [weights],
+    })
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "mst"
+    assert saved.tools.web.search.mst_weights == {"brave": 2.0, "ddg": 1.0}
+
+
+def test_update_web_search_settings_mst_invalid_engines(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="mst_engines"):
+        update_web_search_settings({
+            "provider": ["mst"],
+            "mst_engines": ["not json"],
+        })
+
+
+def test_update_web_search_settings_mst_invalid_weights(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="mst_weights"):
+        update_web_search_settings({
+            "provider": ["mst"],
+            "mst_weights": ["not json"],
+        })
+
+
 def test_settings_payload_includes_effective_transcription_config(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
