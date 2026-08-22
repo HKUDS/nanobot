@@ -298,6 +298,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `xiaomi_mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
+| `sensenova` | LLM (SenseNova/商汤日日新) | [platform.sensenova.cn](https://platform.sensenova.cn) |
 | `ant_ling` | LLM (Ant Ling / 蚂蚁百灵) | [developer.ant-ling.com](https://developer.ant-ling.com/en/docs/api-reference/openai/) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
@@ -950,6 +951,36 @@ LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
 ```
 
 Current LongCat API docs list `LongCat-2.0-Preview` as the supported model. The older `LongCat-Flash-*` models were retired by LongCat on 2026-05-29.
+
+</details>
+
+<details>
+<summary><b>SenseNova (商汤日日新)</b></summary>
+
+SenseNova is available through nanobot's built-in OpenAI-compatible provider flow. The default API base already points to `https://token.sensenova.cn/v1`, so you usually only need to set `apiKey`.
+
+```json
+{
+  "providers": {
+    "sensenova": {
+      "apiKey": "${SENSENOVA_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "sensenova": {
+      "provider": "sensenova",
+      "model": "sensenova-6.8-flash-lite"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "sensenova"
+    }
+  }
+}
+```
+
+Supported models include `sensenova-6.8-flash-lite`, `deepseek-v4-flash`, and `glm-5.2`.
 
 </details>
 
