@@ -15,6 +15,7 @@ START = "<!-- contributors:start -->"
 END = "<!-- contributors:end -->"
 MAX_CONTRIBUTORS = 100
 AVATARS_PER_ROW = 10
+MAINTAINERS = {"re-bin", "chengyongru"}
 
 
 def fetch_contributors() -> list[dict[str, str]]:
@@ -36,6 +37,7 @@ def fetch_contributors() -> list[dict[str, str]]:
         if contributor.get("login")
         and contributor.get("type") != "Bot"
         and not contributor["login"].lower().endswith("[bot]")
+        and contributor["login"].lower() not in MAINTAINERS
     ]
 
 
