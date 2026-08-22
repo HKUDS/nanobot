@@ -1013,7 +1013,7 @@ describe("MessageBubble", () => {
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
 
-  it("keeps turn usage focused on the completed reply", () => {
+  it("distinguishes aggregate turn usage from the latest context", () => {
     const message: UIMessage = {
       id: "a-usage",
       role: "assistant",
@@ -1032,10 +1032,13 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    const usage = screen.getByText("12.4K in · 823 out · 78% cached · 18s");
+    const usage = screen.getByText("12.4K in · 823 out · 78% cached · 3 calls this turn · 18s");
     expect(usage).toHaveAttribute("data-turn-usage");
-    expect(usage).not.toHaveAttribute("tabindex");
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(usage).toHaveAttribute("tabindex", "0");
+
+    fireEvent.focus(usage);
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Context now: 8.1K / 128K");
   });
 
   it("marks estimated usage and omits cache when the provider did not report it", () => {

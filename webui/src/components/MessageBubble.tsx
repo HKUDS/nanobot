@@ -192,9 +192,11 @@ function compactDuration(milliseconds: number): string {
 function TurnUsageMeta({
   usage,
   latencyMs,
+  contextWindowTokens,
 }: {
   usage: TurnUsage;
   latencyMs?: number;
+  contextWindowTokens?: number;
 }) {
   const { t } = useTranslation();
   const prompt = usage.prompt_tokens;
@@ -210,10 +212,26 @@ function TurnUsageMeta({
   ) {
     parts.push(`${Math.round(Math.min(1, usage.cached_tokens / prompt) * 100)}% cached`);
   }
+  if (typeof usage.request_count === "number" && usage.request_count > 1) {
+    parts.push(t("message.usage.requests", {
+      count: usage.request_count,
+      defaultValue: "{{count}} calls this turn",
+    }));
+  }
   if (typeof latencyMs === "number" && latencyMs >= 0) parts.push(compactDuration(latencyMs));
   if (parts.length === 0) return null;
 
   const details: string[] = [];
+  if (typeof usage.context_tokens === "number" && usage.context_tokens >= 0) {
+    const capacity = typeof contextWindowTokens === "number" && contextWindowTokens > 0
+      ? ` / ${formatCompactTokenCount(contextWindowTokens)}`
+      : "";
+    details.push(t("message.usage.context", {
+      tokens: `${approximate}${formatCompactTokenCount(usage.context_tokens)}`,
+      capacity,
+      defaultValue: "Context now: {{tokens}}{{capacity}}",
+    }));
+  }
   if (approximate) {
     details.push(t("message.usage.estimated", { defaultValue: "Includes estimated usage" }));
   }
@@ -621,6 +639,7 @@ export function MessageBubble({
               <TurnUsageMeta
                 usage={message.usage!}
                 latencyMs={message.latencyMs}
+                contextWindowTokens={message.contextWindowTokens}
               />
             ) : null}
             {showAssistantTimestamp ? (
