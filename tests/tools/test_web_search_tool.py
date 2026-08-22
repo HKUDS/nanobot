@@ -287,6 +287,90 @@ async def test_serper_search_rate_limited(monkeypatch):
     assert is_tool_error_result(result)
 
 
+def test_serply_without_api_key_is_treated_as_duckduckgo(monkeypatch):
+    # Serply requires a key; without one we fall back to DuckDuckGo for concurrency.
+    monkeypatch.delenv("SERPLY_API_KEY", raising=False)
+    tool = _tool(provider="serply", api_key="")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
+@pytest.mark.asyncio
+async def test_serply_search(monkeypatch):
+    async def mock_get(self, url, **kw):
+        assert url == "https://api.serply.io/v1/search/"
+        assert kw["headers"]["X-Api-Key"] == "serply-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["params"] == {"q": "serply", "num": 1}
+        return _response(json={
+            "results": [
+                {"title": "Serply", "link": "https://serply.io", "description": "Google Search API"}
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="serply", api_key="serply-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="serply", count=1)
+    assert "Serply" in result
+    assert "https://serply.io" in result
+    assert "Google Search API" in result
+
+
+@pytest.mark.asyncio
+async def test_serply_search_uses_env_api_key(monkeypatch):
+    async def mock_get(self, url, **kw):
+        assert kw["headers"]["X-Api-Key"] == "env-serply-key"
+        return _response(json={
+            "results": [{"title": "Env", "link": "https://serply.io/env", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setenv("SERPLY_API_KEY", "env-serply-key")
+    tool = _tool(provider="serply", api_key="")
+    result = await tool.execute(query="serply", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_serply_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("SERPLY_API_KEY", raising=False)
+    tool = _tool(provider="serply", api_key="")
+    result = await tool.execute(query="serply", count=1)
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_serply_search_http_error(monkeypatch):
+    async def mock_get(self, url, **kw):
+        return _response(status=403, json={"message": "Unauthorized"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="serply", api_key="bad-serply-key")
+    result = await tool.execute(query="serply")
+    assert "Error: Serply search failed (403)" in result
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_serply_search_rate_limited(monkeypatch):
+    async def mock_get(self, url, **kw):
+        return _response(status=429, json={"message": "rate limited"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="serply", api_key="serply-key")
+    result = await tool.execute(query="serply")
+    assert "Serply search rate limited" in result
+    assert is_tool_error_result(result)
+
+
 @pytest.mark.asyncio
 async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):
