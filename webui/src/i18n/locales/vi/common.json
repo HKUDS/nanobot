@@ -1397,6 +1397,7 @@
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",
     "activityThoughtFor": "Đã suy nghĩ trong {{duration}}",
+    "activityProcessed": "Đã xử lý {{count}} tác vụ",
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",

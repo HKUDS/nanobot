@@ -1397,6 +1397,7 @@
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",
     "activityThoughtFor": "{{duration}}考えました",
+    "activityProcessed": "{{count}} 件のタスクを処理",
     "activityWorkingFor": "{{duration}}作業中",
     "activityWorked": "作業しました",
     "activityWorkedFor": "{{duration}}作業しました",

@@ -1397,6 +1397,7 @@
     "activityThinkingFor": "Réflexion pendant {{duration}}",
     "activityThought": "Réflexion terminée",
     "activityThoughtFor": "Réflexion terminée en {{duration}}",
+    "activityProcessed": "{{count}} tâches traitées",
     "activityWorkingFor": "Travail en cours depuis {{duration}}",
     "activityWorked": "Travail terminé",
     "activityWorkedFor": "Travail terminé en {{duration}}",

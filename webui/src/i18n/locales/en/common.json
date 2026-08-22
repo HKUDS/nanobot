@@ -1389,6 +1389,7 @@
     "activityThinkingFor": "Thinking for {{duration}}",
     "activityThought": "Thought",
     "activityThoughtFor": "Thought for {{duration}}",
+    "activityProcessed": "Processed {{count}} tasks",
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",

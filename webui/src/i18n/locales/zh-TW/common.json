@@ -1396,6 +1396,7 @@
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",
+    "activityProcessed": "已處理 {{count}} 個任務",
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",

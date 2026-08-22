@@ -300,6 +300,68 @@ export interface GoalStateWsPayload {
   recap?: string;
 }
 
+export interface SubagentActivityTask {
+  task_id: string;
+  label: string;
+  status: "running" | "completed" | "failed" | string;
+  phase?: string;
+  iteration?: number;
+  elapsed_ms?: number;
+  latest_tool?: { name: string; phase?: string } | null;
+  recent_tools?: Array<{ name: string; phase?: string }>;
+  error?: string | null;
+}
+
+export interface SubagentStatusItem {
+  subagent_id: string;
+  label: string;
+  status: "queued" | "started" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  turn_id?: string;
+  revision?: number;
+  stop_reason?: string;
+  error?: string;
+}
+
+export type SubagentTraceKind =
+  | "input"
+  | "phase"
+  | "tool_start"
+  | "tool_end"
+  | "delta"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface SubagentTraceEvent {
+  event: "subagent_trace";
+  chat_id: string;
+  subagent_id: string;
+  label: string;
+  turn_id?: string;
+  seq: number;
+  revision: number;
+  kind: SubagentTraceKind | string;
+  payload: Record<string, unknown>;
+}
+
+export interface SubagentDetailSnapshot {
+  task_id: string;
+  label: string;
+  turn_id?: string;
+  status?: SubagentStatusItem["status"] | string;
+  revision?: number;
+  seq?: number;
+  input?: string;
+  steps?: Array<Record<string, unknown>>;
+  output?: string;
+  stop_reason?: string;
+  error?: string;
+}
+
+export interface SubagentStatePayload {
+  tasks: SubagentActivityTask[];
+}
+
 export interface ToolProgressEvent {
   version?: number;
   phase?: "start" | "end" | "error" | string;
@@ -1333,6 +1395,28 @@ export type InboundEvent =
       event: "goal_state";
       chat_id: string;
       goal_state: GoalStateWsPayload;
+    }
+  | {
+      event: "subagent_state" | "subagent_state_sync";
+      chat_id: string;
+      tasks: SubagentActivityTask[];
+    }
+  | {
+      event: "subagent_status";
+      chat_id: string;
+      subagent_id: string;
+      label: string;
+      status: SubagentStatusItem["status"];
+      turn_id?: string;
+      revision?: number;
+      stop_reason?: string;
+      error?: string;
+    }
+  | SubagentTraceEvent
+  | {
+      event: "subagent_detail_snapshot";
+      chat_id: string;
+      items: SubagentDetailSnapshot[];
     }
   | {
       event: "session_updated";

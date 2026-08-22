@@ -7,6 +7,8 @@ interface ThinkingReasoningShellProps {
   active: boolean;
   expanded: boolean;
   label: string;
+  summary?: ReactNode;
+  detailsId?: string;
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
   contentRef: Ref<HTMLDivElement>;
@@ -21,6 +23,8 @@ export function ThinkingReasoningShell({
   active,
   expanded,
   label,
+  summary,
+  detailsId,
   children,
   viewportRef,
   contentRef,
@@ -36,40 +40,43 @@ export function ThinkingReasoningShell({
       data-state={active ? "thinking" : "done"}
     >
       {hasDetails ? (
-        <button
-          type="button"
-          data-thread-disclosure=""
-          className="group inline-flex min-h-5 items-center self-start gap-1.5 bg-transparent p-0"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-label={label}
-          aria-live={active ? "polite" : undefined}
-        >
-          <span
-            className={cn(
-              "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
-              active && "animate-pulse motion-reduce:animate-none",
-            )}
+        summary ?? (
+          <button
+            type="button"
+            data-thread-disclosure=""
+            className="group inline-flex min-h-5 items-center self-start gap-1.5 bg-transparent p-0"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            {...(detailsId ? { "aria-controls": detailsId } : {})}
+            aria-label={label}
+            aria-live={active ? "polite" : undefined}
           >
-            {label}
-          </span>
-          <span
-            className={cn(
-              "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",
-              "motion-reduce:transition-none",
-              expanded && "rotate-180",
-            )}
-          >
-            <ChevronDown
+            <span
               className={cn(
-                "h-3 w-3 text-muted-foreground/60 transition-colors duration-200",
-                "group-hover:text-muted-foreground motion-reduce:transition-none",
+                "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
+                active && "animate-pulse motion-reduce:animate-none",
               )}
-              strokeWidth={1.8}
-              aria-hidden
-            />
-          </span>
-        </button>
+            >
+              {label}
+            </span>
+            <span
+              className={cn(
+                "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",
+                "motion-reduce:transition-none",
+                expanded && "rotate-180",
+              )}
+            >
+              <ChevronDown
+                className={cn(
+                  "h-3 w-3 text-muted-foreground/60 transition-colors duration-200",
+                  "group-hover:text-muted-foreground motion-reduce:transition-none",
+                )}
+                strokeWidth={1.8}
+                aria-hidden
+              />
+            </span>
+          </button>
+        )
       ) : (
         <div
           className="inline-flex min-h-5 items-center self-start"
@@ -90,6 +97,7 @@ export function ThinkingReasoningShell({
 
       {hasDetails ? (
         <div
+          id={detailsId}
           {...(!expanded ? { inert: "" } : {})}
           aria-hidden={!expanded}
           className={cn(

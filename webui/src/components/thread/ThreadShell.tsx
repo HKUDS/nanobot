@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { ResizeDivider } from "@/components/ResizeDivider";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
@@ -13,6 +14,7 @@ import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import { SubagentDetailPanel } from "@/components/thread/SubagentDetailPanel";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import {
@@ -40,6 +42,8 @@ import type {
   SettingsPayload,
   SlashCommand,
   SkillSummary,
+  SubagentActivityTask,
+  SubagentDetailSnapshot,
   UIMessage,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -276,6 +280,38 @@ const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
 const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+const SUBAGENT_PANEL_DEFAULT_RATIO = 0.42;
+const SUBAGENT_PANEL_MIN_RATIO = 0.28;
+const SUBAGENT_PANEL_MAX_RATIO = 0.6;
+const SUBAGENT_PANEL_MIN_WIDTH = 320;
+const SUBAGENT_PANEL_MIN_MAIN_WIDTH = 420;
+const SUBAGENT_PANEL_DIVIDER_WIDTH = 12;
+
+export function clampSubagentPanelRatio(
+  ratio: number,
+  shellWidth: number,
+  mainMinWidth = SUBAGENT_PANEL_MIN_MAIN_WIDTH,
+  subagentMinWidth = SUBAGENT_PANEL_MIN_WIDTH,
+): number {
+  const contentWidth = Math.max(shellWidth - SUBAGENT_PANEL_DIVIDER_WIDTH, 1);
+  const minRatio = Math.max(
+    SUBAGENT_PANEL_MIN_RATIO,
+    subagentMinWidth / contentWidth,
+  );
+  const maxRatio = Math.min(
+    SUBAGENT_PANEL_MAX_RATIO,
+    1 - mainMinWidth / contentWidth,
+  );
+  if (maxRatio < minRatio) {
+    // The grid below owns the hard minimum widths. When they cannot both fit,
+    // prefer preserving the main conversation instead of trusting the stale ratio.
+    return Math.min(
+      SUBAGENT_PANEL_MAX_RATIO,
+      Math.max(SUBAGENT_PANEL_MIN_RATIO, maxRatio),
+    );
+  }
+  return Math.min(maxRatio, Math.max(minRatio, ratio));
+}
 
 type FilePreviewAvailabilityCacheEntry = {
   available?: boolean;
@@ -287,10 +323,20 @@ function clampFilePreviewWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, FILE_PREVIEW_MIN_WIDTH), maxWidth);
 }
 
-function maxFilePreviewWidth(containerWidth: number): number {
+export function maxFilePreviewWidth(containerWidth: number, withSubagent = false): number {
+  const mainMinWidth = withSubagent ? 320 : FILE_PREVIEW_MIN_MAIN_WIDTH;
+  const subagentMinWidth = withSubagent ? 280 : 0;
+  const dividerCount = withSubagent ? 1 : 0;
+  const filePreviewMinWidth = withSubagent ? 320 : FILE_PREVIEW_MIN_WIDTH;
   return Math.max(
-    FILE_PREVIEW_MIN_WIDTH,
-    Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+    filePreviewMinWidth,
+    Math.min(
+      FILE_PREVIEW_MAX_WIDTH,
+      containerWidth
+        - mainMinWidth
+        - subagentMinWidth
+        - dividerCount * SUBAGENT_PANEL_DIVIDER_WIDTH,
+    ),
   );
 }
 
@@ -693,9 +739,14 @@ export function ThreadShell({
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+  const [subagentPanelOpen, setSubagentPanelOpen] = useState(false);
+  const [subagentPanelRatio, setSubagentPanelRatio] = useState(SUBAGENT_PANEL_DEFAULT_RATIO);
+  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | null>(null);
+  const [openSubagentTaskIds, setOpenSubagentTaskIds] = useState<string[]>([]);
   const shellRef = useRef<HTMLElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
+  const subagentPanelRatioRef = useRef(SUBAGENT_PANEL_DEFAULT_RATIO);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
@@ -736,6 +787,9 @@ export function ThreadShell({
     isStreaming,
     runStartedAt,
     goalState,
+    turnEnded,
+    subagents,
+    subagentDetails,
     send,
     transcribeAudio,
     stop,
@@ -767,6 +821,10 @@ export function ThreadShell({
   }, [filePreviewWidth]);
 
   useEffect(() => {
+    subagentPanelRatioRef.current = subagentPanelRatio;
+  }, [subagentPanelRatio]);
+
+  useEffect(() => {
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
       filePreviewCloseTimerRef.current = null;
@@ -775,6 +833,9 @@ export function ThreadShell({
     setFilePreviewPath(null);
     setQuotedContext(null);
     setSubmittedViewportTurnId(null);
+    setSubagentPanelOpen(false);
+    setSelectedSubagentTaskId(null);
+    setOpenSubagentTaskIds([]);
   }, [historyKey]);
 
   useEffect(() => {
@@ -806,6 +867,92 @@ export function ThreadShell({
   const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const currentGoalState = messagesReady ? goalState : undefined;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
+  const currentSubagents = messagesReady ? subagents : [];
+  const currentSubagentActivity = useMemo<SubagentActivityTask[]>(
+    () => currentSubagents.map((item) => ({
+      task_id: item.subagent_id,
+      label: item.label,
+      status: item.status,
+      error: item.error ?? null,
+    })),
+    [currentSubagents],
+  );
+  const openSubagent = useCallback((taskId: string) => {
+    setOpenSubagentTaskIds((previous) => previous.includes(taskId) ? previous : [...previous, taskId]);
+    setSelectedSubagentTaskId(taskId);
+    setSubagentPanelOpen(true);
+  }, []);
+  const closeSubagent = useCallback((taskId: string) => {
+    setOpenSubagentTaskIds((previous) => {
+      const next = previous.filter((id) => id !== taskId);
+      if (next.length === 0) {
+        setSelectedSubagentTaskId(null);
+        setSubagentPanelOpen(false);
+      } else {
+        setSelectedSubagentTaskId((selected) => selected === taskId ? next[next.length - 1] : selected);
+      }
+      return next;
+    });
+  }, []);
+  const handleSubagentPanelChange = useCallback((open: boolean) => {
+    setSubagentPanelOpen(open);
+    if (!open) {
+      setOpenSubagentTaskIds([]);
+      setSelectedSubagentTaskId(null);
+    }
+  }, []);
+  const availableSubagentDetails = useMemo(() => {
+    const byId = new Map<string, SubagentDetailSnapshot>();
+    for (const item of subagentDetails) byId.set(item.task_id, item);
+    for (const item of currentSubagents) {
+      if (!byId.has(item.subagent_id)) {
+        byId.set(item.subagent_id, {
+          task_id: item.subagent_id,
+          label: item.label,
+          status: item.status,
+          turn_id: item.turn_id,
+          stop_reason: item.stop_reason,
+          error: item.error,
+        });
+      }
+    }
+    return [...byId.values()];
+  }, [currentSubagents, subagentDetails]);
+  const openedSubagentDetails = useMemo(
+    () => openSubagentTaskIds
+      .map((taskId) => availableSubagentDetails.find((item) => item.task_id === taskId))
+      .filter((item): item is SubagentDetailSnapshot => item !== undefined),
+    [availableSubagentDetails, openSubagentTaskIds],
+  );
+  const subagentPanelVisible = subagentPanelOpen && openedSubagentDetails.length > 0;
+  const filePreviewVisible = Boolean(filePreviewPath && historyKey);
+  const combinedPanelVisible = subagentPanelVisible && filePreviewVisible;
+  const subagentLayoutMainMinWidth = combinedPanelVisible ? 320 : SUBAGENT_PANEL_MIN_MAIN_WIDTH;
+  const subagentLayoutMinWidth = combinedPanelVisible ? 280 : SUBAGENT_PANEL_MIN_WIDTH;
+  const historicalSubagentRounds = useMemo(() => {
+    const rounds = new Map<string, SubagentDetailSnapshot[]>();
+    for (const item of subagentDetails) {
+      const key = item.turn_id || "unknown";
+      const items = rounds.get(key) ?? [];
+      items.push(item);
+      rounds.set(key, items);
+    }
+    const currentTaskIds = new Set(currentSubagents.map((item) => item.subagent_id));
+    return [...rounds.entries()]
+      .map(([turnId, items]) => {
+        const retainedItems = items.filter((item) => !currentTaskIds.has(item.task_id));
+        return {
+          turnId,
+          tasks: retainedItems.map((item) => ({
+            task_id: item.task_id,
+            label: item.label,
+            status: item.status ?? "completed",
+            error: item.error ?? null,
+          })),
+        };
+      })
+      .filter((round) => round.tasks.length > 0);
+  }, [currentSubagents, subagentDetails]);
   const restoredViewportTurnId = useMemo(
     () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
     [currentRunStartedAt, displayMessages, turnActive],
@@ -1356,7 +1503,10 @@ export function ThreadShell({
     const panel = event.currentTarget.closest<HTMLElement>("[data-file-preview-panel]");
     const shellRect = shellRef.current?.getBoundingClientRect();
     const rightEdge = shellRect?.right ?? window.innerWidth;
-    const maxWidth = maxFilePreviewWidth(shellRect?.width ?? window.innerWidth);
+    const maxWidth = maxFilePreviewWidth(
+      shellRect?.width ?? window.innerWidth,
+      subagentPanelVisible,
+    );
     const originalBodyCursor = document.body.style.cursor;
     const originalBodyUserSelect = document.body.style.userSelect;
     const originalPanelTransition = panel?.style.transition ?? "";
@@ -1373,6 +1523,7 @@ export function ThreadShell({
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
+        setFilePreviewWidth(nextWidth);
         panel?.style.setProperty("--file-preview-width", `${nextWidth}px`);
         panel?.style.setProperty("--file-preview-slot-width", `${nextWidth}px`);
       });
@@ -1401,13 +1552,98 @@ export function ThreadShell({
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
-  }, []);
+  }, [subagentPanelVisible]);
+
+  const handleSubagentPanelResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const shellRect = shellRef.current?.getBoundingClientRect();
+    if (!shellRect || shellRect.width <= 0) return;
+
+    const originalBodyCursor = document.body.style.cursor;
+    const originalBodyUserSelect = document.body.style.userSelect;
+    let nextRatio = subagentPanelRatioRef.current;
+    const fileWidth = filePreviewVisible ? filePreviewWidthRef.current : 0;
+    const flexibleShellWidth = Math.max(shellRect.width - fileWidth, 1);
+    const flexibleContentWidth = Math.max(
+      flexibleShellWidth - SUBAGENT_PANEL_DIVIDER_WIDTH,
+      1,
+    );
+
+    const applyRatio = (clientX: number) => {
+      nextRatio = clampSubagentPanelRatio(
+        (shellRect.right - fileWidth - clientX) / flexibleContentWidth,
+        flexibleShellWidth,
+        subagentLayoutMainMinWidth,
+        subagentLayoutMinWidth,
+      );
+      subagentPanelRatioRef.current = nextRatio;
+      setSubagentPanelRatio(nextRatio);
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyRatio(moveEvent.clientX);
+    };
+    const handlePointerUp = () => {
+      document.body.style.cursor = originalBodyCursor;
+      document.body.style.userSelect = originalBodyUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    applyRatio(event.clientX);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, [filePreviewVisible, subagentLayoutMainMinWidth, subagentLayoutMinWidth]);
+
+  const handleSubagentPanelResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+    const flexibleShellWidth = Math.max(
+      shellWidth - (filePreviewVisible ? filePreviewWidthRef.current : 0),
+      1,
+    );
+    const delta = event.key === "ArrowRight" ? 0.04 : -0.04;
+    const nextRatio = clampSubagentPanelRatio(
+      subagentPanelRatioRef.current + delta,
+      flexibleShellWidth,
+      subagentLayoutMainMinWidth,
+      subagentLayoutMinWidth,
+    );
+    subagentPanelRatioRef.current = nextRatio;
+    setSubagentPanelRatio(nextRatio);
+  }, [filePreviewVisible, subagentLayoutMainMinWidth, subagentLayoutMinWidth]);
+
+  useEffect(() => {
+    if (!subagentPanelVisible) return;
+    const clampToShell = () => {
+      const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+      const nextRatio = clampSubagentPanelRatio(subagentPanelRatioRef.current, shellWidth);
+      subagentPanelRatioRef.current = nextRatio;
+      setSubagentPanelRatio(nextRatio);
+    };
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(clampToShell);
+    if (shellRef.current) observer?.observe(shellRef.current);
+    window.addEventListener("resize", clampToShell);
+    clampToShell();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", clampToShell);
+    };
+  }, [subagentPanelVisible]);
 
   useEffect(() => {
     if (!filePreviewPath) return;
     const clampToShell = () => {
       const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-      const maxWidth = maxFilePreviewWidth(shellWidth);
+      const maxWidth = maxFilePreviewWidth(shellWidth, subagentPanelVisible);
       const nextWidth = clampFilePreviewWidth(filePreviewWidthRef.current, maxWidth);
       filePreviewWidthRef.current = nextWidth;
       setFilePreviewWidth(nextWidth);
@@ -1417,7 +1653,7 @@ export function ThreadShell({
     return () => {
       window.removeEventListener("resize", clampToShell);
     };
-  }, [filePreviewPath]);
+  }, [filePreviewPath, subagentPanelVisible]);
 
   const handleForkFromMessage = useCallback(
     async (beforeUserIndex: number) => {
@@ -1576,9 +1812,33 @@ export function ThreadShell({
     />
   ) : null;
 
+  const subagentPanelGridStyle = (() => {
+    const tracks = [
+      subagentPanelVisible
+        ? `minmax(${subagentLayoutMainMinWidth}px, ${1 - subagentPanelRatio}fr)`
+        : filePreviewVisible
+          ? `minmax(${FILE_PREVIEW_MIN_MAIN_WIDTH}px, 1fr)`
+          : "minmax(0, 1fr)",
+    ];
+    if (subagentPanelVisible) {
+      tracks.push(
+        `${SUBAGENT_PANEL_DIVIDER_WIDTH}px`,
+        `minmax(${subagentLayoutMinWidth}px, ${subagentPanelRatio}fr)`,
+      );
+    }
+    if (filePreviewVisible) tracks.push(`${filePreviewWidth}px`);
+    return { gridTemplateColumns: tracks.join(" ") };
+  })();
+
   return (
-    <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+    <section
+      ref={shellRef}
+      className="relative grid min-h-0 min-w-0 flex-1 overflow-hidden"
+      style={subagentPanelGridStyle}
+    >
+      <div
+        className="relative flex min-w-0 flex-col overflow-hidden"
+      >
         {hideHeaderTitle && !temporary && session?.handle ? (
           <div
             aria-label={`Session @${session.handle.name}`}
@@ -1602,6 +1862,7 @@ export function ThreadShell({
             messages={displayMessages}
             temporary={temporary}
             isStreaming={turnActive}
+            turnEnded={turnEnded}
             runStartedAt={currentRunStartedAt}
             emptyState={emptyState}
             composer={composerPortalTarget === undefined ? composer : null}
@@ -1610,6 +1871,8 @@ export function ThreadShell({
             conversationKey={historyKey}
             conversationReady={messagesReady}
             showScrollToBottomButton={!!session}
+            subagents={currentSubagentActivity}
+            subagentRounds={historicalSubagentRounds}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={availableSlashCommands}
@@ -1619,11 +1882,41 @@ export function ThreadShell({
             userMessageOffset={userMessageOffset}
             onLoadOlder={loadOlder}
             onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+            onOpenSubagent={openSubagent}
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
         </FilePreviewAvailabilityProvider>
       </div>
+      {subagentPanelVisible ? (
+        <>
+          <ResizeDivider
+            ariaLabel="调整主会话与 Subagent 详情比例"
+            ariaValueMin={Math.round(SUBAGENT_PANEL_MIN_RATIO * 100)}
+            ariaValueMax={Math.round(SUBAGENT_PANEL_MAX_RATIO * 100)}
+            ariaValueNow={Math.round(subagentPanelRatio * 100)}
+            ariaValueText={`${Math.round(subagentPanelRatio * 100)}% Subagent 详情`}
+            ariaControls="subagent-detail-panel"
+            className="relative z-10 h-full"
+            onPointerDown={handleSubagentPanelResizeStart}
+            onKeyDown={handleSubagentPanelResizeKeyDown}
+            title="拖动调整主会话与 Subagent 详情比例"
+            testId="subagent-panel-resizer"
+          />
+          <div
+            className="min-h-0 min-w-0 overflow-hidden"
+          >
+            <SubagentDetailPanel
+              details={messagesReady ? openedSubagentDetails : []}
+              selectedTaskId={selectedSubagentTaskId}
+              open
+              onOpenChange={handleSubagentPanelChange}
+              onSelect={setSelectedSubagentTaskId}
+              onClose={closeSubagent}
+            />
+          </div>
+        </>
+      ) : null}
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}

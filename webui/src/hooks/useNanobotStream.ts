@@ -35,11 +35,19 @@ import type {
   OutboundMedia,
   SessionMention,
   GoalStateWsPayload,
+  SubagentDetailSnapshot,
+  SubagentTraceEvent,
+  SubagentStatusItem,
   MessageDeliveryStatus,
   UIMediaAttachment,
   UIMessage,
   WorkspaceScopePayload,
 } from "@/lib/types";
+
+const NO_SUBAGENTS: SubagentStatusItem[] = [];
+const ACTIVE_SUBAGENT_STATUSES = new Set(["queued", "started", "running"]);
+const MAX_SUBAGENT_OUTPUT = 12000;
+const MAX_SUBAGENT_STEPS = 100;
 
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas (cleared when its segment closes). */
@@ -255,6 +263,10 @@ export function useNanobotStream(
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
+  turnEnded: boolean;
+  subagents: SubagentStatusItem[];
+  backgroundSubagents: SubagentStatusItem[];
+  subagentDetails: SubagentDetailSnapshot[];
   send: (
     content: string,
     images?: SendAttachment[],
@@ -283,7 +295,10 @@ export function useNanobotStream(
   );
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(initialRunStartedAt);
+  const [subagentDetails, setSubagentDetails] = useState<SubagentDetailSnapshot[]>([]);
+  const [turnEnded, setTurnEnded] = useState(true);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
+  const [subagents, setSubagents] = useState<SubagentStatusItem[]>(NO_SUBAGENTS);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
@@ -296,6 +311,7 @@ export function useNanobotStream(
   const streamTimerRef = useRef<number | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
   const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
+  const activeSubagentTurnIdRef = useRef<string | null>(null);
   /** Timer that defers ``isStreaming = false`` after ``stream_end``.
    *
    * When the model finishes a text segment and calls a tool, the server
@@ -531,6 +547,7 @@ export function useNanobotStream(
         if (event.kind === "delta") {
           next = appendAnswerChunk(next, event.text, event.turn, event.source);
         } else {
+          if (fileEditSegmentRef.current) clearActivitySegment();
           if (closeActiveAssistantStream()) clearActivitySegment();
           next = attachReasoningChunk(
             next,
@@ -683,6 +700,13 @@ export function useNanobotStream(
     setStreamError(null);
     setRunStartedAt(restoredRunStartedAt);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
+    setSubagentDetails([]);
+    activeSubagentTurnIdRef.current = null;
+    setSubagents((previous) => {
+      const cached = chatId ? client.getSubagents?.(chatId) ?? NO_SUBAGENTS : NO_SUBAGENTS;
+      const next = cached.filter((item) => ACTIVE_SUBAGENT_STATUSES.has(item.status));
+      return previous === next ? previous : next;
+    });
     buffer.current = null;
     activeAssistantRef.current = null;
     closedAssistantStreamIdsRef.current.clear();
@@ -691,7 +715,6 @@ export function useNanobotStream(
     sideChannelTurnIdsRef.current.clear();
     suppressStreamUntilTurnEndRef.current = false;
     cancelStreamEndTimer();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, client, cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
 
   useEffect(() => {
@@ -725,6 +748,104 @@ export function useNanobotStream(
             turnId: ev.turn_id,
           });
         }
+        return;
+      }
+      if (ev.event === "subagent_status") {
+        if (ev.chat_id && ev.chat_id !== chatId) return;
+        const eventTurnId = ev.turn_id ?? activeSubagentTurnIdRef.current;
+        if (
+          eventTurnId
+          && activeSubagentTurnIdRef.current
+          && eventTurnId !== activeSubagentTurnIdRef.current
+        ) return;
+        if (
+          eventTurnId
+          && !activeSubagentTurnIdRef.current
+          && ACTIVE_SUBAGENT_STATUSES.has(ev.status)
+        ) activeSubagentTurnIdRef.current = eventTurnId;
+        const item: SubagentStatusItem = {
+          subagent_id: ev.subagent_id,
+          label: ev.label,
+          status: ev.status,
+          ...(eventTurnId ? { turn_id: eventTurnId } : {}),
+          ...(typeof ev.revision === "number" ? { revision: ev.revision } : {}),
+          ...(ev.stop_reason ? { stop_reason: ev.stop_reason } : {}),
+          ...(ev.error ? { error: ev.error } : {}),
+        };
+        setSubagents((previous) => {
+          const index = previous.findIndex((candidate) => candidate.subagent_id === item.subagent_id);
+          if (
+            index !== -1
+            && typeof item.revision === "number"
+            && typeof previous[index].revision === "number"
+            && item.revision < previous[index].revision
+          ) return previous;
+          const next = index === -1
+            ? [...previous, item]
+            : previous.map((candidate, candidateIndex) => candidateIndex === index ? item : candidate);
+          client.setSubagents?.(chatId, next);
+          return next;
+        });
+        return;
+      }
+      if (ev.event === "subagent_detail_snapshot") {
+        if (ev.chat_id && ev.chat_id !== chatId) return;
+        setSubagentDetails((previous) => {
+          const next = [...previous];
+          for (const item of ev.items) {
+            const index = next.findIndex((candidate) => candidate.task_id === item.task_id);
+            if (index === -1) next.push(item);
+            else if ((item.seq ?? 0) >= (next[index].seq ?? 0)) next[index] = { ...next[index], ...item };
+          }
+          return next;
+        });
+        return;
+      }
+      if (ev.event === "subagent_trace") {
+        if (ev.chat_id && ev.chat_id !== chatId) return;
+        const trace = ev as SubagentTraceEvent;
+        const traceTurnId = trace.turn_id ?? activeSubagentTurnIdRef.current;
+        if (
+          traceTurnId
+          && activeSubagentTurnIdRef.current
+          && traceTurnId !== activeSubagentTurnIdRef.current
+        ) return;
+        if (traceTurnId && !activeSubagentTurnIdRef.current) {
+          activeSubagentTurnIdRef.current = traceTurnId;
+        }
+        setSubagentDetails((previous) => {
+          const index = previous.findIndex((item) => item.task_id === trace.subagent_id);
+          const current: SubagentDetailSnapshot = index === -1
+            ? { task_id: trace.subagent_id, label: trace.label, ...(traceTurnId ? { turn_id: traceTurnId } : {}) }
+            : previous[index];
+          if (trace.seq <= (current.seq ?? 0)) return previous;
+          const payload = trace.payload;
+          const text = typeof payload.text === "string" ? payload.text : "";
+          const next: SubagentDetailSnapshot = {
+            ...current,
+            label: trace.label,
+            ...(traceTurnId ? { turn_id: traceTurnId } : {}),
+            seq: trace.seq,
+            revision: trace.revision,
+          };
+          if (trace.kind === "input") next.input = text;
+          if (trace.kind === "delta") next.output = `${current.output ?? ""}${text}`.slice(-MAX_SUBAGENT_OUTPUT);
+          if (["phase", "tool_start", "tool_end"].includes(trace.kind)) {
+            next.steps = [...(current.steps ?? []), { kind: trace.kind, ...payload }].slice(-MAX_SUBAGENT_STEPS);
+          }
+          if (["completed", "failed", "cancelled"].includes(trace.kind)) {
+            next.status = typeof payload.status === "string" ? payload.status : trace.kind;
+            next.output = text || current.output;
+            if (typeof payload.stop_reason === "string") next.stop_reason = payload.stop_reason;
+            if (typeof payload.error === "string") next.error = payload.error;
+          }
+          return index === -1
+            ? [...previous, next]
+            : previous.map((item, itemIndex) => itemIndex === index ? next : item);
+        });
+        return;
+      }
+      if (ev.event === "subagent_state" || ev.event === "subagent_state_sync") {
         return;
       }
       const turnId = eventTurnId(ev);
@@ -854,9 +975,12 @@ export function useNanobotStream(
 
       if (ev.event === "goal_status") {
         if (ev.status === "running" && typeof ev.started_at === "number") {
+          if (ev.turn_id) activeSubagentTurnIdRef.current = ev.turn_id;
           setRunStartedAt(ev.started_at);
           setIsStreaming(true);
+          setTurnEnded(false);
         } else {
+          activeSubagentTurnIdRef.current = null;
           setRunStartedAt(null);
           setIsStreaming(false);
         }
@@ -868,6 +992,17 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRunStartedAt(null);
+        setTurnEnded(true);
+        const scopedTurnId = activeSubagentTurnIdRef.current
+          ?? (typeof ev.turn_id === "string" ? ev.turn_id : null);
+        activeSubagentTurnIdRef.current = null;
+        setSubagents((previous) => {
+          const next = scopedTurnId
+            ? previous.filter((item) => item.turn_id !== scopedTurnId)
+            : [];
+          client.setSubagents?.(chatId, next);
+          return next;
+        });
         // Definitive signal that the turn is fully complete.  Cancel any
         // pending debounce timer and stop the loading indicator immediately.
         cancelStreamEndTimer();
@@ -1204,6 +1339,7 @@ export function useNanobotStream(
     });
     suppressStreamUntilTurnEndRef.current = false;
     setRunStartedAt(null);
+    setTurnEnded(true);
     client.finishRunLocally(chatId);
     client.sendMessage(chatId, "/stop");
   }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
@@ -1217,6 +1353,7 @@ export function useNanobotStream(
     clearActivitySegment();
     suppressStreamUntilTurnEndRef.current = false;
     setRunStartedAt(null);
+    setTurnEnded(true);
     setIsStreaming(false);
   }, [cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
 
@@ -1231,7 +1368,13 @@ export function useNanobotStream(
     messagesReady: messageOwnerChatId === chatId,
     isStreaming,
     runStartedAt,
+    turnEnded,
     goalState,
+    subagents: activeSubagentTurnIdRef.current
+      ? subagents.filter((item) => item.turn_id === activeSubagentTurnIdRef.current)
+      : subagents.filter((item) => !item.turn_id),
+    backgroundSubagents: [],
+    subagentDetails,
     send,
     transcribeAudio,
     stop,

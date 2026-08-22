@@ -4,27 +4,36 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, SubagentActivityTask, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
+  turnEnded?: boolean;
   activeTurnId?: string | null;
   /** Optimistic or canonical active-turn start, in unix seconds. */
   runStartedAt?: number | null;
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  subagents?: SubagentActivityTask[];
+  subagentRounds?: SubagentRoundTasks[];
   slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
+  onOpenSubagent?: (taskId: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
 }
 
 export type DisplayUnit = TurnUnit;
+
+export interface SubagentRoundTasks {
+  turnId: string;
+  tasks: SubagentActivityTask[];
+}
 
 export function buildDisplayUnits(
   messages: UIMessage[],
@@ -56,45 +65,59 @@ export function ThreadMessages({
   messages,
   temporary = false,
   isStreaming = false,
+  turnEnded = true,
   activeTurnId = null,
   runStartedAt = null,
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
+  subagents = [],
+  subagentRounds = [],
   slashCommands = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
+  onOpenSubagent,
   onForkFromMessage,
   onQuoteSelection,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
+  const effectiveStreaming = isStreaming || !turnEnded;
+  const units = useMemo(() => buildDisplayUnits(messages, effectiveStreaming), [effectiveStreaming, messages]);
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
   );
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
-    () => isStreaming
+    () => effectiveStreaming
       ? currentActivityClusterIndices(units, activeTurnId)
       : new Set<number>(),
-    [activeTurnId, isStreaming, units],
+    [activeTurnId, effectiveStreaming, units],
   );
   const pendingTurn = useMemo(
     () => pendingTurnProjection(messages, activeTurnId),
     [activeTurnId, messages],
   );
   const pendingActivity = (
-    isStreaming
+    effectiveStreaming
     && liveActivityClusterIndices.size === 0
     && pendingTurn !== null
     && !pendingTurn.hasVisibleOutput
   ) ? pendingTurn : null;
-  const currentTurnStartIndex = isStreaming
+  const currentTurnStartIndex = effectiveStreaming
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
+  const lastActivityIndex = useMemo(
+    () => units.reduce((last, unit, index) => unit.type === "activity" ? index : last, -1),
+    [units],
+  );
+  const hasActivityUnit = lastActivityIndex >= 0;
+  const subagentTasksByActivityIndex = useMemo(
+    () => subagentTasksForActivityUnits(units, subagentRounds),
+    [subagentRounds, units],
+  );
   let nextUserIndex = hiddenUserMessageCount;
 
   return (
@@ -146,7 +169,7 @@ export function ThreadMessages({
             isTurnStreaming={
               unit.type === "activity"
                 ? liveActivityClusterIndices.has(index)
-                : isStreaming && (
+                : effectiveStreaming && (
                     unit.message.turnId && activeTurnId !== null
                       ? unit.message.turnId === activeTurnId
                       : index > currentTurnStartIndex
@@ -158,12 +181,27 @@ export function ThreadMessages({
             temporary={temporary}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
+            subagents={mergeSubagentTasks(
+              subagentTasksByActivityIndex.get(index) ?? [],
+              index === lastActivityIndex ? subagents : [],
+            )}
             slashCommands={slashCommands}
             onOpenFilePreview={onOpenFilePreview}
+            onOpenSubagent={onOpenSubagent}
             onForkFromMessage={onForkFromMessage}
           />
         );
       })}
+      {!hasActivityUnit && subagents.length > 0 ? (
+        <AgentActivityCluster
+          messages={[]}
+          subagents={subagents}
+          onOpenSubagent={onOpenSubagent}
+          isTurnStreaming={effectiveStreaming}
+          hasBodyBelow={false}
+          startedAtMs={runStartedAt != null ? runStartedAt * 1000 : undefined}
+        />
+      ) : null}
       {pendingActivity ? (
         <div className={units.length > 0 ? "mt-5" : undefined}>
           <AgentActivityCluster
@@ -239,8 +277,10 @@ interface ThreadDisplayUnitProps {
   temporary: boolean;
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
+  subagents: SubagentActivityTask[];
   slashCommands: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
+  onOpenSubagent?: (taskId: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
@@ -257,8 +297,10 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   temporary,
   cliApps,
   mcpPresets,
+  subagents,
   slashCommands,
   onOpenFilePreview,
+  onOpenSubagent,
   onForkFromMessage,
 }: ThreadDisplayUnitProps) {
   // Introducing content-visibility after a unit has painted can move the
@@ -286,7 +328,9 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             startedAtMs={unit.startedAtMs}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
+            subagents={subagents}
             onOpenFilePreview={onOpenFilePreview}
+            onOpenSubagent={onOpenSubagent}
           />
         ) : (
           <MessageBubble
@@ -323,8 +367,10 @@ function threadDisplayUnitPropsEqual(
     && previous.temporary === next.temporary
     && previous.cliApps === next.cliApps
     && previous.mcpPresets === next.mcpPresets
+    && previous.subagents === next.subagents
     && previous.slashCommands === next.slashCommands
     && previous.onOpenFilePreview === next.onOpenFilePreview
+    && previous.onOpenSubagent === next.onOpenSubagent
     && previous.onForkFromMessage === next.onForkFromMessage
   );
 }
@@ -429,6 +475,50 @@ function currentActivityClusterIndices(
     if (unit.message.role === "user") break;
   }
   return indices;
+}
+
+function subagentTasksForActivityUnits(
+  units: DisplayUnit[],
+  rounds: SubagentRoundTasks[],
+): Map<number, SubagentActivityTask[]> {
+  // ponytail: pair persisted rounds with spawn activity in chronological order;
+  // replace with a canonical parent-turn id when the protocol exposes one.
+  const activityIndices = units.flatMap((unit, index) => unit.type === "activity" ? [index] : []);
+  if (!activityIndices.length || !rounds.length) return new Map();
+
+  const delegationIndices = activityIndices.filter((index) => {
+    const unit = units[index];
+    return unit.type === "activity" && unit.messages.some((message) => (
+      message.toolEvents?.some((event) => event.name === "spawn")
+      || message.traces?.some((trace) => trace.includes("Delegated task") || trace.includes("spawn"))
+      || message.content.includes("Delegated task")
+      || message.content.includes("spawn(")
+    ));
+  });
+  const anchors = delegationIndices.length >= rounds.length ? delegationIndices : activityIndices;
+  const orderedRounds = [...rounds].sort((left, right) => subagentRoundSortKey(left.turnId) - subagentRoundSortKey(right.turnId));
+  const result = new Map<number, SubagentActivityTask[]>();
+  orderedRounds.forEach((round, index) => {
+    const activityIndex = anchors[index];
+    if (activityIndex !== undefined) result.set(activityIndex, round.tasks);
+  });
+  return result;
+}
+
+function subagentRoundSortKey(turnId: string): number {
+  const timestamp = Number(turnId.split(":").at(-1));
+  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+}
+
+function mergeSubagentTasks(
+  ...groups: SubagentActivityTask[][]
+): SubagentActivityTask[] {
+  const seen = new Set<string>();
+  return groups.flat().filter((task) => {
+    if (seen.has(task.task_id)) return false;
+    seen.add(task.task_id);
+    return true;
+  });
 }
 
 export function unitKeysForDisplay(units: DisplayUnit[]): string[] {

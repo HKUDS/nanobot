@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { CodeBlock } from "@/components/CodeBlock";
 import { splitFilePath } from "@/components/FileReferenceChip";
 import { MarkdownText } from "@/components/MarkdownText";
+import { ResizeDivider } from "@/components/ResizeDivider";
 import { ApiError, fetchFilePreview } from "@/lib/api";
 import { getRuntimeHost } from "@/lib/runtime";
 import type { FilePreviewPayload } from "@/lib/types";
@@ -148,24 +149,11 @@ export function FilePreviewPanel({
         )}
       >
         {onResizeStart ? (
-          <button
-            type="button"
-            aria-label={t("filePreview.resize", { defaultValue: "Resize file preview" })}
-            className={cn(
-              "group absolute inset-y-0 left-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none md:flex",
-              "items-stretch justify-center focus-visible:outline-none",
-              "host-no-drag",
-            )}
+          <ResizeDivider
+            ariaLabel={t("filePreview.resize", { defaultValue: "Resize file preview" })}
+            className="absolute inset-y-0 left-0 hidden -translate-x-1/2 md:flex"
             onPointerDown={onResizeStart}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
-                "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
-              )}
-            />
-          </button>
+          />
         ) : null}
         <div className="flex min-h-0 flex-1 flex-col">
           <div

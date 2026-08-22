@@ -1397,6 +1397,7 @@
     "activityThinkingFor": "{{duration}} 동안 생각 중",
     "activityThought": "생각함",
     "activityThoughtFor": "{{duration}} 동안 생각함",
+    "activityProcessed": "{{count}}개 작업 처리",
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",

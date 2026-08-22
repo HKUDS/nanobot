@@ -1402,7 +1402,7 @@ describe("ChatList", () => {
     expect(within(allRegions[chatsIdx]).getByText("Recent chat")).toBeInTheDocument();
   });
 
-  it("keeps one Projects heading when Topics sorts between project groups", () => {
+  it("keeps Topics fixed above all project groups", () => {
     const sessions = [
       session({
         chatId: "project-a",
@@ -1448,11 +1448,11 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "Topics", "project-b"]);
+    expect(regionNames).toEqual(["Topics", "project-a", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 
-  it("keeps Topics last when its latest conversation is older than all projects", () => {
+  it("keeps Topics fixed above projects even when older", () => {
     const sessions = [
       session({
         chatId: "project-a",
@@ -1498,7 +1498,7 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "project-b", "Topics"]);
+    expect(regionNames).toEqual(["Topics", "project-a", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 });

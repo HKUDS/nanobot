@@ -311,6 +311,9 @@ function groupSessionsByProject(
   }
 
   groups.sort((a, b) => {
+    // 话题（workspace:chats）固定展示在所有项目分组之上，不受更新时间影响
+    if (a.id === "workspace:chats") return -1;
+    if (b.id === "workspace:chats") return 1;
     const timeOrder = dateToTime(b.updatedAt) - dateToTime(a.updatedAt);
     if (timeOrder !== 0) return timeOrder;
     return a.label.localeCompare(b.label, "en", {

@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
-import { ThreadShell } from "@/components/thread/ThreadShell";
+import {
+  clampSubagentPanelRatio,
+  maxFilePreviewWidth,
+  ThreadShell,
+} from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -117,6 +121,7 @@ function makeClient() {
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
+    getSubagentState: () => [],
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
       if (!handlers) {
@@ -406,6 +411,18 @@ function settingsWithFastPreset(): SettingsPayload {
 }
 
 describe("ThreadShell", () => {
+  it("clamps the Subagent ratio against the divider and main conversation width", () => {
+    expect(clampSubagentPanelRatio(0.42, 1000)).toBeCloseTo(0.42);
+    expect(clampSubagentPanelRatio(0.1, 760)).toBeGreaterThanOrEqual(0.42);
+    expect(clampSubagentPanelRatio(0.6, 760)).toBeLessThanOrEqual(0.44);
+    expect(clampSubagentPanelRatio(0.6, 600)).toBeLessThan(0.42);
+  });
+
+  it("reserves room for both right-side panels when preview and Subagent are open", () => {
+    expect(maxFilePreviewWidth(1000)).toBe(580);
+    expect(maxFilePreviewWidth(1000, true)).toBe(388);
+  });
+
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",

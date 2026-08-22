@@ -14,7 +14,7 @@ import { isNativeRuntime } from "@/lib/runtime";
 import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
-import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { ThreadMessages, type SubagentRoundTasks } from "@/components/thread/ThreadMessages";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import {
@@ -27,7 +27,7 @@ import {
   promptTop,
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, SubagentActivityTask, UIMessage } from "@/lib/types";
 
 export interface ThreadViewportHandle {
   jumpToUserPrompt: (promptId: string) => void;
@@ -38,6 +38,7 @@ interface ThreadViewportProps {
   messages: UIMessage[];
   temporary?: boolean;
   isStreaming: boolean;
+  turnEnded?: boolean;
   /** Optimistic or canonical start time for the active turn, in unix seconds. */
   runStartedAt?: number | null;
   composer?: ReactNode;
@@ -50,6 +51,8 @@ interface ThreadViewportProps {
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  subagents?: SubagentActivityTask[];
+  subagentRounds?: SubagentRoundTasks[];
   slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
   hasMoreBefore?: boolean;
@@ -57,6 +60,7 @@ interface ThreadViewportProps {
   userMessageOffset?: number;
   onLoadOlder?: () => Promise<void> | void;
   onOpenFilePreview?: (path: string) => void;
+  onOpenSubagent?: (taskId: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
 }
@@ -174,6 +178,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   messages,
   temporary = false,
   isStreaming,
+  turnEnded = true,
   runStartedAt = null,
   composer,
   emptyState,
@@ -185,6 +190,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
+  subagents = [],
+  subagentRounds = [],
   slashCommands = [],
   forkBoundaryMessageCount = null,
   hasMoreBefore = false,
@@ -192,6 +199,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   userMessageOffset = 0,
   onLoadOlder,
   onOpenFilePreview,
+  onOpenSubagent,
   onForkFromMessage,
   onQuoteSelection,
 }, ref) {
@@ -757,14 +765,18 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   messages={visibleMessages}
                   temporary={temporary}
                   isStreaming={isStreaming}
+                  turnEnded={turnEnded}
                   activeTurnId={activeTurnId}
                   runStartedAt={runStartedAt}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  subagents={subagents}
+                  subagentRounds={subagentRounds}
                   slashCommands={slashCommands}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   onOpenFilePreview={onOpenFilePreview}
+                  onOpenSubagent={onOpenSubagent}
                   onForkFromMessage={onForkFromMessage}
                   onQuoteSelection={onQuoteSelection}
                 />

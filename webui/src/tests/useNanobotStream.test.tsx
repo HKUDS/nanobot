@@ -120,6 +120,9 @@ function fakeClient() {
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
       },
+      getSubagentState() {
+        return [];
+      },
       hasUnsettledRun(chatId: string) {
         return unsettledRunByChatId.get(chatId) === true;
       },
@@ -2985,6 +2988,89 @@ describe("useNanobotStream", () => {
     expect(result.current.goalState).toEqual({ active: false });
   });
 
+});
+
+describe("subagent round scoping", () => {
+  it("keeps detail history but only exposes the active round statuses", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-rounds", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-rounds", {
+        event: "goal_status",
+        chat_id: "chat-rounds",
+        status: "running",
+        started_at: 1000,
+        turn_id: "turn-1",
+      });
+      fake.emit("chat-rounds", {
+        event: "subagent_status",
+        chat_id: "chat-rounds",
+        subagent_id: "task-1",
+        label: "第一轮任务",
+        status: "running",
+        turn_id: "turn-1",
+      });
+      fake.emit("chat-rounds", {
+        event: "subagent_trace",
+        chat_id: "chat-rounds",
+        subagent_id: "task-1",
+        label: "第一轮任务",
+        turn_id: "turn-1",
+        seq: 1,
+        revision: 0,
+        kind: "input",
+        payload: { text: "第一轮输入" },
+      });
+      fake.emit("chat-rounds", {
+        event: "subagent_trace",
+        chat_id: "chat-rounds",
+        subagent_id: "task-1",
+        label: "第一轮任务",
+        turn_id: "turn-1",
+        seq: 2,
+        revision: 0,
+        kind: "completed",
+        payload: { status: "completed", text: "第一轮结果" },
+      });
+      fake.emit("chat-rounds", { event: "turn_end", chat_id: "chat-rounds", turn_id: "turn-1" });
+      fake.emit("chat-rounds", {
+        event: "goal_status",
+        chat_id: "chat-rounds",
+        status: "running",
+        started_at: 2000,
+        turn_id: "turn-2",
+      });
+      fake.emit("chat-rounds", {
+        event: "subagent_status",
+        chat_id: "chat-rounds",
+        subagent_id: "task-2",
+        label: "第二轮任务",
+        status: "running",
+        turn_id: "turn-2",
+      });
+      fake.emit("chat-rounds", {
+        event: "subagent_status",
+        chat_id: "chat-rounds",
+        subagent_id: "late-task-1",
+        label: "迟到的第一轮任务",
+        status: "running",
+        turn_id: "turn-1",
+      });
+    });
+
+    expect(result.current.subagents).toEqual([
+      expect.objectContaining({ subagent_id: "task-2", turn_id: "turn-2" }),
+    ]);
+    expect(result.current.subagentDetails.map((item) => item.task_id)).toEqual(["task-1"]);
+    expect(result.current.subagentDetails[0]).toMatchObject({
+      turn_id: "turn-1",
+      output: "第一轮结果",
+      status: "completed",
+    });
+  });
 });
 
 describe("live/replay projection before canonical-event revision migration", () => {

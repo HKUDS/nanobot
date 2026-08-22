@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   Clock3,
+  ChevronDown,
   Layers,
   Search,
   Server,
@@ -29,6 +30,7 @@ import {
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { describeMcpActivity } from "@/components/thread/activity/mcp-activity-model";
 import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingReasoningShell";
+import { SubagentActivityGroup } from "@/components/thread/activity/SubagentActivityGroup";
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
 import {
   describeTraceLine,
@@ -46,7 +48,7 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SubagentActivityTask, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 
@@ -127,7 +129,9 @@ interface AgentActivityClusterProps {
   startedAtMs?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  subagents?: SubagentActivityTask[];
   onOpenFilePreview?: (path: string) => void;
+  onOpenSubagent?: (taskId: string) => void;
 }
 
 /**
@@ -142,7 +146,9 @@ export function AgentActivityCluster({
   startedAtMs,
   cliApps = [],
   mcpPresets = [],
+  subagents = [],
   onOpenFilePreview,
+  onOpenSubagent,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
@@ -180,13 +186,14 @@ export function AgentActivityCluster({
   const autoFollowActivityRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
   const wasTurnStreamingRef = useRef(isTurnStreaming);
+  const activityDetailsId = useId();
   const wasTurnStreaming = wasTurnStreamingRef.current;
   /** Live work stays open; completed work briefly shows the done state, then tucks away. */
   const outerExpanded = userToggledOuter
     ? outerOpenLocal
     : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
 
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
+  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0 || subagents.length > 0;
   const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
   const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const durationMs = activityDurationMs(
@@ -220,6 +227,72 @@ export function AgentActivityCluster({
           duration: activityDuration,
           defaultValue: "Thought for {{duration}}",
         });
+  const thoughtSummaryLabel = durationMs <= 0
+    ? t("message.activityThought", { defaultValue: "Thought" })
+    : t("message.activityThoughtFor", {
+        duration: activityDuration,
+        defaultValue: "Thought for {{duration}}",
+      });
+  const processedActivityCount = subagents.length > 0
+    ? subagents.length
+    : reasoningSteps + toolCalls + cliCount + mcpCount + fileCount;
+  const processedLabel = t("message.activityProcessed", {
+    count: processedActivityCount,
+    defaultValue: "Processed {{count}} tasks",
+  });
+  const completedSummary = !isTurnStreaming ? (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      data-testid="completed-activity-summary"
+    >
+      <button
+        type="button"
+        data-thread-disclosure=""
+        onClick={toggleOuter}
+        aria-expanded={outerExpanded}
+        aria-controls={activityDetailsId}
+        aria-label={processedLabel}
+        className="group inline-flex min-h-7 items-center gap-1.5 rounded-full border border-border/60 bg-muted/35 px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+        <span>{processedLabel}</span>
+        <span
+          className={cn(
+            "inline-flex shrink-0 transition-transform [transition-duration:220ms] motion-reduce:transition-none",
+            outerExpanded && "rotate-180",
+          )}
+        >
+          <ChevronDown
+            className="h-3 w-3 text-muted-foreground/60 transition-colors duration-200 group-hover:text-muted-foreground motion-reduce:transition-none"
+            aria-hidden
+          />
+        </span>
+      </button>
+      <button
+        type="button"
+        data-thread-disclosure=""
+        onClick={toggleOuter}
+        aria-expanded={outerExpanded}
+        aria-controls={activityDetailsId}
+        aria-label={thoughtSummaryLabel}
+        className="group inline-flex min-h-7 items-center gap-1.5 rounded-full border border-border/60 bg-muted/35 px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Clock3 className="h-3.5 w-3.5 text-orange-500 dark:text-orange-400" aria-hidden />
+        <span>{thoughtSummaryLabel}</span>
+        <span
+          className={cn(
+            "inline-flex shrink-0 transition-transform [transition-duration:220ms] motion-reduce:transition-none",
+            outerExpanded && "rotate-180",
+          )}
+        >
+          <ChevronDown
+            className="h-3 w-3 text-muted-foreground/60 transition-colors duration-200 group-hover:text-muted-foreground motion-reduce:transition-none"
+            aria-hidden
+          />
+        </span>
+      </button>
+    </div>
+  ) : undefined;
 
   const cancelActivityScrollFrame = useCallback(() => {
     if (scrollFrameRef.current !== null) {
@@ -257,14 +330,14 @@ export function AgentActivityCluster({
     });
   }, [cancelActivityScrollFrame, scrollActivityToBottom]);
 
-  const toggleOuter = () => {
+  function toggleOuter() {
     const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
     if (nextOpen) {
       autoFollowActivityRef.current = true;
     }
     setUserToggledOuter(true);
     setOuterOpenLocal(nextOpen);
-  };
+  }
 
   useLayoutEffect(() => {
     if (!outerExpanded || !autoFollowActivityRef.current) return;
@@ -323,7 +396,11 @@ export function AgentActivityCluster({
 
   if (hasOnlyFileActivity) {
     return (
-      <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+      <div className={cn(
+        "w-full",
+        hasBodyBelow && "mb-2",
+        !isTurnStreaming && hasBodyBelow && "border-b border-border/55 pb-3",
+      )}>
         <FileEditGroup
           edits={fileEdits}
           displayMode={fileEditDisplayMode}
@@ -334,11 +411,17 @@ export function AgentActivityCluster({
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+    <div className={cn(
+      "w-full",
+      hasBodyBelow && "mb-2",
+      !isTurnStreaming && hasBodyBelow && "border-b border-border/55 pb-3",
+    )}>
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}
         label={thoughtLabel}
+        summary={completedSummary}
+        detailsId={activityDetailsId}
         viewportRef={activityScrollRef}
         contentRef={activityContentRef}
         fadeTop={activityScrollFade.top}
@@ -360,6 +443,7 @@ export function AgentActivityCluster({
             onOpenFilePreview={onOpenFilePreview}
           />
         ) : null}
+        {subagents.length ? <SubagentActivityGroup tasks={subagents} onOpenTask={onOpenSubagent} /> : null}
       </ThinkingReasoningShell>
     </div>
   );

@@ -1398,6 +1398,7 @@
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",
+    "activityProcessed": "{{count}} tareas procesadas",
     "activityWorkingFor": "Trabajando durante {{duration}}",
     "activityWorked": "Trabajo completado",
     "activityWorkedFor": "Trabajó durante {{duration}}",

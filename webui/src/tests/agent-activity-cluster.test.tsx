@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SubagentActivityTask, UIMessage } from "@/lib/types";
 
 const BLENDER_CLI_APP: CliAppInfo = {
   name: "blender",
@@ -139,6 +139,47 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("renders isolated subagent activity without exposing arguments or results", () => {
+    const onOpenSubagent = vi.fn();
+    const tasks: SubagentActivityTask[] = [
+      {
+        task_id: "a1",
+        label: "检查 WebUI",
+        status: "running",
+        phase: "awaiting_tools",
+        iteration: 2,
+        elapsed_ms: 4_200,
+        latest_tool: { name: "read_file", phase: "start" },
+        recent_tools: [{ name: "read_file", phase: "start" }],
+      },
+      {
+        task_id: "a2",
+        label: "检查后端",
+        status: "completed",
+        iteration: 3,
+        elapsed_ms: 7_800,
+        recent_tools: [{ name: "rg", phase: "end" }],
+      },
+    ];
+    render(
+      <AgentActivityCluster
+        messages={[]}
+        subagents={tasks}
+        onOpenSubagent={onOpenSubagent}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByTestId("subagent-activity-group")).toHaveTextContent("Subagents · 2");
+    expect(screen.getByText("检查 WebUI")).toBeInTheDocument();
+    expect(screen.getByText("检查后端")).toBeInTheDocument();
+    expect(screen.queryByText("arguments")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("检查 WebUI"));
+    expect(onOpenSubagent).toHaveBeenCalledWith("a1");
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+  });
+
   it("jumps to the latest activity when opened", () => {
     const raf = installAnimationFrameQueue();
     try {
@@ -424,7 +465,7 @@ describe("AgentActivityCluster", () => {
 
     const button = screen.getByRole("button", { name: "Thought" });
     expect(button).toHaveAttribute("data-thread-disclosure");
-    const chevron = button.querySelector("svg");
+    const chevron = button.querySelector(".lucide-chevron-down");
     expect(chevron).toBeInTheDocument();
     expect(chevron).toHaveClass("transition-colors", "duration-200");
     expect(chevron?.parentElement).toHaveClass(
@@ -452,7 +493,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
   });
 
-  it("labels mixed tool activity as work instead of thought", () => {
+  it("shows processed and thought summaries for mixed activity", () => {
     render(
       <AgentActivityCluster
         messages={activityMessages()}
@@ -462,8 +503,9 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 12s")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Processed 2 tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Thought for 12s" })).toBeInTheDocument();
+    expect(screen.getByTestId("completed-activity-summary").closest("div.border-b")).not.toBeNull();
   });
 
   it("omits the duration when completed history has no reliable timing", () => {
@@ -1260,7 +1302,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Worked" }));
+    fireEvent.click(screen.getByRole("button", { name: "Processed 1 tasks" }));
 
     const row = screen.getByText("Could not use GitHub · --json repo view").closest(
       '[data-testid="activity-step"]',
@@ -1553,7 +1595,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Worked" }));
+    fireEvent.click(screen.getByRole("button", { name: "Processed 1 tasks" }));
 
     expect(screen.getByText("Ran command cat << 'EOF' | bash · script, 6 lines")).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();

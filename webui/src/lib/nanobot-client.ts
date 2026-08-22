@@ -8,6 +8,8 @@ import type {
   SessionMention,
   SidebarStatePayload,
   GoalStateWsPayload,
+  SubagentActivityTask,
+  SubagentStatusItem,
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
@@ -216,6 +218,8 @@ export class NanobotClient {
   private static readonly COMPLETED_TURN_FENCE_MAX = 256;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  private subagentStateByChatId = new Map<string, SubagentActivityTask[]>();
+  private subagentsByChatId = new Map<string, SubagentStatusItem[]>();
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
@@ -523,6 +527,18 @@ export class NanobotClient {
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
   getGoalState(chatId: string): GoalStateWsPayload | undefined {
     return this.goalStateByChatId.get(chatId);
+  }
+
+  getSubagentState(chatId: string): SubagentActivityTask[] {
+    return this.subagentStateByChatId.get(chatId) ?? [];
+  }
+
+  getSubagents(chatId: string): SubagentStatusItem[] | undefined {
+    return this.subagentsByChatId.get(chatId);
+  }
+
+  setSubagents(chatId: string, items: SubagentStatusItem[]): void {
+    this.subagentsByChatId.set(chatId, items);
   }
 
   private advanceRunGeneration(chatId: string, turnId?: string): void {
@@ -1243,6 +1259,20 @@ export class NanobotClient {
       this.recordGoalStatusForRunStrip(chatId, parsed);
       if (supersededRunCompletion) return;
       this.recordGoalStateSnapshot(chatId, parsed);
+      if (parsed.event === "subagent_state" || parsed.event === "subagent_state_sync") {
+        const previous = parsed.event === "subagent_state_sync"
+          ? []
+          : this.subagentStateByChatId.get(chatId) ?? [];
+        const byId = new Map(previous.map((task) => [task.task_id, task]));
+        for (const task of parsed.tasks) byId.set(task.task_id, task);
+        this.subagentStateByChatId.set(chatId, [...byId.values()]);
+      }
+      if (parsed.event === "subagent_status") {
+        const previous = this.subagentsByChatId.get(chatId) ?? [];
+        const byId = new Map(previous.map((item) => [item.subagent_id, item]));
+        byId.set(parsed.subagent_id, parsed);
+        this.subagentsByChatId.set(chatId, [...byId.values()]);
+      }
       this.dispatch(chatId, parsed);
     }
   }
@@ -1471,6 +1501,8 @@ export class NanobotClient {
     this.unsettledRunTurnIdsByChatId.delete(chatId);
     this.canonicalCompletedTurnIdsByChatId.delete(chatId);
     this.goalStateByChatId.delete(chatId);
+    this.subagentStateByChatId.delete(chatId);
+    this.subagentsByChatId.delete(chatId);
     for (const key of [...this.runStartedAtByTurnKey.keys()]) {
       if (key.startsWith(`${chatId}\u0000`)) this.runStartedAtByTurnKey.delete(key);
     }

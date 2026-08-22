@@ -659,7 +659,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Worked for 9s")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Thought for 9s" })).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
   });
 
@@ -696,8 +696,8 @@ describe("ThreadMessages", () => {
     expect(units[0].type === "activity" ? units[0].turnLatencyMs : undefined).toBe(20_000);
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("Worked for 20s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Thought for 20s" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thought for 3s" })).not.toBeInTheDocument();
   });
 
   it("keeps late activity after the live assistant answer while streaming", () => {
@@ -1014,8 +1014,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getByText("Worked for 15s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Thought for 15s" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thought for 0s" })).not.toBeInTheDocument();
   });
 
   it("shows copy on every assistant slice while keeping fork on the last slice", () => {
