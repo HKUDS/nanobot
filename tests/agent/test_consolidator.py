@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.agent.memory import (
     _ARCHIVE_SUMMARY_MAX_CHARS,
+    _RAW_ARCHIVE_MAX_CHARS,
     Consolidator,
     MemoryStore,
 )
@@ -1041,6 +1042,7 @@ class TestCompactIdleSession:
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("sdk:oversized")
         session.add_message("user", "x" * 100_000)
+        session.add_message("assistant", "TAIL_FACT_MUST_SURVIVE")
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session(
@@ -1051,9 +1053,10 @@ class TestCompactIdleSession:
         assert result is None
         mock_provider.chat_with_retry.assert_not_awaited()
         entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-        assert entries[0]["content"].startswith("[RAW] ")
-        assert sessions.get_or_create("sdk:oversized").last_consolidated == 1
+        assert len(entries) > 1
+        assert all(entry["content"].startswith("[RAW] ") for entry in entries)
+        assert "TAIL_FACT_MUST_SURVIVE" in entries[-1]["content"]
+        assert sessions.get_or_create("sdk:oversized").last_consolidated == 2
 
     @pytest.mark.asyncio
     async def test_incremental_scope_counts_only_model_visible_messages(
@@ -1282,18 +1285,19 @@ class TestConsolidatorSessionRefresh:
         assert len(session_after.get_history(max_messages=40)) == 8
 
 
-class TestRawArchiveTruncation:
-    """raw_archive() must cap entry size to avoid bloating history.jsonl."""
+class TestRawArchiveChunking:
+    """raw_archive() must bound entries without discarding source content."""
 
-    def test_raw_archive_truncates_large_content(self, store):
-        """Large messages should be truncated to _RAW_ARCHIVE_MAX_CHARS."""
-        big = "x" * 50_000
+    def test_raw_archive_chunks_large_content_losslessly(self, store):
+        big = "x" * 50_000 + "TAIL_FACT_MUST_SURVIVE"
         messages = [{"role": "user", "content": big}]
         store.raw_archive(messages)
         entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-        assert len(entries[0]["content"]) < 50_000
-        assert "[RAW]" in entries[0]["content"]
+        payload = "".join(entry["content"].split("\n", 1)[1] for entry in entries)
+        assert len(entries) > 1
+        assert payload == MemoryStore._format_messages(messages)
+        assert "TAIL_FACT_MUST_SURVIVE" in entries[-1]["content"]
+        assert all(len(entry["content"]) < _RAW_ARCHIVE_MAX_CHARS + 100 for entry in entries)
 
     def test_raw_archive_preserves_small_content(self, store):
         """Small messages should not be truncated."""
@@ -1330,7 +1334,10 @@ class TestRawArchiveTruncation:
         messages = [{"role": "user", "content": "a" * 200}]
         store.raw_archive(messages, max_chars=100)
         entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries[0]["content"]) < 200
+        payload = "".join(entry["content"].split("\n", 1)[1] for entry in entries)
+        assert len(entries) > 1
+        assert payload == MemoryStore._format_messages(messages)
+        assert all(len(entry["content"]) < 200 for entry in entries)
 
 
 class TestArchivePersistence:
