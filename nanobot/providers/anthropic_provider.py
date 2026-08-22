@@ -22,6 +22,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
+from nanobot.providers.langsmith_integration import wrap_anthropic_client
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -109,7 +110,7 @@ class AnthropicProvider(LLMProvider):
             client_kw["default_headers"] = extra_headers
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
-        self._client = AsyncAnthropic(**client_kw)
+        self._client = wrap_anthropic_client(AsyncAnthropic(**client_kw))
 
     @staticmethod
     def _normalize_base_url(api_base: str) -> str:
