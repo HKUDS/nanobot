@@ -1070,6 +1070,8 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
     assert result.usage["prompt_tokens"] == 300  # 100 + 200
     assert result.usage["completion_tokens"] == 30  # 10 + 20
     assert result.usage["cached_tokens"] == 230  # 80 + 150
+    assert result.usage["context_tokens"] == 200
+    assert result.usage["request_count"] == 2
 
 
 @pytest.mark.asyncio

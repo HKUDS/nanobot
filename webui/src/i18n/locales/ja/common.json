@@ -1178,6 +1178,11 @@
       "removeQuotedContext": "引用したコンテキストを削除",
       "modelNotConfigured": "モデルが未設定です",
       "configureModel": "モデルを設定",
+      "switchModel": "この会話で使うモデルを切り替える",
+      "context": {
+        "tooltip": "コンテキスト · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}。{{percent}}% 使用中"
+      },
       "queued": {
         "label": "保留中のガイド",
         "guide": "ガイド",
@@ -1394,6 +1399,11 @@
     "fileEditShowFewerLines": "表示行数を減らす",
     "fileEditOpenFile": "ファイルを開く",
     "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
+    "usage": {
+      "context": "最新のコンテキスト: {{tokens}}{{capacity}} トークン",
+      "requests": "モデルリクエスト {{count}} 回",
+      "estimated": "推定使用量を含みます"
+    },
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",
     "activityThoughtFor": "{{duration}}考えました",

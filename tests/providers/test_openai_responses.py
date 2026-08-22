@@ -1056,8 +1056,24 @@ class TestConsumeSse:
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
         response = _SseResponse([
-            {"type": "response.reasoning_summary_text.delta", "delta": "thinking "},
-            {"type": "response.reasoning_summary_text.delta", "delta": "briefly"},
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "thinking ",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "briefly",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 1,
+                "delta": "Checking result",
+            },
             {"type": "response.output_text.delta", "delta": "answer"},
             {"type": "response.completed", "response": {"status": "completed"}},
         ])
@@ -1075,8 +1091,8 @@ class TestConsumeSse:
         assert tool_calls == []
         assert finish_reason == "stop"
         assert usage == {}
-        assert reasoning == "thinking briefly"
-        assert deltas == ["thinking ", "briefly"]
+        assert reasoning == "thinking briefly\nChecking result"
+        assert deltas == ["thinking ", "briefly", "\nChecking result"]
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_completed_response(self):
@@ -1087,7 +1103,7 @@ class TestConsumeSse:
                     "status": "completed",
                     "output": [
                         {"type": "reasoning", "summary": [
-                            {"type": "summary_text", "text": "cached "},
+                            {"type": "summary_text", "text": "cached"},
                             {"type": "summary_text", "text": "summary"},
                         ]},
                     ],
@@ -1097,7 +1113,7 @@ class TestConsumeSse:
 
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
-        assert reasoning == "cached summary"
+        assert reasoning == "cached\nsummary"
 
     @pytest.mark.asyncio
     async def test_capture_commits_exact_items_only_after_completed_event(self):

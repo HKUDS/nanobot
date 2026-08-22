@@ -1179,6 +1179,11 @@
       "removeQuotedContext": "Quitar contexto citado",
       "modelNotConfigured": "Modelo no configurado",
       "configureModel": "Configurar modelo",
+      "switchModel": "Cambiar el modelo de este chat",
+      "context": {
+        "tooltip": "Contexto · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}. {{percent}} % usado."
+      },
       "queued": {
         "label": "Guía en cola",
         "guide": "Guiar",
@@ -1395,6 +1400,11 @@
     "fileEditShowFewerLines": "Mostrar menos líneas",
     "fileEditOpenFile": "Abrir archivo",
     "fileEditDiffTruncated": "Diferencias truncadas. Abre el archivo para ver el cambio completo.",
+    "usage": {
+      "context": "Contexto más reciente: {{tokens}}{{capacity}} tokens",
+      "requests": "{{count}} solicitudes al modelo",
+      "estimated": "Incluye uso estimado"
+    },
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",

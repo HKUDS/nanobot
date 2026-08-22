@@ -38,7 +38,7 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: "Thinking for 5s" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working for 5s" })).toBeInTheDocument();
 
     rerender(
       <ThreadMessages
@@ -176,6 +176,66 @@ describe("ThreadMessages", () => {
     );
 
     expect(screen.getByText("stable final answer").closest("p")).toBe(paragraph);
+  });
+
+  it("keeps live Markdown mounted when a later tool activity arrives", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+    const turnId = "turn-live-order";
+    const prompt: UIMessage = {
+      id: "u-live",
+      role: "user",
+      content: "research this",
+      createdAt: 1,
+      turnId,
+      turnPhase: "prompt",
+      turnSeq: 0,
+    };
+    const commentary: UIMessage = {
+      id: "a-commentary",
+      role: "assistant",
+      content: "**I will check that.**",
+      createdAt: 2,
+      isStreaming: false,
+      turnId,
+      turnPhase: "answer",
+      turnSeq: 1,
+    };
+    const { rerender } = render(
+      <ThreadMessages
+        messages={[prompt, commentary]}
+        isStreaming
+        activeTurnId={turnId}
+      />,
+    );
+    const paragraph = await screen.findByText("I will check that.");
+    expect(paragraph.closest("[data-testid='activity-model-message']")).toBeNull();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          prompt,
+          commentary,
+          {
+            id: "tool-live",
+            role: "tool",
+            kind: "trace",
+            content: "web_search()",
+            traces: ["web_search()"],
+            createdAt: 3,
+            turnId,
+            turnPhase: "activity",
+            turnSeq: 2,
+          },
+        ]}
+        isStreaming
+        activeTurnId={turnId}
+      />,
+    );
+
+    expect(screen.getByText("I will check that.")).toBe(paragraph);
+    expect(screen.getByText(/working/i)).toBeInTheDocument();
   });
 
   it("offers a follow-up action for text selected within one completed answer", async () => {
@@ -319,12 +379,12 @@ describe("ThreadMessages", () => {
     expect(unitKeysForDisplay(liveUnits)).toEqual(unitKeysForDisplay(replayUnits));
     expect(unitKeysForDisplay(liveUnits)).toEqual([
       "turn-turn-1-user",
+      "turn-turn-1-activity-1",
       "turn-turn-1-answer-1",
-      "turn-turn-1-answer-2",
     ]);
   });
 
-  it("keeps file edits as their own activity row inside a turn", () => {
+  it("keeps file edits inside the single activity surface for a turn", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -364,14 +424,16 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units.map((unit) => unit.type)).toEqual(["activity", "activity", "activity"]);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["r2"]);
+    expect(units).toHaveLength(1);
+    expect(units[0].type).toBe("activity");
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "r1",
+      "t1",
+      "r2",
+    ]);
   });
 
-  it("keeps ordinary tool activity in one Thought block across segment ids", () => {
+  it("keeps ordinary tool activity in one activity block across segment ids", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -449,10 +511,12 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2]).toMatchObject({
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "r1",
+      "t1",
+    ]);
+    expect(units[1]).toMatchObject({
       type: "message",
       message: {
         id: "a1",
@@ -504,8 +568,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
-    expect(screen.getByLabelText(/edited foo\.txt/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/editing foo\.txt/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/editing foo\.txt/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/edited foo\.txt/i)).not.toBeInTheDocument();
   });
 
   it("times live activity from the user turn start", () => {
@@ -731,22 +795,18 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages, true);
 
-    expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["t0"]);
-    expect(units[1]).toMatchObject({
-      type: "message",
-      message: {
-        id: "a1",
-        content: "partial answer",
-      },
-    });
-    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["t1"]);
+    expect(units).toHaveLength(1);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "t0",
+      "a1-activity",
+      "t1",
+    ]);
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
     const answer = screen.getByText("partial answer");
     const liveActivity = screen.getByRole("button", { name: /working/i });
-    expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(liveActivity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("moves late activity before a completed assistant answer", () => {
@@ -779,10 +839,9 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2]).toMatchObject({
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1", "t1"]);
+    expect(units[1]).toMatchObject({
       type: "message",
       message: {
         id: "a1",
@@ -793,7 +852,7 @@ describe("ThreadMessages", () => {
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
     const answer = screen.getByText("Hong Kong is hot today.");
-    const laterActivity = screen.getAllByText(/thought/i).at(-1);
+    const laterActivity = screen.getByRole("button", { name: /worked/i });
     expect(laterActivity).toBeTruthy();
     expect(laterActivity!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -834,7 +893,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    const thought = screen.getAllByText(/thought/i).at(-1);
+    const thought = screen.getByRole("button", { name: /worked/i });
     const answer = screen.getByText("知道，IEM Cologne Major 2026 今天开打了。");
     expect(thought).toBeTruthy();
     expect(thought!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -876,18 +935,16 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages, true);
 
-    expect(units).toHaveLength(4);
+    expect(units).toHaveLength(3);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
       "thought",
-    ]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
       "web",
     ]);
-    expect(units[2]).toMatchObject({
+    expect(units[1]).toMatchObject({
       type: "message",
       message: { id: "answer" },
     });
-    expect(units[3]).toMatchObject({
+    expect(units[2]).toMatchObject({
       type: "message",
       message: { id: "next-user" },
     });
@@ -1018,7 +1075,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
-  it("shows copy on every assistant slice while keeping fork on the last slice", () => {
+  it("projects assistant slices into one answer with one action set", () => {
     const messages: UIMessage[] = [
       {
         id: "early",
@@ -1050,8 +1107,9 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
+    expect(screen.getByText("starting…")).toBeInTheDocument();
     expect(screen.getByText("final reply")).toBeInTheDocument();
   });
 
@@ -1095,7 +1153,7 @@ describe("ThreadMessages", () => {
 
     rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
 
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(2);
   });
 
@@ -1192,13 +1250,15 @@ describe("ThreadMessages", () => {
       .toHaveLength(1);
   });
 
-  it("shows copy on adjacent assistant text slices", () => {
+  it("projects adjacent assistant text slices into one answer", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getByText("part one")).toBeInTheDocument();
+    expect(screen.getByText("part two")).toBeInTheDocument();
   });
 
   it("does not count failed optimistic messages in assistant fork indices", () => {
@@ -1280,7 +1340,6 @@ describe("ThreadMessages", () => {
       .filter(Boolean);
 
     expect(assistantFlags).toEqual([
-      ["a1", false],
       ["a2", true],
       ["a3", true],
     ]);

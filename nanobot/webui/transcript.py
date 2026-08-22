@@ -770,6 +770,36 @@ class WebUITranscriptRecorder:
             record.update(transcript_overrides)
         return self.append(chat_id, record)
 
+    def prepare_and_append_stream_event(
+        self,
+        chat_id: str,
+        event: dict[str, Any],
+        *,
+        completed_text: str | None,
+        metadata: dict[str, Any] | None = None,
+        phase: str | None = None,
+        include_source: bool = False,
+    ) -> bool:
+        """Annotate every live stream event, but persist only completed segments.
+
+        Delta frames are a transport concern: retaining each token-sized chunk
+        would turn rendering cadence into disk-write cadence. The matching end
+        event carries the canonical segment text used by history replay.
+        """
+        self.prepare_event(
+            chat_id,
+            event,
+            metadata=metadata,
+            phase=phase,
+            include_source=include_source,
+        )
+        if event.get("event") in {"delta", "reasoning_delta"}:
+            return True
+        record = dict(event)
+        if completed_text is not None:
+            record["text"] = completed_text
+        return self.append(chat_id, record)
+
     def append_user_message(
         self,
         chat_id: str,
@@ -1903,13 +1933,24 @@ def replay_transcript_to_ui_messages(
             kept.append(m)
         messages = kept
 
-    def stamp_latency(latency_ms: int) -> None:
+    def stamp_completion(
+        *,
+        latency_ms: int | None = None,
+        usage: dict[str, int] | None = None,
+        context_window_tokens: int | None = None,
+    ) -> None:
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == "assistant" and messages[i].get("kind") != "trace":
+                completion: dict[str, Any] = {"isStreaming": False}
+                if latency_ms is not None:
+                    completion["latencyMs"] = latency_ms
+                if usage:
+                    completion["usage"] = usage
+                if context_window_tokens is not None:
+                    completion["contextWindowTokens"] = context_window_tokens
                 messages[i] = {
                     **messages[i],
-                    "latencyMs": latency_ms,
-                    "isStreaming": False,
+                    **completion,
                 }
                 return
 
@@ -2216,29 +2257,26 @@ def replay_transcript_to_ui_messages(
             source_fields = _source_fields(rec)
             if isinstance(final_text, str):
                 if buffer_message_id is None:
+                    buffer_message_id = find_active_placeholder(messages, turn_fields)
+                if buffer_message_id is None:
                     buffer_message_id = _new_id("buf", idx)
-                    messages.append(
-                        {
-                            "id": buffer_message_id,
-                            "role": "assistant",
+                    messages.append({
+                        "id": buffer_message_id,
+                        "role": "assistant",
+                        "content": "",
+                        "isStreaming": True,
+                        "createdAt": _created_at_ms(rec, idx),
+                    })
+                for i, m in enumerate(messages):
+                    if m.get("id") == buffer_message_id:
+                        messages[i] = {
+                            **m,
                             "content": final_text,
                             "isStreaming": True,
                             **turn_fields,
                             **source_fields,
-                            "createdAt": _created_at_ms(rec, idx),
-                        },
-                    )
-                else:
-                    for i, m in enumerate(messages):
-                        if m.get("id") == buffer_message_id:
-                            messages[i] = {
-                                **m,
-                                "content": final_text,
-                                "isStreaming": True,
-                                **turn_fields,
-                                **source_fields,
-                            }
-                            break
+                        }
+                        break
                 if merge_next:
                     buffer_parts = [final_text]
             elif source_fields and buffer_message_id is not None:
@@ -2274,6 +2312,16 @@ def replay_transcript_to_ui_messages(
         if ev == "reasoning_end":
             if suppress_until_turn_end:
                 continue
+            text = rec.get("text")
+            if isinstance(text, str) and text:
+                close_file_edit_phase_before_activity()
+                attach_reasoning_chunk(
+                    messages,
+                    text,
+                    idx,
+                    _turn_fields(rec, "reasoning"),
+                    _created_at_ms(rec, idx),
+                )
             close_reasoning(messages)
             continue
 
@@ -2401,8 +2449,26 @@ def replay_transcript_to_ui_messages(
                     messages[i] = {**m, "isStreaming": False}
             prune_reasoning_only()
             lat = rec.get("latency_ms")
-            if isinstance(lat, (int, float)) and lat >= 0:
-                stamp_latency(int(lat))
+            usage = rec.get("usage")
+            sanitized_usage = (
+                {
+                    key: value
+                    for key, value in cast(dict[object, object], usage).items()
+                    if isinstance(key, str) and type(value) is int and value >= 0
+                }
+                if isinstance(usage, dict)
+                else None
+            )
+            context_window = rec.get("context_window_tokens")
+            stamp_completion(
+                latency_ms=int(lat) if isinstance(lat, (int, float)) and lat >= 0 else None,
+                usage=sanitized_usage,
+                context_window_tokens=(
+                    int(context_window)
+                    if isinstance(context_window, (int, float)) and context_window >= 0
+                    else None
+                ),
+            )
             buffer_message_id = None
             buffer_parts = []
             continue

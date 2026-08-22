@@ -251,6 +251,26 @@ def _refusal_event_key(
     )
 
 
+def _reasoning_summary_event_key(
+    item_id: object,
+    summary_index: object,
+) -> tuple[str | None, int] | None:
+    """Identify one reasoning summary part across its text deltas."""
+    if not isinstance(summary_index, int) or isinstance(summary_index, bool):
+        return None
+    return (
+        item_id if isinstance(item_id, str) else None,
+        summary_index,
+    )
+
+
+def _separate_reasoning_part(content: str | None, part: str) -> str:
+    """Separate summary parts only when the provider supplied no whitespace."""
+    if content and not content[-1].isspace() and not part[0].isspace():
+        return "\n" + part
+    return part
+
+
 def _remaining_refusal_text(streamed_text: str, refusal_text: str) -> str:
     """Return only text not already surfaced by refusal deltas."""
     if not streamed_text:
@@ -342,6 +362,7 @@ async def consume_sse_with_reasoning(
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
     streamed_reasoning = False
+    reasoning_summary_key: tuple[str | None, int] | None = None
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
@@ -406,6 +427,18 @@ async def consume_sse_with_reasoning(
         elif event_type == "response.reasoning_summary_text.delta":
             delta_text = event.get("delta") or ""
             if delta_text:
+                summary_key = _reasoning_summary_event_key(
+                    event.get("item_id"),
+                    event.get("summary_index"),
+                )
+                if (
+                    summary_key is not None
+                    and reasoning_summary_key is not None
+                    and summary_key != reasoning_summary_key
+                ):
+                    delta_text = _separate_reasoning_part(reasoning_content, delta_text)
+                if summary_key is not None:
+                    reasoning_summary_key = summary_key
                 reasoning_content = (reasoning_content or "") + delta_text
                 streamed_reasoning = True
                 if on_reasoning_delta:
@@ -538,7 +571,10 @@ def _extract_reasoning_summary_from_output(output: object) -> str | None:
                 text = summary.get("text")
                 if isinstance(text, str):
                     parts.append(text)
-    return "".join(parts) or None
+    content = ""
+    for part in parts:
+        content += _separate_reasoning_part(content, part)
+    return content or None
 
 
 def parse_response_output(

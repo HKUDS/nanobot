@@ -509,8 +509,6 @@ class FallbackProvider(LLMProvider):
                 )
                 continue
 
-            await self._notify_fallback_model(fallback_model)
-
             fallback_kwargs = {
                 **kwargs,
                 "model": fallback_model,
@@ -541,6 +539,11 @@ class FallbackProvider(LLMProvider):
             fallback_response = await call(fallback_provider, fallback_kwargs)
 
             if fallback_response.finish_reason != "error":
+                # Do not publish a model switch merely because a fallback was
+                # attempted.  A fallback can fail just like the primary, and
+                # the WebUI would otherwise show a misleading success signal.
+                # Publish only after this response is known to be usable.
+                await self._notify_fallback_model(fallback_model)
                 logger.info(
                     "Fallback '{}' succeeded after primary '{}' failed",
                     fallback_model, primary_model,

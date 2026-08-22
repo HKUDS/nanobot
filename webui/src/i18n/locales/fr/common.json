@@ -1178,6 +1178,11 @@
       "removeQuotedContext": "Supprimer le contexte cité",
       "modelNotConfigured": "Modèle non configuré",
       "configureModel": "Configurer le modèle",
+      "switchModel": "Changer le modèle de cette conversation",
+      "context": {
+        "tooltip": "Contexte · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}. {{percent}} % utilisé."
+      },
       "queued": {
         "label": "Guidage en attente",
         "guide": "Guider",
@@ -1394,6 +1399,11 @@
     "fileEditShowFewerLines": "Afficher moins de lignes",
     "fileEditOpenFile": "Ouvrir le fichier",
     "fileEditDiffTruncated": "Différences tronquées. Ouvrez le fichier pour voir la modification complète.",
+    "usage": {
+      "context": "Dernier contexte : {{tokens}}{{capacity}} tokens",
+      "requests": "{{count}} requêtes au modèle",
+      "estimated": "Inclut une estimation de l’utilisation"
+    },
     "activityThinkingFor": "Réflexion pendant {{duration}}",
     "activityThought": "Réflexion terminée",
     "activityThoughtFor": "Réflexion terminée en {{duration}}",

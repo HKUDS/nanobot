@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
-import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
@@ -29,10 +29,9 @@ export type DisplayUnit = TurnUnit;
 export function buildDisplayUnits(
   messages: UIMessage[],
   isStreaming = false,
+  activeTurnId: string | null = null,
 ): DisplayUnit[] {
-  return normalizeActivityTimeline(messages, {
-    preserveTrailingActivity: isStreaming,
-  });
+  return projectActivityTimeline(messages, isStreaming ? activeTurnId : undefined);
 }
 
 export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
@@ -69,7 +68,10 @@ export function ThreadMessages({
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
+  const units = useMemo(
+    () => buildDisplayUnits(messages, isStreaming, activeTurnId),
+    [activeTurnId, isStreaming, messages],
+  );
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],

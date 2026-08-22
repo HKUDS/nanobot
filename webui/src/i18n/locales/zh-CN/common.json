@@ -1191,6 +1191,11 @@
       "removeQuotedContext": "移除引用内容",
       "modelNotConfigured": "模型未配置",
       "configureModel": "配置模型",
+      "switchModel": "切换本次对话所用模型",
+      "context": {
+        "tooltip": "上下文 · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}。已使用 {{percent}}%。"
+      },
       "queued": {
         "label": "排队中的引导消息",
         "guide": "引导",
@@ -1424,7 +1429,12 @@
     "fileEditShowMoreLines": "显示剩余 {{count}} 行",
     "fileEditShowFewerLines": "收起部分行",
     "fileEditOpenFile": "打开文件",
-    "fileEditDiffTruncated": "差异内容已截断。打开文件可查看完整更改。"
+    "fileEditDiffTruncated": "差异内容已截断。打开文件可查看完整更改。",
+    "usage": {
+      "context": "当前上下文：{{tokens}}{{capacity}}",
+      "requests": "本轮 {{count}} 次模型调用",
+      "estimated": "包含估算用量"
+    }
   },
   "lightbox": {
     "title": "图片预览",

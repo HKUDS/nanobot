@@ -584,9 +584,10 @@ class TestFallbackOnPrimaryError:
         assert restored.payload == state.payload
 
     @pytest.mark.asyncio
-    async def test_reports_the_fallback_model_before_its_request(self) -> None:
+    async def test_reports_only_the_successful_fallback_model(self) -> None:
         primary = _FakeProvider("primary", _error_response())
-        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        failed_fallback = _FakeProvider("failed", _error_response("backup overloaded"))
+        successful_fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         fallback_models: list[str] = []
 
         async def _observe(model: str) -> None:
@@ -594,8 +595,11 @@ class TestFallbackOnPrimaryError:
 
         fb = FallbackProvider(
             primary=primary,
-            fallback_presets=[_fallback("fallback-a", provider="backup")],
-            provider_factory=MagicMock(return_value=fallback),
+            fallback_presets=[
+                _fallback("fallback-a", provider="backup"),
+                _fallback("fallback-b", provider="backup"),
+            ],
+            provider_factory=MagicMock(side_effect=[failed_fallback, successful_fallback]),
             fallback_model_observer=_observe,
         )
 
@@ -605,7 +609,7 @@ class TestFallbackOnPrimaryError:
         )
 
         assert result.content == "fallback ok"
-        assert fallback_models == ["fallback-a"]
+        assert fallback_models == ["fallback-b"]
 
     @pytest.mark.asyncio
     async def test_logs_primary_error_before_fallback(self) -> None:

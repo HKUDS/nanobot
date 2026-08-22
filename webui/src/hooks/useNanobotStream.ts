@@ -55,7 +55,6 @@ type PendingStreamEvent =
   | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
 
-const STREAM_END_IDLE_DELAY_MS = 1000;
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
 
 /**
@@ -63,8 +62,8 @@ const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
  *
  * Lookup rule: reasoning can only extend the current reasoning placeholder.
  * Once ordinary answer text has appeared, the next reasoning chunk starts a
- * fresh Thought block so streamed output stays in arrival order:
- * Thought -> answer -> Thought -> answer.
+ * fresh activity surface so streamed output stays in arrival order while the
+ * final answer remains the only visible answer bubble.
  */
 function attachReasoningChunk(
   prev: UIMessage[],
@@ -183,16 +182,6 @@ export interface SubmittedTurn {
   sideChannel: boolean;
 }
 
-function eventExtendsModelActivity(ev: InboundEvent): boolean {
-  if (
-    ev.event === "delta"
-    || ev.event === "reasoning_delta"
-    || ev.event === "file_edit"
-  ) return true;
-  return ev.event === "message"
-    && (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning");
-}
-
 function eventTurnId(ev: InboundEvent): string | undefined {
   return "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : undefined;
 }
@@ -296,14 +285,6 @@ export function useNanobotStream(
   const streamTimerRef = useRef<number | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
   const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
-  /** Timer that defers ``isStreaming = false`` after ``stream_end``.
-   *
-   * When the model finishes a text segment and calls a tool, the server
-   * sends ``stream_end`` but the agent is still "thinking" while the tool
-   * executes.  By deferring the flag reset by a short window (1 s) we keep
-   * the loading spinner alive across tool-call boundaries without needing
-   * backend changes. */
-  const streamEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
@@ -319,25 +300,10 @@ export function useNanobotStream(
     pendingStreamEventsRef.current = [];
   }, []);
 
-  const cancelStreamEndTimer = useCallback(() => {
-    if (streamEndTimerRef.current === null) return;
-    clearTimeout(streamEndTimerRef.current);
-    streamEndTimerRef.current = null;
-  }, []);
-
   const isSideChannelEvent = useCallback((ev: InboundEvent) => {
     const turnId = eventTurnId(ev);
     return turnId !== undefined && sideChannelTurnIdsRef.current.has(turnId);
   }, []);
-
-  const scheduleStreamEndTimer = useCallback((turn: UIMessageTurnFields = {}) => {
-    cancelStreamEndTimer();
-    streamEndTimerRef.current = setTimeout(() => {
-      streamEndTimerRef.current = null;
-      setIsStreaming(false);
-      setMessages((prev) => finalizeStreamedTurn(prev, turn));
-    }, STREAM_END_IDLE_DELAY_MS);
-  }, [cancelStreamEndTimer]);
 
   const createActivitySegmentId = useCallback((activate = true) => {
     activitySegmentCounterRef.current += 1;
@@ -387,7 +353,6 @@ export function useNanobotStream(
       (event) => event.turn.turnId !== rejectedTurnId,
     );
     sideChannelTurnIdsRef.current.delete(rejectedTurnId);
-    cancelStreamEndTimer();
     setMessages((prev) => {
       const rejectedRows = prev.filter((message) => message.turnId === rejectedTurnId);
       if (rejectedRows.length === 0) return prev;
@@ -438,7 +403,7 @@ export function useNanobotStream(
     setRunStartedAt(remainingStartedAt);
     setIsStreaming(hasRemainingRun);
     if (!hasRemainingRun) suppressStreamUntilTurnEndRef.current = false;
-  }, [cancelStreamEndTimer, chatId, client]);
+  }, [chatId, client]);
 
   useEffect(() => client.onError(applyStreamError), [applyStreamError, client]);
 
@@ -659,15 +624,6 @@ export function useNanobotStream(
     return () => document.removeEventListener("visibilitychange", flushOnReturn);
   }, [flushPendingStreamEvents]);
 
-  useEffect(() => {
-    return client.onStatus((status) => {
-      if (status !== "reconnecting" && status !== "closed") return;
-      // A transport drop does not prove the backend turn completed. Keep the
-      // semantic running state intact so queued guidance is not flushed early.
-      cancelStreamEndTimer();
-    });
-  }, [cancelStreamEndTimer, client]);
-
   // Reset local state when switching chats. Do not reset on every
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
@@ -690,9 +646,8 @@ export function useNanobotStream(
     clearPendingStreamWork();
     sideChannelTurnIdsRef.current.clear();
     suppressStreamUntilTurnEndRef.current = false;
-    cancelStreamEndTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, client, cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
+  }, [chatId, client, clearActivitySegment, clearPendingStreamWork]);
 
   useEffect(() => {
     if (hasPendingToolCalls) setIsStreaming(true);
@@ -774,12 +729,6 @@ export function useNanobotStream(
         return;
       }
       const sideChannelEvent = isSideChannelEvent(ev);
-      if (
-        streamEndTimerRef.current !== null
-        && !sideChannelEvent
-        && eventExtendsModelActivity(ev)
-      ) cancelStreamEndTimer();
-
       if (ev.event === "delta") {
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
@@ -822,14 +771,13 @@ export function useNanobotStream(
         });
         if (suppressStreamUntilTurnEndRef.current) return;
         if (ev.resuming) {
-          cancelStreamEndTimer();
           setIsStreaming(true);
-          if (!mergeNext) {
-            setMessages((prev) => finalizeStreamedTurn(prev, turn));
-          }
           return;
         }
-        scheduleStreamEndTimer(turn);
+        // ``stream_end`` closes the current answer segment, not the turn.
+        // Tools and follow-up model segments may still arrive before the
+        // definitive ``turn_end`` event.
+        setIsStreaming(true);
         return;
       }
 
@@ -868,9 +816,8 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRunStartedAt(null);
-        // Definitive signal that the turn is fully complete.  Cancel any
-        // pending debounce timer and stop the loading indicator immediately.
-        cancelStreamEndTimer();
+        // Definitive signal that the turn is fully complete, so stop the
+        // loading indicator immediately.
         setIsStreaming(false);
         const completedAt = Date.now();
         setMessages((prev) => {
@@ -884,6 +831,10 @@ export function useNanobotStream(
             finalized,
             {
               ...(latencyMs !== undefined ? { latencyMs } : {}),
+              ...(ev.usage ? { usage: ev.usage } : {}),
+              ...(typeof ev.context_window_tokens === "number"
+                ? { contextWindowTokens: ev.context_window_tokens }
+                : {}),
               completedAt,
             },
             ev.turn_id,
@@ -1013,8 +964,9 @@ export function useNanobotStream(
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
-        // Streaming state is closed by ``stream_end`` when present, or by
-        // ``turn_end`` for non-streamed and tool-heavy turns.
+        // ``turn_end`` is the turn boundary. ``stream_end`` only closes the
+        // current text segment so a following tool/reasoning segment remains
+        // part of the same live activity surface.
         clearActivitySegment();
         setMessages((prev) => {
           const activeId = buffer.current?.messageId;
@@ -1088,7 +1040,6 @@ export function useNanobotStream(
         });
         return;
       }
-      // ``attached`` frames aren't actionable here.
     };
 
     const unsub = client.onChat(chatId, handle);
@@ -1099,12 +1050,11 @@ export function useNanobotStream(
       closedAssistantStreamIdsRef.current.clear();
       clearActivitySegment();
       clearPendingStreamWork();
-      cancelStreamEndTimer();
     };
   }, [
     applyStreamError,
-    cancelStreamEndTimer,
     chatId,
+    closeActiveAssistantStream,
     client,
     clearActivitySegment,
     clearPendingStreamWork,
@@ -1114,7 +1064,6 @@ export function useNanobotStream(
     isSideChannelEvent,
     onTurnEnd,
     schedulePendingStreamFlush,
-    scheduleStreamEndTimer,
   ]);
 
   const send = useCallback(
@@ -1133,7 +1082,6 @@ export function useNanobotStream(
         : content;
       flushPendingStreamEvents();
       if (finalizeActiveTurn) {
-        cancelStreamEndTimer();
         setIsStreaming(false);
       }
       const turnId = crypto.randomUUID();
@@ -1188,7 +1136,7 @@ export function useNanobotStream(
       client.sendMessage(chatId, outboundContent, wireMedia, clientOptions);
       return { turnId, userMessageId, sideChannel };
     },
-    [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
+    [chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );
 
   const stop = useCallback(() => {
@@ -1209,7 +1157,6 @@ export function useNanobotStream(
   }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
 
   const reconcileTurnComplete = useCallback(() => {
-    cancelStreamEndTimer();
     clearPendingStreamWork();
     buffer.current = null;
     activeAssistantRef.current = null;
@@ -1218,7 +1165,7 @@ export function useNanobotStream(
     suppressStreamUntilTurnEndRef.current = false;
     setRunStartedAt(null);
     setIsStreaming(false);
-  }, [cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
+  }, [clearActivitySegment, clearPendingStreamWork]);
 
   const transcribeAudio = useCallback(
     (dataUrl: string, options?: { durationMs?: number }) =>

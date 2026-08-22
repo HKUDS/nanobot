@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
-import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
+import { relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
   displayTitle,
@@ -906,14 +906,6 @@ export const ChatList = memo(function ChatList({
                       );
                     }
 
-                    const fallbackTitle = t("chat.fallbackTitle", {
-                      id: s.chatId.slice(0, 6),
-                    });
-                    const generatedTitle = s.title?.trim() || "";
-                    const tooltipTitle =
-                      titleOverrides[s.key]?.trim() ||
-                      generatedTitle ||
-                      deriveTitle(s.preview, fallbackTitle);
                     const isPinned = pinned.has(s.key);
                     const isArchived = archived.has(s.key);
                     const preview = visibleSessionPreview(s.preview);
@@ -959,8 +951,7 @@ export const ChatList = memo(function ChatList({
                               && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
                         >
-                          <SidebarItemTooltip label={tooltipTitle}>
-                            <button
+                          <button
                               type="button"
                               onClick={(event) => {
                                 if (deleteSelectionMode) {
@@ -1029,8 +1020,7 @@ export const ChatList = memo(function ChatList({
                                   </span>
                                 ) : null}
                               </span>
-                            </button>
-                          </SidebarItemTooltip>
+                          </button>
                           <SessionActivityIndicator state={activityState} />
                           {!deleteSelectionMode ? (
                             <DropdownMenu
@@ -1435,10 +1425,7 @@ function ActivePaneRows({
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
             >
-              <SidebarItemTooltip
-                label={pane.handle ? `@${pane.handle.name} · ${pane.title}` : pane.title}
-              >
-                <button
+              <button
                   type="button"
                   onClick={(event) => {
                     if (deleteSelectionMode) {
@@ -1474,8 +1461,7 @@ function ActivePaneRows({
                     {isPinned ? <PinnedChatIndicator /> : null}
                     <SidebarSelectionTrack active={active} handle={pane.handle} />
                   </span>
-                </button>
-              </SidebarItemTooltip>
+              </button>
               <SessionActivityIndicator state={activityState} />
               {!deleteSelectionMode ? <DropdownMenu
                 modal={false}
@@ -1652,8 +1638,7 @@ function TemporaryChatSection({
                     : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
                 )}
               >
-                <SidebarItemTooltip label={title}>
-                  <button
+                <button
                     type="button"
                     onClick={() => onSelect(session.key)}
                     aria-current={active ? "page" : undefined}
@@ -1666,8 +1651,7 @@ function TemporaryChatSection({
                     <span className="min-w-0 flex-1 truncate font-medium leading-5">
                       {title}
                     </span>
-                  </button>
-                </SidebarItemTooltip>
+                </button>
                 <SessionActivityIndicator state={running.has(session.chatId) ? "running" : null} />
                 {onClose ? (
                   <button

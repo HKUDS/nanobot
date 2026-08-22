@@ -1192,6 +1192,11 @@
       "removeQuotedContext": "Remover contexto citado",
       "modelNotConfigured": "Modelo não configurado",
       "configureModel": "Configurar modelo",
+      "switchModel": "Alternar o modelo desta conversa",
+      "context": {
+        "tooltip": "Contexto · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}. {{percent}}% usado."
+      },
       "queued": {
         "label": "Guia em fila",
         "guide": "Guiar",
@@ -1424,7 +1429,12 @@
     "fileEditShowMoreLines": "Mostrar mais {{count}} linhas",
     "fileEditShowFewerLines": "Mostrar menos linhas",
     "fileEditOpenFile": "Abrir arquivo",
-    "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa."
+    "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa.",
+    "usage": {
+      "context": "Contexto atual: {{tokens}}{{capacity}}",
+      "requests": "{{count}} chamadas nesta rodada",
+      "estimated": "Inclui uso estimado"
+    }
   },
   "lightbox": {
     "title": "Pré-visualização de imagem",

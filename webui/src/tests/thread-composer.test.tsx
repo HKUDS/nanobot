@@ -317,9 +317,9 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
 }
 
 const MODEL_PRESETS = [
-  { name: "kimi", provider: "moonshot" },
-  { name: "dflash", provider: "deepseek" },
-  { name: "dspro", provider: "deepseek" },
+  { name: "kimi", model: "moonshot/kimi-k2.5", provider: "moonshot" },
+  { name: "dflash", model: "deepseek/deepseek-v4-flash", provider: "deepseek" },
+  { name: "dspro", model: "deepseek/deepseek-v4-pro", provider: "deepseek" },
 ];
 
 function renderPresetComposer(variant: "thread" | "hero" = "thread") {
@@ -337,26 +337,9 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
     />,
   );
   return {
-    badge: screen.getByRole("spinbutton", { name: "kimi" }),
+    badge: screen.getByRole("button", { name: "kimi" }),
     onPresetChange,
   };
-}
-
-function pointerDown(badge: HTMLElement, pointerId = 7, clientY = 100, button = 0) {
-  fireEvent.pointerDown(badge, {
-    button,
-    clientY,
-    isPrimary: true,
-    pointerId,
-    pointerType: "mouse",
-  });
-}
-
-function longPress(badge: HTMLElement, pointerId = 7) {
-  pointerDown(badge, pointerId);
-  act(() => {
-    vi.advanceTimersByTime(400);
-  });
 }
 
 describe("ThreadComposer", () => {
@@ -538,10 +521,40 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    const badge = screen.getByRole("spinbutton", { name: "gpt-5.6-sol" });
+    const badge = screen.getByRole("button", { name: "gpt-5.6-sol" });
     expect(badge).toHaveClass("w-fit", "max-w-[min(18rem,44vw)]");
     expect(badge).not.toHaveClass("w-[5.75rem]");
     expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();
+  });
+
+  it("shows a compact context meter beside the model selector", async () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        modelLabel="gpt-5.6-sol"
+        modelPreset="gpt-5-6-sol"
+        modelProvider="openai_codex"
+        contextUsage={{
+          contextTokens: 74_900,
+          contextWindowTokens: 1_000_000,
+        }}
+        placeholder="Ask anything..."
+      />,
+    );
+
+    const context = screen.getByTestId("composer-context-usage");
+    expect(context).toHaveClass("size-5", "rounded-full");
+    expect(context).not.toHaveTextContent("Context 74.9K / 1M");
+    expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    expect(context).toHaveAccessibleName(
+      "Context · 74.9K / 1M. 7% used.",
+    );
+
+    fireEvent.focus(context);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Context · 74.9K / 1M");
+    expect(tooltip.parentElement).toHaveClass("rounded-full", "px-2.5", "py-1");
+    expect(tooltip.parentElement).not.toHaveTextContent("Available");
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {
@@ -559,7 +572,9 @@ describe("ThreadComposer", () => {
     const modelPill = screen.getByText("gpt-4o").closest(".composer-model-pill");
     expect(modelPill).toHaveClass("font-medium", "text-foreground/70");
     expect(modelPill).not.toHaveClass("font-semibold");
-    expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
+    const providerLogo = screen.getByTestId("composer-model-logo-openai");
+    expect(providerLogo).toBeInTheDocument();
+    expect(providerLogo).not.toHaveClass("border", "bg-background");
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");
@@ -571,141 +586,53 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
 
-  it("shows model details in the shared tooltip without a native title", async () => {
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        modelLabel="gpt-4o"
-        modelDetail="gpt-4o"
-        modelProvider="openai"
-        modelProviderLabel="OpenAI"
-        placeholder="Type your message..."
-      />,
-    );
-
-    const badge = screen.getByLabelText("gpt-4o");
-    expect(badge).not.toHaveAttribute("title");
-    fireEvent.focus(badge);
-
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("gpt-4o · OpenAI");
-  });
-
-  it("smoothly cycles to the next preset on click", () => {
-    vi.useFakeTimers();
-    let runFrame: FrameRequestCallback | null = null;
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      runFrame = callback;
-      return 1;
-    });
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
-    const { badge, onPresetChange } = renderPresetComposer();
-
-    fireEvent.click(badge);
-
-    expect(badge).toHaveAttribute("data-switching", "true");
-    const track = screen.getByTestId("composer-model-pill-track");
-    expect(track).not.toHaveAttribute("data-settling");
-    expect(track).toHaveStyle({ transform: "translate3d(0, -40px, 0)" });
-
-    act(() => runFrame?.(16));
-
-    expect(onPresetChange).toHaveBeenCalledWith("dflash");
-    expect(badge).toHaveAttribute("data-settling", "true");
-    expect(track).toHaveAttribute("data-settling", "true");
-    expect(track).toHaveStyle({ transform: "translate3d(0, -80px, 0)" });
-
-    act(() => vi.advanceTimersByTime(260));
-    expect(badge).not.toHaveAttribute("data-switching");
-  });
-
-  it("scrolls complete preset pills after a left-button long press and wraps", () => {
-    vi.useFakeTimers();
+  it("opens a model picker and switches presets with one click", async () => {
     const { badge, onPresetChange } = renderPresetComposer();
     expect(badge).toHaveClass("h-9");
-    expect(badge).toHaveStyle({ touchAction: "manipulation" });
-    const idleTouchMove = new Event("touchmove", {
-      bubbles: true,
-      cancelable: true,
-    });
-    badge.dispatchEvent(idleTouchMove);
-    expect(idleTouchMove.defaultPrevented).toBe(false);
-    pointerDown(badge);
-    fireEvent.pointerMove(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
-    act(() => vi.advanceTimersByTime(500));
-    fireEvent.pointerUp(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
-    expect(onPresetChange).not.toHaveBeenCalled();
-
-    longPress(badge);
-    expect(badge).toHaveAttribute("data-switching", "true");
-    const viewport = screen.getByTestId("composer-model-pill-viewport");
-    expect(viewport).toHaveClass(
-      "right-0",
-      "w-max",
-      "max-w-[calc(44vw+0.5rem)]",
-      "overflow-hidden",
-      "-top-3",
-      "-bottom-3",
-    );
-    const track = screen.getByTestId("composer-model-pill-track");
-    expect(track).toHaveClass("w-max", "max-w-full", "items-end", "gap-1");
-    const activeTouchMove = new Event("touchmove", {
-      bubbles: true,
-      cancelable: true,
-    });
-    badge.dispatchEvent(activeTouchMove);
-    expect(activeTouchMove.defaultPrevented).toBe(true);
-    const pills = track.querySelectorAll<HTMLElement>(".composer-model-pill");
-    expect(pills).toHaveLength(5);
-    expect(Array.from(pills).every((pill) => pill.classList.contains("w-fit"))).toBe(true);
-    expect(Array.from(pills).every((pill) => pill.querySelector("img"))).toBe(true);
-    expect(Array.from(badge.querySelectorAll("img")).every((image) => !image.draggable)).toBe(true);
-    const centeredPill = track.querySelector<HTMLElement>("[data-preset-offset='0']");
-    expect(centeredPill).toHaveTextContent("kimi");
-    expect(centeredPill).toHaveStyle({ transform: "scale(1.0800)" });
-    expect(
-      track.querySelector<HTMLElement>("[data-preset-offset='1']"),
-    ).toHaveStyle({ transform: "scale(1.0200)" });
-
-    fireEvent.pointerMove(badge, {
-      clientY: 122,
-      pointerId: 7,
-      pointerType: "mouse",
-    });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("kimi");
-    fireEvent.pointerMove(badge, {
-      clientY: 123,
-      pointerId: 7,
-      pointerType: "mouse",
-    });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("dspro");
-    fireEvent.pointerUp(badge, {
-      clientY: 123,
-      pointerId: 7,
-      pointerType: "mouse",
-    });
-
-    expect(onPresetChange).toHaveBeenCalledWith("dspro");
+    expect(badge).toHaveClass("w-fit");
     fireEvent.click(badge);
-    expect(onPresetChange).toHaveBeenCalledTimes(1);
-    expect(badge).toHaveAttribute("data-settling", "true");
-    expect(track).toHaveAttribute("data-settling", "true");
-    act(() => {
-      vi.advanceTimersByTime(260);
-    });
-    expect(badge).not.toHaveAttribute("data-switching");
-    expect(badge).not.toHaveAttribute("data-settling");
+    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
+    expect(picker).toHaveClass("w-[min(18rem,calc(100vw-2rem))]");
+    expect(badge).toHaveClass("w-fit");
+    expect(badge.querySelector(".composer-model-pill")).not.toHaveClass("w-full");
+    expect(within(picker).getAllByRole("option")).toHaveLength(3);
+    expect(within(picker).getByRole("option", { name: "dflash" })).toHaveTextContent(
+      /dflash\s*deepseek-v4-flash/,
+    );
+    expect(within(picker).getByRole("option", { name: "kimi" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(document.activeElement).toBe(within(picker).getByRole("option", { name: "kimi" }));
+    fireEvent.click(within(picker).getByRole("option", { name: "dspro" }));
+    expect(onPresetChange).toHaveBeenCalledWith("dspro");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(badge).toHaveClass("w-fit");
   });
 
-  it("supports the same long-press switcher in hero mode and cancels pointercancel", () => {
+  it("keeps long-press drag switching alongside the click picker", () => {
     vi.useFakeTimers();
+    const { badge, onPresetChange } = renderPresetComposer();
+
+    fireEvent.pointerDown(badge, { pointerId: 1, pointerType: "touch", clientY: 100 });
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByTestId("composer-model-pill-viewport")).toBeInTheDocument();
+    expect(screen.getByTestId("composer-model-pill-layout")).toHaveClass("invisible");
+    expect(screen.getByTestId("composer-model-pill-track")).not.toHaveClass("transition-transform");
+
+    fireEvent.pointerMove(badge, { pointerId: 1, pointerType: "touch", clientY: 56 });
+    fireEvent.pointerUp(badge, { pointerId: 1, pointerType: "touch", clientY: 56 });
+    expect(onPresetChange).toHaveBeenCalledWith("dflash");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("uses the same click picker in hero mode", () => {
     const { badge, onPresetChange } = renderPresetComposer("hero");
     expect(badge).toHaveClass("h-8");
-    longPress(badge, 9);
-    expect(badge).toHaveAttribute("data-switching", "true");
-    fireEvent.pointerMove(badge, { clientY: 75, pointerId: 9, pointerType: "mouse" });
-    fireEvent.pointerCancel(badge, { clientY: 75, pointerId: 9, pointerType: "mouse" });
-    expect(badge).not.toHaveAttribute("data-switching");
-    expect(onPresetChange).not.toHaveBeenCalled();
+    fireEvent.click(badge);
+    fireEvent.click(screen.getByRole("option", { name: "dflash" }));
+    expect(onPresetChange).toHaveBeenCalledWith("dflash");
   });
 
   it("transcribes voice input into the composer without sending", async () => {

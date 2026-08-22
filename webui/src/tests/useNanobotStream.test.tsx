@@ -350,6 +350,51 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("stamps provider usage and latest context on the completed answer", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-usage", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-usage", {
+        event: "delta",
+        chat_id: "chat-usage",
+        text: "done",
+        turn_id: "turn-usage",
+      });
+      fake.emit("chat-usage", {
+        event: "turn_end",
+        chat_id: "chat-usage",
+        turn_id: "turn-usage",
+        latency_ms: 18_200,
+        context_window_tokens: 128_000,
+        usage: {
+          prompt_tokens: 12_400,
+          completion_tokens: 823,
+          cached_tokens: 9_672,
+          context_tokens: 8_100,
+          request_count: 3,
+        },
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      content: "done",
+      isStreaming: false,
+      latencyMs: 18_200,
+      contextWindowTokens: 128_000,
+      usage: {
+        prompt_tokens: 12_400,
+        completion_tokens: 823,
+        cached_tokens: 9_672,
+        context_tokens: 8_100,
+        request_count: 3,
+      },
+    });
+  });
+
   it("preserves proactive automation source metadata on complete assistant messages", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-cron", EMPTY_MESSAGES), {
@@ -2488,7 +2533,7 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("lets stream_end finish streaming while side-channel status replies arrive", () => {
+  it("keeps the turn active after stream_end while side-channel replies arrive", () => {
     vi.useFakeTimers();
     try {
       const fake = fakeClient();
@@ -2528,6 +2573,19 @@ describe("useNanobotStream", () => {
 
       act(() => {
         vi.advanceTimersByTime(1000);
+      });
+
+      expect(result.current.isStreaming).toBe(true);
+      expect(result.current.messages.find((message) => message.content === "done")).toMatchObject({
+        isStreaming: true,
+      });
+
+      act(() => {
+        fake.emit("chat-status-loop", {
+          event: "turn_end",
+          chat_id: "chat-status-loop",
+          turn_id: promptTurnId,
+        });
       });
 
       expect(result.current.isStreaming).toBe(false);
@@ -2589,7 +2647,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(3);
     expect(result.current.messages[1]).toMatchObject({
       content: "Initial findings",
-      isStreaming: false,
+      isStreaming: true,
     });
 
     act(() => {

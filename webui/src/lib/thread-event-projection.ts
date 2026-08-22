@@ -136,7 +136,7 @@ export function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
 
 export function stampLastAssistantCompletion(
   prev: UIMessage[],
-  completion: Pick<UIMessage, "latencyMs" | "completedAt">,
+  completion: Pick<UIMessage, "latencyMs" | "completedAt" | "usage" | "contextWindowTokens">,
   turnId?: string,
 ): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {

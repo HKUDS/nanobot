@@ -112,6 +112,7 @@ import {
   readDraggedSession,
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
+import { formatCompactTokenCount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -178,6 +179,107 @@ function getVoiceShortcutLabel(): string {
   }
 }
 
+export interface ComposerContextUsage {
+  contextTokens: number;
+  contextWindowTokens?: number;
+}
+
+function ComposerContextBadge({ usage }: { usage: ComposerContextUsage | null }) {
+  const { t } = useTranslation();
+  if (!usage || !Number.isFinite(usage.contextTokens) || usage.contextTokens < 0) return null;
+
+  const context = formatCompactTokenCount(usage.contextTokens);
+  const contextWindow = typeof usage.contextWindowTokens === "number"
+    && Number.isFinite(usage.contextWindowTokens)
+    && usage.contextWindowTokens > 0
+    ? usage.contextWindowTokens
+    : null;
+  const capacity = contextWindow !== null
+    ? ` / ${formatCompactTokenCount(contextWindow)}`
+    : "";
+  // The meter is meaningful only with a known capacity.  Do not turn an
+  // otherwise unknown total into a second, text-heavy control beside the
+  // model picker.
+  if (contextWindow === null) return null;
+  const percentage = Math.min(100, Math.round(usage.contextTokens / contextWindow * 100));
+  const status = percentage >= 90
+      ? "critical"
+      : percentage >= 75
+        ? "caution"
+        : "normal";
+  const contextDescription = t("thread.composer.context.tooltip", {
+    defaultValue: "Context · {{tokens}}{{capacity}}",
+    tokens: context,
+    capacity,
+  });
+  const meterDescription = t("thread.composer.context.meterDescription", {
+    defaultValue: "{{context}}. {{percent}}% used.",
+    context: contextDescription,
+    percent: percentage,
+  });
+  const ringCircumference = 2 * Math.PI * 6;
+  const ringLength = ringCircumference * percentage / 100;
+
+  return (
+    <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            data-testid="composer-context-usage"
+            aria-label={meterDescription}
+            className={cn(
+              "inline-flex size-5 shrink-0 items-center justify-center rounded-full",
+              "text-muted-foreground/75 transition-colors hover:text-foreground/85",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              className={cn(
+                "size-[15px] shrink-0 -rotate-90",
+                status === "critical" && "text-destructive",
+                status === "caution" && "text-amber-600 dark:text-amber-400",
+                status === "normal" && "text-muted-foreground/75",
+              )}
+            >
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="opacity-20"
+              />
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeDasharray={`${ringLength} ${ringCircumference}`}
+                data-testid="composer-context-meter"
+              />
+            </svg>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={8}
+          className="w-fit max-w-[calc(100vw-2rem)] rounded-full border-border/70 px-2.5 py-1 text-xs font-medium shadow-[0_8px_24px_rgba(15,23,42,0.13)]"
+        >
+          <span className="whitespace-nowrap tabular-nums">{contextDescription}</span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface ThreadComposerProps {
   onSend: (
     content: string,
@@ -198,6 +300,7 @@ interface ThreadComposerProps {
   modelNeedsSetup?: boolean;
   fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
+  contextUsage?: ComposerContextUsage | null;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
@@ -895,6 +998,7 @@ export function ThreadComposer({
   modelNeedsSetup = false,
   fallbackModelName = null,
   onModelBadgeClick,
+  contextUsage = null,
   variant = "thread",
   slashCommands = [],
   cliApps = [],
@@ -2435,6 +2539,7 @@ export function ThreadComposer({
                 modelPreset={modelPreset}
                 modelPresets={modelPresets}
                 onPresetChange={onModelPresetChange}
+                onRequestComposerFocus={() => textareaRef.current?.focus()}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
@@ -2443,6 +2548,7 @@ export function ThreadComposer({
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
             ) : null}
+            {!voiceRecorder.isRecording ? <ComposerContextBadge usage={contextUsage} /> : null}
             {showVoiceButton ? (
               <TooltipProvider delayDuration={220} skipDelayDuration={80}>
                 <Tooltip>

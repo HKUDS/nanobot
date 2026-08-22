@@ -1178,6 +1178,11 @@
       "removeQuotedContext": "移除引用內容",
       "modelNotConfigured": "尚未設定模型",
       "configureModel": "設定模型",
+      "switchModel": "切換此對話使用的模型",
+      "context": {
+        "tooltip": "上下文 · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}。已使用 {{percent}}%。"
+      },
       "queued": {
         "label": "佇列中的引導訊息",
         "guide": "引導",
@@ -1393,6 +1398,11 @@
     "fileEditShowFewerLines": "收起部分行",
     "fileEditOpenFile": "開啟檔案",
     "fileEditDiffTruncated": "差異內容已截斷。請開啟檔案以檢視完整變更。",
+    "usage": {
+      "context": "最近一次上下文：{{tokens}}{{capacity}} tokens",
+      "requests": "{{count}} 次模型請求",
+      "estimated": "包含估算用量"
+    },
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",

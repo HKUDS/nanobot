@@ -1192,6 +1192,11 @@
       "removeQuotedContext": "Remove quoted context",
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
+      "switchModel": "Switch model for this chat",
+      "context": {
+        "tooltip": "Context · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}. {{percent}}% used."
+      },
       "queued": {
         "label": "Queued guidance",
         "guide": "Guide",
@@ -1424,7 +1429,12 @@
     "fileEditShowMoreLines": "Show {{count}} more lines",
     "fileEditShowFewerLines": "Show fewer lines",
     "fileEditOpenFile": "Open file",
-    "fileEditDiffTruncated": "Diff truncated. Open the file for the full change."
+    "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
+    "usage": {
+      "context": "Context now: {{tokens}}{{capacity}}",
+      "requests": "{{count}} calls this turn",
+      "estimated": "Includes estimated usage"
+    }
   },
   "lightbox": {
     "title": "Image preview",

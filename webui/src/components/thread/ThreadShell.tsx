@@ -8,7 +8,10 @@ import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import {
+  ThreadComposer,
+  type ComposerContextUsage,
+} from "@/components/thread/ThreadComposer";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -81,6 +84,30 @@ function sameMessageShape(a: MessageShape, b: MessageShape): boolean {
     && a.content === b.content
     && (!a.turnId || !b.turnId || a.turnId === b.turnId)
   );
+}
+
+function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const contextTokens = message.usage?.context_tokens;
+    if (
+      message.role !== "assistant"
+      || message.kind === "trace"
+      || message.isStreaming
+      || typeof contextTokens !== "number"
+      || !Number.isFinite(contextTokens)
+      || contextTokens < 0
+    ) {
+      continue;
+    }
+    return {
+      contextTokens,
+      ...(typeof message.contextWindowTokens === "number"
+        ? { contextWindowTokens: message.contextWindowTokens }
+        : {}),
+    };
+  }
+  return null;
 }
 
 function snapshotPreservesMessage(
@@ -400,7 +427,7 @@ function toModelBadgeInfo(
   );
   return {
     label,
-    model: model?.trim() || null,
+    model: toModelBadgeLabel(model),
     provider,
     providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
     needsSetup,
@@ -803,8 +830,12 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
-  const currentRunStartedAt = messagesReady ? runStartedAt : null;
+  const composerContextUsage = useMemo(
+    () => latestComposerContextUsage(displayMessages),
+    [displayMessages],
+  );
   const currentGoalState = messagesReady ? goalState : undefined;
+  const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
   const restoredViewportTurnId = useMemo(
     () => turnActive ? latestActiveTurnId(displayMessages, currentRunStartedAt) : null,
@@ -882,9 +913,17 @@ export function ThreadShell({
   useEffect(() => {
     setLocalModelPreset(null);
   }, [session?.key, sessionModelPreset]);
+  const configuredPresetNames = useMemo(
+    () => new Set(settings?.model_presets.map((preset) => preset.name) ?? []),
+    [settings],
+  );
   const activeModelPreset = (
-    localModelPreset
-    || sessionModelPreset
+    (localModelPreset && (!settings || configuredPresetNames.has(localModelPreset))
+      ? localModelPreset
+      : null)
+    || (sessionModelPreset && (!settings || configuredPresetNames.has(sessionModelPreset))
+      ? sessionModelPreset
+      : null)
     || settings?.agent.model_preset
     || "default"
   );
@@ -958,13 +997,10 @@ export function ThreadShell({
     }
     setFallbackModelName(null);
     return client.onChat(chatId, (event) => {
-      if (event.event !== "turn_model_updated") return;
-      const activeModel = event.model_name.trim();
-      setFallbackModelName(
-        modelBadge.model && activeModel !== modelBadge.model ? activeModel : null,
-      );
+      if (event.event !== "turn_model_updated" || event.fallback !== true) return;
+      setFallbackModelName(event.model_name);
     });
-  }, [chatId, client, modelBadge.model]);
+  }, [chatId, client]);
 
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
@@ -1454,7 +1490,7 @@ export function ThreadShell({
               : t("thread.composer.placeholderThread")
           }
           modelLabel={modelBadgeLabel}
-          modelDetail={toModelBadgeLabel(modelBadge.model)}
+          modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
@@ -1463,6 +1499,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          contextUsage={composerContextUsage}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1501,7 +1538,7 @@ export function ThreadShell({
               : t("thread.composer.placeholderHero")
           }
           modelLabel={modelBadgeLabel}
-          modelDetail={toModelBadgeLabel(modelBadge.model)}
+          modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
@@ -1510,6 +1547,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          contextUsage={composerContextUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
           cliApps={cliApps}

@@ -425,7 +425,7 @@ class AgentRunner:
     ) -> AgentRunResult:
         final_content: str | None = None
         tools_used: list[str] = []
-        usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
+        usage = {"prompt_tokens": 0, "completion_tokens": 0}
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
@@ -1385,16 +1385,23 @@ class AgentRunner:
         ))
 
     @staticmethod
-    def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:
-        for key, value in addition.items():
-            target[key] = target.get(key, 0) + value
-
-    @staticmethod
     def _merge_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
         merged = dict(left)
         for key, value in right.items():
             merged[key] = merged.get(key, 0) + value
         return merged
+
+    @staticmethod
+    def _accumulate_usage(total: dict[str, int], request: dict[str, int]) -> None:
+        """Fold one model request into the current turn's usage."""
+        total["request_count"] = total.get("request_count", 0) + 1
+        prompt_tokens = request.get("prompt_tokens")
+        if prompt_tokens is not None and prompt_tokens >= 0:
+            total["context_tokens"] = prompt_tokens
+        for key, value in request.items():
+            if key in {"context_tokens", "request_count"} or value < 0:
+                continue
+            total[key] = total.get(key, 0) + value
 
     async def _execute_tools(
         self,

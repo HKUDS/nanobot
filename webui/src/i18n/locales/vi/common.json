@@ -1178,6 +1178,11 @@
       "removeQuotedContext": "Xóa ngữ cảnh được trích dẫn",
       "modelNotConfigured": "Chưa cấu hình mô hình",
       "configureModel": "Cấu hình mô hình",
+      "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
+      "context": {
+        "tooltip": "Ngữ cảnh · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}. Đã dùng {{percent}}%."
+      },
       "queued": {
         "label": "Hướng dẫn đang chờ",
         "guide": "Hướng dẫn",
@@ -1394,6 +1399,11 @@
     "fileEditShowFewerLines": "Hiển thị ít dòng hơn",
     "fileEditOpenFile": "Mở tệp",
     "fileEditDiffTruncated": "Khác biệt đã bị cắt bớt. Mở tệp để xem toàn bộ thay đổi.",
+    "usage": {
+      "context": "Ngữ cảnh gần nhất: {{tokens}}{{capacity}} token",
+      "requests": "{{count}} yêu cầu mô hình",
+      "estimated": "Bao gồm mức sử dụng ước tính"
+    },
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",
     "activityThoughtFor": "Đã suy nghĩ trong {{duration}}",
