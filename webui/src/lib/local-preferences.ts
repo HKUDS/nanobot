@@ -7,6 +7,7 @@ export interface LocalPreferences {
   activityMode: LocalActivityMode;
   codeWrap: boolean;
   brandLogos: boolean;
+  browserNotifications: boolean;
   fileEditDisplayMode: FileEditDisplayMode;
 }
 
@@ -18,6 +19,7 @@ export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   activityMode: "auto",
   codeWrap: true,
   brandLogos: false,
+  browserNotifications: false,
   fileEditDisplayMode: "summary",
 };
 
@@ -35,6 +37,7 @@ export function readLocalPreferences(): LocalPreferences {
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
       brandLogos: parsed.brandLogos === true,
+      browserNotifications: parsed.browserNotifications === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
     };
   } catch {

@@ -1274,6 +1274,15 @@ function Shell({
   }, [activeKey, activeTabKey, activeTabState]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
+  const recoveryChatIdList = useMemo(
+    () => sessions
+      .filter((session) => (
+        session.recoveryState?.status === "awaiting_user"
+        || session.recoveryState?.status === "failed"
+      ))
+      .map((session) => session.chatId),
+    [sessions],
+  );
   const activeChatId = activePaneSession?.chatId ?? null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -2552,6 +2561,7 @@ function Shell({
     collapsedGroups: sidebarState.collapsed_groups,
     runningChatIds: runningChatIdList,
     updatedChatIds: updatedChatIdList,
+    recoveryChatIds: recoveryChatIdList,
     viewState: { ...sidebarState.view, sort: automaticSidebarSort },
     showArchived: sidebarState.view.show_archived,
     archivedCount: sidebarArchivedTabKeys.length,

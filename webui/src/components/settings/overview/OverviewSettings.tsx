@@ -421,6 +421,37 @@ export function AppearanceSettings({
               label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.browserNotifications", "Task notifications")}
+            description={tx(
+              "settings.help.browserNotifications",
+              "Notify only when this page is in the background. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.browserNotifications}
+              onChange={(enabled) => {
+                if (!enabled) {
+                  onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: false }));
+                  return;
+                }
+                if (typeof Notification === "undefined") return;
+                if (Notification.permission === "granted") {
+                  onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
+                  return;
+                }
+                void Notification.requestPermission().then((permission) => {
+                  if (permission === "granted") {
+                    onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
+                  }
+                });
+              }}
+              ariaLabel={tx("settings.rows.browserNotifications", "Task notifications")}
+              label={localPrefs.browserNotifications
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>

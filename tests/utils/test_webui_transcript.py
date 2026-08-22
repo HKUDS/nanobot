@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import nanobot.webui.transcript as transcript_module
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
@@ -552,6 +554,22 @@ def test_thread_response_marks_unfinished_tool_tail_pending(tmp_path, monkeypatc
     assert out is not None
     assert out["has_pending_tool_calls"] is True
     assert out["completed_turn_ids"] == []
+
+
+def test_recovery_tail_check_reads_only_the_active_transcript(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:recovery-tail"
+    active_path = transcript_module.webui_transcript_path(key)
+    reads: list[Path] = []
+
+    def read(path: Path) -> list[dict[str, object]]:
+        reads.append(path)
+        return [{"event": "message", "kind": "progress", "text": "running"}]
+
+    monkeypatch.setattr(transcript_module, "_read_transcript_file", read)
+
+    assert transcript_module.has_unfinished_transcript_tail(key) is True
+    assert reads == [active_path]
 
 
 def test_thread_response_reports_active_registry_without_transcript(

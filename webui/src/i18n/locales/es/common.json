@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "Acceso predeterminado",
       "currentModel": "Configuración actual",
       "brandLogos": "Logos de marca",
+      "browserNotifications": "Notificaciones de tareas",
       "cliAppsCatalog": "Catálogo",
       "cliAppsFilter": "Filtro",
       "engine": "Motor",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "Definido por el modelo seleccionado.",
       "selectedModelValue": "Definido por el modelo seleccionado.",
       "brandLogos": "Muestra logos de proveedores de terceros y CLI en Ajustes.",
+      "browserNotifications": "Notifica solo cuando esta página está en segundo plano. Desactivado de forma predeterminada.",
       "cliAppsCatalog": "Instala solo adaptadores CLI de aplicaciones que nanobot puede ejecutar localmente; las aplicaciones nativas no se modifican.",
       "cliAppsFilter": "Busca por aplicación, categoría o capacidad.",
       "logs": "Abre la carpeta de registros del motor nativo.",
@@ -1000,7 +1002,8 @@
     "activity": {
       "running": "Agente en ejecución",
       "complete": "Agente terminado",
-      "updated": "Nueva actividad"
+      "updated": "Nueva actividad",
+      "recovery": "Esta conversación requiere tu atención"
     },
     "pin": "Fijar",
     "unpin": "Desfijar",
@@ -1422,6 +1425,18 @@
     "cliRunFailed": "Falló",
     "automationSourceFallback": "Automatización",
     "automationTriggered": "Activada automáticamente"
+  },
+  "recovery": {
+    "actionFailed": "La recuperación falló. Inténtalo de nuevo.",
+    "interrupted": "Tarea interrumpida",
+    "completed": "Tarea completada",
+    "failed": "La recuperación de la tarea falló",
+    "failedHelp": "La tarea guardada no se pudo restaurar de forma segura. Revísala antes de continuar.",
+    "resuming": "Restaurando la tarea interrumpida…",
+    "review": "Revisa la tarea antes de continuar. Las herramientas no se repetirán automáticamente.",
+    "safeResume": "Continuando desde el contexto guardado de la conversación.",
+    "dismiss": "Descartar",
+    "continue": "Continuar"
   },
   "lightbox": {
     "title": "Vista previa de imagen",

@@ -161,3 +161,25 @@ async def test_dispatch_cancellation_restores_checkpoint():
         "Checkpoint metadata should be cleared after restore"
     assert loop.sessions.save.called, \
         "Session should be persisted so the restored state survives process restart"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_cancellation_keeps_checkpoint_for_managed_restart(tmp_path: Path) -> None:
+    """A restart preserves the checkpoint; an explicit stop still restores it."""
+    loop = _make_loop(tmp_path)
+    loop.preserve_inflight_turns_on_shutdown()
+    loop._restore_runtime_checkpoint = MagicMock()  # type: ignore[method-assign]
+
+    async def _cancel(*_args: object, **_kwargs: object) -> None:
+        raise asyncio.CancelledError()
+
+    loop._process_message = _cancel  # type: ignore[method-assign]
+
+    from nanobot.bus.events import InboundMessage
+
+    with pytest.raises(asyncio.CancelledError):
+        await loop._dispatch(
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
+        )
+
+    loop._restore_runtime_checkpoint.assert_not_called()

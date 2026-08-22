@@ -34,6 +34,7 @@ import {
   type InboundEvent,
   type MentionCandidate,
   type MessageOptions,
+  type RecoveryState,
   type SlashCommand,
   type SessionSummary,
   type TokenUsage,
@@ -70,6 +71,7 @@ import {
 } from "./mention-menu"
 import { PromptQueue, type QueuedPrompt } from "./prompt-queue"
 import { QueuePreview, type QueuePreviewTheme } from "./queue-preview"
+import { RecoveryNotice, type RecoveryNoticeTheme } from "./recovery-notice"
 import { RuntimeControls } from "./runtime-controls"
 import {
   contextualFooterHints,
@@ -107,6 +109,11 @@ interface ChatClient {
   newChat(scope?: WorkspaceScopePayload): void
   forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void
   setWorkspaceScope(scope: WorkspaceScopePayload): void
+  updateRecovery(
+    action: "continue" | "dismiss",
+    chatId: string,
+    recoveryId: string,
+  ): Promise<RecoveryState>
 }
 
 interface Palette {
@@ -295,6 +302,15 @@ function queuePreviewTheme(palette: Palette): QueuePreviewTheme {
   }
 }
 
+function recoveryNoticeTheme(palette: Palette): RecoveryNoticeTheme {
+  return {
+    text: palette.text,
+    muted: palette.muted,
+    accent: palette.accent,
+    error: palette.error,
+  }
+}
+
 function footerHintTheme(palette: Palette): FooterHintTheme {
   return {
     accent: palette.accent,
@@ -380,6 +396,7 @@ export class NanobotTui {
   private readonly contextPanel: ContextPanel
   private readonly diffViewer: DiffViewer
   private readonly queuePreview: QueuePreview
+  private readonly recoveryNotice: RecoveryNotice
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
   private readonly title: BoxRenderable
@@ -444,6 +461,8 @@ export class NanobotTui {
   private currentTask = ""
   private currentAction = ""
   private hostBlocked = false
+  private recoveryState: RecoveryState | null = null
+  private recoveryPending = false
   private hostWorkspace: string
   private hostBranch: string
   private readonly apiReauthenticator: ApiReauthenticator | undefined
@@ -495,6 +514,14 @@ export class NanobotTui {
       treeSitterClient,
     )
     this.queuePreview = new QueuePreview(renderer, queuePreviewTheme(this.palette))
+    this.recoveryNotice = new RecoveryNotice(
+      renderer,
+      recoveryNoticeTheme(this.palette),
+      {
+        onContinue: () => void this.updateRecovery("continue"),
+        onDismiss: () => void this.updateRecovery("dismiss"),
+      },
+    )
     this.client = client || new NanobotClient({
       ...(options.bootstrapUrl
         ? {
@@ -723,6 +750,7 @@ export class NanobotTui {
     this.shell.add(this.runtimeControls.menuRoot)
     if (!host.hosted) this.shell.add(this.title)
     this.shell.add(this.queuePreview.root)
+    this.shell.add(this.recoveryNotice.root)
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
     this.shell.add(this.diffViewer.root)
@@ -829,6 +857,12 @@ export class NanobotTui {
     if (!visibleContent) return
     if (["exit", "quit", "/quit", ":q"].includes(visibleContent.toLowerCase())) {
       this.quit()
+      return
+    }
+    if (["/continue", "/dismiss"].includes(visibleContent.toLowerCase())) {
+      this.clearComposer()
+      this.commandMenu.hide()
+      void this.updateRecovery(visibleContent.toLowerCase() === "/continue" ? "continue" : "dismiss")
       return
     }
     const completion = this.commandMenu.completion(visibleContent)
@@ -946,7 +980,9 @@ export class NanobotTui {
       }
       const hydrationId = ++this.hydrationId
       void this.prepareChat(event.chat_id, restoring, hydrationId).then(() => {
-        if (hydrationId === this.hydrationId) this.flushPendingEvents()
+        if (hydrationId !== this.hydrationId) return
+        this.applyRecoveryState(event.recovery_state ?? null)
+        this.flushPendingEvents()
       })
       return
     }
@@ -1083,6 +1119,9 @@ export class NanobotTui {
         this.applyHostGoalState(event.goal_state)
         if (!this.activeTurn) this.reportHostResting()
         return
+      case "recovery_state":
+        this.applyRecoveryState(event)
+        return
       case "turn_model_updated":
         if (typeof event.context_window_tokens === "number") {
           this.contextWindowTokens = event.context_window_tokens
@@ -1189,6 +1228,85 @@ export class NanobotTui {
     const events = this.pendingEvents
     this.pendingEvents = null
     for (const event of events || []) this.accept(event)
+  }
+
+  private clearRecoveryState(): void {
+    this.recoveryState = null
+    this.recoveryPending = false
+    this.recoveryNotice.hide()
+  }
+
+  private applyRecoveryState(state: RecoveryState | null): void {
+    if (!state) {
+      this.clearRecoveryState()
+      return
+    }
+    this.recoveryState = state
+    this.recoveryPending = false
+    if (state.status === "resuming") {
+      this.recoveryNotice.hide()
+      this.hostBlocked = false
+      this.activeLabel = "Continuing"
+      this.setCurrentAction("Continuing interrupted task")
+      this.setActive(true)
+      this.reportHostWorking()
+      return
+    }
+    if (state.status === "awaiting_user" || state.status === "failed") {
+      this.activeTurnId = null
+      this.setActive(false)
+      this.hostBlocked = true
+      this.recoveryNotice.show(state)
+      const detail = state.reason || (state.status === "failed"
+        ? "Recovery failed"
+        : "Task interrupted")
+      this.setCurrentAction(detail)
+      this.status.content = "Waiting for recovery decision"
+      this.host.reportState("blocked", detail)
+      this.composer.focus()
+      return
+    }
+    this.clearRecoveryState()
+    this.activeTurnId = null
+    this.hostBlocked = false
+    this.setActive(false)
+    if (this.ready) this.status.content = this.readyStatus()
+    this.reportHostResting()
+  }
+
+  private async updateRecovery(action: "continue" | "dismiss"): Promise<void> {
+    const state = this.recoveryState
+    if (
+      !state
+      || (state.status !== "awaiting_user" && state.status !== "failed")
+      || (action === "continue" && state.can_continue === false)
+    ) {
+      this.status.content = "No interrupted task"
+      this.composer.focus()
+      return
+    }
+    if (this.recoveryPending) return
+    this.recoveryPending = true
+    this.recoveryNotice.setBusy(true)
+    this.status.content = action === "continue" ? "Continuing…" : "Dismissing…"
+    try {
+      const next = await this.client.updateRecovery(
+        action,
+        this.client.activeChatId,
+        state.recovery_id,
+      )
+      if (this.recoveryState?.recovery_id === state.recovery_id) {
+        this.applyRecoveryState(next)
+      }
+    } catch (error) {
+      if (this.recoveryState?.recovery_id !== state.recovery_id) return
+      this.recoveryPending = false
+      this.recoveryNotice.setBusy(false)
+      this.status.content = error instanceof Error ? error.message : String(error)
+      this.host.reportState("blocked", state.reason || "Task interrupted")
+    } finally {
+      this.composer.focus()
+    }
   }
 
   private updateGatewayApiConnection(apiUrl: string, apiToken: string): void {
@@ -1576,6 +1694,7 @@ export class NanobotTui {
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
     this.queuePreview.setTheme(queuePreviewTheme(this.palette))
+    this.recoveryNotice.setTheme(recoveryNoticeTheme(this.palette))
     this.updateComposerAppearance()
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
@@ -2001,6 +2120,7 @@ export class NanobotTui {
         this.sessionTitle = sessionLabel(current)
         this.applySessionModel(current)
         this.applySessionScope(current)
+        this.applyRecoveryState(current.recoveryState ?? null)
         this.updateTitle()
       }
       const limit = this.renderer.height >= 20 ? 8 : 4
@@ -2027,6 +2147,7 @@ export class NanobotTui {
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
       this.applySessionScope(session)
+      this.applyRecoveryState(session.recoveryState ?? null)
       this.updateTitle()
       this.closeSessions()
       this.status.content = this.readyStatus()
@@ -2039,6 +2160,7 @@ export class NanobotTui {
     this.closeSessions()
     try {
       this.ready = false
+      this.clearRecoveryState()
       this.clearPromptQueue()
       this.sessionMetadataId += 1
       this.clearHostContext()
@@ -2073,6 +2195,7 @@ export class NanobotTui {
     this.clearComposer()
     try {
       this.ready = false
+      this.clearRecoveryState()
       this.clearPromptQueue()
       this.sessionMetadataId += 1
       this.clearHostContext()

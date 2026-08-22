@@ -82,6 +82,7 @@ interface SidebarProps {
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
   updatedChatIds?: string[];
+  recoveryChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
   archivedCount?: number;
@@ -270,6 +271,7 @@ export function Sidebar(props: SidebarProps) {
             collapsedGroups={props.collapsedGroups}
             runningChatIds={props.runningChatIds}
             updatedChatIds={props.updatedChatIds}
+            recoveryChatIds={props.recoveryChatIds}
             density={props.viewState?.density}
             showPreviews={props.viewState?.show_previews}
             showTimestamps={props.viewState?.show_timestamps}

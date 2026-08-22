@@ -26,7 +26,7 @@ def _make_injection_callback(queue: asyncio.Queue):
     return inject_cb
 
 
-def _make_loop(tmp_path):
+def _make_loop(tmp_path, *, recovery_admission=None):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -39,7 +39,12 @@ def _make_loop(tmp_path):
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            recovery_admission=recovery_admission,
+        )
     return loop
 
 @pytest.mark.asyncio
@@ -759,6 +764,20 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
     )
 
 
+def test_runner_merge_keeps_all_recovery_followup_ids() -> None:
+    """Merged follow-ups stay acknowledged together after a later save."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
+
+    messages = [{"role": "user", "content": "first", PENDING_FOLLOWUP_ID_KEY: "one"}]
+    AgentRunner._append_injected_messages(
+        messages,
+        [{"role": "user", "content": "second", PENDING_FOLLOWUP_ID_KEY: "two"}],
+    )
+
+    assert messages[-1][PENDING_FOLLOWUP_ID_KEY] == ["one", "two"]
+
+
 def test_runner_merge_preserves_runtime_markers_with_media() -> None:
     from nanobot.agent.runner import AgentRunner
     from nanobot.runtime_context import (
@@ -965,6 +984,38 @@ async def test_followup_routed_to_pending_queue(tmp_path):
     assert loop._dispatch.await_count == 0
     assert queued_msg.content == "follow-up"
     assert queued_msg.session_key == UNIFIED_SESSION_KEY
+
+
+@pytest.mark.asyncio
+async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
+    """Recovery admission runs before a newer WebUI message is injected."""
+    from nanobot.bus.events import InboundMessage
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(return_value=True)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    session_key = "websocket:chat"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat",
+        content="new request",
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+    admission.admit.assert_awaited_once_with(msg)
+    assert queued_msg.content == msg.content
+    assert queued_msg.metadata["_recovery_followup_id"]
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
 
 
 @pytest.mark.asyncio
@@ -1312,6 +1363,51 @@ async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
     dispatched_msg = loop._dispatch.await_args.args[0]
     assert dispatched_msg.content == "follow-up"
     assert pending.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_queue_overflow_keeps_websocket_followup_durable(tmp_path):
+    """Fallback dispatch must not acknowledge a WebUI message before it commits."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.manager import Session
+    from nanobot.session.recovery import pending_followups
+
+    loop = _make_loop(tmp_path)
+    dispatched = asyncio.Event()
+    release_dispatch = asyncio.Event()
+
+    async def _dispatch(_msg):
+        dispatched.set()
+        await release_dispatch.wait()
+
+    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
+    session = Session(key="websocket:c")
+    loop.sessions.get_or_create.return_value = session
+    pending = asyncio.Queue(maxsize=1)
+    pending.put_nowait(
+        InboundMessage(channel="websocket", sender_id="u", chat_id="c", content="already queued")
+    )
+    loop._pending_queues["websocket:c"] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    await loop.bus.publish_inbound(
+        InboundMessage(
+            channel="websocket",
+            sender_id="u",
+            chat_id="c",
+            content="durable follow-up",
+            metadata={"webui": True},
+        )
+    )
+    await asyncio.wait_for(dispatched.wait(), timeout=2)
+
+    assert [message.content for message in pending_followups(session)] == ["durable follow-up"]
+    dispatched_msg = loop._dispatch.await_args.args[0]
+    assert dispatched_msg.metadata["_recovery_followup_id"]
+
+    release_dispatch.set()
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
 
 
 @pytest.mark.asyncio

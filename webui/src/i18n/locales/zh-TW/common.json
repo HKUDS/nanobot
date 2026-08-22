@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "預設存取權",
       "currentModel": "目前設定",
       "brandLogos": "品牌 Logo",
+      "browserNotifications": "任務通知",
       "cliAppsCatalog": "目錄",
       "cliAppsFilter": "篩選",
       "engine": "引擎",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "由選取的模型決定。",
       "selectedModelValue": "由選取的模型決定。",
       "brandLogos": "在設定中顯示第三方供應商與 CLI 圖示。",
+      "browserNotifications": "僅在頁面位於背景時通知，預設關閉。",
       "cliAppsCatalog": "只安裝 nanobot 可在本機執行的應用程式專用 CLI 轉接器；不會改動原生應用程式。",
       "cliAppsFilter": "依應用程式、類別或功能搜尋。",
       "logs": "開啟原生引擎日誌資料夾。",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "智能體正在執行",
       "complete": "智能體已完成",
-      "updated": "有新內容"
+      "updated": "有新內容",
+      "recovery": "此對話需要你的處理"
     },
     "pin": "置頂",
     "unpin": "取消置頂",
@@ -1421,6 +1424,18 @@
     "automationSourceFallback": "自動化",
     "automationTriggered": "已自動觸發",
     "askAboutSelection": "繼續提問"
+  },
+  "recovery": {
+    "actionFailed": "復原操作失敗，請再試一次。",
+    "interrupted": "任務已中斷",
+    "completed": "任務已完成",
+    "failed": "任務復原失敗",
+    "failedHelp": "無法安全復原已儲存的任務，繼續前請先檢查。",
+    "resuming": "正在復原中斷的任務…",
+    "review": "繼續前請檢查任務。工具不會自動重播。",
+    "safeResume": "正在從已儲存的對話上下文繼續。",
+    "dismiss": "略過",
+    "continue": "繼續"
   },
   "lightbox": {
     "title": "圖片預覽",

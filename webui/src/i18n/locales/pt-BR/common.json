@@ -198,6 +198,7 @@
       "fileEditDisplay": "Exibição de edição de arquivo",
       "codeWrap": "Quebra de linha no código",
       "brandLogos": "Logos de marca",
+      "browserNotifications": "Notificações de tarefas",
       "maxResults": "Máx. de resultados",
       "timeout": "Tempo limite",
       "jinaReader": "Leitor Jina",
@@ -243,6 +244,7 @@
       "fileEditDisplay": "Escolha se a atividade de edição de arquivo é exibida como contagem de linhas ou como diferenças.",
       "codeWrap": "Mantém linhas longas de código legíveis em telas menores.",
       "brandLogos": "Mostra logotipos de provedores terceiros e de CLIs em Configurações.",
+      "browserNotifications": "Notifica somente quando esta página está em segundo plano. Desativado por padrão.",
       "maxResults": "Resultados retornados por cada chamada de web_search.",
       "timeout": "Segundos antes de uma requisição de busca expirar.",
       "jinaReader": "Usa o Jina Reader para web_fetch quando disponível.",
@@ -1013,7 +1015,8 @@
     "activity": {
       "running": "Agente em execução",
       "complete": "Agente finalizado",
-      "updated": "Nova atividade"
+      "updated": "Nova atividade",
+      "recovery": "Esta conversa precisa da sua atenção"
     },
     "pin": "Fixar",
     "unpin": "Desafixar",
@@ -1435,6 +1438,18 @@
       "requests": "{{count}} chamadas nesta rodada",
       "estimated": "Inclui uso estimado"
     }
+  },
+  "recovery": {
+    "actionFailed": "A recuperação falhou. Tente novamente.",
+    "interrupted": "Tarefa interrompida",
+    "completed": "Tarefa concluída",
+    "failed": "Falha ao recuperar a tarefa",
+    "failedHelp": "Não foi possível restaurar a tarefa salva com segurança. Revise-a antes de continuar.",
+    "resuming": "Restaurando a tarefa interrompida…",
+    "review": "Revise a tarefa antes de continuar. As ferramentas não serão executadas novamente de forma automática.",
+    "safeResume": "Continuando a partir do contexto de conversa salvo.",
+    "dismiss": "Descartar",
+    "continue": "Continuar"
   },
   "lightbox": {
     "title": "Pré-visualização de imagem",

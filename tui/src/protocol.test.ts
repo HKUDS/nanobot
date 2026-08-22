@@ -595,6 +595,62 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("sends stale-safe recovery mutations and validates their response", async () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const statuses: string[] = []
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        onEvent: () => undefined,
+        onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+
+      const result = client.updateRecovery("continue", "chat", "recovery-1")
+      const request = JSON.parse(socket.sent.at(-1) || "{}") as {
+        request_id: string
+        action: string
+        payload: Record<string, string>
+      }
+      expect(request).toMatchObject({
+        type: "webui_request",
+        action: "recovery.continue",
+        payload: { chat_id: "chat", recovery_id: "recovery-1" },
+      })
+      socket.emit("message", { data: JSON.stringify({
+        event: "webui_response",
+        request_id: request.request_id,
+        ok: true,
+        result: { status: "resuming", recovery_id: "recovery-1", attempts: 1 },
+      }) })
+      expect(await result).toEqual({
+        status: "resuming",
+        recovery_id: "recovery-1",
+        attempts: 1,
+      })
+      expect(statuses).not.toContain("error:gateway sent an invalid event")
+
+      const interrupted = client.updateRecovery("dismiss", "chat", "recovery-2")
+      socket.emit("close")
+      await expect(interrupted).rejects.toThrow("gateway connection closed")
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("reports when the bounded history snapshot omits earlier turns", async () => {
     const original = globalThis.fetch
     let requested = ""

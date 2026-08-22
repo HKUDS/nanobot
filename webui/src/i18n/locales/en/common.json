@@ -198,6 +198,7 @@
       "fileEditDisplay": "File edit display",
       "codeWrap": "Code wrapping",
       "brandLogos": "Brand logos",
+      "browserNotifications": "Task notifications",
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
@@ -243,6 +244,7 @@
       "fileEditDisplay": "Choose whether file edit activity opens as line counts or a diff.",
       "codeWrap": "Keep long code lines readable on smaller screens.",
       "brandLogos": "Show third-party provider and CLI logos in Settings.",
+      "browserNotifications": "Notify only when this page is in the background. Off by default.",
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
@@ -1013,7 +1015,8 @@
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished",
-      "updated": "New activity"
+      "updated": "New activity",
+      "recovery": "This conversation needs your attention"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -1435,6 +1438,18 @@
       "requests": "{{count}} calls this turn",
       "estimated": "Includes estimated usage"
     }
+  },
+  "recovery": {
+    "actionFailed": "Recovery action failed. Try again.",
+    "interrupted": "Task interrupted",
+    "completed": "Task completed",
+    "failed": "Task recovery failed",
+    "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
+    "resuming": "Restoring interrupted task…",
+    "review": "Review the task before continuing. Tools will not be replayed automatically.",
+    "safeResume": "Continuing from saved conversation context.",
+    "dismiss": "Dismiss",
+    "continue": "Continue"
   },
   "lightbox": {
     "title": "Image preview",

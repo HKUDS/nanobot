@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "Accès par défaut",
       "currentModel": "Configuration actuelle",
       "brandLogos": "Logos de marque",
+      "browserNotifications": "Notifications de tâches",
       "cliAppsCatalog": "Catalogue",
       "cliAppsFilter": "Filtre",
       "engine": "Moteur",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "Défini par le modèle sélectionné.",
       "selectedModelValue": "Défini par le modèle sélectionné.",
       "brandLogos": "Affiche les logos de fournisseurs tiers et CLI dans les Réglages.",
+      "browserNotifications": "Notifier uniquement lorsque cette page est en arrière-plan. Désactivé par défaut.",
       "cliAppsCatalog": "Installe uniquement les adaptateurs CLI d’applications que nanobot peut exécuter localement ; les applications natives restent inchangées.",
       "cliAppsFilter": "Recherchez par application, catégorie ou capacité.",
       "logs": "Ouvre le dossier des journaux du moteur natif.",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "Agent en cours",
       "complete": "Agent terminé",
-      "updated": "Nouvelle activité"
+      "updated": "Nouvelle activité",
+      "recovery": "Cette conversation nécessite votre attention"
     },
     "pin": "Épingler",
     "unpin": "Désépingler",
@@ -1421,6 +1424,18 @@
     "cliRunFailed": "Échec",
     "automationSourceFallback": "Automatisation",
     "automationTriggered": "Déclenché automatiquement"
+  },
+  "recovery": {
+    "actionFailed": "La récupération a échoué. Réessayez.",
+    "interrupted": "Tâche interrompue",
+    "completed": "Tâche terminée",
+    "failed": "Échec de la récupération de la tâche",
+    "failedHelp": "La tâche enregistrée n’a pas pu être restaurée en toute sécurité. Vérifiez-la avant de continuer.",
+    "resuming": "Restauration de la tâche interrompue…",
+    "review": "Vérifiez la tâche avant de continuer. Les outils ne seront pas relancés automatiquement.",
+    "safeResume": "Reprise depuis le contexte de conversation enregistré.",
+    "dismiss": "Ignorer",
+    "continue": "Continuer"
   },
   "lightbox": {
     "title": "Aperçu de l’image",
