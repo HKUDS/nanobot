@@ -22,6 +22,7 @@ from nanobot.session.goal_state import (
     MAX_GOAL_OBJECTIVE_CHARS,
     discard_legacy_goal_state_key,
     explicit_goal_requested,
+    goal_admission_pending,
     goal_state_raw,
     goal_state_runtime_lines,
     parse_goal_state,
@@ -121,12 +122,20 @@ class _GoalToolsMixin:
             min_length=1,
             max_length=MAX_GOAL_OBJECTIVE_CHARS,
         ),
+        completion_evidence=StringSchema(
+            "Concrete, checkable evidence that will show the objective is complete, e.g. "
+            "'plan.md exists at <path>', 'tests pass', 'checklist satisfied'. If no such "
+            "evidence can be named, the request is not a bounded goal - schedule it with the "
+            "cron tool or ask the user for clarification instead.",
+            min_length=1,
+            max_length=500,
+        ),
         ui_summary=StringSchema(
             "Optional one-line display label for session lists and logs. It is not load-bearing.",
             max_length=120,
             nullable=True,
         ),
-        required=["objective"],
+        required=["objective", "completion_evidence"],
     )
 )
 class CreateGoalTool(Tool, _GoalToolsMixin):
@@ -178,7 +187,8 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         session = self._sessions.get_or_create(request.session_key)
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(session.metadata)
-        if not goal_start_requested and not goal_active:
+        admission_pending = goal_admission_pending(session.metadata)
+        if not goal_start_requested and not goal_active and not admission_pending:
             return None
 
         guidance = render_template(
@@ -186,6 +196,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             strip=True,
             goal_start_requested=goal_start_requested,
             goal_active=goal_active,
+            goal_admission_pending=admission_pending,
         )
         state = wrap_runtime_context_lines(goal_state_runtime_lines(session.metadata))
         content = "\n\n".join(part for part in (guidance, state) if part)
@@ -194,6 +205,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     async def execute(
         self,
         objective: str,
+        completion_evidence: str | None = None,
         ui_summary: str | None = None,
         **kwargs: Any,
     ) -> str:
@@ -218,10 +230,17 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             return ToolResult.error(
                 f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
             )
+        evidence_text = (completion_evidence or "").strip()
+        if not evidence_text:
+            return ToolResult.error(
+                "Error: completion_evidence is required. Name the concrete evidence that will "
+                "prove the objective complete, or route unbounded work to the cron tool."
+            )
         summary = (ui_summary or "").strip()[:120]
         blob = {
             "status": "active",
             "objective": objective_text,
+            "completion_evidence": evidence_text[:500],
             "ui_summary": summary,
             "started_at": _iso_now(),
         }
@@ -250,6 +269,12 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "Replacement objective. Required only when action is 'replace'; make it durable, "
             "self-contained, bounded, and explicit about done-ness.",
             max_length=MAX_GOAL_OBJECTIVE_CHARS,
+            nullable=True,
+        ),
+        completion_evidence=StringSchema(
+            "Required when action is 'replace'. Concrete, checkable evidence that will show "
+            "the replacement objective is complete.",
+            max_length=500,
             nullable=True,
         ),
         ui_summary=StringSchema(
@@ -302,6 +327,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         action: str,
         recap: str | None = None,
         objective: str | None = None,
+        completion_evidence: str | None = None,
         ui_summary: str | None = None,
         **kwargs: Any,
     ) -> str:
@@ -330,10 +356,17 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 return ToolResult.error(
                     f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
                 )
+            evidence_text = (completion_evidence or "").strip()
+            if not evidence_text:
+                return ToolResult.error(
+                    "Error: update_goal action='replace' requires completion_evidence for the "
+                    "new objective."
+                )
             summary = (ui_summary or "").strip()[:120]
             blob = {
                 "status": "active",
                 "objective": objective_text,
+                "completion_evidence": evidence_text[:500],
                 "ui_summary": summary,
                 "started_at": _iso_now(),
                 "replaced_at": _iso_now(),
