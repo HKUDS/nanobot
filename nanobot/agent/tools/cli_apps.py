@@ -1,7 +1,5 @@
 """Controlled runner for installed CLI Apps."""
 
-# pyright: reportIncompatibleMethodOverride=false
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -133,7 +131,8 @@ class CliAppsTool(Tool):
             return None
         return RuntimeContextBlock(source="cli_apps", content=content)
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         name: str,
         args: list[str] | None = None,
