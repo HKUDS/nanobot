@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "臨時聊天",
+    "sideTitle": "側邊聊天",
+    "sideTitleNumbered": "側邊聊天 {{number}}",
+    "sideDescription": "側邊聊天是臨時聊天，關閉應用程式後會消失。",
+    "closeSide": "關閉側邊聊天",
+    "closeSideNamed": "關閉{{title}}",
+    "sideTabs": "側邊聊天分頁",
+    "newSide": "新增側邊聊天",
+    "backToSource": "返回主要對話",
+    "openSide": "開啟側邊聊天",
     "retention": "不會儲存至歷史記錄或記憶。",
     "expiration": "重新載入、關閉頁面或連線中斷後，臨時聊天會結束。",
     "externalEffects": "請求仍會傳送給模型供應商，工具操作也可能留下變更。",
@@ -1239,6 +1248,10 @@
           "new": {
             "title": "新增話題",
             "description": "重置目前話題，並開始新的話題。"
+          },
+          "side": {
+            "title": "側邊聊天",
+            "description": "使用目前聊天內容開始一個臨時對話。"
           },
           "stop": {
             "title": "停止目前任務",

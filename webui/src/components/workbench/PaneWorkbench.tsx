@@ -67,6 +67,8 @@ interface PaneWorkbenchProps {
   layout: WorkbenchLayout;
   chrome?: boolean;
   showLayoutControl: boolean;
+  allowPaneReorder?: boolean;
+  retainCompactPanes?: boolean;
   addPaneDisabled?: boolean;
   addPaneDisabledLabel?: string;
   onActivatePane: (key: string) => void;
@@ -202,6 +204,8 @@ export function PaneWorkbench({
   layout,
   chrome = true,
   showLayoutControl,
+  allowPaneReorder = true,
+  retainCompactPanes = false,
   addPaneDisabled = false,
   addPaneDisabledLabel,
   onActivatePane,
@@ -259,11 +263,11 @@ export function PaneWorkbench({
     ];
   }, [panes, previewPaneKeys]);
   const displayedPanes = useMemo(() => {
-    if (!compact) return orderedPanes;
+    if (!compact || retainCompactPanes) return orderedPanes;
     const activePane = orderedPanes.find((pane) => pane.key === activePaneKey)
       ?? orderedPanes[0];
     return activePane ? [activePane] : [];
-  }, [activePaneKey, compact, orderedPanes]);
+  }, [activePaneKey, compact, orderedPanes, retainCompactPanes]);
   const paneOrder = displayedPanes.map((pane) => pane.key).join("\u0000");
 
   useEffect(() => {
@@ -718,12 +722,17 @@ export function PaneWorkbench({
                     else paneRefs.current.delete(pane.key);
                   }}
                   aria-label={pane.title}
+                  hidden={compact && retainCompactPanes && !active}
                   data-active={active ? "true" : "false"}
                   data-dragging={draggingPaneKey === pane.key ? "true" : undefined}
                   data-testid={`workbench-pane-${pane.key}`}
                   onPointerDownCapture={(event) => handlePanePointerDown(pane.key, event)}
                   onFocusCapture={(event) => handlePaneFocus(pane.key, event)}
-                  className="workbench-pane relative flex min-h-0 min-w-0 overflow-hidden bg-background"
+                  className={cn(
+                    "workbench-pane relative min-h-0 min-w-0 overflow-hidden bg-background",
+                    compact && retainCompactPanes && !active ? "hidden" : "flex",
+                    compact && retainCompactPanes && "absolute inset-0",
+                  )}
                   style={layoutGeometry.paneStyles[index]}
                 >
                   {renderPane(pane, {
@@ -732,7 +741,7 @@ export function PaneWorkbench({
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     headerActions,
                   })}
-                  {chrome && panes.length > 1 && !compact ? (
+                  {chrome && allowPaneReorder && panes.length > 1 && !compact ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button

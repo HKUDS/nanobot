@@ -372,6 +372,72 @@ async def test_temporary_chat_is_transient_and_discarded(bus, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_side_chat_inherits_context_without_persisting(bus, tmp_path) -> None:
+    sessions = SessionManager(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    source = sessions.get_or_create("websocket:source")
+    source.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(project),
+        "access_mode": "full",
+    }
+    source.add_message("user", "main question")
+    source.add_message("assistant", "main answer")
+    sessions.save(source)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 5000)
+    channel._webui_connections.add(connection)
+
+    await channel._dispatch_envelope(connection, "webui-client", {
+        "type": "new_side_chat",
+        "source_chat_id": "source",
+    })
+
+    attached = json.loads(connection.send.await_args.args[0])
+    assert attached["temporary"] is True
+    side_id = attached["chat_id"]
+    side_key = f"websocket:{side_id}"
+    side = sessions.get_cached(side_key)
+    assert side is not None
+    assert [message["content"] for message in side.messages] == [
+        "main question",
+        "main answer",
+    ]
+    assert side.policy.persist is False
+    assert side.metadata[WORKSPACE_SCOPE_METADATA_KEY] == {
+        "project_path": str(project.resolve()),
+        "access_mode": "restricted",
+    }
+    assert sessions.read_session_file(side_key) is None
+
+    connection.send.reset_mock()
+    await channel._dispatch_envelope(connection, "webui-client", {
+        "type": "message",
+        "chat_id": side_id,
+        "content": "side question",
+        "turn_id": "side-turn",
+        "webui": True,
+    })
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.session_key_override == side_key
+    assert inbound.metadata[WORKSPACE_SCOPE_METADATA_KEY] == {
+        "project_path": str(project.resolve()),
+        "access_mode": "restricted",
+    }
+    assert sessions.read_session_file(side_key) is None
+    assert read_transcript_lines(side_key) == []
+    assert [payload["event"] for payload in _sent_ws_payloads(connection)] == [
+        "message_accepted",
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("content", ["/goal private", "/trigger later", "/dream"])
 async def test_temporary_chat_rejects_persistent_commands(bus, tmp_path, content) -> None:
     sessions = SessionManager(tmp_path)

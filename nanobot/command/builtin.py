@@ -71,6 +71,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         lifecycle="finalize_active_turn",
     ),
     BuiltinCommandSpec(
+        "/side",
+        "Side conversation",
+        "Start a temporary conversation with the current chat context.",
+        "messages-square",
+    ),
+    BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",
@@ -1008,6 +1014,16 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_side(ctx: CommandContext) -> OutboundMessage:
+    """Explain the WebUI-owned side conversation command on other channels."""
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="/side is available from an existing WebUI chat.",
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
     """Run a trusted local ``!command`` through nanobot's exec policy."""
     metadata = dict(ctx.msg.metadata or {})
@@ -1049,6 +1065,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
+    router.exact("/side", cmd_side)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

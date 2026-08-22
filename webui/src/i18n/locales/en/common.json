@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "Temporary chat",
+    "sideTitle": "Side conversation",
+    "sideTitleNumbered": "Side conversation {{number}}",
+    "sideDescription": "Side conversations are temporary and disappear when you close the app.",
+    "closeSide": "Close side conversation",
+    "closeSideNamed": "Close {{title}}",
+    "sideTabs": "Side conversation tabs",
+    "newSide": "New side conversation",
+    "backToSource": "Back to main conversation",
+    "openSide": "Open side conversations",
     "retention": "Not saved to history or memory.",
     "expiration": "Reloading, closing, or losing the connection ends these chats.",
     "externalEffects": "Requests still go to your model provider, and tool actions may leave changes.",
@@ -1263,6 +1272,10 @@
           "new": {
             "title": "New chat",
             "description": "Reset this chat and start a fresh conversation."
+          },
+          "side": {
+            "title": "Side conversation",
+            "description": "Start a temporary conversation with the current chat context."
           },
           "stop": {
             "title": "Stop current task",

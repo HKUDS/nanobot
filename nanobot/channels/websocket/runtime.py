@@ -935,6 +935,31 @@ class WebSocketChannel(BaseChannel):
                 temporary=True,
             )
             return
+        if t == "new_side_chat":
+            source_id = envelope.get("source_chat_id")
+            if not _is_valid_chat_id(source_id):
+                await self._send_event(connection, "error", detail="invalid source_chat_id")
+                return
+            if websocket_turn_wall_started_at(source_id) is not None:
+                await self._send_event(connection, "error", detail="side_chat_unavailable")
+                return
+            try:
+                new_id = self._temporary_chats.create_side(
+                    connection,
+                    source_id,
+                    trusted_webui=connection in self._webui_connections,
+                )
+            except TemporaryChatError as exc:
+                await self._send_event(connection, "error", detail=exc.detail)
+                return
+            self._attach(connection, new_id)
+            await self._send_event(
+                connection,
+                "attached",
+                chat_id=new_id,
+                temporary=True,
+            )
+            return
         if t == "fork_chat":
             await handle_webui_fork_chat(self, connection, envelope)
             return

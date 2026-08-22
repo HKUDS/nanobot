@@ -13,7 +13,11 @@ from nanobot.bus.events import (
     InboundMessage,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.security.workspace_access import WorkspaceScope
+from nanobot.security.workspace_access import (
+    WORKSPACE_SCOPE_METADATA_KEY,
+    WorkspaceScope,
+    build_workspace_scope,
+)
 from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
@@ -71,6 +75,7 @@ class WebUITemporaryChats:
         # events cannot create a durable transcript after a chat is discarded.
         self._known_transient_chat_ids: set[str] = set()
         self._media_paths: dict[str, set[str]] = {}
+        self._workspace_scopes: dict[str, WorkspaceScope] = {}
 
     def _session_key(self, chat_id: str) -> str:
         return f"{self._channel_name}:{chat_id}"
@@ -99,6 +104,45 @@ class WebUITemporaryChats:
         self._owner_chat_ids.setdefault(owner, set()).add(chat_id)
         self._active_sessions[chat_id] = session
         self._known_transient_chat_ids.add(chat_id)
+        self._workspace_scopes[chat_id] = self._workspaces.restricted_default_scope()
+        return chat_id
+
+    def create_side(
+        self,
+        owner: object,
+        source_chat_id: str,
+        *,
+        trusted_webui: bool,
+    ) -> str:
+        """Create a temporary fork of an existing persisted WebUI chat."""
+        if not trusted_webui:
+            raise TemporaryChatError("access_denied")
+        if self._sessions is None:
+            raise TemporaryChatError("temporary_chat_unavailable")
+
+        chat_id = str(uuid.uuid4())
+        session = self._sessions.fork_transient(
+            self._session_key(source_chat_id),
+            self._session_key(chat_id),
+            disabled_tools=_TEMPORARY_CHAT_DISABLED_TOOLS,
+        )
+        if session is None:
+            raise TemporaryChatError("side_chat_unavailable")
+        source_scope = self._workspaces.scope_for_session_key(
+            self._session_key(source_chat_id)
+        )
+        self._owners[chat_id] = owner
+        self._owner_chat_ids.setdefault(owner, set()).add(chat_id)
+        self._active_sessions[chat_id] = session
+        self._known_transient_chat_ids.add(chat_id)
+        self._workspace_scopes[chat_id] = build_workspace_scope(
+            source_scope.project_path,
+            "restricted",
+            source_channel=self._channel_name,
+        )
+        session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = self._workspace_scopes[
+            chat_id
+        ].metadata()
         return chat_id
 
     def message_policy(
@@ -125,7 +169,7 @@ class WebUITemporaryChats:
 
         return TemporaryChatMessagePolicy(
             session_key=self._session_key(chat_id),
-            workspace_scope=self._workspaces.restricted_default_scope(),
+            workspace_scope=self._workspace_scopes[chat_id],
         )
 
     def validate_attach(self, chat_id: str) -> None:
@@ -190,6 +234,7 @@ class WebUITemporaryChats:
         session_key = self._session_key(chat_id)
         self._forget_owner(owner, chat_id)
         self._active_sessions.pop(chat_id, None)
+        self._workspace_scopes.pop(chat_id, None)
         self._discard_media(chat_id)
         if self._sessions is not None:
             self._sessions.invalidate(session_key)
@@ -216,3 +261,4 @@ class WebUITemporaryChats:
         self._owner_chat_ids.clear()
         self._active_sessions.clear()
         self._known_transient_chat_ids.clear()
+        self._workspace_scopes.clear()

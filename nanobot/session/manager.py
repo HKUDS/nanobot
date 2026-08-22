@@ -1638,6 +1638,38 @@ class SessionManager:
             self._remember(session)
         return session
 
+    def fork_transient(
+        self,
+        source_key: str,
+        target_key: str,
+        *,
+        disabled_tools: Collection[str] = (),
+    ) -> Session | None:
+        """Copy a persisted session into a fresh, non-persistent session."""
+        source = self._cached(source_key) or self._load(source_key)
+        if source is None or not source.policy.persist:
+            return None
+
+        metadata = deepcopy(source.metadata)
+        for key in _FORK_VOLATILE_METADATA_KEYS:
+            metadata.pop(key, None)
+        now = datetime.now()
+        target = Session(
+            key=target_key,
+            messages=[public_history_message(message) for message in source.messages],
+            created_at=now,
+            updated_at=now,
+            metadata=metadata,
+            last_consolidated=source.last_consolidated,
+            policy=SessionPolicy(
+                persist=False,
+                log_content=False,
+                disabled_tools=frozenset(disabled_tools),
+            ),
+        )
+        self._remember(target)
+        return target
+
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
 

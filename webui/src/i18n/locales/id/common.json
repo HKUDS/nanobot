@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "Obrolan sementara",
+    "sideTitle": "Obrolan samping",
+    "sideTitleNumbered": "Obrolan samping {{number}}",
+    "sideDescription": "Obrolan samping bersifat sementara dan akan hilang saat aplikasi ditutup.",
+    "closeSide": "Tutup obrolan samping",
+    "closeSideNamed": "Tutup {{title}}",
+    "sideTabs": "Tab obrolan samping",
+    "newSide": "Obrolan samping baru",
+    "backToSource": "Kembali ke percakapan utama",
+    "openSide": "Buka obrolan samping",
     "retention": "Tidak disimpan ke riwayat atau memori.",
     "expiration": "Memuat ulang, menutup, atau kehilangan koneksi akan mengakhiri obrolan ini.",
     "externalEffects": "Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
@@ -1239,6 +1248,10 @@
           "new": {
             "title": "Obrolan baru",
             "description": "Reset chat ini dan mulai percakapan baru."
+          },
+          "side": {
+            "title": "Obrolan samping",
+            "description": "Mulai percakapan sementara dengan konteks chat saat ini."
           },
           "stop": {
             "title": "Hentikan tugas saat ini",
