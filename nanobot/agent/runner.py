@@ -19,6 +19,7 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tool_schema_selection import select_model_visible_tools
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import (
     LLMProvider,
@@ -105,6 +106,7 @@ class AgentRunSpec:
     workspace: Path | None = None
     session_key: str | None = None
     context_block_limit: int | None = None
+    mcp_schema_budget_bytes: int = 0
     provider_retry_mode: str = "standard"
     progress_callback: ProgressCallback | None = None
     stream_progress_deltas: bool = True
@@ -446,6 +448,11 @@ class AgentRunner:
             messages=messages,
             state=spec.provider_state,
         )
+        model_visible_tools = select_model_visible_tools(
+            spec.tools.get_definitions(),
+            spec.initial_messages,
+            spec.mcp_schema_budget_bytes,
+        )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -486,6 +493,7 @@ class AgentRunner:
                 messages_for_model,
                 hook,
                 context,
+                model_visible_tools=model_visible_tools,
                 conversation_state=conversation_state,
                 provider_context=provider_context,
             )
@@ -900,6 +908,7 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
         *,
+        model_visible_tools: list[dict[str, Any]],
         malformed_retry: bool = False,
         conversation_state: ProviderConversationStateController,
         provider_context: ProviderCallContext | None = None,
@@ -920,7 +929,7 @@ class AgentRunner:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=spec.tools.get_definitions(),
+            tools=model_visible_tools,
         )
         wants_streaming = hook.wants_streaming()
         progress_callback = spec.progress_callback
@@ -1107,6 +1116,7 @@ class AgentRunner:
             )
             return await self._request_model(
                 spec, retry_messages, hook, context,
+                model_visible_tools=model_visible_tools,
                 malformed_retry=True,
                 conversation_state=conversation_state,
                 provider_context=conversation_state.independent_request_context(
