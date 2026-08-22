@@ -31,6 +31,7 @@ from nanobot.cli.models import (
     get_model_suggestions,
 )
 from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
+from nanobot.config.paths import get_data_dir
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
@@ -1661,6 +1662,27 @@ def _quick_start_codex_proxy(config: Config) -> str | None:
     return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
 
 
+def _openai_codex_oauth_storage() -> Any:
+    """Build the OpenAI Codex OAuth token storage rooted under nanobot's data dir.
+
+    Keeps tokens under the same managed, persistent directory as other OAuth
+    providers (see ``providers/xai_oauth.py``, ``agent/tools/mcp_oauth.py``)
+    instead of oauth-cli-kit's unmanaged platformdirs default, which is neither
+    permission-safe nor persistent in Docker deployments.
+    """
+    # oauth-cli-kit does not publish type information.
+    from oauth_cli_kit.providers import (  # pyright: ignore[reportMissingTypeStubs]
+        OPENAI_CODEX_PROVIDER,
+    )
+    from oauth_cli_kit.storage import (  # pyright: ignore[reportMissingTypeStubs]
+        FileTokenStorage,
+    )
+
+    return FileTokenStorage(
+        token_filename=OPENAI_CODEX_PROVIDER.token_filename, data_dir=get_data_dir()
+    )
+
+
 def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
     """Authenticate an OAuth provider supported by Quick Start."""
     if provider_name != "openai_codex":
@@ -1673,6 +1695,8 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
             get_token,
             login_oauth_interactive,
         )
+
+        storage = _openai_codex_oauth_storage()
     except ImportError:
         console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         return False
@@ -1685,7 +1709,7 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
 
     token = None
     with suppress(Exception):
-        token = get_token(proxy=proxy)
+        token = get_token(proxy=proxy, storage=storage)
     if not getattr(token, "access", None):
         console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
         try:
@@ -1693,6 +1717,7 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
                 print_fn=lambda message: console.print(message, markup=False),
                 prompt_fn=lambda prompt: _get_questionary().text(prompt).ask() or "",
                 proxy=proxy,
+                storage=storage,
             )
         except Exception as exc:
             console.print(f"[red]OAuth login failed: {escape(str(exc))}[/red]")
@@ -1717,7 +1742,7 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
         from oauth_cli_kit import get_token  # pyright: ignore[reportMissingTypeStubs]
 
         proxy = _quick_start_codex_proxy(config)
-        token = get_token(proxy=proxy)
+        token = get_token(proxy=proxy, storage=_openai_codex_oauth_storage())
     except Exception:
         return False
     return bool(getattr(token, "access", None))
