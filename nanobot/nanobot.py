@@ -164,7 +164,10 @@ class Nanobot:
             chat_id: Logical chat identifier for runtime context.
             sender_id: Logical sender identifier for runtime context.
             media: Optional local media paths attached to the message.
-            ephemeral: If true, do not persist the turn or compact session history.
+            ephemeral: If true, do not persist the turn or compact session
+                history. The stored session is left unchanged: prior history is
+                still read for context, but messages, metadata, provider state,
+                and session files are not modified by this run.
             attributes: Optional caller-owned request data exposed to context
                 providers and turn-hook factories. Attributes are kept separate
                 from nanobot's trusted internal message metadata.

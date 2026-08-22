@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -674,6 +675,197 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     assert result.usage["provider_tokens"] == 3
 
 
+def _ephemeral_test_bot(tmp_path, *, provider: MagicMock | None = None) -> Nanobot:
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = provider if provider is not None else MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = SimpleNamespace(
+        max_tokens=8192,
+        temperature=0.1,
+        reasoning_effort=None,
+    )
+    provider.estimate_prompt_tokens.return_value = (10_000, "test")
+    if not isinstance(provider.chat_with_retry, AsyncMock):
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+            content="saved reply",
+            tool_calls=[],
+            usage={"total_tokens": 3},
+        ))
+    return Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+
+
+def _session_file(bot: Nanobot, key: str) -> Path:
+    return bot._loop.sessions._get_session_path(key)
+
+
+def _assert_session_state_unchanged(bot: Nanobot, key: str, path: Path, *, bytes_before: bytes, cached_before) -> None:
+    assert path.read_bytes() == bytes_before
+    cached_after = bot._loop.sessions.get_or_create(key)
+    assert cached_after.messages == cached_before.messages
+    assert cached_after.metadata == cached_before.metadata
+    assert cached_after.last_consolidated == cached_before.last_consolidated
+    assert cached_after.provider_state == cached_before.provider_state
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_run_leaves_persisted_session_unchanged(tmp_path):
+    from nanobot.providers.base import LLMResponse
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    bot = _ephemeral_test_bot(tmp_path, provider=provider)
+    key = "sdk:iso"
+
+    await bot.run("hello", session_key=key)
+
+    path = _session_file(bot, key)
+    assert path.exists()
+    bytes_before = path.read_bytes()
+    cached_before = copy.deepcopy(bot._loop.sessions.get_or_create(key))
+
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="ephemeral reply",
+        tool_calls=[],
+        usage={"total_tokens": 3},
+    ))
+    result = await bot.run("forgotten", session_key=key, ephemeral=True)
+
+    assert result.content == "ephemeral reply"
+    _assert_session_state_unchanged(bot, key, path, bytes_before=bytes_before, cached_before=cached_before)
+
+    # A later ordinary run continues exactly from the pre-ephemeral state.
+    await bot.run("again", session_key=key)
+    snapshot = bot.sessions.export(key)
+    assert snapshot is not None
+    contents = [message["content"] for message in snapshot.messages]
+    assert contents == ["hello", "saved reply", "again", "ephemeral reply"]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_run_on_new_key_writes_no_session_file(tmp_path):
+    bot = _ephemeral_test_bot(tmp_path)
+    key = "sdk:fresh-iso"
+
+    path = _session_file(bot, key)
+    assert not path.exists()
+
+    await bot.run("hi", session_key=key, ephemeral=True)
+
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_run_provider_failure_leaves_persisted_session_unchanged(tmp_path):
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    bot = _ephemeral_test_bot(tmp_path, provider=provider)
+    key = "sdk:iso-failure"
+
+    await bot.run("hello", session_key=key)
+
+    path = _session_file(bot, key)
+    bytes_before = path.read_bytes()
+    cached_before = copy.deepcopy(bot._loop.sessions.get_or_create(key))
+
+    provider.chat_with_retry = AsyncMock(side_effect=RuntimeError("provider exploded"))
+    try:
+        await bot.run("forgotten", session_key=key, ephemeral=True)
+    except RuntimeError:
+        pass
+
+    _assert_session_state_unchanged(bot, key, path, bytes_before=bytes_before, cached_before=cached_before)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_ephemeral_direct_run_leaves_persisted_session_unchanged(tmp_path):
+    entered = asyncio.Event()
+
+    async def slow_chat(*args, **kwargs):
+        entered.set()
+        await asyncio.sleep(3600)
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    bot = _ephemeral_test_bot(tmp_path, provider=provider)
+    key = "sdk:cancel-iso"
+
+    await bot.run("hello", session_key=key)
+
+    path = _session_file(bot, key)
+    bytes_before = path.read_bytes()
+    cached_before = copy.deepcopy(bot._loop.sessions.get_or_create(key))
+
+    provider.chat_with_retry = AsyncMock(side_effect=slow_chat)
+    task = asyncio.create_task(bot.run("forgotten", session_key=key, ephemeral=True))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    _assert_session_state_unchanged(bot, key, path, bytes_before=bytes_before, cached_before=cached_before)
+
+
+@pytest.mark.asyncio
+async def test_internal_loop_ephemeral_turn_still_persists_session(tmp_path):
+    """Dream-style direct ephemeral turns intentionally save their own session."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="dream reply",
+        tool_calls=[],
+        usage={"total_tokens": 3},
+    ))
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+
+    await loop.process_direct("dream work", session_key="dream:test-save", ephemeral=True)
+
+    path = loop.sessions._get_session_path("dream:test-save")
+    assert path.exists()
+    roles = [
+        record["role"]
+        for record in (
+            json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+        )
+        if "_type" not in record
+    ]
+    assert roles == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_slash_command_short_circuit_leaves_persisted_session_unchanged(tmp_path):
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    bot = _ephemeral_test_bot(tmp_path, provider=provider)
+    key = "sdk:iso-command"
+
+    await bot.run("hello", session_key=key)
+
+    path = _session_file(bot, key)
+    bytes_before = path.read_bytes()
+    cached_before = copy.deepcopy(bot._loop.sessions.get_or_create(key))
+
+    await bot.run("/help", session_key=key, ephemeral=True)
+
+    _assert_session_state_unchanged(bot, key, path, bytes_before=bytes_before, cached_before=cached_before)
+
+
 @pytest.mark.asyncio
 async def test_run_forwards_non_default_runtime_options(tmp_path):
     from nanobot.bus.events import OutboundMessage
@@ -702,6 +894,7 @@ async def test_run_forwards_non_default_runtime_options(tmp_path):
         sender_id="alice",
         media=["/tmp/image.png"],
         ephemeral=True,
+        read_only_session=True,
         _run_extra_hooks_for_ephemeral=True,
         hooks=ANY,
     )

@@ -39,6 +39,10 @@ def build_process_direct_kwargs(
     if ephemeral:
         kwargs["ephemeral"] = True
         kwargs["_run_extra_hooks_for_ephemeral"] = True
+        # SDK contract: ephemeral runs read prior context but leave the stored
+        # session (file, cache, provider state) untouched. Internal ephemeral
+        # turns such as Dream keep their own save semantics.
+        kwargs["read_only_session"] = True
     if attributes is not None:
         kwargs["attributes"] = dict(attributes)
     if on_stream is not None:
