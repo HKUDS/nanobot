@@ -22,6 +22,7 @@ from nanobot.webui.settings_api import (
     create_model_configuration,
     create_provider_settings,
     delete_model_configuration,
+    delete_provider_settings,
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
@@ -701,6 +702,81 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     dynamic_provider = saved.providers.model_extra[DYNAMIC_PROVIDER_NAME]
     assert dynamic_provider.api_base == "https://new.example/v1"
     assert dynamic_provider.api_key == "sk-test"
+
+
+def test_delete_builtin_provider_configuration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.providers.openai.api_base = "https://gateway.example/v1"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = delete_provider_settings({"provider": ["openai"]})
+
+    provider = next(row for row in payload["providers"] if row["name"] == "openai")
+    assert provider["configured"] is False
+    saved = load_config(config_path)
+    assert saved.providers.openai.api_key is None
+    assert saved.providers.openai.api_base is None
+
+
+def test_delete_builtin_provider_rejects_model_preset_reference(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.model_presets["writing"] = ModelPresetConfig(
+        provider="openai",
+        model="gpt-4.1-mini",
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError) as referenced:
+        delete_provider_settings({"provider": ["openai"]})
+
+    assert referenced.value.status == 409
+    assert load_config(config_path).providers.openai.api_key == "sk-test"
+
+
+def test_delete_custom_provider_rejects_model_preset_reference(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = _dynamic_provider_config()
+    config.model_presets["tenant"] = ModelPresetConfig(
+        provider=DYNAMIC_PROVIDER_NAME,
+        model="gpt-4o-mini",
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError) as referenced:
+        delete_provider_settings({"provider": [DYNAMIC_PROVIDER_NAME]})
+
+    assert referenced.value.status == 409
+    assert DYNAMIC_PROVIDER_NAME in load_config(config_path).providers.model_extra
+
+
+def test_delete_unreferenced_custom_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(_dynamic_provider_config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = delete_provider_settings({"provider": [DYNAMIC_PROVIDER_NAME]})
+
+    assert all(row["name"] != DYNAMIC_PROVIDER_NAME for row in payload["providers"])
+    assert DYNAMIC_PROVIDER_NAME not in load_config(config_path).providers.model_extra
 
 
 def test_create_provider_settings_persists_custom_advanced_options(
