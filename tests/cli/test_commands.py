@@ -2088,13 +2088,26 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
 
-def test_heartbeat_empty_response_still_retains_recent_messages(
-    monkeypatch, tmp_path: Path,
+@pytest.mark.parametrize(
+    ("isolated_session", "response_content", "expected_session_key"),
+    [
+        (True, "", "heartbeat"),
+        (False, "Actionable heartbeat result", "telegram:u1"),
+    ],
+)
+def test_heartbeat_session_isolation_controls_retention_and_delivery_recording(
+    monkeypatch,
+    tmp_path: Path,
+    isolated_session: bool,
+    response_content: str,
+    expected_session_key: str,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     config.agents.defaults.dream.enabled = True
+    config.agents.defaults.unified_session = False
+    config.gateway.heartbeat.isolated_session = isolated_session
     config.workspace_path.mkdir(parents=True)
     (config.workspace_path / "HEARTBEAT.md").write_text(
         "## Active Tasks\n\n- Check repository health\n",
@@ -2105,6 +2118,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
+    session_keys: list[str] = []
 
     class _FakeSession:
         def retain_recent_legal_suffix(self, limit: int) -> None:
@@ -2116,7 +2130,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
             seen["heartbeat_session"] = self.session
 
         def get_or_create(self, key: str) -> _FakeSession:
-            seen["session_key"] = key
+            session_keys.append(key)
             return self.session
 
         def save(self, session: _FakeSession) -> None:
@@ -2147,8 +2161,9 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
             self.sessions = kwargs["session_manager"]
             self.tools = {}
 
-        async def process_direct(self, *_args, **_kwargs):
-            return SimpleNamespace(content="")
+        async def process_direct(self, *_args, **kwargs):
+            seen["turn_session_key"] = kwargs["session_key"]
+            return SimpleNamespace(content=response_content)
 
         async def aclose(self) -> None:
             return None
@@ -2163,8 +2178,9 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
         def __init__(self, *_args, **_kwargs) -> None:
             self.enabled_channels = ["telegram"]
 
-    async def _unexpected_evaluator(*_args, **_kwargs) -> bool:
-        raise AssertionError("empty heartbeat response must not be evaluated")
+    async def _evaluate(*_args, **_kwargs) -> bool:
+        seen["evaluated"] = True
+        return True
 
     _patch_cli_command_runtime(
         monkeypatch,
@@ -2177,7 +2193,7 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cli.gateway_runtime.read_webui_sidebar_state", lambda: {})
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _evaluate)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
@@ -2185,10 +2201,19 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     cron = seen["cron"]
     response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
 
-    assert response is None
-    assert seen["session_key"] == "heartbeat"
-    assert seen["retained_limit"] == config.gateway.heartbeat.keep_recent_messages
-    assert seen["saved_session"] is seen["heartbeat_session"]
+    assert response == (response_content or None)
+    assert seen["turn_session_key"] == expected_session_key
+    if isolated_session:
+        assert session_keys == ["heartbeat"]
+        assert seen["retained_limit"] == config.gateway.heartbeat.keep_recent_messages
+        assert seen["saved_session"] is seen["heartbeat_session"]
+        assert "evaluated" not in seen
+    else:
+        assert session_keys == []
+        assert "retained_limit" not in seen
+        assert "saved_session" not in seen
+        assert seen["evaluated"] is True
+        bus.publish_outbound.assert_awaited_once()
 
 
 def test_webui_yes_creates_config_and_enables_local_websocket(
