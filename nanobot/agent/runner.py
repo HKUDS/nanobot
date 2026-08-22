@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import time
 from collections.abc import Awaitable, Callable, Iterable
@@ -40,6 +41,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
+    contains_leaked_tool_call_markup,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     extract_reasoning,
@@ -50,6 +52,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
+    LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE,
     build_budget_exhausted_finalization_message,
     build_finalization_retry_message,
     build_goal_continue_message,
@@ -432,6 +435,10 @@ class AgentRunner:
         external_lookup_counts: dict[str, int] = {}
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
+        # Per-turn loop guard: the last few tool-call signatures (name + args),
+        # most recent last. Used to warn the model when it repeats the exact
+        # same call several times in a row instead of making progress.
+        recent_tool_signatures: list[str] = []
         empty_content_retries = 0
         # Segments from one uninterrupted length-recovery chain. Tool work or
         # injected user input starts a new logical answer and clears the chain.
@@ -524,6 +531,13 @@ class AgentRunner:
                     response,
                 )
                 messages.append(assistant_message)
+
+                loop_warning = self._detect_tool_call_loop(
+                    response.tool_calls, recent_tool_signatures
+                ) or self._detect_intra_round_duplicate_calls(response.tool_calls)
+                if loop_warning:
+                    messages.append({"role": "system", "content": loop_warning})
+
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -785,6 +799,35 @@ class AgentRunner:
                 should_continue, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
                     phase="after empty response",
+                )
+                if should_continue:
+                    had_injections = True
+                    length_recovery_parts.clear()
+                    continue
+                break
+            if contains_leaked_tool_call_markup(clean):
+                # Same last-mile safety net as the max-iterations finalize path
+                # (above): a model asked to finalize can still write literal
+                # <tool_call>... text instead of a real answer. This is the
+                # dominant path where most turns actually end, so it needs its
+                # own guard rather than relying on the retry-path check alone.
+                logger.warning(
+                    "Leaked tool-call markup in final response for {}; "
+                    "substituting fallback ({} chars)",
+                    spec.session_key or "default",
+                    len(clean or ""),
+                )
+                final_content = LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE
+                stop_reason = "leaked_tool_call_markup"
+                error = final_content
+                self._append_final_message(messages, final_content)
+                context.final_content = final_content
+                context.error = error
+                context.stop_reason = stop_reason
+                await hook.after_iteration(context)
+                should_continue, injection_cycles = await self._try_drain_injections(
+                    spec, messages, None, injection_cycles,
+                    phase="after leaked tool-call markup",
                 )
                 if should_continue:
                     had_injections = True
@@ -1250,12 +1293,14 @@ class AgentRunner:
 
         raw_usage = self._usage_or_estimate(spec, retry_messages, response)
         self._accumulate_usage(usage, raw_usage)
-        if response.finish_reason == "error" or response.has_tool_calls:
+        leaked_tool_call = contains_leaked_tool_call_markup(response.content)
+        if response.finish_reason == "error" or response.has_tool_calls or leaked_tool_call:
             logger.warning(
                 "Budget-exhausted finalization returned finish_reason='{}' "
-                "with {} tool call(s) for {}; using fallback",
+                "with {} tool call(s){} for {}; using fallback",
                 response.finish_reason,
                 len(response.tool_calls),
+                " (leaked tool-call markup in content)" if leaked_tool_call else "",
                 spec.session_key or "default",
             )
             return None
@@ -1308,6 +1353,97 @@ class AgentRunner:
             strip=True,
             max_iterations=spec.max_iterations,
         )
+
+    @staticmethod
+    def _single_call_signature(tc: ToolCallRequest) -> str:
+        """Build a stable signature for one tool call (name + arguments)."""
+        if isinstance(tc.arguments, str):
+            args_repr = tc.arguments
+        else:
+            try:
+                args_repr = json.dumps(tc.arguments, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                args_repr = str(tc.arguments)
+        return f"{tc.name}:{args_repr}"
+
+    @staticmethod
+    def _tool_call_signature(tool_calls: Iterable[ToolCallRequest]) -> str:
+        """Build a stable signature for one round of tool calls (name + args).
+
+        Order-independent (sorted) since concurrent_tools can execute several
+        calls in one round and their relative order isn't semantically
+        meaningful for loop detection.
+        """
+        parts = [AgentRunner._single_call_signature(tc) for tc in tool_calls]
+        return "|".join(sorted(parts))
+
+    @staticmethod
+    def _detect_intra_round_duplicate_calls(
+        tool_calls: Iterable[ToolCallRequest],
+        *,
+        threshold: int = 3,
+    ) -> str | None:
+        """Detect several identical calls batched into a single round.
+
+        Complements ``_detect_tool_call_loop``, which only tracks one
+        signature per whole round and so only catches a loop that repeats
+        across separate rounds -- it cannot see ``threshold`` identical
+        calls issued together in one round (e.g. three parallel read_file
+        calls with the same path), since that round produces its own
+        distinct joined signature just once. This checks within a single
+        round instead, so it fires the first time such a round occurs
+        rather than requiring it to repeat.
+        """
+        counts: dict[str, int] = {}
+        for tc in tool_calls:
+            signature = AgentRunner._single_call_signature(tc)
+            counts[signature] = counts.get(signature, 0) + 1
+        if not any(count >= threshold for count in counts.values()):
+            return None
+        return (
+            f"You have just made the exact same tool call {threshold}+ times "
+            "in a single turn (identical tool name and arguments, issued "
+            "together). Repeating an identical call will not produce a "
+            "different result. Stop repeating this action -- either try a "
+            "genuinely different approach, or report what you have found so "
+            "far and ask how to proceed."
+        )
+
+    @staticmethod
+    def _detect_tool_call_loop(
+        tool_calls: Iterable[ToolCallRequest],
+        recent_tool_signatures: list[str],
+        *,
+        threshold: int = 3,
+    ) -> str | None:
+        """Track recent tool-call signatures and return a warning once the
+        exact same round of calls repeats ``threshold`` times in a row.
+
+        Mutates ``recent_tool_signatures`` in place (bounded to ``threshold``
+        entries) and clears it after a warning fires, so the same loop won't
+        re-trigger the warning every single iteration once it's already been
+        flagged once.
+        """
+        signature = AgentRunner._tool_call_signature(tool_calls)
+        if not signature:
+            return None
+        recent_tool_signatures.append(signature)
+        if len(recent_tool_signatures) > threshold:
+            recent_tool_signatures.pop(0)
+        if (
+            len(recent_tool_signatures) == threshold
+            and len(set(recent_tool_signatures)) == 1
+        ):
+            recent_tool_signatures.clear()
+            return (
+                f"You have just made the exact same tool call(s) {threshold} times "
+                "in a row (identical tool name and arguments). Repeating an "
+                "identical call will not produce a different result. Stop "
+                "repeating this action -- either try a genuinely different "
+                "approach, or report what you have found so far and ask how "
+                "to proceed."
+            )
+        return None
 
     def _usage_or_estimate(
         self,

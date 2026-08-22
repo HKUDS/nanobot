@@ -1664,7 +1664,10 @@ class AgentLoop:
         """Assemble the final outbound message from turn results."""
         # MessageTool suppression
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            if not had_injections or stop_reason == "empty_final_response":
+            if not had_injections or stop_reason in (
+                "empty_final_response",
+                "leaked_tool_call_markup",
+            ):
                 return None
 
         if log_content:

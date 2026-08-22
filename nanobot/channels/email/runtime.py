@@ -283,6 +283,9 @@ class EmailChannel(BaseChannel):
                 failed_attachments.append(f"[attachment: {filename} - send failed]")
                 self.logger.exception("Failed to attach file {}", media_path)
 
+        # Leaked tool-call markup is filtered centrally in ChannelManager._send_once
+        # before any channel's send() is invoked -- see contains_leaked_tool_call_markup
+        # usage there. No per-channel check needed here.
         content = msg.content or ""
         if failed_attachments:
             fallback = "\n".join(failed_attachments)
