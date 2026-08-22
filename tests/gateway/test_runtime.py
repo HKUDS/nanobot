@@ -18,6 +18,7 @@ from nanobot.gateway import (
     GatewayRuntimePaths,
     GatewayStartOptions,
     GatewayStatus,
+    RuntimeResult,
 )
 from nanobot.gateway.runtime import monitor_gateway_clients
 from nanobot.process_runtime import process_is_running
@@ -452,6 +453,48 @@ def test_restart_does_not_detach_a_foreground_gateway(tmp_path, monkeypatch):
 
     assert result.ok is False
     assert result.message == "gateway_foreground_restart_required"
+
+
+def test_restart_marks_the_exiting_gateway_for_turn_recovery(tmp_path, monkeypatch):
+    """A managed restart must not look like an explicit stop to the child."""
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    status = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=runtime.paths.state_path,
+        log_path=runtime.paths.log_path,
+        launch_mode="background",
+    )
+    monkeypatch.setattr(runtime, "status", lambda **_kwargs: status)
+
+    def stop(*, timeout_s: int):
+        assert timeout_s == 20
+        assert json.loads(runtime._restart_intent_path.read_text(encoding="utf-8")) == {
+            "pid": 12345
+        }
+        return SimpleNamespace(ok=True, message="gateway_stopped", status=status)
+
+    monkeypatch.setattr(runtime, "_stop", stop)
+    monkeypatch.setattr(
+        runtime,
+        "_start_background",
+        lambda _options: RuntimeResult(True, "gateway_started_background", status),
+    )
+
+    result = runtime.restart(GatewayStartOptions(port=18790))
+
+    assert result.ok is True
+    assert not runtime._restart_intent_path.exists()
+
+
+def test_restart_intent_only_applies_to_the_recorded_gateway_process(tmp_path):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+
+    runtime._write_restart_intent(os.getpid())
+
+    assert runtime.preserves_inflight_turns_on_exit() is True
+    runtime._write_restart_intent(os.getpid() + 1)
+    assert runtime.preserves_inflight_turns_on_exit() is False
 
 
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):

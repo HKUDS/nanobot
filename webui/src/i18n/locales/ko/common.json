@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "기본 권한",
       "currentModel": "현재 구성",
       "brandLogos": "브랜드 로고",
+      "browserNotifications": "작업 알림",
       "cliAppsCatalog": "카탈로그",
       "cliAppsFilter": "필터",
       "engine": "엔진",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "선택한 모델에 의해 설정됩니다.",
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
       "brandLogos": "설정에서 타사 제공자와 CLI 로고를 표시합니다.",
+      "browserNotifications": "이 페이지가 백그라운드에 있을 때만 알립니다. 기본값은 꺼짐입니다.",
       "cliAppsCatalog": "nanobot이 로컬에서 실행할 수 있는 앱 CLI 어댑터만 설치합니다. 네이티브 앱은 변경하지 않습니다.",
       "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다.",
       "logs": "네이티브 엔진 로그 폴더를 엽니다.",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "에이전트 실행 중",
       "complete": "에이전트 완료",
-      "updated": "새 활동"
+      "updated": "새 활동",
+      "recovery": "이 대화에는 확인이 필요합니다"
     },
     "pin": "고정",
     "unpin": "고정 해제",
@@ -1421,6 +1424,18 @@
     "cliRunFailed": "실패",
     "automationSourceFallback": "자동화",
     "automationTriggered": "자동 실행됨"
+  },
+  "recovery": {
+    "actionFailed": "복구 작업에 실패했습니다. 다시 시도하세요.",
+    "interrupted": "작업이 중단됨",
+    "completed": "작업 완료",
+    "failed": "작업 복구 실패",
+    "failedHelp": "저장된 작업을 안전하게 복구할 수 없습니다. 계속하기 전에 검토하세요.",
+    "resuming": "중단된 작업을 복구하는 중…",
+    "review": "계속하기 전에 작업을 검토하세요. 도구는 자동으로 다시 실행되지 않습니다.",
+    "safeResume": "저장된 대화 컨텍스트에서 계속합니다.",
+    "dismiss": "닫기",
+    "continue": "계속"
   },
   "lightbox": {
     "title": "이미지 미리보기",

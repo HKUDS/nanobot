@@ -48,15 +48,21 @@ _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
+_RUNTIME_CHECKPOINT_DATA_ERRORS = (OSError, *_SESSION_DATA_ERRORS)
 _PROVIDER_STATE_RECORD_TYPE = "provider_state"
 _PROVIDER_STATE_RECORD_PREFIX_RE = re.compile(
     r'^\s*\{\s*"_type"\s*:\s*"provider_state"\s*(?:,|\})'
 )
+_RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+_RUNTIME_CHECKPOINT_VERSION = 1
+_RUNTIME_CHECKPOINT_SUFFIX = ".checkpoint.json"
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
+    "pending_user_followups",
     "runtime_checkpoint",
     "session_handle",
+    "webui_recovery",
     "thread_goal",
     "title",
     "title_user_edited",
@@ -1001,6 +1007,9 @@ class JsonlSessionStore:
     def get_session_path(self, key: str) -> Path:
         return self.sessions_dir / f"{self.storage_key(key)}.jsonl"
 
+    def get_runtime_checkpoint_path(self, key: str) -> Path:
+        return self.sessions_dir / f"{self.storage_key(key)}{_RUNTIME_CHECKPOINT_SUFFIX}"
+
     def get_legacy_lossy_path(self, key: str) -> Path:
         return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
 
@@ -1066,7 +1075,7 @@ class JsonlSessionStore:
                     else:
                         messages.append(data)
 
-            return Session(
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
@@ -1075,6 +1084,8 @@ class JsonlSessionStore:
                 last_consolidated=last_consolidated,
                 provider_state=provider_state,
             )
+            self._overlay_runtime_checkpoint_unlocked(session, path)
+            return session
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
             repaired = self._repair_unlocked(key)
@@ -1159,7 +1170,7 @@ class JsonlSessionStore:
             if not messages and not metadata and provider_state is None:
                 return None
 
-            return Session(
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
@@ -1168,6 +1179,8 @@ class JsonlSessionStore:
                 last_consolidated=last_consolidated,
                 provider_state=provider_state,
             )
+            self._overlay_runtime_checkpoint_unlocked(session, path)
+            return session
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Repair failed for session {}: {}", key, e)
             return None
@@ -1185,6 +1198,105 @@ class JsonlSessionStore:
     def save(self, session: Session, *, fsync: bool = False) -> None:
         with self._session_files_lock:
             self._save_unlocked(session, fsync=fsync)
+
+    def save_runtime_checkpoint(self, session: Session) -> None:
+        """Atomically persist only the volatile in-flight turn state.
+
+        A checkpoint is written several times during a tool-heavy turn. Keeping it
+        beside the append history avoids copying the full transcript at each safe
+        recovery boundary.
+        """
+        with self._session_files_lock:
+            path = self.get_session_path(session.key)
+            if not path.exists():
+                # A user turn normally creates the session first. Internal callers
+                # may checkpoint a fresh session, so establish the durable base once.
+                self._save_unlocked(session)
+                return
+
+            checkpoint = session.metadata.get(_RUNTIME_CHECKPOINT_KEY)
+            if not isinstance(checkpoint, dict):
+                self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
+                return
+
+            payload: dict[str, Any] = {
+                "version": _RUNTIME_CHECKPOINT_VERSION,
+                "session_key": session.key,
+                "base_updated_at": session.updated_at.isoformat(),
+                "base_message_count": len(session.messages),
+                "checkpoint": checkpoint,
+                "provider_state": (
+                    session.provider_state.to_private_record()
+                    if session.provider_state is not None
+                    else None
+                ),
+            }
+            target = self.get_runtime_checkpoint_path(session.key)
+            tmp = target.with_name(f".{target.name}.{secrets.token_hex(8)}.tmp")
+            try:
+                with open(tmp, "x", encoding="utf-8") as handle:
+                    os.chmod(tmp, 0o600)
+                    json.dump(
+                        payload,
+                        handle,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                os.replace(tmp, target)
+            finally:
+                tmp.unlink(missing_ok=True)
+
+    def _overlay_runtime_checkpoint_unlocked(self, session: Session, main_path: Path) -> None:
+        checkpoint_path = self.get_runtime_checkpoint_path(session.key)
+        try:
+            checkpoint_stat = checkpoint_path.lstat()
+            if not stat.S_ISREG(checkpoint_stat.st_mode):
+                logger.warning(
+                    "Ignoring non-regular runtime checkpoint for session {}",
+                    session.key,
+                )
+                return
+            # A complete session save supersedes an older sidecar. This comparison
+            # closes the small crash window between replacing the JSONL and unlinking
+            # its previous checkpoint.
+            if main_path.stat().st_mtime_ns > checkpoint_stat.st_mtime_ns:
+                checkpoint_path.unlink(missing_ok=True)
+                return
+            raw = _json_object(json.loads(checkpoint_path.read_text(encoding="utf-8")))
+            if (
+                raw.get("version") != _RUNTIME_CHECKPOINT_VERSION
+                or raw.get("session_key") != session.key
+                or raw.get("base_updated_at") != session.updated_at.isoformat()
+                or raw.get("base_message_count") != len(session.messages)
+                or not isinstance(raw.get("checkpoint"), dict)
+            ):
+                checkpoint_path.unlink(missing_ok=True)
+                return
+            provider_record = raw.get("provider_state")
+            provider_state = (
+                None
+                if provider_record is None
+                else ProviderConversationState.from_private_record(provider_record)
+            )
+            if provider_record is not None and provider_state is None:
+                raise ValueError("invalid checkpoint provider state")
+            session.metadata[_RUNTIME_CHECKPOINT_KEY] = cast(
+                dict[str, Any], raw["checkpoint"]
+            )
+            session.provider_state = provider_state
+        except FileNotFoundError:
+            return
+        except _RUNTIME_CHECKPOINT_DATA_ERRORS as exc:
+            logger.warning(
+                "Ignoring invalid runtime checkpoint for session {}: {}",
+                session.key,
+                exc,
+            )
+            # Atomic writes mean a malformed target cannot become valid later.
+            # Remove it once so future loads do not repeatedly parse and log it.
+            with suppress(OSError):
+                if checkpoint_path.is_file() and not checkpoint_path.is_symlink():
+                    checkpoint_path.unlink()
 
     def _save_unlocked(self, session: Session, *, fsync: bool = False) -> None:
         path = self.get_session_path(session.key)
@@ -1214,6 +1326,10 @@ class JsonlSessionStore:
                     os.fsync(f.fileno())
 
             os.replace(tmp_path, path)
+
+            # The full record now contains the authoritative checkpoint state (or
+            # its removal), so an older volatile overlay is no longer needed.
+            self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
 
             if fsync:
                 with suppress(PermissionError):
@@ -1278,6 +1394,7 @@ class JsonlSessionStore:
     def _delete_unlocked(self, key: str) -> bool:
         paths = [
             self.get_session_path(key),
+            self.get_runtime_checkpoint_path(key),
             self.get_legacy_lossy_path(key),
             self.get_legacy_session_path(key),
         ]
@@ -1585,6 +1702,10 @@ class SessionManager:
         """Get the collision-resistant workspace path for a session."""
         return self._jsonl_store.get_session_path(key)
 
+    def _get_runtime_checkpoint_path(self, key: str) -> Path:
+        """Get the private in-flight checkpoint path for a session."""
+        return self._jsonl_store.get_runtime_checkpoint_path(key)
+
     def _get_legacy_lossy_path(self, key: str) -> Path:
         """Previous workspace session path using lossy ':' to '_' replacement."""
         return self._jsonl_store.get_legacy_lossy_path(key)
@@ -1652,6 +1773,18 @@ class SessionManager:
 
         self._store.save(session, fsync=fsync)
         self._remember(session)
+
+    def save_runtime_checkpoint(self, session: Session) -> None:
+        """Persist volatile recovery state without rewriting long history."""
+        if not session.policy.persist:
+            return
+        if self._store is self._jsonl_store:
+            self._jsonl_store.save_runtime_checkpoint(session)
+            self._remember(session)
+            return
+        # Third-party stores keep their existing all-or-nothing semantics until
+        # they opt into a dedicated checkpoint primitive.
+        self.save(session)
 
     def rename_model_preset(self, old_name: str, new_name: str) -> int:
         """Rename a session-scoped model preset across durable and live sessions."""

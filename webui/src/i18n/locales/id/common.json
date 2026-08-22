@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "Akses bawaan",
       "currentModel": "Konfigurasi saat ini",
       "brandLogos": "Logo merek",
+      "browserNotifications": "Notifikasi tugas",
       "cliAppsCatalog": "Katalog",
       "cliAppsFilter": "Saring",
       "engine": "Mesin",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
       "brandLogos": "Tampilkan logo penyedia pihak ketiga dan CLI di Pengaturan.",
+      "browserNotifications": "Beri tahu hanya saat halaman ini di latar belakang. Nonaktif secara bawaan.",
       "cliAppsCatalog": "Instal hanya adaptor CLI aplikasi yang dapat dijalankan nanobot secara lokal; aplikasi asli tidak diubah.",
       "cliAppsFilter": "Cari berdasarkan aplikasi, kategori, atau kemampuan.",
       "logs": "Buka folder log mesin asli.",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "Agen sedang berjalan",
       "complete": "Agen selesai",
-      "updated": "Aktivitas baru"
+      "updated": "Aktivitas baru",
+      "recovery": "Percakapan ini memerlukan perhatian Anda"
     },
     "pin": "Sematkan",
     "unpin": "Lepas sematan",
@@ -1421,6 +1424,18 @@
     "cliRunFailed": "Gagal",
     "automationSourceFallback": "Otomatisasi",
     "automationTriggered": "Dipicu otomatis"
+  },
+  "recovery": {
+    "actionFailed": "Pemulihan gagal. Coba lagi.",
+    "interrupted": "Tugas terputus",
+    "completed": "Tugas selesai",
+    "failed": "Pemulihan tugas gagal",
+    "failedHelp": "Tugas tersimpan tidak dapat dipulihkan dengan aman. Tinjau sebelum melanjutkan.",
+    "resuming": "Memulihkan tugas yang terputus…",
+    "review": "Tinjau tugas sebelum melanjutkan. Alat tidak akan dijalankan ulang secara otomatis.",
+    "safeResume": "Melanjutkan dari konteks percakapan yang tersimpan.",
+    "dismiss": "Abaikan",
+    "continue": "Lanjutkan"
   },
   "lightbox": {
     "title": "Pratinjau gambar",
