@@ -196,7 +196,7 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 )
             )
             self.channel._background_tasks.add(task)
-            task.add_done_callback(self.channel._background_tasks.discard)
+            task.add_done_callback(self.channel._on_background_task_done)
 
             return AckMessage.STATUS_OK, "OK"
 
@@ -256,6 +256,16 @@ class DingTalkChannel(BaseChannel):
 
         # Hold references to background tasks to prevent GC
         self._background_tasks: set[asyncio.Task[None]] = set()
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        exception = task.exception()
+        if exception is not None:
+            self.logger.opt(exception=exception).error(
+                "DingTalk inbound message task failed"
+            )
 
     async def start(self) -> None:
         """Start the DingTalk bot with Stream Mode."""
@@ -326,8 +336,11 @@ class DingTalkChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
         # Cancel outstanding background tasks
-        for task in self._background_tasks:
+        background_tasks = tuple(self._background_tasks)
+        for task in background_tasks:
             task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
         self._background_tasks.clear()
 
     async def _close_stream_client(self) -> None:
