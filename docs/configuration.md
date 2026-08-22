@@ -2346,6 +2346,23 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
 
+To keep a skill available for explicit user invocation while preventing the model
+from selecting it automatically, add `disable-model-invocation: true` to its
+`SKILL.md` frontmatter:
+
+```yaml
+---
+name: deploy
+description: Deploy the current project.
+disable-model-invocation: true
+---
+```
+
+The skill remains visible to users through `/skill` and can be loaded for the
+current turn with `$deploy`. Its name and description are omitted from main-agent
+and subagent skill summaries, and `disable-model-invocation` takes precedence over
+`always: true`.
+
 ### Agent Plugins v1
 
 nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`; a v1 package has `plugin.json` and may add `mcp.json`, `skills/<name>/SKILL.md`, or both. Agent Plugins are the common package and activation boundary for installable capabilities; they do not replace native providers, channels, tools, standalone workspace skills, or directly configured MCP servers.
