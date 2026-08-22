@@ -160,6 +160,33 @@ def test_delete_webui_skill_only_deletes_workspace_skills(
     assert exc_info.value.status == 403
 
 
+def test_delete_workspace_override_preserves_disabled_builtin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_skill(tmp_path, "github")
+    config = _config("github")
+    saved: list[object] = []
+    monkeypatch.setattr("nanobot.webui.skills_api.load_config", lambda: config)
+    monkeypatch.setattr("nanobot.webui.skills_api.save_config", saved.append)
+    disabled = {"github"}
+
+    action = delete_webui_skill(
+        tmp_path,
+        "github",
+        disabled_skills=disabled,
+    )
+
+    skills = webui_skills_payload(tmp_path, disabled_skills=disabled)["skills"]
+    github = next(skill for skill in skills if skill["name"] == "github")
+    assert action["deleted"] is True
+    assert github["source"] == "builtin"
+    assert github["enabled"] is False
+    assert disabled == {"github"}
+    assert config.agents.defaults.disabled_skills == ["github"]
+    assert saved == []
+
+
 def test_delete_webui_skill_rejects_symlinked_skills_root(
     tmp_path: Path,
 ) -> None:

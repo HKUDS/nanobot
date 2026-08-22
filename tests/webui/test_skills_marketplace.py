@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
+from nanobot.agent.skills import SkillsLoader
 from nanobot.webui.skills_marketplace import (
     SkillsMarketplaceError,
     _valid_skillhub_download_url,
@@ -18,11 +19,19 @@ from nanobot.webui.skills_marketplace import (
 )
 
 
+def _assert_builtin_skill(workspace_path: Path, name: str) -> None:
+    assert any(
+        entry["name"] == name and entry["source"] == "builtin"
+        for entry in SkillsLoader(workspace_path).list_skills(filter_unavailable=False)
+    )
+
+
 @pytest.mark.asyncio
 async def test_search_marketplace_skills_filters_and_marks_installed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _assert_builtin_skill(tmp_path, "github")
     skill_dir = tmp_path / "skills" / "react-testing"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("---\nname: react-testing\n---\n", encoding="utf-8")
@@ -40,6 +49,12 @@ async def test_search_marketplace_skills_filters_and_marks_installed(
                         "skillId": "react-testing",
                         "source": "acme/agent-skills",
                         "installs": 42,
+                    },
+                    {
+                        "name": "GitHub",
+                        "skillId": "github",
+                        "source": "acme/agent-skills",
+                        "installs": 40,
                     },
                     {"skillId": "../escape", "source": "acme/agent-skills"},
                     {"skillId": "valid-name", "source": "not-a-repository"},
@@ -91,7 +106,19 @@ async def test_search_marketplace_skills_filters_and_marks_installed(
                 "installed": True,
                 "install_supported": True,
                 "metric": "installs_total",
-            }
+            },
+            {
+                "id": "acme/agent-skills/github",
+                "skill_id": "github",
+                "name": "GitHub",
+                "source": "acme/agent-skills",
+                "provider": "skills_sh",
+                "installs": 40,
+                "url": "https://skills.sh/acme/agent-skills/github",
+                "installed": False,
+                "install_supported": True,
+                "metric": "installs_total",
+            },
         ],
     }
 
@@ -368,12 +395,67 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
 
 
 @pytest.mark.asyncio
-async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
+async def test_install_marketplace_skill_can_shadow_builtin(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _assert_builtin_skill(tmp_path, "github")
+    launched = False
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, None]:
+            skill_dir = tmp_path / "skills" / "github"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: github\n---\n",
+                encoding="utf-8",
+            )
+            return b"installed", None
+
+        def kill(self) -> None:
+            raise AssertionError("successful install must not be killed")
+
+    async def create_subprocess_exec(*_command: str, **_kwargs: object) -> FakeProcess:
+        nonlocal launched
+        launched = True
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.shutil.which",
+        lambda executable: "/usr/local/bin/npx" if executable == "npx" else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.asyncio.create_subprocess_exec",
+        create_subprocess_exec,
+    )
+
+    result = await install_marketplace_skill(
+        "acme/agent-skills",
+        "github",
+        tmp_path,
+    )
+
+    assert launched is True
+    assert result == {
+        "installed": True,
+        "already_installed": False,
+        "name": "github",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skill_id", ["ima-skills", "github"])
+async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    skill_id: str,
+) -> None:
+    if skill_id == "github":
+        _assert_builtin_skill(tmp_path, skill_id)
     archive_buffer = io.BytesIO()
-    skill_content = b"---\nname: ima-skills\ndescription: Tencent knowledge skill.\n---\n"
+    skill_content = f"---\nname: {skill_id}\ndescription: Marketplace skill.\n---\n".encode()
     with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("SKILL.md", skill_content)
         archive.writestr("_meta.json", b'{"version":"1.1.8"}')
@@ -432,13 +514,13 @@ async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
             if url.endswith("/signature"):
                 return FakeResponse(payload={"signed": True, "content_hash": content_hash})
             assert url == "https://api.skillhub.cn/api/v1/download"
-            assert params == {"slug": "ima-skills", "version": "1.1.8"}
+            assert params == {"slug": skill_id, "version": "1.1.8"}
             return FakeResponse(
                 status_code=302,
                 headers={
                     "location": (
                         "https://skillhub-1388575217.cos.accelerate.myqcloud.com/"
-                        "skills/ima-skills.zip"
+                        f"skills/{skill_id}.zip"
                     )
                 },
             )
@@ -451,7 +533,7 @@ async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
             headers: dict[str, str],
         ) -> FakeResponse:
             assert method == "GET"
-            assert url.endswith("/skills/ima-skills.zip")
+            assert url.endswith(f"/skills/{skill_id}.zip")
             assert "application/zip" in headers["Accept"]
             return FakeResponse(
                 headers={"content-length": str(len(archive_bytes))},
@@ -465,7 +547,7 @@ async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
 
     result = await install_marketplace_skill(
         "",
-        "ima-skills",
+        skill_id,
         tmp_path,
         provider="skillhub",
         version="1.1.8",
@@ -474,11 +556,11 @@ async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
     assert result == {
         "installed": True,
         "already_installed": False,
-        "name": "ima-skills",
+        "name": skill_id,
         "provider": "skillhub",
         "version": "1.1.8",
     }
-    assert (tmp_path / "skills" / "ima-skills" / "SKILL.md").read_bytes() == skill_content
+    assert (tmp_path / "skills" / skill_id / "SKILL.md").read_bytes() == skill_content
 
 
 @pytest.mark.parametrize(
@@ -532,6 +614,35 @@ async def test_install_marketplace_skill_is_idempotent(
         "installed": True,
         "already_installed": True,
         "name": "already-here",
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_skillhub_skill_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_dir = tmp_path / "skills" / "already-here"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: already-here\n---\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace._skillhub_client",
+        pytest.fail,
+    )
+
+    result = await install_marketplace_skill(
+        "",
+        "already-here",
+        tmp_path,
+        provider="skillhub",
+        version="1.1.8",
+    )
+
+    assert result == {
+        "installed": True,
+        "already_installed": True,
+        "name": "already-here",
+        "provider": "skillhub",
     }
 
 

@@ -1,8 +1,10 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import {
+  fetchMarketplaceSkillTrends,
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   searchMarketplaceSkills,
@@ -16,6 +18,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
+    fetchMarketplaceSkillTrends: vi.fn(),
     fetchSkills: vi.fn(),
     fetchTrendingMarketplaceSkills: vi.fn(),
     searchMarketplaceSkills: vi.fn(),
@@ -24,11 +27,14 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 const client = {} as NanobotClient;
 
-function marketplace(token: string) {
+function marketplace(
+  token: string,
+  installedSkills: ComponentProps<typeof SkillsMarketplace>["installedSkills"] = [],
+) {
   return (
     <ClientProvider client={client} token={token}>
       <SkillsMarketplace
-        installedSkills={[]}
+        installedSkills={installedSkills}
         installing=""
         onInstallingChange={() => {}}
       />
@@ -78,6 +84,9 @@ describe("SkillsMarketplace", () => {
       install_supported: true,
       skills: [],
     });
+    vi.mocked(fetchMarketplaceSkillTrends).mockReset().mockResolvedValue({
+      trends: { "acme/agent-skills/github": [] },
+    });
     vi.mocked(searchMarketplaceSkills).mockReset().mockImplementation(
       async (_token, query) => ({
         query,
@@ -124,5 +133,82 @@ describe("SkillsMarketplace", () => {
     });
     expect(searchMarketplaceSkills).toHaveBeenCalledTimes(2);
     expect(searchMarketplaceSkills).toHaveBeenLastCalledWith("tok-new", "Vue");
+  });
+
+  it("allows a marketplace skill to shadow a built-in skill with the same name", async () => {
+    vi.mocked(fetchTrendingMarketplaceSkills).mockResolvedValueOnce({
+      period: "mixed",
+      provider: "all",
+      install_supported: true,
+      skills: [
+        {
+          id: "acme/agent-skills/github",
+          skill_id: "github",
+          name: "GitHub",
+          source: "acme/agent-skills",
+          provider: "skills_sh",
+          installs: 42,
+          url: "https://skills.sh/acme/agent-skills/github",
+          installed: false,
+          install_supported: true,
+          metric: "installs_total",
+        },
+      ],
+    });
+
+    render(marketplace("tok", [
+      {
+        name: "github",
+        description: "Bundled GitHub skill.",
+        source: "builtin",
+        available: true,
+      },
+    ]));
+
+    await act(async () => {});
+
+    const install = screen.getByRole("button", { name: "Install GitHub" });
+    expect(install).toBeEnabled();
+    fireEvent.click(install);
+    expect(
+      screen.getByText(
+        "This workspace copy will override the existing built-in or plugin skill until you delete it.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a marketplace skill disabled when it is installed in the workspace", async () => {
+    vi.mocked(fetchTrendingMarketplaceSkills).mockResolvedValueOnce({
+      period: "mixed",
+      provider: "all",
+      install_supported: true,
+      skills: [
+        {
+          id: "acme/agent-skills/github",
+          skill_id: "github",
+          name: "GitHub",
+          source: "acme/agent-skills",
+          provider: "skills_sh",
+          installs: 42,
+          url: "https://skills.sh/acme/agent-skills/github",
+          installed: false,
+          install_supported: true,
+          metric: "installs_total",
+        },
+      ],
+    });
+
+    render(marketplace("tok", [
+      {
+        name: "github",
+        description: "Workspace GitHub skill.",
+        source: "workspace",
+        available: true,
+      },
+    ]));
+
+    await act(async () => {});
+
+    expect(screen.getByRole("button", { name: "Installed GitHub" })).toBeDisabled();
   });
 });

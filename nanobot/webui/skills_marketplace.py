@@ -358,7 +358,7 @@ async def _install_skills_sh_skill(
 
     loader = SkillsLoader(workspace_path)
     existing = {entry["name"]: entry for entry in loader.list_skills(filter_unavailable=False)}
-    if skill_id in existing:
+    if existing.get(skill_id, {}).get("source") == "workspace":
         return {"installed": True, "already_installed": True, "name": skill_id}
 
     workspace = workspace_path.expanduser().resolve()
@@ -447,7 +447,7 @@ async def _install_skillhub_skill(
 
     loader = SkillsLoader(workspace_path)
     existing = {entry["name"]: entry for entry in loader.list_skills(filter_unavailable=False)}
-    if skill_id in existing:
+    if existing.get(skill_id, {}).get("source") == "workspace":
         return {
             "installed": True,
             "already_installed": True,
@@ -744,6 +744,7 @@ def _installed_skill_names(workspace_path: Path) -> set[str]:
     return {
         entry["name"]
         for entry in SkillsLoader(workspace_path).list_skills(filter_unavailable=False)
+        if entry.get("source") == "workspace"
     }
 
 
