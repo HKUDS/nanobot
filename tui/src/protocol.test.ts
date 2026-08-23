@@ -356,14 +356,34 @@ describe("gateway protocol", () => {
       socket.emit("message", {
         data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client" }),
       })
+      socket.emit("message", {
+        data: JSON.stringify({ event: "attached", chat_id: "draft-chat" }),
+      })
+      // A gateway restart re-sends ready while the TUI keeps the draft chat alive.
+      socket.emit("message", {
+        data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client" }),
+      })
+      client.send("hello")
 
-      expect(socket.sent.map((value) => JSON.parse(value))).toEqual([{
-        type: "new_chat",
-        workspace_scope: {
-          project_path: "/tmp/launch-project",
-          access_mode: "restricted",
+      expect(socket.sent.map((value) => JSON.parse(value))).toEqual([
+        {
+          type: "new_chat",
+          workspace_scope: {
+            project_path: "/tmp/launch-project",
+            access_mode: "restricted",
+          },
         },
-      }])
+        { type: "attach", chat_id: "draft-chat" },
+        expect.objectContaining({
+          type: "message",
+          chat_id: "draft-chat",
+          content: "hello",
+          workspace_scope: {
+            project_path: "/tmp/launch-project",
+            access_mode: "restricted",
+          },
+        }),
+      ])
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
     }

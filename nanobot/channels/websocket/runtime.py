@@ -1217,7 +1217,6 @@ class WebSocketChannel(BaseChannel):
                 if session_mentions:
                     metadata["session_mentions"] = session_mentions
             metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
-            self._workspaces.persist_scope(cid, scope)
             is_webui = metadata.get("webui") is True
             queued_owner = None
             if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
@@ -1272,6 +1271,7 @@ class WebSocketChannel(BaseChannel):
                         else False
                     ),
                 )
+                self._workspaces.persist_scope(cid, scope)
                 accepted = True
             finally:
                 if not accepted and queued_owner is not None:

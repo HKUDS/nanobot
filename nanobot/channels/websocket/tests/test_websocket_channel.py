@@ -1564,6 +1564,49 @@ async def test_new_chat_without_message_does_not_create_session(
 
 
 @pytest.mark.asyncio
+async def test_failed_first_message_does_not_persist_draft_session(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "tui-client",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(tmp_path),
+                "access_mode": "full",
+            },
+        },
+    )
+    chat_id = json.loads(conn.send.await_args_list[0].args[0])["chat_id"]
+    bus.publish_inbound.side_effect = RuntimeError("queue unavailable")
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        await channel._dispatch_envelope(
+            conn,
+            "tui-client",
+            {
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "hello",
+                "webui": True,
+            },
+        )
+
+    assert sessions.list_sessions() == []
+
+
+@pytest.mark.asyncio
 async def test_workspace_scope_change_invalidates_other_attached_clients(
     bus: MagicMock,
     tmp_path,

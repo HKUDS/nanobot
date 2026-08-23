@@ -163,6 +163,7 @@ type OutboundEvent =
       content: string
       turn_id: string
       webui: true
+      workspace_scope?: WorkspaceScopePayload
       cli_apps?: Array<{ name: string }>
       mcp_presets?: Array<{ name: string }>
       session_mentions?: SessionMention[]
@@ -903,6 +904,7 @@ export async function fetchGatewayConnection(
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
+  private workspaceScope?: WorkspaceScopePayload
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private closedByClient = false
@@ -1002,6 +1004,7 @@ export class NanobotClient {
       content,
       turn_id: turnId,
       webui: true,
+      ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
@@ -1014,10 +1017,12 @@ export class NanobotClient {
 
   attach(chatId: string): void {
     if (!chatId) throw new Error("chat id is required")
+    this.workspaceScope = undefined
     this.write({ type: "attach", chat_id: chatId })
   }
 
   newChat(scope?: WorkspaceScopePayload): void {
+    this.workspaceScope = scope
     this.write({ type: "new_chat", ...(scope ? { workspace_scope: scope } : {}) })
   }
 
@@ -1032,6 +1037,7 @@ export class NanobotClient {
 
   setWorkspaceScope(scope: WorkspaceScopePayload): void {
     if (!this.chatId) throw new Error("chat is not ready")
+    this.workspaceScope = scope
     this.write({ type: "set_workspace_scope", chat_id: this.chatId, workspace_scope: scope })
   }
 
@@ -1131,6 +1137,8 @@ export class NanobotClient {
       }
     } else if (event.event === "attached") {
       this.chatId = event.chat_id
+    } else if (event.event === "session_updated" && event.workspace_scope) {
+      this.workspaceScope = event.workspace_scope
     }
     this.options.onEvent(event)
   }

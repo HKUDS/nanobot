@@ -336,12 +336,12 @@ class WebUIWorkspaceController:
 
     def persist_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
         session_key = f"websocket:{chat_id}"
-        self._draft_scopes.pop(session_key, None)
         if self._sessions is not None:
             session = self._sessions.get_or_create(session_key)
             session.metadata["webui"] = True
             session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._sessions.save(session)
+        self._draft_scopes.pop(session_key, None)
 
     def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
         """Keep a new chat's scope transient until its first accepted message."""
