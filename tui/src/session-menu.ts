@@ -45,6 +45,7 @@ export class SessionMenu {
   ) {
     this.picker = new PickerMenu<SessionMenuRow>(renderer, theme, {
       id: "nanobot-tui-session-menu",
+      key: (session) => session.chatId,
       searchText: (session) => [
         sessionLabel(session),
         session.modelPreset || "",
@@ -67,7 +68,9 @@ export class SessionMenu {
           .filter(Boolean)
           .join(" · ")
         const marker = this.marker(session)
-        const foreground = selected ? this.theme.text : this.theme.muted
+        const foreground = this.interrupted(session)
+          ? this.theme.warning || this.theme.accent || this.theme.text
+          : selected ? this.theme.text : this.theme.muted
         return [
           ...(marker ? [chunk(`${marker.text} `, marker.color)] : []),
           chunk(`${sessionLabel(session)}${detail ? `  ${detail}` : ""}`, foreground),
@@ -111,8 +114,11 @@ export class SessionMenu {
       }))
       .sort((left, right) => {
         return Number(right.active) - Number(left.active)
+          || sessionPriority(right) - sessionPriority(left)
           || Number(right.pinned) - Number(left.pinned)
           || Number(left.archived) - Number(right.archived)
+          || timestamp(right.updatedAt) - timestamp(left.updatedAt)
+          || sessionLabel(left).localeCompare(sessionLabel(right))
       })
   }
 
@@ -140,9 +146,7 @@ export class SessionMenu {
   }
 
   private marker(session: SessionMenuRow): { text: string; color: string } | null {
-    const interrupted = session.recoveryState?.status === "awaiting_user"
-      || session.recoveryState?.status === "failed"
-    if (interrupted) {
+    if (this.interrupted(session)) {
       return {
         text: "⚠",
         color: this.theme.warning || this.theme.accent || this.theme.text,
@@ -159,6 +163,11 @@ export class SessionMenu {
     if (session.pinned) return { text: "◆", color: this.theme.muted }
     if (session.archived) return { text: "◇", color: this.theme.muted }
     return null
+  }
+
+  private interrupted(session: SessionMenuRow): boolean {
+    return session.recoveryState?.status === "awaiting_user"
+      || session.recoveryState?.status === "failed"
   }
 
   private observe(sessions: SessionSummary[], currentChatId: string): void {
@@ -248,4 +257,17 @@ function pathName(path: string): string {
 function shortPath(path: string): string {
   const parts = path.split("/").filter(Boolean)
   return parts.slice(-2).join("/") || path
+}
+
+function sessionPriority(session: SessionMenuRow): number {
+  if (session.recoveryState?.status === "awaiting_user"
+    || session.recoveryState?.status === "failed") return 3
+  if (session.runStartedAt !== null) return 2
+  return session.unread ? 1 : 0
+}
+
+function timestamp(value: string | null): number {
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? 0 : parsed
 }

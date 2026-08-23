@@ -19,6 +19,7 @@ export interface PickerMenuTheme {
 
 interface PickerMenuOptions<T> {
   id: string
+  key?: (item: T) => string
   searchText: (item: T) => string
   render: (item: T, selected: boolean) => string | TextChunk[]
   emptyText?: string
@@ -85,6 +86,8 @@ export class PickerMenu<T> {
   update(query: string, limit = this.limit): void {
     if (!this.visible) return
     const changed = query !== this.query
+    const previous = this.matches[this.selected]
+    const previousKey = previous === undefined ? null : this.options.key?.(previous)
     this.query = query
     this.limit = Math.max(1, limit)
     const words = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)
@@ -94,7 +97,18 @@ export class PickerMenu<T> {
         return words.every((word) => haystack.includes(word))
       })
       .slice(0, this.limit)
-    this.selected = changed ? 0 : Math.min(this.selected, Math.max(0, this.matches.length - 1))
+    if (changed) {
+      this.selected = 0
+    } else {
+      const preserved = previous === undefined
+        ? -1
+        : previousKey === null || previousKey === undefined
+          ? this.matches.indexOf(previous)
+          : this.matches.findIndex((item) => this.options.key?.(item) === previousKey)
+      this.selected = preserved >= 0
+        ? preserved
+        : Math.min(this.selected, Math.max(0, this.matches.length - 1))
+    }
     this.render()
   }
 

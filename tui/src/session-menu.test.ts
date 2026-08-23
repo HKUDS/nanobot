@@ -103,6 +103,39 @@ describe("SessionMenu", () => {
     menu.hide()
   })
 
+  test("prioritizes actionable sessions without moving keyboard selection on refresh", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+    const running = {
+      ...sessions[0]!,
+      chatId: "running",
+      title: "Background task",
+      runStartedAt: Date.now(),
+      pinned: false,
+    }
+
+    const idle = { ...sessions[1]!, recoveryState: null }
+    menu.open([sessions[0]!, running, idle], "one", 6)
+    expect(menu.choose()?.chatId).toBe("one")
+    expect(menu.move(1)).toBe(true)
+    expect(menu.choose()?.chatId).toBe("running")
+
+    menu.replace([sessions[0]!, running, sessions[1]!], "one")
+    await setup.renderOnce()
+
+    expect(menu.choose()?.chatId).toBe("running")
+    const frame = setup.captureCharFrame()
+    expect(frame.indexOf("Release checklist")).toBeLessThan(frame.indexOf("Background task"))
+    menu.hide()
+  })
+
   test("keeps keyboard selection when the pointer stays over the previous row", async () => {
     setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
     const menu = new SessionMenu(setup.renderer, {
