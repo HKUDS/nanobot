@@ -105,6 +105,7 @@ def agent(
                 workspace_override=workspace,
                 session_id=session_id,
                 theme=theme,
+                config_override=config,
             )
         except TuiSessionError as exc:
             raise typer.BadParameter(str(exc), param_hint="--session") from exc

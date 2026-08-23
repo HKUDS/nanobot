@@ -77,6 +77,7 @@ def launch_tui(
     workspace_override: str | None,
     session_id: str | None,
     theme: str,
+    config_override: str | None = None,
 ) -> int:
     """Run the native TUI against the shared local gateway."""
     chat_id = _initial_tui_chat_id(session_id)
@@ -108,6 +109,16 @@ def launch_tui(
                 ),
             }
         )
+        if config_override:
+            env["NANOBOT_TUI_RESUME_CONFIG"] = str(
+                Path(config_override).expanduser().resolve(strict=False)
+            )
+        else:
+            env.pop("NANOBOT_TUI_RESUME_CONFIG", None)
+        if workspace_override:
+            env["NANOBOT_TUI_RESUME_WORKSPACE"] = str(tui_workspace)
+        else:
+            env.pop("NANOBOT_TUI_RESUME_WORKSPACE", None)
         if bootstrap_secret:
             env["NANOBOT_TUI_BOOTSTRAP_SECRET"] = bootstrap_secret
         else:

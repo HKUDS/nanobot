@@ -98,6 +98,11 @@ interface AppOptions {
   onExit?: (chatId: string) => void
 }
 
+interface SessionResumeContext {
+  configPath?: string
+  workspace?: string
+}
+
 interface ChatClient {
   readonly activeChatId: string
   connect(): void
@@ -345,9 +350,28 @@ function singleLine(value: string, limit = 120): string {
   return value.replace(/\s+/gu, " ").trim().slice(0, limit)
 }
 
-export function sessionExitMessage(chatId: string): string {
+function quoteResumePath(value: string, platform: string): string {
+  const escaped = platform === "win32"
+    ? value.replaceAll("'", "''")
+    : value.replaceAll("'", "'\"'\"'")
+  return `'${escaped}'`
+}
+
+export function sessionExitMessage(
+  chatId: string,
+  context: SessionResumeContext = {},
+  platform = process.platform,
+): string {
   const sessionId = `websocket:${chatId}`
-  return `Resume with: nanobot agent --session ${sessionId}\n`
+  const command = ["nanobot", "agent"]
+  if (context.configPath) {
+    command.push("--config", quoteResumePath(context.configPath, platform))
+  }
+  if (context.workspace) {
+    command.push("--workspace", quoteResumePath(context.workspace, platform))
+  }
+  command.push("--session", sessionId)
+  return `Resume with: ${command.join(" ")}\n`
 }
 
 async function copyWithSystemClipboard(text: string): Promise<void> {

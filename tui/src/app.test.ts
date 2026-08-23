@@ -44,6 +44,25 @@ test("formats a reusable session ID after exit", () => {
   )
 })
 
+test("preserves launch context in the reusable session command", () => {
+  expect(sessionExitMessage("resume-chat", {
+    configPath: "/tmp/nanobot/config file.json",
+    workspace: "/tmp/nanobot/work space",
+  })).toBe(
+    "Resume with: nanobot agent --config '/tmp/nanobot/config file.json' "
+      + "--workspace '/tmp/nanobot/work space' --session websocket:resume-chat\n",
+  )
+})
+
+test("quotes Windows resume paths for PowerShell", () => {
+  expect(sessionExitMessage("resume-chat", {
+    configPath: "C:\\Users\\O'Reilly\\nanobot config.json",
+  }, "win32")).toBe(
+    "Resume with: nanobot agent --config 'C:\\Users\\O''Reilly\\nanobot config.json' "
+      + "--session websocket:resume-chat\n",
+  )
+})
+
 function contrastRatio(foreground: string, background: string): number {
   const luminance = (color: string) => {
     const channel = (offset: number) => {
@@ -2400,6 +2419,8 @@ if (process.platform !== "win32") {
         NANOBOT_TUI_API_URL: "",
         NANOBOT_TUI_API_TOKEN: "",
         NANOBOT_TUI_CHAT_ID: "resume-chat",
+        NANOBOT_TUI_RESUME_CONFIG: "/tmp/nanobot config.json",
+        NANOBOT_TUI_RESUME_WORKSPACE: "/tmp/nanobot workspace",
         NANOBOT_TUI_MODEL: "test/model",
         NANOBOT_TUI_WORKSPACE: "/tmp/nanobot-test",
         NANOBOT_TUI_VERSION: "test",
@@ -2436,7 +2457,8 @@ if (process.platform !== "win32") {
     expect(output).toContain("\x1b[?1049l")
     expect(output.indexOf("\x1b[?1049l")).toBeLessThan(output.indexOf("Resume with:"))
     expect(output).toContain(
-      "Resume with: nanobot agent --session websocket:resume-chat\n",
+      "Resume with: nanobot agent --config '/tmp/nanobot config.json' "
+        + "--workspace '/tmp/nanobot workspace' --session websocket:resume-chat\n",
     )
   })
 }
