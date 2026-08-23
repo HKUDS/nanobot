@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from nanobot.cli.commands import app
 from nanobot.cli.process_identity import named_executable, set_cli_process_identity
 
 
@@ -42,6 +44,18 @@ def test_cli_process_identity_keeps_windows_launcher_name(
     set_cli_process_identity(["agent"])
 
     assert titles == []
+
+
+def test_legacy_console_entrypoint_still_sets_subcommand_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+    monkeypatch.setattr("nanobot.cli.commands.set_cli_process_identity", commands.append)
+
+    result = CliRunner().invoke(app, ["webui", "--help"])
+
+    assert result.exit_code == 0
+    assert commands == [["webui"]]
 
 
 def test_named_executable_creates_stable_role_symlink(
