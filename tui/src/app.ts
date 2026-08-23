@@ -117,6 +117,7 @@ interface AppOptions {
   version: string
   access: string
   theme: "auto" | ThemeMode
+  initialView?: "config"
   onDetach?: (chatId?: string) => void
   onExit?: (chatId: string) => void
 }
@@ -585,6 +586,8 @@ export class NanobotTui {
   private composerValue = ""
   private composerCursor = 0
   private reconcilingComposer = false
+  private initialViewPending: AppOptions["initialView"]
+  private rendererStarted = false
 
   private constructor(
     renderer: CliRenderer,
@@ -596,6 +599,7 @@ export class NanobotTui {
   ) {
     this.renderer = renderer
     this.clipboardImageReader = clipboardImageReader
+    this.initialViewPending = options.initialView
     this.defaultModelName = options.model
     this.defaultModelPreset = options.modelPreset
     this.modelName = options.model
@@ -942,6 +946,8 @@ export class NanobotTui {
     void this.loadSkills()
     this.runtimeControls.preload()
     this.renderer.start()
+    this.rendererStarted = true
+    this.openInitialViewIfReady()
     // OpenTUI learns the real terminal background through OSC 10/11. Wait for
     // that bounded probe after first paint. The neutral terminal background is
     // safe to render immediately, and the detected palette can be applied later.
@@ -1492,9 +1498,21 @@ export class NanobotTui {
 
   private useGatewayConnection(apiUrl: string, apiToken: string): void {
     this.updateGatewayApiConnection(apiUrl, apiToken)
+    this.openInitialViewIfReady()
     void this.loadCommands()
     void this.loadMentions()
     void this.loadSkills()
+  }
+
+  private openInitialViewIfReady(): void {
+    if (
+      !this.rendererStarted
+      || this.initialViewPending !== "config"
+      || !this.options.apiUrl
+      || !this.options.apiToken
+    ) return
+    this.initialViewPending = undefined
+    void this.openConfig()
   }
 
   private async refreshApiConnection(
@@ -2392,6 +2410,7 @@ export class NanobotTui {
     } catch {
       // Local navigation remains available against older gateways.
     }
+    if (this.quitting) return
     const commands = new Map(discovered.map((command) => [command.command, command]))
     this.commandMenu.setCommands([...commands.values()], LOCAL_COMMANDS)
     this.syncCommandMenu()
@@ -2425,6 +2444,7 @@ export class NanobotTui {
         this.options.apiToken,
         this.apiReauthenticator,
       )
+      if (this.quitting) return
       if (this.activeMentionQuery) this.syncComposerMenus()
     } catch {
       // Mentions are additive; plain text input remains fully functional.
