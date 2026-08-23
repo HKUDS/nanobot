@@ -14,6 +14,7 @@ export interface RecoveryNoticeTheme {
   text: string
   muted: string
   accent: string
+  warning: string
   error: string
 }
 
@@ -149,7 +150,7 @@ export class RecoveryNotice {
         ? "This task can’t be resumed safely. Dismiss to start a new message."
         : "Review the saved context. Tools will not replay automatically."
     this.title.content = new StyledText([
-      chunk("△ ", failed ? this.theme.error : this.theme.accent),
+      chunk("⚠ ", failed ? this.theme.error : this.theme.warning),
       chunk(title, this.theme.text, true),
     ])
     this.detail.content = new StyledText([chunk(`  ${detail}`, this.theme.muted)])

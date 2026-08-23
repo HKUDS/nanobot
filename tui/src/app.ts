@@ -125,6 +125,7 @@ interface Palette {
   accent: string
   link: string
   success: string
+  warning: string
   error: string
   user: string
   userBackground: string
@@ -141,6 +142,7 @@ const DARK: Palette = {
   accent: "#EF8E30",
   link: "#60A5FA",
   success: "#5CC489",
+  warning: "#F5C451",
   error: "#F87171",
   user: "#EF8E30",
   // Codex-style turn anchor: 12% white over the reference dark background.
@@ -158,6 +160,7 @@ const LIGHT: Palette = {
   accent: "#B94D0B",
   link: "#1D4ED8",
   success: "#166534",
+  warning: "#A16207",
   error: "#B91C1C",
   user: "#B94D0B",
   // Codex-style turn anchor: 4% black over the reference light background.
@@ -171,6 +174,7 @@ const ACTIVE_COMPOSER_PLACEHOLDER = "Steer this turn…"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
+const SESSION_REFRESH_INTERVAL_MS = 1_000
 const LOCAL_COMMANDS: TuiCommand[] = [
   {
     command: "/sessions",
@@ -259,6 +263,8 @@ function commandMenuTheme(palette: Palette): CommandMenuTheme {
     text: palette.text,
     muted: palette.muted,
     border: palette.border,
+    accent: palette.accent,
+    warning: palette.warning,
     selectedBackground: palette.userBackground,
   }
 }
@@ -307,6 +313,7 @@ function recoveryNoticeTheme(palette: Palette): RecoveryNoticeTheme {
     text: palette.text,
     muted: palette.muted,
     accent: palette.accent,
+    warning: palette.warning,
     error: palette.error,
   }
 }
@@ -454,6 +461,8 @@ export class NanobotTui {
   private quitting = false
   private sessionLoadId = 0
   private sessionLoading = false
+  private sessionRefreshPending = false
+  private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
   private readonly modelCommandTurns = new Set<string>()
   private readonly silentCommandTurns = new Set<string>()
@@ -1995,7 +2004,7 @@ export class NanobotTui {
 
   private closeTransientMenus(): void {
     this.commandMenu.hide()
-    this.sessionMenu.hide()
+    this.hideSessionMenu()
     this.mentionMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
@@ -2049,7 +2058,7 @@ export class NanobotTui {
       return
     }
     this.commandMenu.hide()
-    this.sessionMenu.hide()
+    this.hideSessionMenu()
     this.contextPanel.hide()
     this.clearComposer()
     this.status.content = "Loading branch points…"
@@ -2139,6 +2148,7 @@ export class NanobotTui {
       }
       const limit = this.renderer.height >= 20 ? 8 : 4
       this.sessionMenu.open(sessions, this.client.activeChatId, limit)
+      this.startSessionRefresh()
       this.renderTitleColor()
       this.sessionMenu.update(this.composer.plainText, limit)
       this.syncComposerPlaceholder()
@@ -2153,6 +2163,7 @@ export class NanobotTui {
   }
 
   private switchSession(session: SessionSummary): void {
+    this.sessionMenu.markRead(session.chatId)
     if (session.chatId === this.client.activeChatId) {
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
@@ -2199,7 +2210,7 @@ export class NanobotTui {
       return
     }
     this.commandMenu.hide()
-    this.sessionMenu.hide()
+    this.hideSessionMenu()
     this.mentionMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
@@ -2307,7 +2318,7 @@ export class NanobotTui {
   private closeSessions(): void {
     this.sessionLoadId += 1
     this.sessionLoading = false
-    this.sessionMenu.hide()
+    this.hideSessionMenu()
     this.renderTitleColor()
     this.clearComposer()
     this.syncComposerPlaceholder()
@@ -2317,9 +2328,51 @@ export class NanobotTui {
     this.updateMeta()
   }
 
+  private hideSessionMenu(): void {
+    this.stopSessionRefresh()
+    this.sessionMenu.hide()
+  }
+
+  private startSessionRefresh(): void {
+    if (this.sessionRefreshTimer) return
+    this.sessionRefreshTimer = setInterval(() => {
+      if (!this.sessionMenu.visible) {
+        this.stopSessionRefresh()
+        return
+      }
+      void this.refreshSessionMenu()
+    }, SESSION_REFRESH_INTERVAL_MS)
+    ;(this.sessionRefreshTimer as unknown as { unref?: () => void }).unref?.()
+  }
+
+  private stopSessionRefresh(): void {
+    if (this.sessionRefreshTimer) clearInterval(this.sessionRefreshTimer)
+    this.sessionRefreshTimer = null
+  }
+
+  private async refreshSessionMenu(): Promise<void> {
+    if (this.sessionRefreshPending || !this.sessionMenu.visible || this.quitting) return
+    this.sessionRefreshPending = true
+    const loadId = this.sessionLoadId
+    try {
+      const sessions = await fetchSessions(
+        this.options.apiUrl,
+        this.options.apiToken,
+        this.apiReauthenticator,
+      )
+      if (this.quitting || loadId !== this.sessionLoadId || !this.sessionMenu.visible) return
+      this.sessionMenu.replace(sessions, this.client.activeChatId)
+      this.status.content = sessions.length ? `${sessions.length} sessions` : "No saved sessions"
+    } catch {
+      // Keep the existing picker usable during a transient refresh failure.
+    } finally {
+      this.sessionRefreshPending = false
+    }
+  }
+
   private async openContext(): Promise<void> {
     this.commandMenu.hide()
-    this.sessionMenu.hide()
+    this.hideSessionMenu()
     this.mentionMenu.hide()
     this.branchMenu.hide()
     this.clearComposer()
@@ -2391,7 +2444,7 @@ export class NanobotTui {
 
   private openDiff(): void {
     this.commandMenu.hide()
-    this.sessionMenu.hide()
+    this.hideSessionMenu()
     this.mentionMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
@@ -2455,6 +2508,7 @@ export class NanobotTui {
     this.quitting = true
     this.submitGeneration += 1
     this.submitPending = false
+    this.stopSessionRefresh()
     this.host.release()
     this.client.close()
     this.renderer.destroy()
@@ -2465,6 +2519,7 @@ export class NanobotTui {
 
   private handleDestroy = (): void => {
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
+    this.stopSessionRefresh()
     this.transcript.destroy()
     this.diffViewer.destroy()
     this.host.release()

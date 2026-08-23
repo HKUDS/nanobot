@@ -1049,7 +1049,7 @@ describe("NanobotTui layout", () => {
 
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("Task interrupted")
+    expect(setup.captureCharFrame()).toContain("⚠ Task interrupted")
     expect(setup.captureCharFrame()).toContain("Tools will not replay automatically")
     expect(ui.status.plainText).toContain("continue or dismiss")
     expect(ui.activeTurn).toBe(false)

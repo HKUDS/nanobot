@@ -48,6 +48,8 @@ describe("SessionMenu", () => {
       text: "#FFFFFF",
       muted: "#999999",
       border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
     })
     setup.renderer.root.add(menu.root)
     menu.open(sessions, "one", 6)
@@ -58,7 +60,7 @@ describe("SessionMenu", () => {
 
     menu.update("release stable", 6)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("△ Release checklist")
+    expect(setup.captureCharFrame()).toContain("⚠ Release checklist")
     expect(menu.choose()?.chatId).toBe("two")
   })
 
@@ -68,12 +70,47 @@ describe("SessionMenu", () => {
     )
   })
 
+  test("animates running sessions and marks completed background sessions unread", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+    const running = {
+      ...sessions[0]!,
+      chatId: "running",
+      title: "Background task",
+      runStartedAt: Date.now(),
+      pinned: false,
+    }
+
+    menu.open([sessions[0]!, running], "one", 6)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Background task/u)
+
+    menu.replace([{ ...sessions[0]! }, { ...running, runStartedAt: null }], "one")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("• Background task")
+
+    menu.markRead("running")
+    menu.replace([{ ...sessions[0]! }, { ...running, runStartedAt: null }], "running")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("● Background task")
+    menu.hide()
+  })
+
   test("keeps keyboard selection when the pointer stays over the previous row", async () => {
     setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
     const menu = new SessionMenu(setup.renderer, {
       text: "#FFFFFF",
       muted: "#999999",
       border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
     })
     setup.renderer.root.add(menu.root)
     menu.open(sessions, "one", 6)
@@ -102,6 +139,8 @@ describe("SessionMenu", () => {
       text: "#FFFFFF",
       muted: "#999999",
       border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
     })
     setup.renderer.root.add(menu.root)
     const scoped = sessions.map((session) => ({
