@@ -906,7 +906,7 @@ class WebSocketChannel(BaseChannel):
             )
             if scope is None:
                 return
-            self._workspaces.persist_scope(new_id, scope)
+            self._workspaces.stage_scope(new_id, scope)
             self._attach(connection, new_id)
             await self._send_event(
                 connection,
@@ -1023,7 +1023,7 @@ class WebSocketChannel(BaseChannel):
             )
             if scope is None:
                 return
-            self._workspaces.persist_scope(cid, scope)
+            self._workspaces.stage_scope(cid, scope)
             # Other clients on the same gateway only need an invalidation; they
             # can reload the authoritative session row without receiving a
             # local project path that belongs to another connection.

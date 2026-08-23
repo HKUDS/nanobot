@@ -1511,6 +1511,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
             },
         },
     )
+    assert sessions.list_sessions() == []
     await channel._dispatch_envelope(
         conn,
         "webui-client",
@@ -1522,6 +1523,44 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
         "project_path": str(project.resolve()),
         "access_mode": "full",
     }
+
+
+@pytest.mark.asyncio
+async def test_new_chat_without_message_does_not_create_session(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "tui-client",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(tmp_path),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    attached = json.loads(conn.send.await_args_list[0].args[0])
+    assert attached["event"] == "attached"
+    assert sessions.list_sessions() == []
+    assert channel._workspaces.scope_for_session_key(
+        f"websocket:{attached['chat_id']}"
+    ).access_mode == "full"
+
+    await channel._cleanup_connection(conn)
+
+    assert sessions.list_sessions() == []
 
 
 @pytest.mark.asyncio
@@ -1730,6 +1769,10 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         },
     )
+    channel._workspaces.persist_scope(
+        "chat-running",
+        channel._workspaces.scope_for_session_key("websocket:chat-running"),
+    )
     conn.send.reset_mock()
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
@@ -1796,6 +1839,13 @@ async def test_remote_webui_scope_allows_access_reduction(
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "session_updated"
     assert payload["workspace_scope"]["access_mode"] == "restricted"
+    assert sessions.list_sessions() == []
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-remote", "content": "hello", "webui": True},
+    )
     saved = sessions.read_session_file("websocket:chat-remote")
     assert saved["metadata"]["workspace_scope"] == {
         "project_path": str(default_workspace.resolve()),
@@ -1865,8 +1915,10 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
     release_hydrate.set()
     await message_task
 
-    saved = sessions.read_session_file(f"websocket:{chat_id}")
-    assert saved["metadata"]["workspace_scope"]["access_mode"] == "restricted"
+    assert sessions.read_session_file(f"websocket:{chat_id}") is None
+    assert channel._workspaces.scope_for_session_key(
+        f"websocket:{chat_id}"
+    ).access_mode == "restricted"
     payload = json.loads(message_conn.send.await_args.args[0])
     assert payload["event"] == "error"
     assert payload["detail"] == "workspace_scope_rejected"
@@ -1954,8 +2006,10 @@ async def test_native_webui_scope_allows_custom_scope_without_loopback(
     assert payload["workspace_scope"]["restrict_to_workspace"] is False
     assert payload["workspace_scope"]["sandbox_status"]["restrict_to_workspace"] is False
     assert payload["workspace_scope"]["sandbox_status"]["workspace_root"] == str(project.resolve())
-    saved = sessions.read_session_file("websocket:chat-native")
-    assert saved["metadata"]["workspace_scope"] == {
+    assert sessions.read_session_file("websocket:chat-native") is None
+    assert channel._workspaces.scope_for_session_key(
+        "websocket:chat-native"
+    ).metadata() == {
         "project_path": str(project.resolve()),
         "access_mode": "full",
     }
