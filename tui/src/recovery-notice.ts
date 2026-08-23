@@ -25,7 +25,8 @@ interface RecoveryNoticeOptions {
 /** A quiet action surface for a gateway-owned interrupted turn. */
 export class RecoveryNotice {
   readonly root: BoxRenderable
-  private readonly message: TextRenderable
+  private readonly title: TextRenderable
+  private readonly detail: TextRenderable
   private readonly dismiss: TextRenderable
   private readonly resume: TextRenderable
   private state: RecoveryState | null = null
@@ -39,18 +40,24 @@ export class RecoveryNotice {
     this.root = new BoxRenderable(renderer, {
       id: "nanobot-tui-recovery-notice",
       width: "100%",
-      height: 1,
+      height: 2,
       flexShrink: 0,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 2,
+      flexDirection: "column",
       paddingLeft: 1,
       paddingRight: 1,
       visible: false,
       backgroundColor: RGBA.defaultBackground(),
     })
-    this.message = new TextRenderable(renderer, {
-      id: "nanobot-tui-recovery-message",
+    const header = new BoxRenderable(renderer, {
+      id: "nanobot-tui-recovery-header",
+      width: "100%",
+      height: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    })
+    this.title = new TextRenderable(renderer, {
+      id: "nanobot-tui-recovery-title",
       width: "auto",
       minWidth: 0,
       flexGrow: 1,
@@ -58,11 +65,20 @@ export class RecoveryNotice {
       truncate: true,
       selectable: false,
     })
+    this.detail = new TextRenderable(renderer, {
+      id: "nanobot-tui-recovery-detail",
+      width: "100%",
+      height: 1,
+      truncate: true,
+      selectable: false,
+    })
     this.dismiss = this.action(renderer, "dismiss", "Dismiss", options.onDismiss)
     this.resume = this.action(renderer, "continue", "Continue", options.onContinue, true)
-    this.root.add(this.message)
-    this.root.add(this.dismiss)
-    this.root.add(this.resume)
+    header.add(this.title)
+    header.add(this.dismiss)
+    header.add(this.resume)
+    this.root.add(header)
+    this.root.add(this.detail)
   }
 
   get visible(): boolean {
@@ -128,15 +144,15 @@ export class RecoveryNotice {
     const contextUnavailable = this.state.can_continue === false
     const title = failed ? "Recovery failed" : "Task interrupted"
     const detail = failed
-      ? "Review the task before continuing"
+      ? "Review the saved task before continuing."
       : contextUnavailable
-        ? "Saved context unavailable"
-      : "Tools will not replay automatically"
-    this.message.content = new StyledText([
+        ? "This task can’t be resumed safely. Dismiss to start a new message."
+        : "Review the saved context. Tools will not replay automatically."
+    this.title.content = new StyledText([
       chunk("△ ", failed ? this.theme.error : this.theme.accent),
       chunk(title, this.theme.text, true),
-      chunk(` · ${detail}`, this.theme.muted),
     ])
+    this.detail.content = new StyledText([chunk(`  ${detail}`, this.theme.muted)])
     this.dismiss.fg = RGBA.fromHex(this.busy ? this.theme.muted : this.theme.text)
     this.resume.visible = !contextUnavailable
     this.resume.fg = RGBA.fromHex(this.busy ? this.theme.muted : this.theme.accent)

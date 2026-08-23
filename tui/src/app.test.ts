@@ -1050,6 +1050,8 @@ describe("NanobotTui layout", () => {
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("Task interrupted")
+    expect(setup.captureCharFrame()).toContain("Tools will not replay automatically")
+    expect(ui.status.plainText).toContain("continue or dismiss")
     expect(ui.activeTurn).toBe(false)
     expect(ui.composer.focused).toBe(true)
 
@@ -1084,6 +1086,19 @@ describe("NanobotTui layout", () => {
     expect(ui.recoveryNotice.visible).toBe(false)
     expect(ui.activeTurn).toBe(false)
     expect(ui.composer.focused).toBe(true)
+
+    app.accept({
+      event: "recovery_state",
+      chat_id: "chat",
+      status: "awaiting_user",
+      recovery_id: "recovery-unavailable",
+      can_continue: false,
+    })
+    await setup.renderOnce()
+    const unavailableFrame = setup.captureCharFrame()
+    expect(unavailableFrame).toContain("can’t be resumed safely")
+    expect(unavailableFrame).not.toContain("Continue")
+    expect(ui.status.plainText).toContain("dismiss to start a new message")
 
     app.accept({
       event: "recovery_state",

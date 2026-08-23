@@ -1266,7 +1266,9 @@ export class NanobotTui {
         ? "Recovery failed"
         : "Task interrupted")
       this.setCurrentAction(detail)
-      this.status.content = "Waiting for recovery decision"
+      this.status.content = state.can_continue === false
+        ? "Interrupted · dismiss to start a new message"
+        : "Interrupted · continue or dismiss"
       this.host.reportState("blocked", detail)
       this.composer.focus()
       return
