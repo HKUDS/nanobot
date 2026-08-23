@@ -1399,8 +1399,12 @@
     "fileEditOpenFile": "開啟檔案",
     "fileEditDiffTruncated": "差異內容已截斷。請開啟檔案以檢視完整變更。",
     "usage": {
-      "context": "最近一次上下文：{{tokens}}{{capacity}} tokens",
+      "context": "上下文 {{tokens}}",
+      "turnInput": "本輪輸入 {{tokens}}",
+      "request": "{{count}} 次模型請求",
       "requests": "{{count}} 次模型請求",
+      "output": "輸出 {{tokens}}",
+      "cached": "快取 {{percent}}%",
       "estimated": "包含估算用量"
     },
     "activityThinkingFor": "思考中，已 {{duration}}",

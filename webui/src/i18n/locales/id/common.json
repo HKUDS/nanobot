@@ -1400,8 +1400,12 @@
     "fileEditOpenFile": "Buka file",
     "fileEditDiffTruncated": "Perbedaan dipotong. Buka file untuk melihat perubahan lengkap.",
     "usage": {
-      "context": "Konteks terbaru: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} permintaan model",
+      "context": "Konteks {{tokens}}",
+      "turnInput": "Input giliran {{tokens}}",
+      "request": "{{count}} permintaan",
+      "requests": "{{count}} permintaan",
+      "output": "Output {{tokens}}",
+      "cached": "{{percent}}% di-cache",
       "estimated": "Termasuk penggunaan perkiraan"
     },
     "activityThinkingFor": "Berpikir selama {{duration}}",

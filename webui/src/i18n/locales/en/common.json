@@ -1431,8 +1431,12 @@
     "fileEditOpenFile": "Open file",
     "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
     "usage": {
-      "context": "Context now: {{tokens}}{{capacity}}",
-      "requests": "{{count}} calls this turn",
+      "context": "{{tokens}} context",
+      "turnInput": "{{tokens}} turn input",
+      "request": "{{count}} request",
+      "requests": "{{count}} requests",
+      "output": "{{tokens}} out",
+      "cached": "{{percent}}% cached",
       "estimated": "Includes estimated usage"
     }
   },

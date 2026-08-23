@@ -1400,8 +1400,12 @@
     "fileEditOpenFile": "Mở tệp",
     "fileEditDiffTruncated": "Khác biệt đã bị cắt bớt. Mở tệp để xem toàn bộ thay đổi.",
     "usage": {
-      "context": "Ngữ cảnh gần nhất: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} yêu cầu mô hình",
+      "context": "Ngữ cảnh {{tokens}}",
+      "turnInput": "Đầu vào lượt {{tokens}}",
+      "request": "{{count}} yêu cầu",
+      "requests": "{{count}} yêu cầu",
+      "output": "Đầu ra {{tokens}}",
+      "cached": "{{percent}}% đã lưu đệm",
       "estimated": "Bao gồm mức sử dụng ước tính"
     },
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",

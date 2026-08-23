@@ -1400,8 +1400,12 @@
     "fileEditOpenFile": "Ouvrir le fichier",
     "fileEditDiffTruncated": "Différences tronquées. Ouvrez le fichier pour voir la modification complète.",
     "usage": {
-      "context": "Dernier contexte : {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} requêtes au modèle",
+      "context": "{{tokens}} de contexte",
+      "turnInput": "{{tokens}} en entrée sur ce tour",
+      "request": "{{count}} requête",
+      "requests": "{{count}} requêtes",
+      "output": "{{tokens}} en sortie",
+      "cached": "{{percent}} % en cache",
       "estimated": "Inclut une estimation de l’utilisation"
     },
     "activityThinkingFor": "Réflexion pendant {{duration}}",

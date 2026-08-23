@@ -291,6 +291,13 @@ const LOCALIZED_NEW_SURFACE_KEYS = [
   "message.openLink",
   "message.openAttachment",
   "message.skill",
+  "message.usage.context",
+  "message.usage.turnInput",
+  "message.usage.request",
+  "message.usage.requests",
+  "message.usage.output",
+  "message.usage.cached",
+  "message.usage.estimated",
   "settings.channels.connectionChecks",
   "settings.channels.open",
 ];

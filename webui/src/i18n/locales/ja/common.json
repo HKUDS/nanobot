@@ -1400,8 +1400,12 @@
     "fileEditOpenFile": "ファイルを開く",
     "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
     "usage": {
-      "context": "最新のコンテキスト: {{tokens}}{{capacity}} トークン",
-      "requests": "モデルリクエスト {{count}} 回",
+      "context": "コンテキスト {{tokens}}",
+      "turnInput": "ターン入力 {{tokens}}",
+      "request": "リクエスト {{count}} 回",
+      "requests": "リクエスト {{count}} 回",
+      "output": "出力 {{tokens}}",
+      "cached": "キャッシュ {{percent}}%",
       "estimated": "推定使用量を含みます"
     },
     "activityThinkingFor": "{{duration}}考えています",

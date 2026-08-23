@@ -1401,8 +1401,12 @@
     "fileEditOpenFile": "Abrir archivo",
     "fileEditDiffTruncated": "Diferencias truncadas. Abre el archivo para ver el cambio completo.",
     "usage": {
-      "context": "Contexto más reciente: {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} solicitudes al modelo",
+      "context": "{{tokens}} de contexto",
+      "turnInput": "{{tokens}} de entrada en el turno",
+      "request": "{{count}} solicitud",
+      "requests": "{{count}} solicitudes",
+      "output": "{{tokens}} de salida",
+      "cached": "{{percent}}% en caché",
       "estimated": "Incluye uso estimado"
     },
     "activityThinkingFor": "Pensando durante {{duration}}",

@@ -192,46 +192,69 @@ function compactDuration(milliseconds: number): string {
 function TurnUsageMeta({
   usage,
   latencyMs,
-  contextWindowTokens,
 }: {
   usage: TurnUsage;
   latencyMs?: number;
-  contextWindowTokens?: number;
 }) {
   const { t } = useTranslation();
+  const context = usage.context_tokens;
   const prompt = usage.prompt_tokens;
   const completion = usage.completion_tokens;
   const approximate = (usage.estimated_tokens ?? 0) > 0 ? "~" : "";
+  const formatTokens = (tokens: number) => `${approximate}${formatCompactTokenCount(tokens)}`;
   const parts: string[] = [];
-  if (typeof prompt === "number") parts.push(`${approximate}${formatCompactTokenCount(prompt)} in`);
-  if (typeof completion === "number") parts.push(`${approximate}${formatCompactTokenCount(completion)} out`);
+  const details: string[] = [];
+
+  if (typeof context === "number" && context >= 0) {
+    parts.push(t("message.usage.context", {
+      tokens: formatTokens(context),
+      defaultValue: "{{tokens}} context",
+    }));
+    if (typeof prompt === "number") {
+      details.push(t("message.usage.turnInput", {
+        tokens: formatTokens(prompt),
+        defaultValue: "{{tokens}} turn input",
+      }));
+    }
+  } else if (typeof prompt === "number") {
+    parts.push(t("message.usage.turnInput", {
+      tokens: formatTokens(prompt),
+      defaultValue: "{{tokens}} turn input",
+    }));
+  }
+
+  if (typeof usage.request_count === "number" && usage.request_count > 0) {
+    const requestKey = usage.request_count === 1
+      ? "message.usage.request"
+      : "message.usage.requests";
+    details.push(t(requestKey, {
+      count: usage.request_count,
+      defaultValue: usage.request_count === 1 ? "{{count}} request" : "{{count}} requests",
+    }));
+  }
+
+  if (typeof completion === "number") {
+    const output = t("message.usage.output", {
+      tokens: formatTokens(completion),
+      defaultValue: "{{tokens}} out",
+    });
+    if (parts.length > 0) details.push(output);
+    else parts.push(output);
+  }
+
   if (
     typeof usage.cached_tokens === "number"
     && typeof prompt === "number"
     && prompt > 0
   ) {
-    parts.push(`${Math.round(Math.min(1, usage.cached_tokens / prompt) * 100)}% cached`);
-  }
-  if (typeof usage.request_count === "number" && usage.request_count > 1) {
-    parts.push(t("message.usage.requests", {
-      count: usage.request_count,
-      defaultValue: "{{count}} calls this turn",
+    details.push(t("message.usage.cached", {
+      percent: Math.round(Math.min(1, usage.cached_tokens / prompt) * 100),
+      defaultValue: "{{percent}}% cached",
     }));
   }
+
   if (typeof latencyMs === "number" && latencyMs >= 0) parts.push(compactDuration(latencyMs));
   if (parts.length === 0) return null;
-
-  const details: string[] = [];
-  if (typeof usage.context_tokens === "number" && usage.context_tokens >= 0) {
-    const capacity = typeof contextWindowTokens === "number" && contextWindowTokens > 0
-      ? ` / ${formatCompactTokenCount(contextWindowTokens)}`
-      : "";
-    details.push(t("message.usage.context", {
-      tokens: `${approximate}${formatCompactTokenCount(usage.context_tokens)}`,
-      capacity,
-      defaultValue: "Context now: {{tokens}}{{capacity}}",
-    }));
-  }
   if (approximate) {
     details.push(t("message.usage.estimated", { defaultValue: "Includes estimated usage" }));
   }
@@ -639,7 +662,6 @@ export function MessageBubble({
               <TurnUsageMeta
                 usage={message.usage!}
                 latencyMs={message.latencyMs}
-                contextWindowTokens={message.contextWindowTokens}
               />
             ) : null}
             {showAssistantTimestamp ? (
