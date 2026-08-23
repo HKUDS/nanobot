@@ -904,18 +904,7 @@ class AgentRunner:
         conversation_state: ProviderConversationStateController,
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        timeout_s: float | None = spec.llm_timeout_s
-        if timeout_s is None:
-            # Default to a finite timeout to avoid per-session lock starvation when an LLM
-            # request hangs indefinitely (e.g. gateway/network stall).
-            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
-            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
-            try:
-                timeout_s = float(raw)
-            except (TypeError, ValueError):
-                timeout_s = 300.0
-        if timeout_s <= 0:
-            timeout_s = None
+        timeout_s = self._resolve_llm_timeout_s(spec)
 
         kwargs = self._build_request_kwargs(
             spec,
@@ -1284,10 +1273,38 @@ class AgentRunner:
             messages,
             tools=None,
         )
-        return await spec.runtime.provider.chat_with_retry(
+        coro = spec.runtime.provider.chat_with_retry(
             **kwargs,
             provider_context=provider_context,
         )
+        timeout_s = self._resolve_llm_timeout_s(spec)
+        try:
+            return (
+                await coro
+                if timeout_s is None
+                else await asyncio.wait_for(coro, timeout=timeout_s)
+            )
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                finish_reason="error",
+                error_kind="timeout",
+            )
+
+    @staticmethod
+    def _resolve_llm_timeout_s(spec: AgentRunSpec) -> float | None:
+        """Resolve the wall-clock limit shared by every model request path."""
+        timeout_s = spec.llm_timeout_s
+        if timeout_s is None:
+            # Default to a finite timeout to avoid per-session lock starvation when an LLM
+            # request hangs indefinitely (e.g. gateway/network stall).
+            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
+            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
+            try:
+                timeout_s = float(raw)
+            except (TypeError, ValueError):
+                timeout_s = 300.0
+        return timeout_s if timeout_s > 0 else None
 
     @staticmethod
     def _budget_exhausted_finalization_messages(

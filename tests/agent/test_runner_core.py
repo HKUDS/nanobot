@@ -500,6 +500,55 @@ async def test_runner_times_out_hung_llm_request():
 
 
 @pytest.mark.asyncio
+async def test_runner_times_out_hung_max_iteration_finalization():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    calls = 0
+
+    async def chat_with_retry(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_1",
+                        name="probe",
+                        arguments={},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        await asyncio.Event().wait()
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    result = await asyncio.wait_for(
+        AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[{"role": "user", "content": "run the probe"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            max_iterations_message="fallback after {max_iterations} iteration",
+            llm_timeout_s=0.01,
+        )),
+        timeout=1.0,
+    )
+
+    assert calls == 2
+    assert result.stop_reason == "max_iterations"
+    assert result.error is None
+    assert result.final_content == "fallback after 1 iteration"
+
+
+@pytest.mark.asyncio
 async def test_runner_applies_outer_wall_timeout_to_streaming_requests():
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
