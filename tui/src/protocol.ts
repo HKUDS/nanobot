@@ -64,6 +64,35 @@ export interface RecoveryState {
   can_continue?: boolean
 }
 
+export interface ConfigEditorSecret {
+  path: string
+  configured: boolean
+}
+
+export interface ConfigEditorSection {
+  id: string
+  label: string
+  description: string
+  prefixes: string[]
+}
+
+export interface ConfigEditorPresentation {
+  primary_paths: string[]
+  provider_primary_fields: string[]
+  sections: ConfigEditorSection[]
+  deprecated_paths: string[]
+}
+
+export interface ConfigEditorSnapshot {
+  version: number
+  revision: string
+  config: Record<string, unknown>
+  schema: Record<string, unknown>
+  secrets: ConfigEditorSecret[]
+  presentation: ConfigEditorPresentation
+  requires_restart?: boolean
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -166,6 +195,12 @@ type OutboundEvent =
       cli_apps?: Array<{ name: string }>
       mcp_presets?: Array<{ name: string }>
       session_mentions?: SessionMention[]
+    }
+  | {
+      type: "webui_request"
+      request_id: string
+      action: string
+      payload: Record<string, unknown>
     }
 
 export interface ClientOptions {
@@ -707,6 +742,82 @@ export async function fetchRuntimeControls(
   }
 }
 
+interface PendingMutation {
+  event: Extract<OutboundEvent, { type: "webui_request" }>
+  resolve: (value: unknown) => void
+  reject: (reason: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+export async function fetchConfigEditor(
+  apiUrl: string,
+  apiToken: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<ConfigEditorSnapshot> {
+  if (!apiUrl || !apiToken) throw new Error("configuration connection is not ready")
+  const response = await fetchApi(
+    apiUrl,
+    apiToken,
+    "/api/settings/config-editor",
+    reauthenticate,
+  )
+  if (!response.ok) throw new Error(`configuration request failed: HTTP ${response.status}`)
+  return decodeConfigEditorSnapshot(await response.json() as unknown)
+}
+
+export function decodeConfigEditorSnapshot(payload: unknown): ConfigEditorSnapshot {
+  if (!isRecord(payload)
+    || typeof payload.version !== "number"
+    || typeof payload.revision !== "string"
+    || !isRecord(payload.config)
+    || !isRecord(payload.schema)
+    || !Array.isArray(payload.secrets)
+    || !isRecord(payload.presentation)
+    || !Array.isArray(payload.presentation.primary_paths)
+    || !Array.isArray(payload.presentation.provider_primary_fields)
+    || !Array.isArray(payload.presentation.sections)
+    || !Array.isArray(payload.presentation.deprecated_paths)
+  ) throw new Error("gateway returned an invalid configuration contract")
+
+  const secrets = payload.secrets.flatMap((value): ConfigEditorSecret[] => (
+    isRecord(value) && typeof value.path === "string" && typeof value.configured === "boolean"
+      ? [{ path: value.path, configured: value.configured }]
+      : []
+  ))
+  const sections = payload.presentation.sections.flatMap((value): ConfigEditorSection[] => (
+    isRecord(value)
+      && typeof value.id === "string"
+      && typeof value.label === "string"
+      && typeof value.description === "string"
+      && Array.isArray(value.prefixes)
+      && value.prefixes.every((prefix) => typeof prefix === "string")
+      ? [{
+          id: value.id,
+          label: value.label,
+          description: value.description,
+          prefixes: value.prefixes as string[],
+        }]
+      : []
+  ))
+  const strings = (value: unknown[]): string[] => value.filter(
+    (item): item is string => typeof item === "string",
+  )
+  return {
+    version: payload.version,
+    revision: payload.revision,
+    config: payload.config,
+    schema: payload.schema,
+    secrets,
+    presentation: {
+      primary_paths: strings(payload.presentation.primary_paths),
+      provider_primary_fields: strings(payload.presentation.provider_primary_fields),
+      sections,
+      deprecated_paths: strings(payload.presentation.deprecated_paths),
+    },
+    ...(payload.requires_restart === true ? { requires_restart: true } : {}),
+  }
+}
+
 export async function fetchSessions(
   apiUrl: string,
   apiToken: string,
@@ -908,11 +1019,7 @@ export class NanobotClient {
   private closedByClient = false
   private opening = false
   private connectedOnce = false
-  private readonly pendingMutations = new Map<string, {
-    resolve: (value: unknown) => void
-    reject: (error: Error) => void
-    timer: ReturnType<typeof setTimeout>
-  }>()
+  private readonly pendingMutations = new Map<string, PendingMutation>()
 
   constructor(private readonly options: ClientOptions) {}
 
@@ -964,6 +1071,7 @@ export class NanobotClient {
       this.connectedOnce = true
       this.reconnectAttempt = 0
       this.options.onStatus("connected")
+      for (const pending of this.pendingMutations.values()) this.write(pending.event)
     })
     socket.addEventListener("message", (message) => {
       if (this.socket === socket) this.handleMessage(String(message.data))
@@ -1049,7 +1157,7 @@ export class NanobotClient {
     })
   }
 
-  private requestMutation<T>(
+  requestMutation<T = unknown>(
     action: string,
     payload: Record<string, unknown> = {},
     timeoutMs = 20_000,
@@ -1057,29 +1165,30 @@ export class NanobotClient {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("gateway connection is not open"))
     }
-    const requestId = crypto.randomUUID()
-    const frame = JSON.stringify({
+    const requestId = `tui-${crypto.randomUUID()}`
+    const event = {
       type: "webui_request",
       request_id: requestId,
       action,
       payload,
-    } satisfies OutboundEvent)
+    } satisfies OutboundEvent
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingMutations.delete(requestId)
         reject(new Error(`gateway request timed out after ${timeoutMs}ms`))
       }, timeoutMs)
       this.pendingMutations.set(requestId, {
+        event,
         resolve: (value) => resolve(value as T),
         reject,
         timer,
       })
       try {
-        this.socket?.send(frame)
-      } catch {
+        this.write(event)
+      } catch (error) {
         clearTimeout(timer)
         this.pendingMutations.delete(requestId)
-        reject(new Error("could not send gateway request"))
+        reject(error instanceof Error ? error : new Error(String(error)))
       }
     })
   }
@@ -1110,8 +1219,19 @@ export class NanobotClient {
       if (!pending) return
       clearTimeout(pending.timer)
       this.pendingMutations.delete(response.request_id)
-      if (response.ok) pending.resolve(response.result)
-      else pending.reject(new Error(response.error?.message || "gateway request failed"))
+      if (response.ok) {
+        pending.resolve(response.result)
+      } else {
+        const status = response.error?.status ? `HTTP ${response.error.status}: ` : ""
+        let message = response.error?.message || "gateway request failed"
+        try {
+          const detail = JSON.parse(message) as unknown
+          if (isRecord(detail) && typeof detail.error === "string") message = detail.error
+        } catch {
+          // Plain-text gateway errors are already suitable for the settings surface.
+        }
+        pending.reject(new Error(`${status}${message}`))
+      }
       return
     }
     const event = decodeInboundEvent(value)
