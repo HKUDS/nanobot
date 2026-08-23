@@ -1371,12 +1371,12 @@ class AgentLoop:
             await self.aclose()
 
     def preserve_inflight_turns_on_shutdown(self) -> None:
-        """Keep durable checkpoints when the owning gateway is restarting.
+        """Keep durable checkpoints when the owning gateway exits.
 
         Normal cancellation intentionally materializes partial output so a
-        stopped gateway leaves a readable conversation.  A managed restart is
-        different: RecoveryCoordinator needs the checkpoint intact to safely
-        offer the unfinished turn for explicit continuation after restart.
+        user-stopped turn leaves a readable conversation.  Gateway lifecycle
+        shutdown is different: RecoveryCoordinator needs the checkpoint intact
+        to safely offer the unfinished turn for explicit continuation later.
         """
         self._preserve_inflight_turns_on_shutdown = True
 
@@ -1443,13 +1443,10 @@ class AgentLoop:
                             session_key,
                             exc_info=True,
                         )
-                    # Preserve partial context from the interrupted turn so
-                    # the user does not lose tool results and assistant
-                    # messages accumulated before /stop.  The checkpoint was
-                    # already persisted to session metadata by
-                    # _emit_checkpoint during tool execution; materializing
-                    # it into session history now makes it visible in the
-                    # next conversation turn.
+                    # An explicit turn stop materializes partial context so
+                    # the next prompt can see completed tool results.  Gateway
+                    # shutdown keeps the durable checkpoint untouched instead,
+                    # allowing RecoveryCoordinator to offer Continue safely.
                     if (
                         session_key in self._discarding_sessions
                         or self._preserve_inflight_turns_on_shutdown

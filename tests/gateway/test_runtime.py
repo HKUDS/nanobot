@@ -455,8 +455,7 @@ def test_restart_does_not_detach_a_foreground_gateway(tmp_path, monkeypatch):
     assert result.message == "gateway_foreground_restart_required"
 
 
-def test_restart_marks_the_exiting_gateway_for_turn_recovery(tmp_path, monkeypatch):
-    """A managed restart must not look like an explicit stop to the child."""
+def test_restart_stops_then_starts_the_background_gateway(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     status = GatewayStatus(
         running=True,
@@ -469,9 +468,6 @@ def test_restart_marks_the_exiting_gateway_for_turn_recovery(tmp_path, monkeypat
 
     def stop(*, timeout_s: int):
         assert timeout_s == 20
-        assert json.loads(runtime._restart_intent_path.read_text(encoding="utf-8")) == {
-            "pid": 12345
-        }
         return SimpleNamespace(ok=True, message="gateway_stopped", status=status)
 
     monkeypatch.setattr(runtime, "_stop", stop)
@@ -484,17 +480,6 @@ def test_restart_marks_the_exiting_gateway_for_turn_recovery(tmp_path, monkeypat
     result = runtime.restart(GatewayStartOptions(port=18790))
 
     assert result.ok is True
-    assert not runtime._restart_intent_path.exists()
-
-
-def test_restart_intent_only_applies_to_the_recorded_gateway_process(tmp_path):
-    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
-
-    runtime._write_restart_intent(os.getpid())
-
-    assert runtime.preserves_inflight_turns_on_exit() is True
-    runtime._write_restart_intent(os.getpid() + 1)
-    assert runtime.preserves_inflight_turns_on_exit() is False
 
 
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):

@@ -102,6 +102,9 @@ class _GatewayAgentContractStub:
     ) -> OutboundMessage | None:
         return None
 
+    def preserve_inflight_turns_on_shutdown(self) -> None:
+        return None
+
 
 class _EmptyGatewaySessionManager:
     """Minimal session-manager contract for gateway assembly tests."""
@@ -3712,6 +3715,9 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
         async def aclose(self) -> None:
             seen["agent_closed"] = True
 
+        def preserve_inflight_turns_on_shutdown(self) -> None:
+            seen["inflight_turns_preserved"] = True
+
         def stop(self) -> None:
             seen["agent_stopped"] = True
 
@@ -3793,6 +3799,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
 
     assert result.exit_code == 0
     assert seen["agent_stopped"] is True
+    assert seen["inflight_turns_preserved"] is True
     assert seen["agent_closed"] is True
     assert seen["agent_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True

@@ -164,8 +164,8 @@ async def test_dispatch_cancellation_restores_checkpoint():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_cancellation_keeps_checkpoint_for_managed_restart(tmp_path: Path) -> None:
-    """A restart preserves the checkpoint; an explicit stop still restores it."""
+async def test_dispatch_cancellation_keeps_checkpoint_for_gateway_shutdown(tmp_path: Path) -> None:
+    """Gateway shutdown preserves the checkpoint; an explicit stop restores it."""
     loop = _make_loop(tmp_path)
     loop.preserve_inflight_turns_on_shutdown()
     loop._restore_runtime_checkpoint = MagicMock()  # type: ignore[method-assign]

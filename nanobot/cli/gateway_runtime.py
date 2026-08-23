@@ -963,8 +963,10 @@ def _run_gateway(
                     with suppress(asyncio.CancelledError):
                         await shutdown_task
                 cron.stop()
-                if gateway_runtime.preserves_inflight_turns_on_exit():
-                    agent.preserve_inflight_turns_on_shutdown()
+                # A gateway exit interrupts ownership of active turns; it is
+                # not the same as the user stopping a turn.  Keep checkpoints
+                # so the next gateway can offer an explicit Continue action.
+                agent.preserve_inflight_turns_on_shutdown()
                 agent.stop()
                 # Cancel runtime tasks first, then deterministically close
                 # exec/MCP resources while the event loop is still alive.

@@ -201,52 +201,6 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
         """Serialize long lifecycle transitions without blocking child cleanup."""
         return FileLock(f"{self.paths.state_path}.transition.lock")
 
-    @property
-    def _restart_intent_path(self) -> Path:
-        """Return the short-lived marker used to distinguish restart from stop.
-
-        A gateway receives the same operating-system termination request for a
-        graceful ``restart`` and an explicit ``stop``.  The marker lets the
-        exiting process preserve its durable turn checkpoint only for the
-        former.  It is intentionally local to one gateway instance.
-        """
-        return self.paths.state_path.with_name(f"{self.paths.state_path.name}.restart")
-
-    def preserves_inflight_turns_on_exit(self) -> bool:
-        """Whether this gateway was asked to exit as part of a managed restart."""
-        try:
-            raw_intent: object = json.loads(
-                self._restart_intent_path.read_text(encoding="utf-8")
-            )
-        except (json.JSONDecodeError, OSError):
-            return False
-        if not isinstance(raw_intent, dict):
-            return False
-        intent = cast(dict[str, object], raw_intent)
-        return intent.get("pid") == os.getpid()
-
-    def _write_restart_intent(self, pid: int) -> None:
-        self.paths.run_dir.mkdir(parents=True, exist_ok=True)
-        target = self._restart_intent_path
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=target.parent,
-            prefix=f".{target.name}.",
-            delete=False,
-        ) as handle:
-            json.dump({"pid": pid}, handle)
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary = Path(handle.name)
-        os.replace(temporary, target)
-
-    def _clear_restart_intent(self) -> None:
-        try:
-            self._restart_intent_path.unlink()
-        except FileNotFoundError:
-            pass
-
     def start_background(self, options: ProcessStartOptions) -> RuntimeResult:
         """Start the gateway detached from the current terminal."""
         lease = GatewayClientLease(self, kind="gateway-background")
@@ -399,15 +353,7 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
                         "gateway_foreground_restart_required",
                         status,
                     )
-                assert status.pid is not None
-                self._write_restart_intent(status.pid)
-            try:
-                stop_result = self._stop(timeout_s=timeout_s)
-            finally:
-                # The old process reads the marker while handling shutdown.
-                # Never let a stale marker turn a later explicit stop into a
-                # recoverable restart.
-                self._clear_restart_intent()
+            stop_result = self._stop(timeout_s=timeout_s)
             if not stop_result.ok:
                 return self._result(stop_result)
             with self._lifecycle_lock():

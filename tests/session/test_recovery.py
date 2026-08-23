@@ -76,6 +76,47 @@ async def test_stale_incomplete_transcript_waits_for_confirmation(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_materialized_interruption_can_continue_from_saved_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Older shutdowns may have cleared the checkpoint after saving partial history."""
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "research this"},
+            {"role": "assistant", "content": "I will check."},
+            {"role": "tool", "tool_call_id": "search-1", "content": "saved result"},
+        ]
+    )
+    _persist(sessions, session)
+    monkeypatch.setattr(
+        "nanobot.webui.transcript.has_unfinished_transcript_tail",
+        lambda _key: True,
+    )
+
+    coordinator, bus, restarted = _coordinator(tmp_path)
+    await coordinator.scan()
+
+    state = restarted.get_or_create("websocket:chat").metadata[RECOVERY_METADATA_KEY]
+    assert state["status"] == "awaiting_user"
+    assert state["reason"] == "interrupted_with_saved_context"
+    assert "can_continue" not in state
+    event = bus.outbound.get_nowait().event
+    assert isinstance(event, RecoveryStateEvent)
+    assert event.can_continue is None
+
+    await coordinator.handle_action(
+        "continue",
+        {"chat_id": "chat", "recovery_id": state["recovery_id"]},
+    )
+
+    continuation = bus.inbound.get_nowait()
+    assert continuation.session_key_override == "websocket:chat"
+
+
+@pytest.mark.asyncio
 async def test_transcript_only_interruption_is_discovered_without_materializing_completed_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

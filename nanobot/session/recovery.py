@@ -677,13 +677,18 @@ class RecoveryCoordinator:
                 # contains an activity row without a turn_end.  Treat it as an
                 # interrupted turn instead of letting the UI resurrect it as a
                 # forever-running spinner.
+                can_continue = self._has_saved_continuation_context(session)
                 waiting = self._set_state(
                     session,
                     status="awaiting_user",
                     recovery_id=uuid4().hex,
                     attempts=0,
-                    reason="interrupted_without_checkpoint",
-                    can_continue=False,
+                    reason=(
+                        "interrupted_with_saved_context"
+                        if can_continue
+                        else "interrupted_without_checkpoint"
+                    ),
+                    can_continue=can_continue,
                 )
                 self.sessions.save(session)
                 await self._publish(chat_id, waiting)
@@ -891,6 +896,29 @@ class RecoveryCoordinator:
             # Recovery must fail closed if the optional display transcript is
             # corrupt or unavailable; the normal checkpoint path still applies.
             return False
+
+    @staticmethod
+    def _has_saved_continuation_context(session: Session) -> bool:
+        """Whether an interrupted turn left model-visible context to continue from."""
+        last_user = next(
+            (
+                index
+                for index in range(len(session.messages) - 1, -1, -1)
+                if session.messages[index].get("role") == "user"
+            ),
+            None,
+        )
+        if last_user is None:
+            return False
+        tail = session.messages[last_user + 1 :]
+        return bool(tail) and (
+            tail[-1].get("role") == "tool"
+            or any(message.get("_recovery_interrupted") is True for message in tail)
+            or any(
+                message.get("role") == "assistant" and bool(message.get("tool_calls"))
+                for message in tail
+            )
+        )
 
     @staticmethod
     def _websocket_route(session: Session) -> tuple[str, str] | None:
