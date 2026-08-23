@@ -152,10 +152,103 @@ def config_editor_snapshot(*, config_path: Path) -> dict[str, Any]:
         "version": CONFIG_EDITOR_VERSION,
         "revision": _revision(persisted),
         "config": redacted,
-        "schema": Config.model_json_schema(mode="validation", by_alias=True),
+        "schema": _config_editor_schema(),
         "secrets": secrets,
         "presentation": deepcopy(_PRESENTATION),
     }
+
+
+def _config_editor_schema() -> dict[str, Any]:
+    """Augment the typed config schema with dependency-free channel manifests."""
+    schema = Config.model_json_schema(mode="validation", by_alias=True)
+    raw_properties = schema.get("properties")
+    raw_definitions = schema.get("$defs")
+    if not isinstance(raw_properties, dict) or not isinstance(raw_definitions, dict):
+        return schema
+    properties = cast(dict[str, Any], raw_properties)
+    definitions = cast(dict[str, Any], raw_definitions)
+    channels_ref = properties.get("channels")
+    if not isinstance(channels_ref, dict):
+        return schema
+    typed_channels_ref = cast(dict[str, Any], channels_ref)
+    ref = typed_channels_ref.get("$ref")
+    if not isinstance(ref, str):
+        return schema
+    definition_name = ref.rsplit("/", maxsplit=1)[-1]
+    channels_schema = definitions.get(definition_name)
+    if not isinstance(channels_schema, dict):
+        return schema
+    typed_channels_schema = cast(dict[str, Any], channels_schema)
+    channel_properties = typed_channels_schema.setdefault("properties", {})
+    if not isinstance(channel_properties, dict):
+        return schema
+    typed_channel_properties = cast(dict[str, Any], channel_properties)
+
+    for name, plugin in discover_plugins().items():
+        if not plugin.settings_visible:
+            continue
+        setup = plugin.setup
+        plugin_properties: dict[str, Any] = {}
+        if "always_enabled" not in plugin.capabilities:
+            plugin_properties["enabled"] = {
+                "type": "boolean",
+                "default": plugin.default_enabled,
+                "title": "Enabled",
+            }
+        if setup is not None:
+            for field_name, field in setup.fields.items():
+                if not field.writable:
+                    continue
+                _insert_channel_field_schema(
+                    plugin_properties,
+                    field_name.split("."),
+                    _channel_field_schema(field.kind, field.choices, field.default),
+                )
+        typed_channel_properties[name] = {
+            "type": "object",
+            "title": plugin.display_name,
+            "description": f"{plugin.display_name} channel configuration.",
+            "properties": plugin_properties,
+            "additionalProperties": True,
+        }
+    return schema
+
+
+def _channel_field_schema(kind: str, choices: frozenset[str], default: Any) -> dict[str, Any]:
+    if kind == "bool":
+        schema: dict[str, Any] = {"type": "boolean"}
+    elif kind == "int":
+        schema = {"type": "integer"}
+    elif kind == "list":
+        schema = {"type": "array", "items": {"type": "string"}}
+    else:
+        schema = {"type": "string"}
+    if kind == "enum":
+        schema["enum"] = sorted(choices)
+    if default is not None:
+        schema["default"] = default
+    return schema
+
+
+def _insert_channel_field_schema(
+    properties: dict[str, Any],
+    parts: list[str],
+    field_schema: dict[str, Any],
+) -> None:
+    name = parts[0]
+    if len(parts) == 1:
+        properties[name] = field_schema
+        return
+    parent_value = properties.setdefault(
+        name,
+        {"type": "object", "properties": {}, "additionalProperties": True},
+    )
+    if not isinstance(parent_value, dict):
+        return
+    parent = cast(dict[str, Any], parent_value)
+    nested = parent.setdefault("properties", {})
+    if isinstance(nested, dict):
+        _insert_channel_field_schema(cast(dict[str, Any], nested), parts[1:], field_schema)
 
 
 def update_config_editor(
