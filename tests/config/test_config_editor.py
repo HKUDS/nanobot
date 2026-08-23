@@ -190,3 +190,18 @@ def test_presentation_assigns_every_root_schema_domain_to_a_section(tmp_path: Pa
     }
 
     assert set(properties) <= assigned_roots
+
+
+def test_snapshot_schema_includes_unconfigured_channel_manifest_fields(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    save_config(Config(), path)
+
+    snapshot = config_editor_snapshot(config_path=path)
+    channel_ref = snapshot["schema"]["properties"]["channels"]["$ref"]
+    channels = snapshot["schema"]["$defs"][channel_ref.rsplit("/", 1)[-1]]
+
+    telegram = channels["properties"]["telegram"]["properties"]
+    assert telegram["token"]["type"] == "string"
+    assert telegram["allowFrom"]["type"] == "array"
+    signal = channels["properties"]["signal"]["properties"]
+    assert signal["dm"]["properties"]["allowFrom"]["type"] == "array"
