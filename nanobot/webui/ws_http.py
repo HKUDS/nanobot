@@ -149,6 +149,7 @@ _WEBUI_MUTATION_PATHS = {
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
     "settings.agent.update": "/api/settings/update",
+    "settings.config_editor.update": "/api/settings/config-editor/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
     "settings.model_configuration.update": "/api/settings/model-configurations/update",
     "settings.model_configuration.delete": "/api/settings/model-configurations/delete",
