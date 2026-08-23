@@ -45,7 +45,6 @@ __all__ = [
     "_print_foreground_port_conflict",
     "_print_webui_foreground_lifecycle",
     "_resolve_webui_config_path",
-    "_run_quick_start_for_webui",
     "_tcp_endpoint_reachable",
     "_validate_gateway_startup",
     "_warn_webui_bind_scope",
@@ -478,43 +477,3 @@ def _gateway_instance_command(
         workspace_path = str(Path(workspace).expanduser().resolve(strict=False))
         parts.extend(["--workspace", workspace_path])
     return " ".join(shlex.quote(part) for part in parts)
-
-
-def _run_quick_start_for_webui(
-    config: Config,
-    *,
-    yes: bool,
-    config_path: Path,
-) -> Config:
-    """Offer the existing Quick Start flow when provider setup is missing."""
-    if yes:
-        console.print(
-            "[red]Error: provider/model setup is incomplete, and --yes cannot answer "
-            "provider credentials.[/red]"
-        )
-        console.print("Complete provider/model setup:")
-        _print_model_setup_steps(config_path)
-        raise typer.Exit(1)
-
-    console.print()
-    console.print("[yellow]Model provider setup is not ready.[/yellow]")
-    console.print(
-        "Quick Start will ask for provider, API key/base URL, model, and WebUI password."
-    )
-    _confirm_webui_action("Run Quick Start now?", yes=False)
-
-    from nanobot.cli.onboard import run_quick_start_onboard
-
-    try:
-        result = run_quick_start_onboard(config)
-    except RuntimeError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        console.print(
-            "[yellow]Run `nanobot onboard --wizard` "
-            "after installing wizard dependencies.[/yellow]"
-        )
-        raise typer.Exit(1) from exc
-    if not result.should_save:
-        console.print("[yellow]Quick Start cancelled. No changes were saved.[/yellow]")
-        raise typer.Exit(1)
-    return result.config

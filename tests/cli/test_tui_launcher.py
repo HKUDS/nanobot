@@ -133,6 +133,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
         workspace_override=None,
         session_id=None,
         theme="auto",
+        initial_view="config",
     )
 
     assert result == 0
@@ -146,6 +147,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert "NANOBOT_TUI_WS_URL" not in captured
     assert "NANOBOT_TUI_API_TOKEN" not in captured
     assert "NANOBOT_TUI_CHAT_ID" not in captured
+    assert captured["NANOBOT_TUI_OPEN"] == "config"
     assert "NANOBOT_TUI_STATE_PATH" not in captured
     assert events == ["spawned", "waited"]
     assert released == [True]
@@ -341,7 +343,40 @@ def test_interactive_agent_uses_native_tui(
         "workspace_override": None,
         "session_id": "websocket:terminal-chat",
         "theme": "light",
+        "initial_view": None,
     }
+
+
+def test_interactive_agent_can_open_config_on_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    launched: dict[str, object] = {}
+
+    def launch(*_args: object, **kwargs: object) -> int:
+        launched.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr("nanobot.cli.tui_launcher.launch_tui", launch)
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("nanobot.cli.agent.sys.stdout", SimpleNamespace(isatty=lambda: True))
+
+    agent(
+        message=None,
+        session_id=None,
+        workspace=None,
+        config=None,
+        markdown=True,
+        logs=False,
+        classic=False,
+        theme="auto",
+        open_view="config",
+    )
+
+    assert launched["initial_view"] == "config"
 
 
 def test_interactive_agent_does_not_silently_fall_back(

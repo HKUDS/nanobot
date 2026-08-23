@@ -436,20 +436,38 @@ def test_status_uses_explicit_config_and_workspace(tmp_path: Path):
     assert str(config_workspace) not in compact_output
 
 
-def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_paths, monkeypatch):
+def test_onboard_wizard_opens_native_config_editor(mock_paths, monkeypatch):
     config_file, workspace_dir, _ = mock_paths
+    launched: dict[str, object] = {}
 
-    from nanobot.cli.onboard import OnboardResult
+    def launch(config: Config, **kwargs: object) -> int:
+        launched["config"] = config
+        launched.update(kwargs)
+        return 0
 
-    monkeypatch.setattr(
-        "nanobot.cli.onboard.run_onboard",
-        lambda initial_config: OnboardResult(config=initial_config, should_save=False),
-    )
+    monkeypatch.setattr("nanobot.cli.commands._interactive_terminal", lambda: True)
+    monkeypatch.setattr("nanobot.cli.tui_launcher.launch_tui", launch)
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
 
     result = runner.invoke(app, ["onboard", "--wizard"])
 
     assert result.exit_code == 0
-    assert "No changes were saved" in result.stdout
+    assert config_file.exists()
+    assert workspace_dir.exists()
+    assert launched["config_path"] == config_file
+    assert launched["workspace_override"] == str(workspace_dir)
+    assert launched["session_id"] is None
+    assert launched["theme"] == "auto"
+    assert launched["initial_view"] == "config"
+    assert "Config saved" in result.stdout
+
+
+def test_onboard_wizard_requires_a_terminal_before_saving(mock_paths):
+    config_file, workspace_dir, _ = mock_paths
+
+    result = runner.invoke(app, ["onboard", "--wizard"])
+
+    assert result.exit_code == 2
     assert not config_file.exists()
     assert not workspace_dir.exists()
 
@@ -480,13 +498,15 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
 
-    from nanobot.cli.onboard import OnboardResult
+    launched: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        "nanobot.cli.onboard.run_onboard",
-        lambda initial_config: OnboardResult(config=initial_config, should_save=True),
-    )
-    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+    def launch(_config: Config, **kwargs: object) -> int:
+        launched.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("nanobot.cli.commands._interactive_terminal", lambda: True)
+    monkeypatch.setattr("nanobot.cli.tui_launcher.launch_tui", launch)
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
 
     result = runner.invoke(
         app,
@@ -495,6 +515,9 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
 
     assert result.exit_code == 0
     resolved_config = str(config_path.resolve())
+    assert launched["config_path"] == config_path.resolve()
+    assert launched["workspace_override"] == str(workspace_path.resolve())
+    assert launched["initial_view"] == "config"
     assert f'nanobot webui -c "{resolved_config}"' in result.stdout
 
 
@@ -2217,6 +2240,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
         lambda path: seen.__setitem__("templates", path),
     )
 
+    _patch_gateway_ports_free(monkeypatch)
     _patch_webui_managed_gateway(monkeypatch, seen)
 
     result = runner.invoke(
@@ -2499,10 +2523,11 @@ def test_webui_missing_runtime_env_fails_before_starting_gateway(
     assert f"${{{missing_env}}}" in config_file.read_text(encoding="utf-8")
 
 
-def test_webui_yes_still_refuses_invalid_custom_model_setup(
+def test_webui_yes_opens_settings_for_invalid_custom_model_setup(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    seen: dict[str, object] = {}
     config_file = tmp_path / "config.json"
     config_file.write_text(
         json.dumps({
@@ -2520,15 +2545,19 @@ def test_webui_yes_still_refuses_invalid_custom_model_setup(
         }),
         encoding="utf-8",
     )
+    _patch_gateway_ports_free(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
+    _patch_webui_managed_gateway(monkeypatch, seen)
 
-    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+    result = runner.invoke(
+        app,
+        ["webui", "--config", str(config_file), "--yes", "--no-open"],
+    )
 
-    assert result.exit_code == 1
-    assert "provider/model setup is incomplete" in result.stdout
+    assert result.exit_code == 0
+    assert seen["start_options"].config_path == str(config_file.resolve(strict=False))
+    assert "Model setup is incomplete" in result.stdout
     assert "Settings → Models" in _without_rendered_line_breaks(result.stdout)
-    assert "nanobot onboard --wizard" in result.stdout
-    assert "nanobot status --config" in result.stdout
-    assert config_file.name in result.stdout
 
 
 def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> None:

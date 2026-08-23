@@ -6,7 +6,7 @@ import signal
 import sys
 from collections.abc import Awaitable, Callable
 from types import FrameType
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -77,12 +77,24 @@ def agent(
         "--theme",
         help="Terminal UI appearance: auto, dark, or light",
     ),
+    open_view: Annotated[
+        str | None,
+        typer.Option("--open", help="Open a native TUI view on startup (supported: config)"),
+    ] = None,
 ):
     """Chat in the terminal or send one message non-interactively."""
     runtime_config = _load_runtime_config(config, workspace)
     theme = theme.strip().lower()
     if theme not in {"auto", "dark", "light"}:
         raise typer.BadParameter("must be auto, dark, or light", param_hint="--theme")
+    if open_view is not None:
+        open_view = open_view.strip().lower()
+        if open_view != "config":
+            raise typer.BadParameter("must be config", param_hint="--open")
+        if message is not None:
+            raise typer.BadParameter("cannot be used with --message", param_hint="--open")
+        if classic:
+            raise typer.BadParameter("requires the native TUI", param_hint="--open")
     native_tui = message is None and not classic
     if native_tui:
         from nanobot.cli.tui_launcher import TuiSessionError, TuiUnavailableError, launch_tui
@@ -105,6 +117,7 @@ def agent(
                 workspace_override=workspace,
                 session_id=session_id,
                 theme=theme,
+                initial_view=open_view,
             )
         except TuiSessionError as exc:
             raise typer.BadParameter(str(exc), param_hint="--session") from exc

@@ -88,6 +88,7 @@ export class ConfigEditor {
   private dirty = new Set<string>()
   private loading = false
   private saving = false
+  private destroyed = false
   private discardArmed = false
   private terminalWidth = 80
 
@@ -253,14 +254,19 @@ export class ConfigEditor {
     this.feedback.content = "Loading configuration…"
     this.renderRows()
     try {
-      this.useSnapshot(await this.options.load())
-      this.feedback.content = ""
+      const snapshot = await this.options.load()
+      if (!this.destroyed) {
+        this.useSnapshot(snapshot)
+        this.feedback.content = ""
+      }
     } catch (error) {
-      this.feedback.fg = this.theme.error
-      this.feedback.content = errorMessage(error)
+      if (!this.destroyed) {
+        this.feedback.fg = this.theme.error
+        this.feedback.content = errorMessage(error)
+      }
     } finally {
       this.loading = false
-      this.renderRows()
+      if (!this.destroyed) this.renderRows()
     }
   }
 
@@ -353,6 +359,7 @@ export class ConfigEditor {
   }
 
   destroy(): void {
+    this.destroyed = true
     this.renderer.keyInput.off("paste", this.handlePaste)
   }
 
@@ -743,6 +750,7 @@ export class ConfigEditor {
     this.feedback.content = "Saving configuration…"
     try {
       const snapshot = await this.options.save(this.snapshot.revision, cloneConfig(this.draft))
+      if (this.destroyed) return
       this.useSnapshot(snapshot)
       this.feedback.fg = this.theme.success
       this.feedback.content = snapshot.requires_restart
@@ -750,11 +758,13 @@ export class ConfigEditor {
         : "Configuration saved."
       this.options.onStatus?.("Configuration saved")
     } catch (error) {
-      this.feedback.fg = this.theme.error
-      this.feedback.content = errorMessage(error)
+      if (!this.destroyed) {
+        this.feedback.fg = this.theme.error
+        this.feedback.content = errorMessage(error)
+      }
     } finally {
       this.saving = false
-      this.renderRows()
+      if (!this.destroyed) this.renderRows()
     }
   }
 }

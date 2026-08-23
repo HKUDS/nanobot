@@ -2486,6 +2486,43 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("opens the requested configuration view after bootstrap credentials arrive", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes("/api/settings/config-editor")
+        ? configSnapshot()
+        : { commands: [], mentions: [] }
+      return Promise.resolve(new Response(JSON.stringify(body)))
+    }) as typeof fetch
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    setup.renderer.waitForThemeMode = async () => null
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, initialView: "config" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      configEditor: { visible: boolean }
+      useGatewayConnection(apiUrl: string, apiToken: string): void
+    }
+
+    try {
+      await app.start()
+      expect(ui.configEditor.visible).toBe(false)
+
+      ui.useGatewayConnection("http://nanobot.test", "token")
+      await waitUntil(() => ui.configEditor.visible)
+      await setup.renderOnce()
+
+      expect(setup.captureCharFrame()).toContain("Configuration · Essentials")
+    } finally {
+      globalThis.fetch = original
+      app.stop()
+    }
+  })
+
   test("detaches without sending a message or reporting a normal exit", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     const sent: string[] = []
