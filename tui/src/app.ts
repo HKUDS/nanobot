@@ -312,6 +312,7 @@ function recoveryNoticeTheme(palette: Palette): RecoveryNoticeTheme {
   return {
     text: palette.text,
     muted: palette.muted,
+    border: palette.border,
     accent: palette.accent,
     warning: palette.warning,
     error: palette.error,

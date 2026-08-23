@@ -13,6 +13,7 @@ import type { RecoveryState } from "./protocol"
 export interface RecoveryNoticeTheme {
   text: string
   muted: string
+  border: string
   accent: string
   warning: string
   error: string
@@ -41,9 +42,12 @@ export class RecoveryNotice {
     this.root = new BoxRenderable(renderer, {
       id: "nanobot-tui-recovery-notice",
       width: "100%",
-      height: 2,
+      height: 4,
       flexShrink: 0,
       flexDirection: "column",
+      border: true,
+      borderStyle: "rounded",
+      borderColor: theme.border,
       paddingLeft: 1,
       paddingRight: 1,
       visible: false,
@@ -106,6 +110,7 @@ export class RecoveryNotice {
 
   setTheme(theme: RecoveryNoticeTheme): void {
     this.theme = theme
+    this.root.borderColor = theme.border
     if (this.visible) this.render()
   }
 
