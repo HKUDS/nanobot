@@ -1,0 +1,71 @@
+{
+  "description": "Utilisez nanobot depuis les tickets Linear grâce aux sessions d’agent natives.",
+  "requirements": "Une application OAuth Linear privée et une URL de rappel HTTPS publique et stable",
+  "setup": {
+    "docsLabel": "Ouvrir le guide de configuration Linear",
+    "officialLabel": "Créer une application OAuth Linear",
+    "tryIt": "Mentionnez l’application dans un commentaire de ticket. Les messages suivants dans sa session d’agent ne nécessitent pas de nouvelle mention.",
+    "summary": "Créez une application OAuth Linear privée, enregistrez ses identifiants et son URL publique, puis autorisez l’espace de travail. Chaque nouvelle session exige une @mention explicite ; les commentaires ordinaires sont ignorés.",
+    "steps": [
+      "Exposez cette instance nanobot avec une URL HTTPS stable (un tunnel convient).",
+      "Créez une application OAuth privée dans Linear avec les autorisations read, write et app:mentionable. N’ajoutez pas app:assignable.",
+      "Abonnez le webhook de l’application à AgentSessionEvent, PermissionChange et OAuthAuthorization avec l’URL générée.",
+      "Enregistrez les paramètres, connectez l’espace de travail avec OAuth, puis @mentionnez l’application dans un ticket."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "ID client OAuth",
+        "placeholder": "ID client OAuth Linear",
+        "help": "Copiez-le depuis l’application OAuth privée dans Linear."
+      },
+      "clientSecret": {
+        "label": "Secret client OAuth",
+        "placeholder": "••••••",
+        "help": "Enregistré uniquement sur cette instance nanobot."
+      },
+      "webhookSigningSecret": {
+        "label": "Secret de signature du webhook",
+        "placeholder": "••••••",
+        "help": "Utilisé pour vérifier Linear-Signature avant toute analyse du contenu du webhook."
+      },
+      "publicBaseUrl": {
+        "label": "URL HTTPS publique",
+        "placeholder": "https://nanobot.example.com",
+        "help": "Une origine HTTPS stable acheminée vers l’écouteur ci-dessous ; n’incluez pas de chemin."
+      },
+      "host": {
+        "label": "Hôte d’écoute",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Port d’écoute",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Chemin du webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "Chemin de rappel OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs Linear autorisés",
+        "placeholder": "ID utilisateur Linear séparés par des virgules",
+        "help": "Laissez vide pour utiliser l’association nanobot, ou saisissez * pour autoriser tous les utilisateurs des espaces connectés."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Code QR d’autorisation Linear",
+    "authorizeTitle": "Autoriser dans Linear",
+    "authorizeDescription": "Ouvrez Linear dans ce navigateur ou scannez le code QR. nanobot activera le canal après l’autorisation.",
+    "waiting": "En attente de l’autorisation Linear...",
+    "connected": "Linear est connecté.",
+    "stopped": "L’autorisation a été interrompue.",
+    "connecting": "Connexion...",
+    "reconnect": "Connecter un autre espace de travail",
+    "connect": "Connecter Linear",
+    "openLinear": "Continuer dans Linear"
+  }
+}

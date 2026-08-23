@@ -28,6 +28,7 @@ Use **Settings → Channels** in the WebUI for guided setup. These guides explai
 | Connect QQ | [QQ AI agent](./qq-ai-agent.md) |
 | Connect Email | [Email AI agent](./email-ai-agent.md) |
 | Connect Mattermost | [Mattermost AI agent](./mattermost-ai-agent.md) |
+| Connect Linear | [Native Linear agent](./linear-agent.md) |
 
 ## Integrate from Code
 
