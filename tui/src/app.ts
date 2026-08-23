@@ -407,7 +407,8 @@ export class NanobotTui {
   private readonly meta: TextRenderable
   private readonly host: TuiHost
   private readonly draft = new ComposerDraft()
-  private readonly promptQueue = new PromptQueue()
+  private readonly promptQueues = new Map<string, PromptQueue>()
+  private currentChatId = ""
   private palette: Palette
   private activeThemeMode: ThemeMode
   private backgroundKnown: boolean
@@ -959,6 +960,8 @@ export class NanobotTui {
 
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
+      const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
+      this.currentChatId = event.chat_id
       this.host.reportSession(event.chat_id)
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
@@ -983,6 +986,8 @@ export class NanobotTui {
         if (hydrationId !== this.hydrationId) return
         this.applyRecoveryState(event.recovery_state ?? null)
         this.flushPendingEvents()
+        this.syncQueuePreview()
+        if (switchedSession) this.sendNextFollowUp()
       })
       return
     }
@@ -1400,6 +1405,7 @@ export class NanobotTui {
   }
 
   private renderActiveStatus(): void {
+    if (this.sessionLoading || this.sessionMenu.visible) return
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
     const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
     const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
@@ -1427,6 +1433,16 @@ export class NanobotTui {
     if (!prompt) return
     this.syncQueuePreview()
     this.sendPrompt(prompt)
+  }
+
+  private get promptQueue(): PromptQueue {
+    const chatId = this.currentChatId || this.client.activeChatId
+    let queue = this.promptQueues.get(chatId)
+    if (!queue) {
+      queue = new PromptQueue()
+      this.promptQueues.set(chatId, queue)
+    }
+    return queue
   }
 
   private restoreQueuedPrompts(): void {
@@ -2093,10 +2109,6 @@ export class NanobotTui {
   }
 
   private async openSessions(): Promise<void> {
-    if (this.activeTurn) {
-      this.status.content = "Wait for the current turn or press Ctrl+C"
-      return
-    }
     this.commandMenu.hide()
     this.dismissRuntimeControls()
     this.mentionMenu.hide()
@@ -2139,10 +2151,6 @@ export class NanobotTui {
   }
 
   private switchSession(session: SessionSummary): void {
-    if (this.activeTurn) {
-      this.status.content = "Wait for the current turn or press Ctrl+C"
-      return
-    }
     if (session.chatId === this.client.activeChatId) {
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
@@ -2150,7 +2158,6 @@ export class NanobotTui {
       this.applyRecoveryState(session.recoveryState ?? null)
       this.updateTitle()
       this.closeSessions()
-      this.status.content = this.readyStatus()
       return
     }
     if (!this.ready) {
@@ -2160,8 +2167,10 @@ export class NanobotTui {
     this.closeSessions()
     try {
       this.ready = false
+      this.activeTurnId = null
+      this.setActive(false)
       this.clearRecoveryState()
-      this.clearPromptQueue()
+      this.queuePreview.update([])
       this.sessionMetadataId += 1
       this.clearHostContext()
       this.sessionTitle = sessionLabel(session)
@@ -2301,7 +2310,8 @@ export class NanobotTui {
     this.clearComposer()
     this.syncComposerPlaceholder()
     this.composer.focus()
-    if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
+    if (this.activeTurn) this.renderActiveStatus()
+    else if (this.ready) this.status.content = this.readyStatus()
     this.updateMeta()
   }
 

@@ -567,6 +567,97 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("switches away from a running session without losing its queued follow-ups", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/api/sessions")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          sessions: [
+            { key: "websocket:chat", title: "Running chat", run_started_at: 1_700_000_000 },
+            { key: "websocket:other", title: "Other chat" },
+          ],
+        })))
+      }
+      if (url.endsWith("/api/webui/sidebar-state")) {
+        return Promise.resolve(new Response(JSON.stringify({})))
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        messages: [],
+        page: { has_more_before: false },
+      })))
+    }) as typeof fetch
+    const sent: string[] = []
+    const attached: string[] = []
+    let activeChatId = "chat"
+    const base = client(sent, attached)
+    const transport = {
+      ...base,
+      get activeChatId() { return activeChatId },
+      attach(chatId: string) {
+        attached.push(chatId)
+        activeChatId = chatId
+      },
+    }
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
+      transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      ready: boolean
+      activeTurn: boolean
+      composer: TextareaRenderable
+      sessionMenu: { visible: boolean }
+      queuePreview: { root: { visible: boolean } }
+      status: { plainText: string }
+    }
+
+    try {
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => ui.ready)
+      app.accept({ event: "goal_status", chat_id: "chat", status: "running", turn_id: "turn" })
+      ui.composer.setText("follow up in chat")
+      setup.mockInput.pressTab()
+      await waitUntil(() => ui.composer.plainText === "")
+      expect(ui.queuePreview.root.visible).toBe(true)
+
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
+      await waitUntil(() => ui.sessionMenu.visible)
+      await Bun.sleep(120)
+      expect(ui.status.plainText).toContain("2 sessions")
+
+      ui.composer.setText("other")
+      ui.composer.submit()
+      await waitUntil(() => attached.at(-1) === "other")
+      app.accept({ event: "attached", chat_id: "other" })
+      await waitUntil(() => ui.ready)
+      expect(ui.activeTurn).toBe(false)
+      expect(ui.queuePreview.root.visible).toBe(false)
+
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
+      await waitUntil(() => ui.sessionMenu.visible)
+      ui.composer.setText("running")
+      ui.composer.submit()
+      await waitUntil(() => attached.at(-1) === "chat")
+      app.accept({ event: "attached", chat_id: "chat" })
+      app.accept({ event: "goal_status", chat_id: "chat", status: "running", turn_id: "turn" })
+      await waitUntil(() => ui.ready && ui.activeTurn)
+      expect(ui.queuePreview.root.visible).toBe(true)
+      expect(sent).toEqual([])
+
+      app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
+      await waitUntil(() => sent.length === 1)
+      expect(sent).toEqual(["follow up in chat"])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("refreshes expired API credentials before opening sessions", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
