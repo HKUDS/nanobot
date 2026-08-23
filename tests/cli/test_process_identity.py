@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ def test_cli_process_identity_uses_product_and_role(
 ) -> None:
     titles: list[str] = []
     monkeypatch.setattr("nanobot.cli.process_identity.os.name", "posix")
-    monkeypatch.setattr("nanobot.cli.process_identity.setproctitle", titles.append)
+    monkeypatch.setattr("nanobot.cli.process_identity._set_process_title", titles.append)
 
     set_cli_process_identity(args)
 
@@ -36,7 +37,7 @@ def test_cli_process_identity_keeps_windows_launcher_name(
 ) -> None:
     titles: list[str] = []
     monkeypatch.setattr("nanobot.cli.process_identity.os.name", "nt")
-    monkeypatch.setattr("nanobot.cli.process_identity.setproctitle", titles.append)
+    monkeypatch.setattr("nanobot.cli.process_identity._set_process_title", titles.append)
 
     set_cli_process_identity(["agent"])
 
@@ -44,12 +45,12 @@ def test_cli_process_identity_keeps_windows_launcher_name(
 
 
 def test_named_executable_creates_stable_role_symlink(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX symlink naming is not used on Windows")
     executable = tmp_path / "bun"
     executable.write_text("runtime", encoding="utf-8")
-    monkeypatch.setattr("nanobot.cli.process_identity.os.name", "posix")
 
     first = Path(
         named_executable(executable.as_posix(), name="nanobot-tui", directory=tmp_path / "run")
