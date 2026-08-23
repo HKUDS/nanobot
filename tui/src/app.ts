@@ -23,6 +23,8 @@ import {
   connectionEndpoint,
   fetchAvailableSkills,
   fetchGatewayHealth,
+  decodeConfigEditorSnapshot,
+  fetchConfigEditor,
   fetchHistory,
   fetchGatewayConnection,
   fetchMentionCandidates,
@@ -97,6 +99,7 @@ import {
   type FooterHintTheme,
 } from "./footer-hints"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "./host"
+import { ConfigEditor, type ConfigEditorTheme } from "./config-editor"
 
 interface AppOptions {
   resolveConnection?: () => Promise<GatewayConnection>
@@ -132,6 +135,7 @@ interface ChatClient {
     chatId: string,
     recoveryId: string,
   ): Promise<RecoveryState>
+  requestMutation?(action: string, payload: Record<string, unknown>): Promise<unknown>
 }
 
 interface Palette {
@@ -196,6 +200,12 @@ const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
 const SESSION_REFRESH_INTERVAL_MS = 1_000
 const LOCAL_COMMANDS: TuiCommand[] = [
+  {
+    command: "/config",
+    title: "Configuration",
+    description: "Edit every nanobot setting",
+    action: "config",
+  },
   {
     command: "/sessions",
     title: "Sessions",
@@ -308,6 +318,19 @@ function contextPanelTheme(palette: Palette): ContextPanelTheme {
     text: palette.text,
     border: palette.border,
     accent: palette.accent,
+  }
+}
+
+function configEditorTheme(palette: Palette): ConfigEditorTheme {
+  return {
+    text: palette.text,
+    muted: palette.muted,
+    faint: palette.faint,
+    border: palette.border,
+    accent: palette.accent,
+    success: palette.success,
+    error: palette.error,
+    selectedBackground: palette.userBackground,
   }
 }
 
@@ -480,6 +503,7 @@ export class NanobotTui {
   private readonly runtimeControls: RuntimeControls
   private readonly contextPanel: ContextPanel
   private readonly diffViewer: DiffViewer
+  private readonly configEditor: ConfigEditor
   private readonly queuePreview: QueuePreview
   private readonly recoveryNotice: RecoveryNotice
   private readonly client: ChatClient
@@ -667,7 +691,7 @@ export class NanobotTui {
       backgroundColor: RGBA.defaultBackground(),
       onMouseDown: (event) => {
         if (event.button !== 0) return
-        if (!this.diffViewer.visible) {
+        if (!this.diffViewer.visible && !this.configEditor.visible) {
           // OpenTUI applies automatic focus after mouse handlers run. Prevent
           // a focusable transcript ancestor from stealing text focus back
           // after the composer has been restored here.
@@ -808,6 +832,33 @@ export class NanobotTui {
       flexShrink: 1,
       selectable: false,
     })
+    this.configEditor = new ConfigEditor(
+      renderer,
+      configEditorTheme(this.palette),
+      {
+        load: () => fetchConfigEditor(
+          this.options.apiUrl,
+          this.options.apiToken,
+          this.apiReauthenticator,
+        ),
+        save: async (revision, config) => {
+          if (!this.client.requestMutation) {
+            throw new Error("configuration updates require a current gateway")
+          }
+          return decodeConfigEditorSnapshot(await this.client.requestMutation(
+            "settings.config_editor.update",
+            { revision, config },
+          ))
+        },
+        onVisibilityChange: (visible) => {
+          if (!visible) {
+            this.composer.focus()
+            if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
+          }
+        },
+        onStatus: (message) => { this.status.content = message },
+      },
+    )
 
     const statusRow = new BoxRenderable(renderer, {
       id: "nanobot-tui-status-row",
@@ -835,6 +886,7 @@ export class NanobotTui {
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
     this.shell.add(this.diffViewer.root)
+    this.shell.add(this.configEditor.root)
     this.renderer.root.add(this.shell)
 
     this.renderer.keyInput.on("keypress", this.handleKey)
@@ -983,6 +1035,7 @@ export class NanobotTui {
     }
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
+      else if (command.command.action === "config") void this.openConfig()
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "diff") this.openDiff()
       else if (command.command.action === "branch") void this.openBranch()
@@ -1689,6 +1742,10 @@ export class NanobotTui {
         return
       }
     }
+    if (this.configEditor.visible) {
+      if (this.configEditor.handleKey(key)) key.preventDefault()
+      return
+    }
     if (this.diffViewer.visible) {
       if (key.ctrl && key.name === "c") {
         const selected = this.renderer.getSelection()?.getSelectedText()
@@ -1970,6 +2027,7 @@ export class NanobotTui {
     this.runtimeControls.setTheme(runtimeControlsTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
+    this.configEditor.setTheme(configEditorTheme(this.palette))
     this.queuePreview.setTheme(queuePreviewTheme(this.palette))
     this.recoveryNotice.setTheme(recoveryNoticeTheme(this.palette))
     this.updateComposerAppearance()
@@ -1991,6 +2049,7 @@ export class NanobotTui {
     this.syncComposerPlaceholder()
     this.contextPanel.resize(this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
+    this.configEditor.resize(this.renderer.width, this.renderer.height)
     this.title.visible = this.renderer.height >= 14
     this.runtimeControls.resize(this.renderer.width)
     this.updateTitle()
@@ -2113,7 +2172,7 @@ export class NanobotTui {
   }
 
   private syncCommandMenu(): void {
-    const limit = this.renderer.height >= 20 ? 7 : 3
+    const limit = this.renderer.height >= 20 ? 8 : 3
     this.commandMenu.update(this.composer.plainText, limit)
     this.updateMeta()
   }
@@ -2813,6 +2872,18 @@ export class NanobotTui {
     this.updateMeta()
   }
 
+  private async openConfig(): Promise<void> {
+    if (this.activeTurn) {
+      this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    this.closeTransientMenus()
+    this.dismissRuntimeControls()
+    this.clearComposer()
+    this.composer.blur()
+    await this.configEditor.show()
+  }
+
   private async loadOlderHistory(): Promise<void> {
     if (
       this.historyLoadingOlder
@@ -2882,6 +2953,7 @@ export class NanobotTui {
     this.transcript.destroy()
     this.diffViewer.destroy()
     void this.clipboardImageReader.dispose().catch(() => {})
+    this.configEditor.destroy()
     this.host.release()
     this.client.close()
   }
