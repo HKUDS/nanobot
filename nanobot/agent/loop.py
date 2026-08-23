@@ -1303,6 +1303,12 @@ class AgentLoop:
                         break
                 if deferred:
                     continue
+                routed_msg = msg
+                if effective_key != msg.session_key:
+                    routed_msg = dataclasses.replace(
+                        msg,
+                        session_key_override=effective_key,
+                    )
                 # A newer WebUI message must supersede an explicit recovery
                 # before it is injected into that recovery's pending queue.
                 # Without this admission point, a recovered turn could finish
@@ -1311,7 +1317,7 @@ class AgentLoop:
                     effective_key in self._pending_queues
                     and msg.channel == "websocket"
                     and self._recovery_admission is not None
-                    and not await self._recovery_admission.admit(msg)
+                    and not await self._recovery_admission.admit(routed_msg)
                 ):
                     continue
                 # If this session already has an active pending queue (i.e. a task
@@ -1326,12 +1332,7 @@ class AgentLoop:
                             self.commands.dispatch,
                         )
                         continue
-                    pending_msg = msg
-                    if effective_key != msg.session_key:
-                        pending_msg = dataclasses.replace(
-                            msg,
-                            session_key_override=effective_key,
-                        )
+                    pending_msg = routed_msg
                     session = self.sessions.get_or_create(effective_key)
                     followup_id = record_pending_followup(session, pending_msg)
                     if followup_id is not None:

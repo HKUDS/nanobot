@@ -1019,6 +1019,39 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_unified_websocket_followup_admits_effective_session(tmp_path):
+    """Recovery admission and the pending queue must use the same session key."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(return_value=True)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._unified_session = True
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat",
+        content="new request",
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+    admitted_msg = admission.admit.await_args.args[0]
+    assert admitted_msg.session_key == UNIFIED_SESSION_KEY
+    assert queued_msg.session_key == UNIFIED_SESSION_KEY
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+
+@pytest.mark.asyncio
 async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_path):
     """Injected results stay inside the active turn instead of opening a side turn."""
     from nanobot.bus.events import InboundMessage
