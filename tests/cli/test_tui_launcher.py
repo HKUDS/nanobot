@@ -467,9 +467,13 @@ def test_source_checkout_refreshes_locked_tui_dependencies(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", install)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher.named_executable",
+        lambda executable, **_kwargs: f"{executable}-named",
+    )
 
     assert _resolve_source_tui_command(source_dir, bun) == [
-        bun,
+        f"{bun}-named",
         str(source_dir / "src" / "index.ts"),
     ]
 

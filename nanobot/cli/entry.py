@@ -6,6 +6,8 @@ import os
 import sys
 from contextlib import suppress
 
+from nanobot.cli.process_identity import set_cli_process_identity
+
 
 def _native_tui_candidate(args: list[str]) -> bool:
     """Return whether ``agent`` can start without the classic agent stack."""
@@ -34,6 +36,7 @@ def _configure_windows_console() -> None:
 
 def main() -> None:
     """Dispatch native TUI startup without importing the complete CLI graph."""
+    set_cli_process_identity(sys.argv[1:])
     _configure_windows_console()
     if _native_tui_candidate(sys.argv[1:]):
         import typer

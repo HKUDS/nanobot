@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot import __version__
+from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
     _gateway_health_ready,
@@ -229,7 +230,12 @@ def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
         detail = (install.stderr or install.stdout).strip().splitlines()
         suffix = f": {detail[-1]}" if detail else ""
         raise TuiUnavailableError(f"could not install TUI dependencies{suffix}")
-    return [bun, str(source_dir / "src" / "index.ts")]
+    executable = named_executable(
+        bun,
+        name="nanobot-tui",
+        directory=get_data_dir() / "run" / "executables",
+    )
+    return [executable, str(source_dir / "src" / "index.ts")]
 
 
 def _download_release_tui(asset: str) -> Path | None:
