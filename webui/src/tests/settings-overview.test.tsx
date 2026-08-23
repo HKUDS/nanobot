@@ -1,5 +1,6 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { LOCAL_PREFS_STORAGE_KEY } from "@/lib/local-preferences";
 import type { SettingsPayload } from "@/lib/types";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -9,6 +10,44 @@ import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewT
 describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
+
+  it("defaults per-turn token usage off and persists changes across remounts", async () => {
+    const renderAppearance = () => renderSettingsView({
+      initialSection: "appearance",
+      initialSettings: settingsPayload(),
+      showSidebar: true,
+    });
+
+    renderAppearance();
+
+    const title = "Show per-turn token usage";
+    const description = (
+      "Show context, aggregate input, output, cache rate, and model calls under assistant messages. "
+      + "Stored only in this browser."
+    );
+    expect(screen.getByText(description)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: title })).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(screen.getByRole("switch", { name: title }));
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(LOCAL_PREFS_STORAGE_KEY) || "{}");
+      expect(saved.showTurnUsage).toBe(true);
+    });
+
+    cleanup();
+    renderAppearance();
+    expect(screen.getByRole("switch", { name: title })).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByRole("switch", { name: title }));
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(LOCAL_PREFS_STORAGE_KEY) || "{}");
+      expect(saved.showTurnUsage).toBe(false);
+    });
+
+    cleanup();
+    renderAppearance();
+    expect(screen.getByRole("switch", { name: title })).toHaveAttribute("aria-checked", "false");
+  });
 
   it("persists the file edit display local preference", async () => {
     renderSettingsView({

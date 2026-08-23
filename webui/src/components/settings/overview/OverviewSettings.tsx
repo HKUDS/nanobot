@@ -408,6 +408,22 @@ export function AppearanceSettings({
             />
           </SettingsRow>
           <SettingsRow
+            title={tx("settings.rows.showTurnUsage", "Show per-turn token usage")}
+            description={tx(
+              "settings.help.showTurnUsage",
+              "Show context, aggregate input, output, cache rate, and model calls under assistant messages. Stored only in this browser.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.showTurnUsage}
+              onChange={(showTurnUsage) => (
+                onChangeLocalPrefs((prev) => ({ ...prev, showTurnUsage }))
+              )}
+              ariaLabel={tx("settings.rows.showTurnUsage", "Show per-turn token usage")}
+              label={localPrefs.showTurnUsage ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
             title={tx("settings.rows.brandLogos", "Brand logos")}
             description={tx(
               "settings.legal.thirdPartyBrands",

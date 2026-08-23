@@ -1,8 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { useShowTurnUsage } from "@/hooks/useShowTurnUsage";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
+import {
+  DEFAULT_LOCAL_PREFS,
+  LOCAL_PREFS_STORAGE_KEY,
+  writeLocalPreferences,
+} from "@/lib/local-preferences";
 import type {
   CliAppInfo,
   McpPresetInfo,
@@ -67,6 +73,11 @@ const MCP_PRESETS: McpPresetInfo[] = [
   },
 ];
 
+function PreferenceAwareMessageBubble({ message }: { message: UIMessage }) {
+  const showTurnUsage = useShowTurnUsage();
+  return <MessageBubble message={message} showTurnUsage={showTurnUsage} />;
+}
+
 const SLASH_COMMANDS: SlashCommand[] = [
   {
     command: "/model",
@@ -95,6 +106,10 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
+  afterEach(() => {
+    localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY);
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",
@@ -1013,6 +1028,40 @@ describe("MessageBubble", () => {
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
 
+  it("hides turn usage by default and leaves latency visible when the preference changes", async () => {
+    const message: UIMessage = {
+      id: "turn-usage-preference",
+      role: "assistant",
+      content: "done",
+      createdAt: Date.now(),
+      latencyMs: 18_200,
+      usage: {
+        prompt_tokens: 12_400,
+        completion_tokens: 823,
+        context_tokens: 8_100,
+        request_count: 1,
+      },
+    };
+
+    const { container } = render(<PreferenceAwareMessageBubble message={message} />);
+
+    expect(container.querySelector("[data-turn-usage]")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-turn-latency]")).toHaveTextContent("18s");
+
+    act(() => {
+      writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, showTurnUsage: true });
+    });
+    expect(await screen.findByText("8.1K context")).toHaveAttribute("data-turn-usage");
+
+    act(() => {
+      writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, showTurnUsage: false });
+    });
+    await waitFor(() => {
+      expect(container.querySelector("[data-turn-usage]")).not.toBeInTheDocument();
+    });
+    expect(container.querySelector("[data-turn-latency]")).toHaveTextContent("18s");
+  });
+
   it("shows consecutive contexts while keeping each turn's aggregate cost in details", async () => {
     const turns: UIMessage[] = [
       {
@@ -1043,7 +1092,9 @@ describe("MessageBubble", () => {
       },
     ];
 
-    render(<>{turns.map((message) => <MessageBubble key={message.id} message={message} />)}</>);
+    render(<>{turns.map((message) => (
+      <MessageBubble key={message.id} message={message} showTurnUsage />
+    ))}</>);
 
     const turnAUsage = screen.getByText("56K context");
     const turnBUsage = screen.getByText("57K context");
@@ -1079,7 +1130,7 @@ describe("MessageBubble", () => {
       },
     };
 
-    render(<MessageBubble message={message} />);
+    render(<MessageBubble message={message} showTurnUsage />);
 
     const usage = screen.getByText("~1.3K turn input");
     expect(usage).not.toHaveTextContent("context");
