@@ -52,10 +52,12 @@ describe("SessionMenu", () => {
       warning: "#F5C451",
     })
     setup.renderer.root.add(menu.root)
-    menu.open(sessions, "one", 6)
+    menu.open(sessions, "one", 6, "Codex")
     await setup.renderOnce()
 
     expect(setup.captureCharFrame()).toContain("› ● API migration")
+    expect(setup.captureCharFrame()).not.toContain("Move authentication")
+    expect(setup.captureCharFrame()).not.toContain("Codex")
     expect(menu.choose()?.chatId).toBe("one")
 
     menu.update("release stable", 6)
@@ -230,5 +232,32 @@ describe("SessionMenu", () => {
     const duplicates = setup.captureCharFrame()
     expect(duplicates).toContain("frontend/nanobot")
     expect(duplicates).toContain("backend/nanobot")
+  })
+
+  test("shows only model overrides and keeps previews searchable", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+
+    menu.open(sessions, "one", 6, "Codex")
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).not.toContain("Codex")
+    expect(frame).not.toContain("Prepare the stable release")
+
+    menu.update("prepare stable", 6)
+    await setup.renderOnce()
+    expect(menu.choose()?.chatId).toBe("two")
+
+    menu.replace([{ ...sessions[1]!, modelPreset: "Deep Research" }], "one", "Codex")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Deep Research")
+    menu.hide()
   })
 })

@@ -32,6 +32,7 @@ export class SessionMenu {
   private spinnerFrame = 0
   private spinnerTimer: ReturnType<typeof setInterval> | null = null
   private rows: SessionMenuRow[] = []
+  private defaultModelPreset = ""
   private readonly snapshots = new Map<string, {
     preview: string
     runStartedAt: number | null
@@ -58,12 +59,9 @@ export class SessionMenu {
       ].join(" "),
       render: (session, selected) => {
         const age = updatedLabel(session.updatedAt)
-        const preview = session.preview.trim()
         const detail = [
           this.showWorkspaces ? this.workspaceLabel(session) : "",
-          session.modelPreset,
-          age,
-          preview && preview !== sessionLabel(session) ? preview : "",
+          this.modelOverride(session),
         ]
           .filter(Boolean)
           .join(" · ")
@@ -73,7 +71,9 @@ export class SessionMenu {
           : selected ? this.theme.text : this.theme.muted
         return [
           ...(marker ? [chunk(`${marker.text} `, marker.color)] : []),
-          chunk(`${sessionLabel(session)}${detail ? `  ${detail}` : ""}`, foreground),
+          chunk(sessionLabel(session), foreground),
+          ...(detail ? [chunk(`  ${detail}`, this.theme.muted)] : []),
+          ...(age ? [chunk(`  ${age}`, this.theme.muted)] : []),
         ]
       },
       emptyText: "No matching sessions",
@@ -86,14 +86,25 @@ export class SessionMenu {
     return this.picker.visible
   }
 
-  open(sessions: SessionSummary[], currentChatId: string, limit: number): void {
+  open(
+    sessions: SessionSummary[],
+    currentChatId: string,
+    limit: number,
+    defaultModelPreset = "",
+  ): void {
+    this.defaultModelPreset = defaultModelPreset
     this.observe(sessions, currentChatId)
     this.rows = this.prepareRows(sessions, currentChatId)
     this.picker.show(this.rows, "", limit)
     this.syncSpinner()
   }
 
-  replace(sessions: SessionSummary[], currentChatId: string): void {
+  replace(
+    sessions: SessionSummary[],
+    currentChatId: string,
+    defaultModelPreset = this.defaultModelPreset,
+  ): void {
+    this.defaultModelPreset = defaultModelPreset
     this.observe(sessions, currentChatId)
     this.rows = this.prepareRows(sessions, currentChatId)
     this.picker.replace(this.rows)
@@ -235,6 +246,11 @@ export class SessionMenu {
 
   private workspaceLabel(session: SessionSummary): string {
     return this.workspaceLabels.get(normalizeWorkspacePath(session.workspaceScope?.project_path)) || ""
+  }
+
+  private modelOverride(session: SessionSummary): string {
+    const preset = session.modelPreset?.trim() || ""
+    return preset && preset !== this.defaultModelPreset ? preset : ""
   }
 }
 

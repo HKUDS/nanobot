@@ -2147,7 +2147,12 @@ export class NanobotTui {
         this.updateTitle()
       }
       const limit = this.renderer.height >= 20 ? 8 : 4
-      this.sessionMenu.open(sessions, this.client.activeChatId, limit)
+      this.sessionMenu.open(
+        sessions,
+        this.client.activeChatId,
+        limit,
+        this.defaultModelPreset,
+      )
       this.startSessionRefresh()
       this.renderTitleColor()
       this.sessionMenu.update(this.composer.plainText, limit)
@@ -2361,7 +2366,11 @@ export class NanobotTui {
         this.apiReauthenticator,
       )
       if (this.quitting || loadId !== this.sessionLoadId || !this.sessionMenu.visible) return
-      this.sessionMenu.replace(sessions, this.client.activeChatId)
+      this.sessionMenu.replace(
+        sessions,
+        this.client.activeChatId,
+        this.defaultModelPreset,
+      )
       this.status.content = sessions.length ? `${sessions.length} sessions` : "No saved sessions"
     } catch {
       // Keep the existing picker usable during a transient refresh failure.
