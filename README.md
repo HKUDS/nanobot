@@ -209,7 +209,13 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 nanobot agent
 ```
 
-This opens the native terminal client with the configured model and tools, using the launch directory as its workspace. Use `/sessions` to switch saved conversations, `/new-chat` to preserve this conversation and start another one, `/branch` to fork from a completed reply, `/context` to inspect the compacted summary and raw message suffix available to the agent, or `/diff` to review the latest turn's file changes. Type `@` to mention an installed app, configured MCP server, or saved session. While nanobot is working, `Enter` steers the current turn, `Tab` queues a visible follow-up for the next turn, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) returns the latest queued message for editing. Press `Shift+Enter` to add a newline; `Ctrl+J` is the universal fallback for terminals that cannot distinguish modified Enter keys. Use `PageUp` at the top to load earlier transcript pages. Each launch starts a new session; `--session` selects an existing WebSocket session, while `--workspace` overrides the launch directory. Use `--classic` to resume a session from another channel. The existing nanobot `/new` command keeps its original behavior: it resets the current chat. `nanobot agent` and `nanobot webui` share one on-demand local gateway: either command can start it, each launcher releases only its own client, and the last interactive launcher to exit stops it. Use `/detach` to close the TUI while keeping the gateway and any active agent turn running in the background; after the terminal is restored, nanobot prints the exact `nanobot gateway stop` command for that config and workspace. Use `nanobot gateway --background` to start persistently before opening a client. Type `exit` or press `Ctrl+C` when you are done; after the terminal is restored, nanobot prints a ready-to-run `nanobot agent --session ...` command that resumes the session. Use `nanobot agent --classic` for the legacy Python prompt.
+This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI.
+
+- Type `/` to discover commands, `/sessions` to switch conversations, or `@` to mention an app, MCP server, or saved session.
+- Press `Enter` to send or steer, `Tab` to queue a follow-up, and `Shift+Enter` to add a newline (`Ctrl+J` works in terminals that cannot distinguish modified Enter keys).
+- Use `/detach` to leave the current task running, or start with `nanobot gateway --background` when nanobot should stay online after all local clients exit.
+
+Each launch starts a new session by default. Use `--session` to resume one and `--workspace` to choose another workspace. See the [CLI reference](./docs/cli-reference.md#agent-cli) for session branching, diffs, history, shortcuts, gateway lifecycle, and compatibility options.
 
 For one request and an immediate exit, use:
 
