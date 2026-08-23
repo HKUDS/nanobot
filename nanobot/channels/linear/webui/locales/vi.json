@@ -1,0 +1,71 @@
+{
+  "description": "Sử dụng nanobot từ issue Linear thông qua Agent Session gốc.",
+  "requirements": "Ứng dụng OAuth Linear riêng tư và URL callback HTTPS công khai, ổn định",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn thiết lập Linear",
+    "officialLabel": "Tạo ứng dụng OAuth Linear",
+    "tryIt": "Nhắc đến ứng dụng trong bình luận của issue. Tin nhắn tiếp theo trong Agent Session không cần nhắc lại.",
+    "summary": "Tạo ứng dụng OAuth Linear riêng tư, lưu thông tin xác thực và URL công khai, rồi cấp quyền cho workspace. Mỗi phiên mới cần @mention rõ ràng; bình luận thông thường sẽ bị bỏ qua.",
+    "steps": [
+      "Công khai phiên bản nanobot này qua URL HTTPS ổn định (có thể dùng tunnel).",
+      "Tạo ứng dụng OAuth riêng tư trong Linear với các scope read, write và app:mentionable. Không thêm app:assignable.",
+      "Đăng ký webhook của ứng dụng cho AgentSessionEvent, PermissionChange và OAuthAuthorization bằng URL được tạo.",
+      "Lưu cài đặt, kết nối workspace qua OAuth, rồi @mention ứng dụng trong một issue."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "ID máy khách OAuth",
+        "placeholder": "ID máy khách OAuth Linear",
+        "help": "Sao chép từ ứng dụng OAuth riêng tư trong Linear."
+      },
+      "clientSecret": {
+        "label": "Mã bí mật máy khách OAuth",
+        "placeholder": "••••••",
+        "help": "Chỉ được lưu trên phiên bản nanobot này."
+      },
+      "webhookSigningSecret": {
+        "label": "Mã bí mật ký webhook",
+        "placeholder": "••••••",
+        "help": "Dùng để xác minh Linear-Signature trước khi phân tích nội dung webhook."
+      },
+      "publicBaseUrl": {
+        "label": "URL HTTPS công khai",
+        "placeholder": "https://nanobot.example.com",
+        "help": "Origin HTTPS ổn định được chuyển tiếp tới listener bên dưới; không bao gồm path."
+      },
+      "host": {
+        "label": "Host lắng nghe",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Cổng lắng nghe",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Đường dẫn webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "Đường dẫn callback OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Người dùng Linear được phép",
+        "placeholder": "ID người dùng Linear, phân tách bằng dấu phẩy",
+        "help": "Để trống để dùng ghép đôi nanobot, hoặc dùng * để cho phép mọi người dùng trong các workspace đã kết nối."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Mã QR cấp quyền Linear",
+    "authorizeTitle": "Cấp quyền trong Linear",
+    "authorizeDescription": "Mở Linear trong trình duyệt này hoặc quét mã QR. nanobot sẽ bật channel sau khi được cấp quyền.",
+    "waiting": "Đang chờ cấp quyền Linear...",
+    "connected": "Linear đã được kết nối.",
+    "stopped": "Đã dừng cấp quyền.",
+    "connecting": "Đang kết nối...",
+    "reconnect": "Kết nối workspace khác",
+    "connect": "Kết nối Linear",
+    "openLinear": "Tiếp tục trong Linear"
+  }
+}

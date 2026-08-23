@@ -1,0 +1,71 @@
+{
+  "description": "Linear 이슈에서 네이티브 Agent Session을 통해 nanobot을 사용합니다.",
+  "requirements": "비공개 Linear OAuth 앱과 안정적인 공개 HTTPS 콜백 URL",
+  "setup": {
+    "docsLabel": "Linear 설정 가이드 열기",
+    "officialLabel": "Linear OAuth 앱 만들기",
+    "tryIt": "이슈 댓글에서 앱을 멘션하세요. Agent Session 안의 후속 메시지에는 다시 멘션할 필요가 없습니다.",
+    "summary": "비공개 Linear OAuth 앱을 만들고 인증 정보와 공개 URL을 저장한 다음 워크스페이스를 승인하세요. 새 세션은 명시적인 @멘션으로만 시작되며 일반 댓글은 무시됩니다.",
+    "steps": [
+      "이 nanobot 인스턴스를 안정적인 HTTPS URL로 공개하세요(터널을 사용할 수 있습니다).",
+      "Linear에서 read, write, app:mentionable 범위가 있는 비공개 OAuth 앱을 만드세요. app:assignable은 추가하지 마세요.",
+      "생성된 URL로 앱 webhook을 AgentSessionEvent, PermissionChange, OAuthAuthorization에 구독하세요.",
+      "설정을 저장하고 OAuth로 워크스페이스를 연결한 다음 이슈에서 앱을 @멘션하세요."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "OAuth 클라이언트 ID",
+        "placeholder": "Linear OAuth 클라이언트 ID",
+        "help": "Linear의 비공개 OAuth 앱에서 복사하세요."
+      },
+      "clientSecret": {
+        "label": "OAuth 클라이언트 시크릿",
+        "placeholder": "••••••",
+        "help": "이 nanobot 인스턴스에만 저장됩니다."
+      },
+      "webhookSigningSecret": {
+        "label": "Webhook 서명 시크릿",
+        "placeholder": "••••••",
+        "help": "Webhook 본문을 파싱하기 전에 Linear-Signature를 검증하는 데 사용됩니다."
+      },
+      "publicBaseUrl": {
+        "label": "공개 HTTPS URL",
+        "placeholder": "https://nanobot.example.com",
+        "help": "아래 리스너로 연결되는 안정적인 HTTPS 오리진입니다. 경로는 포함하지 마세요."
+      },
+      "host": {
+        "label": "수신 호스트",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "수신 포트",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Webhook 경로",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "OAuth 콜백 경로",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "허용된 Linear 사용자",
+        "placeholder": "쉼표로 구분한 Linear 사용자 ID",
+        "help": "nanobot 페어링을 사용하려면 비워 두세요. 연결된 워크스페이스의 모든 사용자를 허용하려면 *를 사용하세요."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Linear 승인 QR 코드",
+    "authorizeTitle": "Linear에서 승인",
+    "authorizeDescription": "이 브라우저에서 Linear를 열거나 QR 코드를 스캔하세요. 승인 후 nanobot이 채널을 활성화합니다.",
+    "waiting": "Linear 승인을 기다리는 중...",
+    "connected": "Linear가 연결되었습니다.",
+    "stopped": "승인이 중지되었습니다.",
+    "connecting": "연결 중...",
+    "reconnect": "다른 워크스페이스 연결",
+    "connect": "Linear 연결",
+    "openLinear": "Linear에서 계속"
+  }
+}

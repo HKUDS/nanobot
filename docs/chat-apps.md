@@ -1,6 +1,6 @@
 # Chat Apps for Self-Hosted AI Agents
 
-Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, and
+Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, and
 other chat platforms. This page is the full chat-channel reference. If you want
 a focused setup path for one platform, start with a guide:
 
@@ -15,6 +15,7 @@ a focused setup path for one platform, start with a guide:
 | QQ | [Build a QQ AI Agent with nanobot](./guides/qq-ai-agent.md) |
 | Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
 | Mattermost | [Build a Mattermost AI Agent with nanobot](./guides/mattermost-ai-agent.md) |
+| Linear | [Use nanobot as a native Linear agent](./guides/linear-agent.md) |
 
 Want to build your own channel? See the [Channel Package Guide](./channel-package-guide.md).
 
@@ -105,6 +106,32 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
 | **Signal** | signal-cli daemon + phone number |
+| **Linear** | Private OAuth app + public HTTPS callback URL |
+
+<details id="linear">
+<summary><b>Linear</b></summary>
+
+Linear is a native Agent channel rather than a comment bot. A user starts a task
+by explicitly mentioning the installed nanobot app in an issue. Follow-up prompts
+inside that Agent Session continue the same nanobot session without another
+mention. Ordinary issue comments do not invoke nanobot.
+
+The native Agent API is webhook-based. Linear must reach a stable HTTPS URL, but
+the machine running nanobot does not need its own public IP address: a reverse
+proxy, Cloudflare Tunnel, Tailscale Funnel, or another HTTPS tunnel can forward
+the public URL to nanobot's local listener.
+
+The recommended setup is **Settings → Channels → Linear**. Save the public URL
+first to reveal a prefilled private OAuth app link, create the app, copy its Client
+ID, Client Secret, and Webhook Signing Secret back into nanobot, save again, then
+choose **Connect Linear**. OAuth requests only `read`, `write`, and
+`app:mentionable`; it deliberately does not request `app:assignable` so a new task
+must begin with an @mention.
+
+See the [native Linear agent guide](./guides/linear-agent.md) for the complete
+setup, tunnel examples, security model, and troubleshooting.
+
+</details>
 
 <details>
 <summary><b>Telegram</b></summary>

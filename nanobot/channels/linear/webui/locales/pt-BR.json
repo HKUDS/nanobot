@@ -1,0 +1,71 @@
+{
+  "description": "Use o nanobot em issues do Linear por meio de Agent Sessions nativas.",
+  "requirements": "Um aplicativo OAuth privado do Linear e uma URL pública HTTPS estável para callbacks",
+  "setup": {
+    "docsLabel": "Abrir o guia de configuração do Linear",
+    "officialLabel": "Criar aplicativo OAuth do Linear",
+    "tryIt": "Mencione o aplicativo em um comentário da issue. As mensagens seguintes dentro da Agent Session não precisam de outra menção.",
+    "summary": "Crie um aplicativo OAuth privado do Linear, salve as credenciais e a URL pública e autorize o workspace. Cada nova sessão exige uma @menção explícita; comentários comuns são ignorados.",
+    "steps": [
+      "Exponha esta instância do nanobot por uma URL HTTPS estável (um túnel pode ser usado).",
+      "Crie um aplicativo OAuth privado no Linear com os escopos read, write e app:mentionable. Não adicione app:assignable.",
+      "Inscreva o webhook do aplicativo em AgentSessionEvent, PermissionChange e OAuthAuthorization usando a URL gerada.",
+      "Salve as configurações, conecte o workspace com OAuth e @mencione o aplicativo em uma issue."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "ID do cliente OAuth",
+        "placeholder": "ID do cliente OAuth do Linear",
+        "help": "Copie do aplicativo OAuth privado no Linear."
+      },
+      "clientSecret": {
+        "label": "Segredo do cliente OAuth",
+        "placeholder": "••••••",
+        "help": "Armazenado somente nesta instância do nanobot."
+      },
+      "webhookSigningSecret": {
+        "label": "Segredo de assinatura do webhook",
+        "placeholder": "••••••",
+        "help": "Usado para verificar Linear-Signature antes de interpretar o conteúdo do webhook."
+      },
+      "publicBaseUrl": {
+        "label": "URL HTTPS pública",
+        "placeholder": "https://nanobot.example.com",
+        "help": "Uma origem HTTPS estável encaminhada ao listener abaixo; não inclua um caminho."
+      },
+      "host": {
+        "label": "Host de escuta",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Porta de escuta",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Caminho do webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "Caminho do callback OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Usuários do Linear permitidos",
+        "placeholder": "IDs de usuário do Linear separados por vírgulas",
+        "help": "Deixe vazio para usar o pareamento do nanobot ou use * para permitir todos os usuários dos workspaces conectados."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Código QR de autorização do Linear",
+    "authorizeTitle": "Autorizar no Linear",
+    "authorizeDescription": "Abra o Linear neste navegador ou escaneie o código QR. O nanobot habilitará o canal após a autorização.",
+    "waiting": "Aguardando autorização do Linear...",
+    "connected": "O Linear está conectado.",
+    "stopped": "A autorização foi interrompida.",
+    "connecting": "Conectando...",
+    "reconnect": "Conectar outro workspace",
+    "connect": "Conectar Linear",
+    "openLinear": "Continuar no Linear"
+  }
+}

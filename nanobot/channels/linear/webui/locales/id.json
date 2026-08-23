@@ -1,0 +1,71 @@
+{
+  "description": "Gunakan nanobot dari issue Linear melalui Agent Session native.",
+  "requirements": "Aplikasi OAuth Linear privat dan URL callback HTTPS publik yang stabil",
+  "setup": {
+    "docsLabel": "Buka panduan penyiapan Linear",
+    "officialLabel": "Buat aplikasi OAuth Linear",
+    "tryIt": "Mention aplikasi dalam komentar issue. Pesan lanjutan di Agent Session tidak memerlukan mention lagi.",
+    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Setiap sesi baru memerlukan @mention eksplisit; komentar biasa akan diabaikan.",
+    "steps": [
+      "Ekspos instans nanobot ini melalui URL HTTPS yang stabil (tunnel dapat digunakan).",
+      "Buat aplikasi OAuth privat di Linear dengan scope read, write, dan app:mentionable. Jangan tambahkan app:assignable.",
+      "Daftarkan webhook aplikasi untuk AgentSessionEvent, PermissionChange, dan OAuthAuthorization menggunakan URL yang dibuat.",
+      "Simpan pengaturan, hubungkan workspace melalui OAuth, lalu @mention aplikasi pada issue."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "ID klien OAuth",
+        "placeholder": "ID klien OAuth Linear",
+        "help": "Salin dari aplikasi OAuth privat di Linear."
+      },
+      "clientSecret": {
+        "label": "Secret klien OAuth",
+        "placeholder": "••••••",
+        "help": "Hanya disimpan oleh instans nanobot ini."
+      },
+      "webhookSigningSecret": {
+        "label": "Secret penandatanganan webhook",
+        "placeholder": "••••••",
+        "help": "Digunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
+      },
+      "publicBaseUrl": {
+        "label": "URL HTTPS publik",
+        "placeholder": "https://nanobot.example.com",
+        "help": "Origin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
+      },
+      "host": {
+        "label": "Host listener",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Port listener",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Path webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "Path callback OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Pengguna Linear yang diizinkan",
+        "placeholder": "ID pengguna Linear, dipisahkan koma",
+        "help": "Biarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Kode QR otorisasi Linear",
+    "authorizeTitle": "Otorisasi di Linear",
+    "authorizeDescription": "Buka Linear di browser ini atau pindai kode QR. nanobot akan mengaktifkan channel setelah otorisasi.",
+    "waiting": "Menunggu otorisasi Linear...",
+    "connected": "Linear telah terhubung.",
+    "stopped": "Otorisasi dihentikan.",
+    "connecting": "Menghubungkan...",
+    "reconnect": "Hubungkan workspace lain",
+    "connect": "Hubungkan Linear",
+    "openLinear": "Lanjutkan di Linear"
+  }
+}

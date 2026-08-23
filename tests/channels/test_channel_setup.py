@@ -18,6 +18,7 @@ EXPECTED_CHANNELS = {
     "discord",
     "email",
     "feishu",
+    "linear",
     "matrix",
     "mattermost",
     "mochat",
