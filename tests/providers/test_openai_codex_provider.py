@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import io
+import ssl
 from types import SimpleNamespace
 from typing import Any
 
@@ -40,6 +42,46 @@ def test_codex_default_model_matches_curated_flagship() -> None:
     assert spec is not None
     assert spec.builtin_models
     assert OpenAICodexProvider().get_default_model() == spec.builtin_models[0].id
+
+
+@pytest.mark.asyncio
+async def test_codex_provider_reuses_tls_context_for_concurrent_requests(monkeypatch) -> None:
+    _mock_codex_token(monkeypatch)
+    proxy = "http://127.0.0.1:23458"
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context_calls: list[tuple[bool, bool]] = []
+    request_contexts: list[object] = []
+
+    def fake_create_ssl_context(
+        *,
+        verify: bool,
+        cert: object = None,
+        trust_env: bool = True,
+    ) -> ssl.SSLContext:
+        _ = cert
+        context_calls.append((verify, trust_env))
+        return context
+
+    async def fake_request(_url, _headers, _body, *, verify, **_kwargs):
+        request_contexts.append(verify)
+        await asyncio.sleep(0)
+        return provider_base.LLMResponse(content="ok")
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.httpx.create_ssl_context",
+        fake_create_ssl_context,
+    )
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider(proxy=proxy)
+    responses = await asyncio.gather(*(
+        provider.chat([{"role": "user", "content": f"request {index}"}])
+        for index in range(3)
+    ))
+
+    assert [response.content for response in responses] == ["ok", "ok", "ok"]
+    assert context_calls == [(True, False)]
+    assert request_contexts == [context, context, context]
 
 
 class _WarningCaptureLogger:
