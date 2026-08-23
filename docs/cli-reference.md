@@ -294,7 +294,7 @@ The `plugins` command name is retained for compatibility, but these entries are 
 | `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
 | `azure` | Azure identity support for Azure-hosted models |
 | `bedrock` | AWS Bedrock model provider support |
-| `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
+| `langfuse` | Langfuse tracing support for OpenAI-compatible providers and the Codex OAuth provider |
 | `olostep` | Olostep web search provider support |
 | A channel name such as `telegram` or `slack` | The connector package and saved channel enablement |
 
