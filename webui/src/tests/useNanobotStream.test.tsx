@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   ConnectionStatus,
@@ -1811,6 +1812,95 @@ describe("useNanobotStream", () => {
       "web_search({\"query\":\"OpenClaw\"})",
     ]);
     expect(result.current.messages[2].reasoning).toBe("Second reasoning.");
+  });
+
+  it("preserves closed reasoning slices when an intervening tool trace is missing", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-r8", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-r8", {
+        event: "reasoning_delta",
+        chat_id: "chat-r8",
+        text: "First reasoning.",
+        turn_id: "turn-r8",
+        turn_phase: "reasoning",
+        turn_seq: 1,
+      });
+      fake.emit("chat-r8", {
+        event: "reasoning_end",
+        chat_id: "chat-r8",
+        turn_id: "turn-r8",
+        turn_phase: "reasoning",
+        turn_seq: 2,
+      });
+      fake.emit("chat-r8", {
+        event: "reasoning_delta",
+        chat_id: "chat-r8",
+        text: "Second reasoning.",
+        turn_id: "turn-r8",
+        turn_phase: "reasoning",
+        turn_seq: 3,
+      });
+      fake.emit("chat-r8", {
+        event: "reasoning_end",
+        chat_id: "chat-r8",
+        turn_id: "turn-r8",
+        turn_phase: "reasoning",
+        turn_seq: 4,
+      });
+      fake.emit("chat-r8", {
+        event: "message",
+        chat_id: "chat-r8",
+        text: "exec()",
+        kind: "tool_hint",
+        turn_id: "turn-r8",
+        turn_phase: "activity",
+        turn_seq: 5,
+      });
+      fake.emit("chat-r8", {
+        event: "message",
+        chat_id: "chat-r8",
+        text: "Final answer.",
+        turn_id: "turn-r8",
+        turn_phase: "answer",
+        turn_seq: 6,
+      });
+      fake.emit("chat-r8", {
+        event: "turn_end",
+        chat_id: "chat-r8",
+        turn_id: "turn-r8",
+        turn_phase: "complete",
+        turn_seq: 7,
+      });
+    });
+
+    await flushStreamFrame();
+
+    expect(result.current.messages.map((message) => (
+      message.reasoning || message.traces?.[0] || message.content
+    ))).toEqual([
+      "First reasoning.",
+      "Second reasoning.",
+      "exec()",
+      "Final answer.",
+    ]);
+
+    const units = normalizeActivityTimeline(result.current.messages);
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((message) => (
+      message.reasoning || message.traces?.[0]
+    )) : []).toEqual([
+      "First reasoning.",
+      "Second reasoning.",
+      "exec()",
+    ]);
+    expect(units[1]).toMatchObject({
+      type: "message",
+      message: { content: "Final answer." },
+    });
   });
 
   it("keeps tool-call reasoning before the matching live tool trace", () => {

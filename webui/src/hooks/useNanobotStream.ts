@@ -90,10 +90,12 @@ function attachReasoningChunk(
     const activitySegmentId = candidate.activitySegmentId ?? segments?.ensure();
     const hasAnswer = candidate.content.length > 0;
     if (hasAnswer) break;
+    // ``reasoning_end`` closes this row even though the assistant placeholder
+    // stays streaming for the rest of the turn. The next reasoning stream must
+    // get its own row when an intervening tool trace is delayed or unavailable.
     if (
       candidate.reasoningStreaming
-      || candidate.reasoning !== undefined
-      || candidate.isStreaming
+      || (candidate.isStreaming && candidate.reasoning === undefined)
     ) {
       const merged: UIMessage = {
         ...candidate,

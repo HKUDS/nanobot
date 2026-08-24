@@ -123,14 +123,23 @@ function isToolTrace(message: UIMessage | undefined): boolean {
   return message?.kind === "trace";
 }
 
+function hasToolTraceAfterReasoningRun(messages: UIMessage[], index: number): boolean {
+  let nextIndex = index + 1;
+  while (
+    nextIndex < messages.length
+    && isReasoningOnlyPlaceholder(messages[nextIndex])
+  ) nextIndex += 1;
+  return isToolTrace(messages[nextIndex]);
+}
+
 export function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
   return prev.filter((message, index) => {
     if (!isReasoningOnlyPlaceholder(message)) return true;
-    // A reasoning-only assistant row immediately followed by tool traces is
-    // the live equivalent of a persisted assistant tool-call message with
-    // empty content, reasoning_content, and tool_calls. Keep it so live render
-    // and history replay stay isomorphic.
-    return isToolTrace(prev[index + 1]);
+    // Closed reasoning streams followed by tool activity are the live
+    // equivalent of persisted assistant tool-call messages. A delayed tool
+    // trace may arrive after the next reasoning stream, so keep the whole run
+    // instead of requiring every row to be immediately adjacent to the trace.
+    return hasToolTraceAfterReasoningRun(prev, index);
   });
 }
 

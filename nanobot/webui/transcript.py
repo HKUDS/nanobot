@@ -1813,24 +1813,19 @@ def replay_transcript_to_ui_messages(
                 break
             content = str(candidate.get("content") or "")
             has_answer = len(content) > 0
+            # A completed reasoning field is closed even while its assistant
+            # placeholder remains streaming for the rest of the turn.
             if (
                 candidate.get("reasoningStreaming")
-                or candidate.get("reasoning") is not None
+                or (
+                    candidate.get("isStreaming")
+                    and candidate.get("reasoning") is None
+                )
                 or has_answer
-                or candidate.get("isStreaming")
             ):
                 prev[i] = {
                     **candidate,
                     "reasoning": (str(candidate.get("reasoning") or "")) + chunk,
-                    "reasoningStreaming": True,
-                    "activitySegmentId": candidate.get("activitySegmentId") or _ensure_activity_segment(),
-                    **turn_fields,
-                }
-                return
-            if not has_answer and candidate.get("isStreaming"):
-                prev[i] = {
-                    **candidate,
-                    "reasoning": chunk,
                     "reasoningStreaming": True,
                     "activitySegmentId": candidate.get("activitySegmentId") or _ensure_activity_segment(),
                     **turn_fields,
@@ -1919,11 +1914,17 @@ def replay_transcript_to_ui_messages(
         m = messages[index] if 0 <= index < len(messages) else None
         return bool(m and m.get("kind") == "trace")
 
+    def has_tool_trace_after_reasoning_run(index: int) -> bool:
+        next_index = index + 1
+        while next_index < len(messages) and is_reasoning_only_placeholder(messages[next_index]):
+            next_index += 1
+        return is_tool_trace_at(next_index)
+
     def prune_reasoning_only() -> None:
         nonlocal messages
         kept: list[dict[str, Any]] = []
         for i, m in enumerate(messages):
-            if is_reasoning_only_placeholder(m) and not is_tool_trace_at(i + 1):
+            if is_reasoning_only_placeholder(m) and not has_tool_trace_after_reasoning_run(i):
                 continue
             kept.append(m)
         messages = kept
