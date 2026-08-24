@@ -222,7 +222,10 @@ export interface TokenUsage {
   prompt_tokens?: number
   completion_tokens?: number
   cached_tokens?: number
+  cache_write_tokens?: number
   total_tokens?: number
+  context_tokens?: number
+  request_count?: number
   provider_tokens?: number
   estimated_tokens?: number
   cost_usd?: number
@@ -372,7 +375,10 @@ function isTokenUsage(value: unknown): value is TokenUsage {
     "prompt_tokens",
     "completion_tokens",
     "cached_tokens",
+    "cache_write_tokens",
     "total_tokens",
+    "context_tokens",
+    "request_count",
     "provider_tokens",
     "estimated_tokens",
     "cost_usd",

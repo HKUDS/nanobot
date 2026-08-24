@@ -726,6 +726,19 @@ describe("gateway protocol", () => {
       estimated_session_tokens: 2176,
       archived_summary: "Older work was compacted.",
       archived_summary_at: "2026-08-13T10:00:00Z",
+      last_usage: {
+        prompt_tokens: 1200,
+        completion_tokens: 80,
+        total_tokens: 1280,
+        context_tokens: 1200,
+        cached_tokens: 900,
+        request_count: 1,
+        estimated_tokens: 0,
+        generation_ms: 4000,
+        measured_completion_tokens: 80,
+        ttft_ms: 250,
+        timed_requests: 1,
+      },
     })))) as unknown as typeof fetch
 
     try {
@@ -738,7 +751,19 @@ describe("gateway protocol", () => {
         estimatedSessionTokens: 2176,
         archivedSummary: "Older work was compacted.",
         archivedSummaryAt: "2026-08-13T10:00:00Z",
-        lastUsage: null,
+        lastUsage: {
+          prompt_tokens: 1200,
+          completion_tokens: 80,
+          total_tokens: 1280,
+          context_tokens: 1200,
+          cached_tokens: 900,
+          request_count: 1,
+          estimated_tokens: 0,
+          generation_ms: 4000,
+          measured_completion_tokens: 80,
+          ttft_ms: 250,
+          timed_requests: 1,
+        },
       })
     } finally {
       globalThis.fetch = original

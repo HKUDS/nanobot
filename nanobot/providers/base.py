@@ -451,7 +451,7 @@ class LLMUsage:
         }
 
     def to_turn_dict(self) -> dict[str, int]:
-        """Project canonical usage into the WebUI's compact per-turn shape."""
+        """Project canonical usage into the compact WebUI/TUI per-turn shape."""
         result: dict[str, int] = {
             "prompt_tokens": self.input_tokens,
             "completion_tokens": self.output_tokens,
@@ -465,6 +465,12 @@ class LLMUsage:
             result["cached_tokens"] = self.cache_read_tokens
         if self.cache_write_tokens is not None:
             result["cache_write_tokens"] = self.cache_write_tokens
+        if self.generation_ms > 0 and self.measured_output_tokens > 0:
+            result["generation_ms"] = self.generation_ms
+            result["measured_completion_tokens"] = self.measured_output_tokens
+        if self.timed_requests > 0:
+            result["ttft_ms"] = self.ttft_ms
+            result["timed_requests"] = self.timed_requests
         return result
 
     @classmethod

@@ -3319,6 +3319,11 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
+    usage = LLMUsage.reported(
+        input_tokens=80,
+        output_tokens=20,
+        cache_read_tokens=40,
+    ).with_timing(generation_ms=500, ttft_ms=125)
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3326,7 +3331,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         content="",
         event=TurnEndEvent(
             latency_ms=1500,
-            usage=LLMUsage.reported(input_tokens=80, output_tokens=20, cache_read_tokens=40),
+            usage=usage,
             context_window_tokens=128_000,
         ),
     ))
@@ -3336,11 +3341,19 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
             "event": "turn_end",
             "chat_id": "chat-1",
             "latency_ms": 1500,
-            "usage": LLMUsage.reported(
-                input_tokens=80,
-                output_tokens=20,
-                cache_read_tokens=40,
-            ).to_turn_dict(),
+            "usage": {
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+                "total_tokens": 100,
+                "context_tokens": 80,
+                "cached_tokens": 40,
+                "request_count": 1,
+                "estimated_tokens": 0,
+                "generation_ms": 500,
+                "measured_completion_tokens": 20,
+                "ttft_ms": 125,
+                "timed_requests": 1,
+            },
             "context_window_tokens": 128_000,
         },
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
@@ -5307,7 +5320,12 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
 
     from nanobot.session import Session
 
-    usage = LLMUsage.reported(input_tokens=12, output_tokens=3, total_tokens=175)
+    usage = LLMUsage.reported(
+        input_tokens=12,
+        output_tokens=3,
+        total_tokens=175,
+        cache_read_tokens=6,
+    ).with_timing(generation_ms=300, ttft_ms=45)
     session = Session(
         key="websocket:context-route",
         messages=[{"role": "user", "content": "hello"}],
@@ -5328,7 +5346,19 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
     assert response.status_code == 200
     body = json.loads(response.body.decode())
     assert body["replay_messages"] == 1
-    assert body["last_usage"] == usage.to_dict()
+    assert body["last_usage"] == {
+        "prompt_tokens": 12,
+        "completion_tokens": 3,
+        "total_tokens": 175,
+        "context_tokens": 12,
+        "cached_tokens": 6,
+        "request_count": 1,
+        "estimated_tokens": 0,
+        "generation_ms": 300,
+        "measured_completion_tokens": 3,
+        "ttft_ms": 45,
+        "timed_requests": 1,
+    }
     manager.read_session_snapshot.assert_called_once_with(session.key)
 
 

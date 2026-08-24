@@ -38,7 +38,7 @@ def session_context_payload(session: Session) -> dict[str, Any]:
         estimate_message_tokens({"role": "system", "content": summary}) if summary else 0
     )
     stored_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
-    last_usage = stored_usage.to_dict() if stored_usage is not None else None
+    last_usage = stored_usage.to_turn_dict() if stored_usage is not None else None
 
     return {
         "schema_version": 1,

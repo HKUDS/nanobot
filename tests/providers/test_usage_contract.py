@@ -102,7 +102,10 @@ def test_usage_projects_compact_turn_observability_shape() -> None:
         output_tokens=3,
         total_tokens=20,
         cache_read_tokens=4,
-    ) + LLMUsage.estimated(input_tokens=18, output_tokens=2)
+    ).with_timing(generation_ms=250, ttft_ms=50) + LLMUsage.estimated(
+        input_tokens=18,
+        output_tokens=2,
+    ).with_timing(generation_ms=100, ttft_ms=None)
 
     assert usage.to_turn_dict() == {
         "prompt_tokens": 30,
@@ -111,6 +114,10 @@ def test_usage_projects_compact_turn_observability_shape() -> None:
         "context_tokens": 18,
         "request_count": 2,
         "estimated_tokens": 20,
+        "generation_ms": 350,
+        "measured_completion_tokens": 5,
+        "ttft_ms": 50,
+        "timed_requests": 1,
     }
 
 
