@@ -30,7 +30,7 @@ def _fake_resolve_public(hostname, port, family=0, type_=0):
 
 @pytest.mark.asyncio
 async def test_exec_blocks_curl_metadata():
-    tool = ExecTool()
+    tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
         result = await tool.execute(
             command='curl -s -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/'
@@ -41,7 +41,7 @@ async def test_exec_blocks_curl_metadata():
 
 @pytest.mark.asyncio
 async def test_exec_blocks_wget_localhost():
-    tool = ExecTool()
+    tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
         result = await tool.execute(command="wget http://localhost:8080/secret -O /tmp/out")
     assert "Error" in result
@@ -111,6 +111,40 @@ def test_exec_full_workspace_scope_still_blocks_metadata(tmp_path):
     assert "internal/private" in error
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo blocked",
+        "echo http://169.254.169.254/latest/meta-data/",
+    ],
+)
+async def test_exec_full_access_skips_command_guard(tmp_path, command):
+    tool = ExecTool(
+        working_dir=str(tmp_path),
+        restrict_to_workspace=False,
+        deny_patterns=[r"echo\s+blocked"],
+    )
+    result = await tool.execute(command=command)
+
+    assert "Exit code: 0" in result
+    assert "Command blocked" not in result
+
+
+async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=True)
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        result = await tool.execute(
+            command="echo http://169.254.169.254/latest/meta-data/",
+        )
+    finally:
+        reset_workspace_scope(token)
+
+    assert "Exit code: 0" in result
+    assert "Command blocked" not in result
+
+
 @pytest.mark.asyncio
 async def test_exec_allows_normal_commands():
     tool = ExecTool(timeout=5)
@@ -131,7 +165,7 @@ async def test_exec_allows_curl_to_public_url():
 @pytest.mark.asyncio
 async def test_exec_blocks_chained_internal_url():
     """Internal URLs buried in chained commands should still be caught."""
-    tool = ExecTool()
+    tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
         result = await tool.execute(
             command="echo start && curl http://169.254.169.254/latest/meta-data/ && echo done"

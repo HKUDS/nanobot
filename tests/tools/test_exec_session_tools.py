@@ -525,6 +525,7 @@ def test_exec_session_mode_reuses_exec_safety_guard(tmp_path):
     tool = ExecTool(
         working_dir=str(tmp_path),
         deny_patterns=[r"echo\s+blocked"],
+        restrict_to_workspace=True,
         session_manager=manager,
     )
 

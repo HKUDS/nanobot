@@ -470,14 +470,18 @@ class ExecTool(Tool):
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
 
-        guard_error = self._guard_command(
-            command,
-            cwd,
-            restrict_to_workspace=access.restrict_to_workspace,
-            workspace_root=workspace_root,
-        )
-        if guard_error:
-            return guard_error
+        # Full access is an explicit trust decision. Keep the application-level
+        # command guard aligned with the selected access mode instead of
+        # continuing to block commands after workspace restriction is disabled.
+        if access.restrict_to_workspace:
+            guard_error = self._guard_command(
+                command,
+                cwd,
+                restrict_to_workspace=True,
+                workspace_root=workspace_root,
+            )
+            if guard_error:
+                return guard_error
 
         if self.sandbox:
             if _IS_WINDOWS:
