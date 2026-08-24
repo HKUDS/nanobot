@@ -57,7 +57,14 @@ import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  RetryStatus,
+  ToolProgressEvent,
+  UIFileEdit,
+  UIMessage,
+} from "@/lib/types";
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 
@@ -143,6 +150,7 @@ interface AgentActivityClusterProps {
   turnLatencyMs?: number;
   /** User turn start timestamp for live activity before the first trace/reasoning row. */
   startedAtMs?: number;
+  retryStatus?: RetryStatus | null;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
@@ -158,6 +166,7 @@ export function AgentActivityCluster({
   hasBodyBelow,
   turnLatencyMs,
   startedAtMs,
+  retryStatus = null,
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
@@ -219,7 +228,34 @@ export function AgentActivityCluster({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
-  const activityLabel = isTurnStreaming
+  const retryError = retryStatus?.error_kind === "connection"
+    ? t("message.retryConnection", { defaultValue: "Connection failed" })
+    : retryStatus?.error_kind === "timeout"
+      ? t("message.retryTimeout", { defaultValue: "Model timed out" })
+      : retryStatus?.error_kind === "rate_limit"
+        ? t("message.retryRateLimit", { defaultValue: "Rate limited" })
+        : retryStatus?.error_kind === "server"
+          ? t("message.retryServer", { defaultValue: "Model unavailable" })
+          : t("message.retryUnknown", { defaultValue: "Model request failed" });
+  const retryAttempt = retryStatus?.max_attempts
+    ? `${retryStatus.attempt}/${retryStatus.max_attempts}`
+    : String(retryStatus?.attempt ?? "");
+  const retrySeconds = retryStatus?.next_retry_at === undefined
+    ? 0
+    : Math.max(0, Math.ceil(retryStatus.next_retry_at - now / 1000));
+  const activityLabel = retryStatus?.state === "exhausted"
+    ? t("message.retryExhausted", {
+        error: retryError,
+        defaultValue: "{{error}} · ending turn",
+      })
+    : retryStatus?.state === "waiting"
+      ? t("message.retryWaiting", {
+          error: retryError,
+          seconds: retrySeconds,
+          attempt: retryAttempt,
+          defaultValue: "{{error}} · retrying in {{seconds}}s · attempt {{attempt}}",
+        })
+      : isTurnStreaming
     ? t("message.activityWorkingFor", {
         duration: activityDuration,
         defaultValue: "Working for {{duration}}",

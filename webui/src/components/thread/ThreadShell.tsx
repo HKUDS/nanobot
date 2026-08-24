@@ -820,6 +820,7 @@ export function ThreadShell({
     messagesReady,
     isStreaming,
     runStartedAt,
+    retryStatus,
     goalState,
     recoveryState,
     continueRecovery,
@@ -1726,6 +1727,7 @@ export function ThreadShell({
             temporary={temporary}
             isStreaming={turnActive}
             runStartedAt={currentRunStartedAt}
+            retryStatus={retryStatus}
             emptyState={emptyState}
             composer={composerPortalTarget === undefined ? composer : null}
             activeTurnId={viewportTurnId}

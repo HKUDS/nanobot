@@ -3,15 +3,83 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import RetryWaitEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventBus
+from nanobot.bus.runtime_events import RuntimeEventBus, TurnCompleted, TurnRetryStatusChanged
+from nanobot.providers.base import ModelRetryStatus
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+
+
+@pytest.mark.asyncio
+async def test_retry_callbacks_keep_cli_text_and_publish_structured_runtime_state() -> None:
+    bus = MessageBus()
+    runtime_bus = RuntimeEventBus()
+    seen: list[object] = []
+    runtime_bus.subscribe(seen.append)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-1"},
+    )
+    delivery = TurnDeliveryFactory(bus, runtime_bus).create(msg, msg.session_key)
+
+    retry_wait = delivery.retry_wait_callback()
+    retry_status = delivery.retry_status_callback()
+    assert retry_wait is not None
+    assert retry_status is not None
+    await retry_wait("Model request failed, retry in 2s (attempt 1).")
+    await retry_status(ModelRetryStatus(
+        state="waiting",
+        attempt=1,
+        max_attempts=4,
+        error_kind="connection",
+        next_retry_at=123.5,
+    ))
+
+    outbound = await bus.consume_outbound()
+    assert isinstance(outbound.event, RetryWaitEvent)
+    assert outbound.content == "Model request failed, retry in 2s (attempt 1)."
+    assert len(seen) == 1
+    assert isinstance(seen[0], TurnRetryStatusChanged)
+    assert seen[0].error_kind == "connection"
+    assert seen[0].next_retry_at == 123.5
+
+
+@pytest.mark.asyncio
+async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
+    bus = MessageBus()
+    runtime_bus = RuntimeEventBus()
+    seen: list[TurnCompleted] = []
+    runtime_bus.subscribe(seen.append, TurnCompleted)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+    )
+    delivery = TurnDeliveryFactory(bus, runtime_bus).create(msg, msg.session_key)
+    delivery.record_stop_reason("error")
+
+    await delivery.complete(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-a",
+            content="Sorry, I encountered an error calling the AI model.",
+        ),
+        publish_completion=True,
+    )
+
+    assert len(seen) == 1
+    assert seen[0].outcome == "failed"
+    assert seen[0].failure_kind == "model"
 
 
 def test_websocket_lifecycles_get_distinct_internal_owners(tmp_path: Path) -> None:

@@ -66,6 +66,15 @@ export interface RecoveryState {
   can_continue?: boolean;
 }
 
+export interface RetryStatus {
+  state: "waiting" | "recovered" | "exhausted";
+  attempt: number;
+  max_attempts?: number;
+  error_kind: string;
+  next_retry_at?: number;
+  turn_id?: string;
+}
+
 export interface UIMessage {
   id: string;
   role: Role;
@@ -1411,6 +1420,15 @@ export type InboundEvent =
       chat_id: string;
       stream_id?: string;
     } & InboundTurnMetadata)
+  | ({
+      event: "retry_status";
+      chat_id: string;
+      state: "waiting" | "recovered" | "exhausted";
+      attempt: number;
+      max_attempts?: number;
+      error_kind: string;
+      next_retry_at?: number;
+    } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";
       model_name: string;
@@ -1432,6 +1450,9 @@ export type InboundEvent =
       context_window_tokens?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted";
+      failure_kind?: string;
+      failure_message?: string;
     } & InboundTurnMetadata)
   | ({
       event: "goal_status";

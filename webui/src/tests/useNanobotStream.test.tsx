@@ -125,6 +125,9 @@ function fakeClient() {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
       },
+      getRunTurnId() {
+        return null;
+      },
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
       },
@@ -3163,6 +3166,48 @@ describe("useNanobotStream", () => {
       });
     });
     expect(result.current.runStartedAt).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("tracks retry status in place and clears it at turn end", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-retry", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "retry_status",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        state: "waiting",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+        next_retry_at: 123.5,
+      });
+    });
+    expect(result.current.retryStatus).toEqual({
+      state: "waiting",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+      next_retry_at: 123.5,
+      turn_id: "turn-1",
+    });
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "turn_end",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_message: "Model request failed. This turn has ended.",
+      });
+    });
+    expect(result.current.retryStatus).toBeNull();
     expect(result.current.isStreaming).toBe(false);
   });
 

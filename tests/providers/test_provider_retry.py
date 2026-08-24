@@ -8,6 +8,7 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
     LLMResponse,
+    ModelRetryStatus,
     ProviderCallContext,
     ProviderConversationState,
 )
@@ -65,6 +66,40 @@ async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_emits_structured_retry_lifecycle(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(
+            content="network connection failed",
+            finish_reason="error",
+            error_kind="connection",
+        ),
+        LLMResponse(content="ok"),
+    ])
+    statuses: list[ModelRetryStatus] = []
+
+    async def _fake_sleep(_delay: float) -> None:
+        return None
+
+    async def _status(status: ModelRetryStatus) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_status=_status,
+    )
+
+    assert response.content == "ok"
+    assert [status.state for status in statuses] == ["waiting", "recovered"]
+    assert statuses[0].attempt == 1
+    assert statuses[0].max_attempts == 4
+    assert statuses[0].error_kind == "connection"
+    assert statuses[0].next_retry_at is not None
+    assert statuses[1].attempt == 2
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_does_not_retry_non_transient_error(monkeypatch) -> None:
     provider = ScriptedProvider([
         LLMResponse(content="401 unauthorized", finish_reason="error"),
@@ -111,9 +146,14 @@ async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exh
         LLMResponse(content="429 rate limit a", finish_reason="error"),
         LLMResponse(content="429 rate limit b", finish_reason="error"),
         LLMResponse(content="429 rate limit c", finish_reason="error"),
-        LLMResponse(content="503 final server error", finish_reason="error"),
+        LLMResponse(
+            content="503 final server error",
+            finish_reason="error",
+            error_status_code=503,
+        ),
     ])
     progress: list[str] = []
+    statuses: list[ModelRetryStatus] = []
 
     async def _fake_sleep(delay: int) -> None:
         return None
@@ -121,15 +161,25 @@ async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exh
     async def _progress(msg: str) -> None:
         progress.append(msg)
 
+    async def _status(status: ModelRetryStatus) -> None:
+        statuses.append(status)
+
     monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(
         messages=[{"role": "user", "content": "hello"}],
         on_retry_wait=_progress,
+        on_retry_status=_status,
     )
 
     assert response.content == "503 final server error"
     assert progress[-1] == "Model request failed after 4 attempts, giving up."
+    assert statuses[-1] == ModelRetryStatus(
+        state="exhausted",
+        attempt=4,
+        max_attempts=4,
+        error_kind="server",
+    )
 
 
 @pytest.mark.asyncio

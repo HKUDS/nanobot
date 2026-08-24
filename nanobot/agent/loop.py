@@ -56,7 +56,13 @@ from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.llm_usage.context import source_from_request
-from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMUsage,
+    ProviderConversationState,
+    RetryEventCallback,
+    RetryStatusCallback,
+)
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -162,7 +168,8 @@ class TurnContext:
     on_stream: Callable[[str], Awaitable[None]] | None = None
     on_stream_end: Callable[..., Awaitable[None]] | None = None
     on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
-    on_retry_wait: Callable[[str], Awaitable[None]] | None = None
+    on_retry_wait: RetryEventCallback | None = None
+    on_retry_status: RetryStatusCallback | None = None
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
     pending_summary: SessionSummary | None = None
@@ -936,7 +943,8 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
@@ -1179,6 +1187,7 @@ class AgentLoop:
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 retry_wait_callback=on_retry_wait,
+                retry_status_callback=on_retry_status,
                 checkpoint_callback=_checkpoint,
                 consolidate_history=(
                     partial(
@@ -1997,6 +2006,8 @@ class AgentLoop:
             ctx.on_progress = ctx.delivery.progress_callback()
         if ctx.on_retry_wait is None:
             ctx.on_retry_wait = ctx.delivery.retry_wait_callback()
+        if ctx.on_retry_status is None:
+            ctx.on_retry_status = ctx.delivery.retry_status_callback()
 
     async def _run_turn(self, ctx: TurnContext) -> None:
         runtime = ctx.require_runtime()
@@ -2012,6 +2023,7 @@ class AgentLoop:
                 on_stream=ctx.on_stream,
                 on_stream_end=ctx.on_stream_end,
                 on_retry_wait=ctx.on_retry_wait,
+                on_retry_status=ctx.on_retry_status,
                 session=ctx.session,
                 pending_queue=ctx.pending_queue,
                 ephemeral=ctx.ephemeral,
@@ -2089,6 +2101,7 @@ class AgentLoop:
             )
 
     async def _prepare_outbound(self, ctx: TurnContext) -> None:
+        ctx.delivery.record_stop_reason(ctx.stop_reason)
         if ctx.suppress_response:
             ctx.outbound = None
             return

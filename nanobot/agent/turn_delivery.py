@@ -19,7 +19,12 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventPublisher
-from nanobot.providers.base import LLMUsage
+from nanobot.providers.base import (
+    LLMUsage,
+    ModelRetryStatus,
+    RetryEventCallback,
+    RetryStatusCallback,
+)
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -39,7 +44,16 @@ TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
 ProgressCallback = Callable[..., Awaitable[None]]
 StreamCallback = Callable[[str], Awaitable[None]]
 StreamEndCallback = Callable[..., Awaitable[None]]
-RetryWaitCallback = Callable[[str], Awaitable[None]]
+RetryWaitCallback = RetryEventCallback
+ModelRetryStatusCallback = RetryStatusCallback
+
+
+def _turn_outcome(stop_reason: object) -> tuple[str, str | None]:
+    if stop_reason == "error":
+        return "failed", "model"
+    if stop_reason == "tool_error":
+        return "failed", "tool"
+    return "completed", None
 
 
 class TurnDeliveryFactory:
@@ -131,6 +145,7 @@ class TurnDelivery:
     _stream_base_id: str | None = field(init=False, default=None)
     _stream_segment: int = field(init=False, default=0)
     _stream_open: bool = field(init=False, default=False)
+    _stop_reason: str | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.delivery_message = dataclasses.replace(
@@ -174,6 +189,22 @@ class TurnDelivery:
 
         return _on_retry_wait
 
+    def retry_status_callback(self) -> ModelRetryStatusCallback | None:
+        if not self.route.publish_lifecycle:
+            return None
+
+        async def _on_retry_status(status: ModelRetryStatus) -> None:
+            await self.runtime_event_publisher.retry_status_changed(
+                self.delivery_message,
+                self.session_key,
+                state=status.state,
+                attempt=status.attempt,
+                max_attempts=status.max_attempts,
+                error_kind=status.error_kind,
+                next_retry_at=status.next_retry_at,
+            )
+        return _on_retry_status
+
     async def started(self) -> None:
         if self.route.publish_lifecycle:
             await self.runtime_event_publisher.session_turn_started(
@@ -206,6 +237,9 @@ class TurnDelivery:
 
     def record_usage(self, round_usages: list[LLMUsage]) -> None:
         self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages)
+
+    def record_stop_reason(self, stop_reason: str) -> None:
+        self._stop_reason = stop_reason
 
     def background_response(
         self,
@@ -255,11 +289,17 @@ class TurnDelivery:
                 )
             )
         if publish_completion:
+            stop_reason = self._stop_reason
+            if stop_reason is None and response is not None:
+                stop_reason = cast(str | None, response.metadata.get("_stop_reason"))
+            outcome, failure_kind = _turn_outcome(stop_reason)
             await self.runtime_event_publisher.turn_completed(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
+                outcome=outcome,
+                failure_kind=failure_kind,
             )
 
     async def fail(self, *, publish_completion: bool) -> None:
@@ -277,6 +317,8 @@ class TurnDelivery:
                 chat_id=self.lifecycle_message.chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
+                outcome="failed",
+                failure_kind="internal",
             )
 
     async def idle(self) -> None:

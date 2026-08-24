@@ -2540,6 +2540,57 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.placeholder).toBe("Ask nanobot anything")
   })
 
+  test("updates retry state in place and ends failed turns explicitly", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({
+      event: "goal_status",
+      chat_id: "chat",
+      status: "running",
+      turn_id: "turn-1",
+    })
+    const ui = app as unknown as { status: { plainText: string } }
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "waiting",
+      attempt: 1,
+      max_attempts: 4,
+      error_kind: "connection",
+      next_retry_at: Date.now() / 1000 + 5,
+    })
+    expect(ui.status.plainText).toMatch(/^Connection failed · retrying in [45]s · attempt 1\/4/u)
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "waiting",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+      next_retry_at: Date.now() / 1000 + 3,
+    })
+    expect(ui.status.plainText).toContain("attempt 2/4")
+
+    app.accept({
+      event: "turn_end",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      outcome: "failed",
+      failure_kind: "model",
+      failure_message: "Model request failed. This turn has ended.",
+    })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("Model request failed. This turn has ended.")
+    expect(occurrences(frame, "Model request failed. This turn has ended.")).toBe(1)
+    expect(ui.status.plainText).toBe("Ready · Last turn failed")
+  })
+
   test("folds long tool traces without discarding their details", async () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)

@@ -9,6 +9,7 @@ from nanobot.bus.runtime_events import (
     SessionTurnPersisted,
     SessionTurnStarted,
     TurnCompleted,
+    TurnRetryStatusChanged,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
 )
@@ -89,6 +90,39 @@ async def test_runtime_event_publisher_builds_context_from_inbound_message() -> 
     assert isinstance(running, TurnRunStatusChanged)
     assert running.status == "running"
     assert running.started_at == 12.5
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_publisher_emits_structured_retry_status() -> None:
+    bus = RuntimeEventBus()
+    seen: list[TurnRetryStatusChanged] = []
+    publisher = RuntimeEventPublisher(bus)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+        metadata={"turn_id": "turn-1"},
+    )
+    bus.subscribe(seen.append, TurnRetryStatusChanged)
+
+    await publisher.retry_status_changed(
+        msg,
+        "websocket:chat-a",
+        state="waiting",
+        attempt=2,
+        max_attempts=4,
+        error_kind="connection",
+        next_retry_at=123.5,
+    )
+
+    assert len(seen) == 1
+    assert seen[0].context.chat_id == "chat-a"
+    assert seen[0].state == "waiting"
+    assert seen[0].attempt == 2
+    assert seen[0].max_attempts == 4
+    assert seen[0].error_kind == "connection"
+    assert seen[0].next_retry_at == 123.5
 
 
 @pytest.mark.asyncio

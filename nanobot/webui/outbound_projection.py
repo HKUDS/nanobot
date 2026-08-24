@@ -12,6 +12,7 @@ from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     ProgressEvent,
     RecoveryStateEvent,
+    RetryStatusEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -29,6 +30,7 @@ from nanobot.webui.outbound_wire import (
     WebUIWirePayload,
     WebUIWirePersistence,
     encode_recovery_state,
+    encode_retry_status,
     encode_turn_end,
 )
 from nanobot.webui.session_identity import webui_session_key
@@ -147,6 +149,7 @@ class WebUIOutboundProjector:
         if not conns:
             quiet_events = (
                 ProgressEvent,
+                RetryStatusEvent,
                 UserInputEvent,
                 TurnEndEvent,
                 SessionUpdatedEvent,
@@ -184,6 +187,14 @@ class WebUIOutboundProjector:
                 await self._transport.send_payload(
                     msg.chat_id,
                     encode_recovery_state(msg.chat_id, event),
+                    persistence="transient",
+                )
+            return
+        if isinstance(event, RetryStatusEvent):
+            if conns:
+                await self._transport.send_payload(
+                    msg.chat_id,
+                    encode_retry_status(msg.chat_id, event, msg.metadata),
                     persistence="transient",
                 )
             return

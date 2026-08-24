@@ -757,6 +757,65 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("validates structured retry and failed turn events", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const events: InboundEvent[] = []
+      const statuses: string[] = []
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        onEvent: (event) => events.push(event),
+        onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        state: "waiting",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+        next_retry_at: 123.5,
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "turn_end",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_message: "Model request failed. This turn has ended.",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        state: "waiting",
+        attempt: 0,
+        error_kind: "connection",
+      }) })
+
+      expect(events).toHaveLength(2)
+      expect(events[0]?.event).toBe("retry_status")
+      expect(events[1]?.event).toBe("turn_end")
+      expect(statuses).toContain("error:gateway sent an invalid event")
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("reattaches the same generated chat after a transient disconnect", async () => {
     const original = globalThis.WebSocket
     const sockets: FakeSocket[] = []
