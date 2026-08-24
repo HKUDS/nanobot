@@ -1814,7 +1814,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[2].reasoning).toBe("Second reasoning.");
   });
 
-  it("preserves closed reasoning slices when an intervening tool trace is missing", async () => {
+  it("preserves closed reasoning slices when the tool trace is unavailable", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-r8", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -1854,38 +1854,28 @@ describe("useNanobotStream", () => {
       fake.emit("chat-r8", {
         event: "message",
         chat_id: "chat-r8",
-        text: "exec()",
-        kind: "tool_hint",
-        turn_id: "turn-r8",
-        turn_phase: "activity",
-        turn_seq: 5,
-      });
-      fake.emit("chat-r8", {
-        event: "message",
-        chat_id: "chat-r8",
         text: "Final answer.",
         turn_id: "turn-r8",
         turn_phase: "answer",
-        turn_seq: 6,
+        turn_seq: 5,
       });
       fake.emit("chat-r8", {
         event: "turn_end",
         chat_id: "chat-r8",
         turn_id: "turn-r8",
         turn_phase: "complete",
-        turn_seq: 7,
+        turn_seq: 6,
       });
     });
 
     await flushStreamFrame();
 
-    expect(result.current.messages.map((message) => (
-      message.reasoning || message.traces?.[0] || message.content
-    ))).toEqual([
-      "First reasoning.",
-      "Second reasoning.",
-      "exec()",
-      "Final answer.",
+    expect(result.current.messages.map((message) => ({
+      reasoning: message.reasoning,
+      content: message.content,
+    }))).toEqual([
+      { reasoning: "First reasoning.", content: "" },
+      { reasoning: "Second reasoning.", content: "Final answer." },
     ]);
 
     const units = normalizeActivityTimeline(result.current.messages);
@@ -1895,7 +1885,6 @@ describe("useNanobotStream", () => {
     )) : []).toEqual([
       "First reasoning.",
       "Second reasoning.",
-      "exec()",
     ]);
     expect(units[1]).toMatchObject({
       type: "message",
@@ -1993,7 +1982,7 @@ describe("useNanobotStream", () => {
     });
   });
 
-  it("prunes reasoning-only placeholders when a turn ends without an answer", () => {
+  it("preserves reasoning-only output when a turn ends without an answer", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-empty-thinking", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -2015,11 +2004,18 @@ describe("useNanobotStream", () => {
       });
     });
 
-    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "",
+      reasoning: "thinking without final text",
+      reasoningStreaming: false,
+      isStreaming: false,
+    });
     expect(result.current.isStreaming).toBe(false);
   });
 
-  it("drops stale reasoning-only placeholders before sending the next user turn", () => {
+  it("keeps earlier reasoning before sending the next user turn", () => {
     const fake = fakeClient();
     const initialMessages = [
       {
@@ -2040,12 +2036,16 @@ describe("useNanobotStream", () => {
       result.current.send("fine");
     });
 
-    expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0].role).toBe("user");
-    expect(result.current.messages[0].content).toBe("fine");
-    expect(result.current.messages[0].turnId).toEqual(expect.any(String));
-    expect(result.current.messages[0].turnPhase).toBe("user");
-    expect(result.current.messages[0].deliveryStatus).toBe("sending");
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      reasoning: "leftover thinking",
+    });
+    expect(result.current.messages[1].role).toBe("user");
+    expect(result.current.messages[1].content).toBe("fine");
+    expect(result.current.messages[1].turnId).toEqual(expect.any(String));
+    expect(result.current.messages[1].turnPhase).toBe("user");
+    expect(result.current.messages[1].deliveryStatus).toBe("sending");
   });
 
   it("returns the submitted turn identity used by the optimistic row and wire frame", () => {

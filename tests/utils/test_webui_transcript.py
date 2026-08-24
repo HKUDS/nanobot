@@ -480,6 +480,25 @@ def test_replay_preserves_closed_reasoning_slices_before_later_tool_trace() -> N
     ]
 
 
+def test_replay_preserves_closed_reasoning_slices_without_tool_trace() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {"event": "reasoning_delta", "text": "First reasoning.", "turn_seq": 1},
+        {"event": "reasoning_end", "turn_seq": 2},
+        {"event": "reasoning_delta", "text": "Second reasoning.", "turn_seq": 3},
+        {"event": "reasoning_end", "turn_seq": 4},
+        {"event": "message", "text": "Final answer.", "turn_seq": 5},
+        {"event": "turn_end", "turn_seq": 6},
+    ])
+
+    assert [
+        (message.get("reasoning"), message.get("content"))
+        for message in msgs
+    ] == [
+        ("First reasoning.", ""),
+        ("Second reasoning.", "Final answer."),
+    ]
+
+
 def test_replay_keeps_answer_separate_from_reasoning_before_delayed_tool_trace() -> None:
     msgs = replay_transcript_to_ui_messages([
         {"event": "delta", "text": "Visible progress.", "turn_phase": "answer"},

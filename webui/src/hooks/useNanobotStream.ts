@@ -21,7 +21,6 @@ import {
   isReasoningOnlyPlaceholder,
   matchesTurn,
   mergeFileEdits,
-  pruneReasoningOnlyPlaceholders,
   replaceMessageAt,
   stampLastAssistantCompletion,
   stripCoveredFileEditToolHintsFromMessages,
@@ -843,7 +842,6 @@ export function useNanobotStream(
         const completedAt = Date.now();
         setMessages((prev) => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
-          finalized = pruneReasoningOnlyPlaceholders(finalized);
           const latencyMs =
             typeof ev.latency_ms === "number" && ev.latency_ms >= 0
               ? Math.round(ev.latency_ms)
@@ -1187,7 +1185,7 @@ export function useNanobotStream(
         }
         const base = finalizeActiveTurn ? finalizeStreamedTurn(prev) : prev;
         return [
-          ...(sideChannel || continueActiveTurn ? base : pruneReasoningOnlyPlaceholders(base)),
+          ...base,
           {
             id: userMessageId,
             role: "user",

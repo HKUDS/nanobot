@@ -1911,25 +1911,6 @@ def replay_transcript_to_ui_messages(
             and not m.get("media")
         )
 
-    def is_tool_trace_at(index: int) -> bool:
-        m = messages[index] if 0 <= index < len(messages) else None
-        return bool(m and m.get("kind") == "trace")
-
-    def has_tool_trace_after_reasoning_run(index: int) -> bool:
-        next_index = index + 1
-        while next_index < len(messages) and is_reasoning_only_placeholder(messages[next_index]):
-            next_index += 1
-        return is_tool_trace_at(next_index)
-
-    def prune_reasoning_only() -> None:
-        nonlocal messages
-        kept: list[dict[str, Any]] = []
-        for i, m in enumerate(messages):
-            if is_reasoning_only_placeholder(m) and not has_tool_trace_after_reasoning_run(i):
-                continue
-            kept.append(m)
-        messages = kept
-
     def stamp_completion(
         *,
         latency_ms: int | None = None,
@@ -2444,7 +2425,6 @@ def replay_transcript_to_ui_messages(
             for i, m in enumerate(messages):
                 if m.get("isStreaming"):
                     messages[i] = {**m, "isStreaming": False}
-            prune_reasoning_only()
             lat = rec.get("latency_ms")
             usage = rec.get("usage")
             sanitized_usage = (

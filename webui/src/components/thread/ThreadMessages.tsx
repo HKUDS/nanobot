@@ -26,12 +26,8 @@ interface ThreadMessagesProps {
 
 export type DisplayUnit = TurnUnit;
 
-export function buildDisplayUnits(
-  messages: UIMessage[],
-  isStreaming = false,
-  activeTurnId: string | null = null,
-): DisplayUnit[] {
-  return projectActivityTimeline(messages, isStreaming ? activeTurnId : undefined);
+export function buildDisplayUnits(messages: UIMessage[]): DisplayUnit[] {
+  return projectActivityTimeline(messages);
 }
 
 export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
@@ -69,8 +65,8 @@ export function ThreadMessages({
   const { t } = useTranslation();
   const messageListRef = useRef<HTMLDivElement>(null);
   const units = useMemo(
-    () => buildDisplayUnits(messages, isStreaming, activeTurnId),
-    [activeTurnId, isStreaming, messages],
+    () => buildDisplayUnits(messages),
+    [messages],
   );
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
