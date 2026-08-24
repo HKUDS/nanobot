@@ -76,7 +76,7 @@ async def _fake_request_success(
     _ = url, headers, body, verify, proxy, on_content_delta, on_thinking_delta, on_tool_call_delta
     return provider_base.LLMResponse(
         content="hello",
-        usage={"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+        usage=provider_base.LLMUsage.reported(input_tokens=1, output_tokens=2, total_tokens=3),
     )
 
 
@@ -142,8 +142,8 @@ async def test_codex_langfuse_success_records_generation_with_expected_fields(mo
     assert gen.start_kwargs["model"] == "gpt-5.6-sol"
     assert gen.update_calls[-1]["output"] == "hello"
     assert gen.update_calls[-1]["usage_details"] == {
-        "prompt_tokens": 1,
-        "completion_tokens": 2,
+        "input_tokens": 1,
+        "output_tokens": 2,
         "total_tokens": 3,
     }
     assert gen.ended is True
@@ -288,7 +288,7 @@ async def test_codex_langfuse_traces_each_request_during_native_compaction(monke
                 "content": [{"type": "output_text", "text": "old answer"}],
             },
         ],
-        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5, total_tokens=95),
     )
 
     async def fake_request(
@@ -305,12 +305,12 @@ async def test_codex_langfuse_traces_each_request_during_native_compaction(monke
                     model="gpt-5.6-sol",
                     input_items=body["input"],
                     output_items=[compact_item],
-                    usage={"prompt_tokens": 95, "completion_tokens": 2, "total_tokens": 97},
+                    usage=provider_base.LLMUsage.reported(input_tokens=95, output_tokens=2, total_tokens=97),
                 ),
             )
         return provider_base.LLMResponse(
             content="done",
-            usage={"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+            usage=provider_base.LLMUsage.reported(input_tokens=5, output_tokens=1, total_tokens=6),
         )
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -456,7 +456,7 @@ async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch) 
                 "content": [{"type": "output_text", "text": "old answer"}],
             },
         ],
-        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5, total_tokens=95),
     )
     generations: list[_FakeGeneration] = []
 
