@@ -11,7 +11,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
-from nanobot.config.loader import get_config_path
+from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.config.schema import Config
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.mcp_presets_api import custom_mcp_action
 from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -56,6 +57,55 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
     request._nanobot_webui_mutation_payload = payload
     request._nanobot_trusted_proxy_authenticated = True
     return request
+
+
+@pytest.mark.asyncio
+async def test_config_editor_route_reads_and_updates_complete_config(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    refreshed: list[bool] = []
+    router = _router(
+        config_path=config_path,
+        refresh_runtime_config=lambda: refreshed.append(True),
+    )
+
+    read_request = SimpleNamespace(path="/api/settings/config-editor", headers=Headers())
+    read_request._nanobot_trusted_proxy_authenticated = True
+    response = await router.dispatch(None, read_request, "/api/settings/config-editor")
+
+    assert response is not None
+    snapshot = json.loads(response.body)
+    snapshot["config"]["agents"]["defaults"]["botName"] = "Mochi"
+    update_request = _mutation_request(
+        "/api/settings/config-editor/update",
+        {"revision": snapshot["revision"], "config": snapshot["config"]},
+    )
+    updated = await router.dispatch(
+        None,
+        update_request,
+        "/api/settings/config-editor/update",
+    )
+
+    assert updated is not None
+    assert updated.status_code == 200
+    assert json.loads(updated.body)["requires_restart"] is True
+    assert load_config(config_path).agents.defaults.bot_name == "Mochi"
+    assert refreshed == [True]
+
+
+@pytest.mark.asyncio
+async def test_config_editor_update_rejects_plain_http(tmp_path) -> None:
+    router = _router(config_path=tmp_path / "config.json")
+    request = SimpleNamespace(path="/api/settings/config-editor/update", headers=Headers())
+
+    response = await router.dispatch(
+        None,
+        request,
+        "/api/settings/config-editor/update",
+    )
+
+    assert response is not None
+    assert response.status_code == 405
 
 
 @pytest.mark.asyncio

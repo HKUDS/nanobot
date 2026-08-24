@@ -17,6 +17,11 @@ from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
+from nanobot.config.editor import (
+    ConfigEditorError,
+    config_editor_snapshot,
+    update_config_editor,
+)
 from nanobot.pairing import approve_code, deny_code, list_pending
 from nanobot.webui import settings_capabilities as capability_domain
 from nanobot.webui import settings_contracts as contracts
@@ -148,6 +153,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/config-editor/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
     "/api/settings/model-configurations/update",
@@ -287,6 +293,10 @@ class WebUISettingsRouter:
             return self._handle_settings()
         if route == ("root", "usage"):
             return self._handle_settings_usage()
+        if route == ("root", "config-editor"):
+            return self._handle_config_editor()
+        if route == ("root", "config-editor-update"):
+            return self._handle_config_editor_update(request)
 
         domain, action = route
         domain_request = self._domain_request(
@@ -334,6 +344,10 @@ class WebUISettingsRouter:
             return "root", "settings"
         if path == "/api/settings/usage":
             return "root", "usage"
+        if path == "/api/settings/config-editor":
+            return "root", "config-editor"
+        if path == "/api/settings/config-editor/update":
+            return "root", "config-editor-update"
         if action := _MODEL_ROUTES.get(path):
             return "models", action
         if action := _CAPABILITY_ROUTES.get(path):
@@ -428,6 +442,32 @@ class WebUISettingsRouter:
 
     def _handle_settings_usage(self) -> Response:
         return self._json_response(self.settings.read(settings_usage_payload))
+
+    def _handle_config_editor(self) -> Response:
+        return self._json_response(
+            config_editor_snapshot(config_path=self.settings.config.path)
+        )
+
+    def _handle_config_editor_update(self, request: WsRequest) -> Response:
+        payload = _mutation_payload(request)
+        if payload is None:
+            return self._error_response(400, "Configuration draft is required.")
+        try:
+            updated = self.settings.config.run_serialized(
+                lambda config_path: update_config_editor(payload, config_path=config_path)
+            )
+        except ConfigEditorError as exc:
+            detail = exc.message
+            if exc.issues:
+                first = exc.issues[0]
+                detail = f"{detail} {first['path']}: {first['message']}"
+            return self._error_response(exc.status, detail)
+        if self.settings.refresh_runtime_config is not None:
+            self.settings.refresh_runtime_config()
+        updated["requires_restart"] = True
+        return self._json_response(
+            self._with_restart_state(updated, section="advanced")
+        )
 
     def _model_operations(self) -> model_domain.ModelSettingsOperations:
         return model_domain.ModelSettingsOperations(
