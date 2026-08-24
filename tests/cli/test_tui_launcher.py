@@ -19,7 +19,6 @@ from nanobot.cli.tui_launcher import (
     _initial_tui_workspace,
     _resolve_source_tui_command,
     _resolve_tui_command,
-    _wait_for_tui_exit,
     _websocket_chat_id,
     launch_tui,
 )
@@ -150,31 +149,6 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     assert "NANOBOT_TUI_STATE_PATH" not in captured
     assert events == ["spawned", "waited"]
     assert released == [True]
-
-
-def test_launcher_uses_the_tui_exit_status_when_ctrl_c_reaches_both_processes() -> None:
-    waits: list[float | None] = []
-
-    class FakeProcess:
-        def wait(self, timeout: float | None = None) -> int:
-            waits.append(timeout)
-            if timeout is None:
-                raise KeyboardInterrupt
-            return 0
-
-    assert _wait_for_tui_exit(FakeProcess()) == 0  # type: ignore[arg-type]
-    assert waits == [None, tui_launcher._TUI_INTERRUPT_GRACE_SECONDS]
-
-
-def test_launcher_propagates_ctrl_c_when_the_tui_keeps_running() -> None:
-    class FakeProcess:
-        def wait(self, timeout: float | None = None) -> int:
-            if timeout is None:
-                raise KeyboardInterrupt
-            raise subprocess.TimeoutExpired("nanobot-tui", timeout)
-
-    with pytest.raises(KeyboardInterrupt):
-        _wait_for_tui_exit(FakeProcess())  # type: ignore[arg-type]
 
 
 def test_launcher_terminates_the_tui_when_gateway_start_fails(

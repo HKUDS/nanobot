@@ -1653,7 +1653,10 @@ export class NanobotTui {
         this.clearComposer()
         this.status.content = this.readyStatus()
       } else {
-        this.quit()
+        // Finish dispatching the raw ETX before destroy() restores terminal input.
+        // Releasing the terminal from inside this callback can leak the same Ctrl+C
+        // to the parent shell on Windows terminals.
+        setTimeout(() => this.quit(), 0)
       }
       return
     }

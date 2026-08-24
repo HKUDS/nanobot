@@ -63,7 +63,6 @@ _TUI_RELEASE_LIMITS = {
 }
 # Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
 _TUI_DETACH_EXIT_CODE = 90
-_TUI_INTERRUPT_GRACE_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -128,7 +127,7 @@ def launch_tui(
             workspace_override=workspace_override,
             wait_until_ready=False,
         )
-        exit_code = _wait_for_tui_exit(process)
+        exit_code = process.wait()
         if exit_code == _TUI_DETACH_EXIT_CODE:
             lease = gateway.lease
             if lease is not None:
@@ -151,20 +150,6 @@ def launch_tui(
             # gateway's client monitor observes the released last lease and owns
             # the orderly on-demand shutdown.
             lease.release(wait_for_stop=False)
-
-
-def _wait_for_tui_exit(process: subprocess.Popen[Any]) -> int:
-    """Prefer the TUI's status when Ctrl+C also reaches its launcher."""
-    try:
-        return process.wait()
-    except KeyboardInterrupt as interrupt:
-        # Raw terminal clients consume Ctrl+C themselves, but some terminals
-        # also signal the whole foreground process group. Let the TUI's signal
-        # handler finish before deciding whether this was a launcher interrupt.
-        try:
-            return process.wait(timeout=_TUI_INTERRUPT_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            raise interrupt from None
 
 
 def _resolve_tui_command() -> list[str]:

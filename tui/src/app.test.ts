@@ -2379,7 +2379,7 @@ describe("NanobotTui layout", () => {
     expect(exited).toEqual(["chat"])
   })
 
-  test("exits immediately when Ctrl+C is pressed on an idle empty composer", async () => {
+  test("exits after Ctrl+C input dispatch completes on an idle empty composer", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     let closed = false
     const transport = client()
@@ -2393,7 +2393,9 @@ describe("NanobotTui layout", () => {
 
     setup.mockInput.pressCtrlC()
 
-    expect(closed).toBe(true)
+    expect(closed).toBe(false)
+    expect(setup.renderer.isDestroyed).toBe(false)
+    await waitUntil(() => closed)
     expect(setup.renderer.isDestroyed).toBe(true)
   })
 
