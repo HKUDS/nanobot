@@ -49,6 +49,29 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
+def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
+    """Project paths must not invalidate the stable identity and tool contract prefix."""
+    agent_home = tmp_path / "agent-home"
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+    agent_home.mkdir()
+    project_a.mkdir()
+    project_b.mkdir()
+    builder = ContextBuilder(agent_home)
+
+    prompt_a = builder.build_system_prompt(workspace=project_a)
+    prompt_b = builder.build_system_prompt(workspace=project_b)
+    marker = "# Current Project"
+    prefix_a = prompt_a[: prompt_a.index(marker)]
+    prefix_b = prompt_b[: prompt_b.index(marker)]
+
+    assert prefix_a == prefix_b
+    assert "# Tool Usage Notes" in prefix_a
+    assert str(project_a.resolve()) not in prefix_a
+    assert str(project_b.resolve()) not in prefix_b
+    assert prompt_a == builder.build_system_prompt(workspace=project_a)
+
+
 def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
