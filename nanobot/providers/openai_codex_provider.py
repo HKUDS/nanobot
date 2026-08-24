@@ -257,6 +257,7 @@ class OpenAICodexProvider(LLMProvider):
                 *,
                 emit_deltas: bool,
                 trace_name: str,
+                validate: Callable[[LLMResponse], None] | None = None,
             ) -> LLMResponse:
                 wire_body = _without_response_item_ids(request_body)
                 tracer = _start_codex_langfuse_generation(
@@ -292,6 +293,12 @@ class OpenAICodexProvider(LLMProvider):
                             on_thinking_delta=on_thinking_delta if emit_deltas else None,
                             on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
                         )
+                    # Transport succeeding isn't the same as the caller
+                    # accepting the response (e.g. a compaction reply with no
+                    # usable compaction item) - validate before the
+                    # generation is finalized as a success.
+                    if validate is not None:
+                        validate(result)
                 except Exception as exc:
                     tracer.record_error(_codex_error_response(exc))
                     raise
@@ -323,19 +330,17 @@ class OpenAICodexProvider(LLMProvider):
                 }
                 try:
                     compact_result = await _send(
-                        compact_body, emit_deltas=False, trace_name="codex_compaction"
+                        compact_body,
+                        emit_deltas=False,
+                        trace_name="codex_compaction",
+                        validate=_validate_compaction_result,
                     )
                     compact_items = (
                         responses_state_items(compact_result.provider_state)
                         if compact_result.provider_state is not None
                         else None
                     )
-                    if not compact_items or compact_items[-1].get("type") not in {
-                        "compaction",
-                        "compaction_summary",
-                        "context_compaction",
-                    }:
-                        raise RuntimeError("Codex compaction returned no compaction item")
+                    # validate() already raised if this were empty/wrong-typed.
                     body["input"] = [
                         *_retained_compaction_messages(history_items),
                         *compact_items,
@@ -531,6 +536,25 @@ def _retained_compaction_messages(
             break
     retained_reversed.reverse()
     return retained_reversed
+
+
+def _validate_compaction_result(result: LLMResponse) -> None:
+    """Reject a transport-successful compaction reply with no usable item.
+
+    Passed to ``_send`` as its ``validate`` hook so a response Codex sent
+    fine but the caller can't use gets traced as an error, not a success.
+    """
+    compact_items = (
+        responses_state_items(result.provider_state)
+        if result.provider_state is not None
+        else None
+    )
+    if not compact_items or compact_items[-1].get("type") not in {
+        "compaction",
+        "compaction_summary",
+        "context_compaction",
+    }:
+        raise RuntimeError("Codex compaction returned no compaction item")
 
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | None:

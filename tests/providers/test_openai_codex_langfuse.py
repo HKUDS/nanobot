@@ -337,3 +337,166 @@ async def test_codex_langfuse_traces_each_request_during_native_compaction(monke
     assert generations[1].start_kwargs["name"] == "codex_request"
     assert all(gen.ended for gen in generations)
     assert generations[1].update_calls[-1]["output"] == "done"
+
+
+async def test_codex_langfuse_detection_failure_does_not_break_codex_call(monkeypatch) -> None:
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    capture = _capture_codex_warnings(monkeypatch)
+
+    def broken_find_spec(name: str):
+        raise ValueError("corrupt module cache")
+
+    monkeypatch.setattr("importlib.util.find_spec", broken_find_spec)
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex", _fake_request_success
+    )
+
+    provider = OpenAICodexProvider()
+    result = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    assert len(capture.calls) == 1
+    assert "Langfuse tracing failed for Codex request" in capture.calls[0][0]
+
+
+async def test_codex_langfuse_traces_the_actual_wire_body_not_the_prenormalized_one(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    generations: list[_FakeGeneration] = []
+
+    def start_generation(**kwargs: Any) -> _FakeGeneration:
+        gen = _FakeGeneration(kwargs)
+        generations.append(gen)
+        return gen
+
+    _install_fake_langfuse(monkeypatch, start_generation)
+
+    provider = OpenAICodexProvider(
+        default_model="openai-codex/gpt-5.6-sol",
+        extra_body={"model": "openai-codex/override-model"},
+    )
+    state = build_responses_state(
+        provider=provider._responses_state_provider(),
+        model="gpt-5.6-sol",
+        input_items=[{
+            "id": "msg_user",
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Check the weather"}],
+        }],
+        output_items=[
+            {
+                "id": "rs_reasoning",
+                "type": "reasoning",
+                "encrypted_content": "opaque reasoning",
+                "summary": [],
+            },
+            {
+                "id": "fc_read",
+                "type": "function_call",
+                "call_id": "call_read",
+                "name": "read_file",
+                "arguments": '{"path":"weather/SKILL.md"}',
+                "status": "completed",
+            },
+        ],
+    )
+    sent_bodies: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url, headers, body, verify, proxy=None, on_content_delta=None,
+        on_thinking_delta=None, on_tool_call_delta=None,
+    ):
+        sent_bodies.append(body)
+        return provider_base.LLMResponse(content="done")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    await provider.chat(
+        [{"role": "user", "content": "Check the weather"}],
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([{
+                "role": "tool",
+                "tool_call_id": "call_read|fc_read",
+                "content": "weather skill contents",
+            }]),
+        ),
+    )
+
+    assert len(sent_bodies) == 1
+    wire_body = sent_bodies[0]
+    assert all("id" not in item for item in wire_body["input"])
+    assert len(generations) == 1
+    gen = generations[0]
+    # extra_body's model override must be what's traced, not the original
+    # default_model argument that _extra_body overrides.
+    assert gen.start_kwargs["model"] == "override-model"
+    # Traced input must match the actually-sent, ID-stripped items, not the
+    # pre-normalized body that still carries server-assigned "id" fields.
+    assert gen.start_kwargs["input"]["input"] == wire_body["input"]
+    assert all("id" not in item for item in gen.start_kwargs["input"]["input"])
+
+
+async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch) -> None:
+    """A transport-successful compaction with no usable item must not trace as a success."""
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state = build_responses_state(
+        provider=provider._responses_state_provider(),
+        model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old question"}],
+        output_items=[
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "old answer"}],
+            },
+        ],
+        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+    )
+    generations: list[_FakeGeneration] = []
+
+    def start_generation(**kwargs: Any) -> _FakeGeneration:
+        gen = _FakeGeneration(kwargs)
+        generations.append(gen)
+        return gen
+
+    _install_fake_langfuse(monkeypatch, start_generation)
+
+    async def fake_request(
+        url, headers, body, verify, proxy=None, on_content_delta=None,
+        on_thinking_delta=None, on_tool_call_delta=None,
+    ):
+        if body["input"][-1].get("type") == "compaction_trigger":
+            # HTTP/transport succeeds, but with no usable compaction item -
+            # this is the "success" that _call_codex's own validation
+            # rejects and falls back on.
+            return provider_base.LLMResponse(content=None)
+        return provider_base.LLMResponse(content="done")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    response = await provider.chat_with_retry(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "new question"},
+        ],
+        max_tokens=5,
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([
+                {"role": "user", "content": "new question"},
+            ]),
+            context_window_tokens=100,
+        ),
+    )
+
+    assert response.content == "done"  # falls back to the uncompacted request
+    assert len(generations) == 2
+    compaction_gen = generations[0]
+    assert compaction_gen.start_kwargs["name"] == "codex_compaction"
+    assert compaction_gen.update_calls[-1]["level"] == "ERROR"
+    assert compaction_gen.ended is True
