@@ -145,6 +145,20 @@ class WebuiSessionAccess:
         *,
         exclude_session_key: str | None = None,
     ) -> list[SessionMatch]:
+        # 优先走 SQLite+FTS5 检索镜像（更快、返回原文而非截断摘要）；
+        # 镜像不可用/异常时退回逐文件扫描 JSONL（等价于既有行为）。
+        index = getattr(self._sessions, "get_sqlite_index", None)
+        if index is not None:
+            try:
+                sqlite_results = index().search(
+                    query, limit, exclude_session_key=exclude_session_key
+                )
+                if sqlite_results:
+                    return cast(list[SessionMatch], sqlite_results)
+            except Exception:
+                # fall through to JSONL scan
+                pass
+
         needle = query.casefold()
         rows: list[dict[str, Any]] = []
         for row in list_webui_sessions(self._sessions):

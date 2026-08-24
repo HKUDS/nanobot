@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Collection, Generator, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
+import threading
 
 from filelock import FileLock
 from loguru import logger
@@ -28,6 +29,7 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.sqlite_session_index import SessionSqliteIndex
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -1644,6 +1646,68 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
+        # SQLite+ FTS5 检索镜像（JSONL 仍是主存储；db 只做查询/持久化，异常静默降级）
+        self._sqlite_index: SessionSqliteIndex | None = None
+        try:
+            db_path = self.sessions_dir / "_index" / "session.db"
+            self._sqlite_index = SessionSqliteIndex(db_path)
+        except Exception:
+            logger.warning("SQLite session index unavailable; falling back to JSONL scan")
+            self._sqlite_index = None
+        if self._sqlite_index is not None:
+            self._start_index_backfill()
+
+    def get_sqlite_index(self) -> SessionSqliteIndex | None:
+        """Expose the read-only search mirror (None when unavailable)."""
+        return self._sqlite_index
+
+    def _start_index_backfill(self) -> None:
+        """Backfill SQLite index from existing JSONL sessions in a background thread.
+
+        历史会话一次性入索引库；此后每次 save
+        增量同步。幂等：按 (session_key, message_count) 跳过已入库会话。
+        """
+        index = self._sqlite_index
+        if index is None:
+            return
+        jsonl_store = self._jsonl_store
+
+        def _backfill() -> None:
+            try:
+                for info in jsonl_store.list_sessions():
+                    key = info.get("key") if isinstance(info, dict) else None
+                    if not isinstance(key, str) or not key:
+                        continue
+                    if index.has_session(key):
+                        continue
+                    try:
+                        session = jsonl_store.load(key)
+                    except Exception:
+                        continue
+                    if session is None or not session.policy.persist:
+                        continue
+                    self._sync_session_to_index(session)
+                logger.info("SQLite session index backfill complete from {}", jsonl_store.sessions_dir)
+            except Exception:
+                logger.warning("SQLite session index backfill failed", exc_info=True)
+
+        threading.Thread(target=_backfill, daemon=True, name="session-index-backfill").start()
+
+    def _sync_session_to_index(self, session: Session) -> None:
+        index = self._sqlite_index
+        if index is None:
+            return
+        try:
+            index.upsert_session(
+                session.key,
+                title=str(session.metadata.get("title") or ""),
+                created_at=session.created_at.isoformat() if session.created_at else "",
+                updated_at=session.updated_at.isoformat() if session.updated_at else "",
+                metadata=session.metadata,
+            )
+            index.upsert_messages(session.key, session.messages)
+        except Exception:
+            logger.warning("Failed to sync session {} to SQLite index", session.key, exc_info=True)
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1773,6 +1837,7 @@ class SessionManager:
 
         self._store.save(session, fsync=fsync)
         self._remember(session)
+        self._sync_session_to_index(session)
 
     def save_runtime_checkpoint(self, session: Session) -> None:
         """Persist volatile recovery state without rewriting long history."""
@@ -1856,6 +1921,11 @@ class SessionManager:
         deleted = self._store.delete(key)
         if self._delete_observer is not None:
             self._delete_observer(key)
+        if deleted and self._sqlite_index is not None:
+            try:
+                self._sqlite_index.delete_session(key)
+            except Exception:
+                logger.warning("Failed to delete session {} from SQLite index", key, exc_info=True)
         return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
