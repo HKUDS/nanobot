@@ -1813,6 +1813,8 @@ def replay_transcript_to_ui_messages(
                 break
             content = str(candidate.get("content") or "")
             has_answer = len(content) > 0
+            if has_answer:
+                break
             # A completed reasoning field is closed even while its assistant
             # placeholder remains streaming for the rest of the turn.
             if (
@@ -1821,7 +1823,6 @@ def replay_transcript_to_ui_messages(
                     candidate.get("isStreaming")
                     and candidate.get("reasoning") is None
                 )
-                or has_answer
             ):
                 prev[i] = {
                     **candidate,
