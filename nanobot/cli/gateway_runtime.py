@@ -218,6 +218,44 @@ _GATEWAY_HEALTH_MAX_CONNECTIONS = 64
 _GATEWAY_HEALTH_READ_TIMEOUT_SECONDS = 2.0
 
 
+def _build_conditional_trigger_runtime(config: Any, trigger_store: Any) -> Any | None:
+    """Build the ConditionalTriggerRuntime.
+
+    Registers built-in monitors (script_signal).
+    Returns None when no monitor is active (no empty loop).
+    """
+    try:
+        from nanobot.triggers.conditional import (
+            ConditionalTriggerRuntime,
+            build_all_monitors,
+        )
+        from nanobot.triggers.conditional.monitors.script_signal import ScriptSignalMonitor
+
+        monitors = build_all_monitors()
+        # script_signal needs a workspace path; build one if the registry lacks it
+        if "script_signal" not in monitors:
+            monitors["script_signal"] = ScriptSignalMonitor(config.workspace_path)
+
+        # Do not start an idle loop when every monitor is disabled
+        active = {k: v for k, v in monitors.items() if getattr(v.config, "enabled", True)}
+        if not active:
+            return None
+
+        runtime = ConditionalTriggerRuntime(
+            workspace_path=config.workspace_path,
+            trigger_store=trigger_store,
+            monitors=active,
+        )
+        logger.info(
+            "Conditional triggers enabled: {}",
+            ", ".join(sorted(active.keys())),
+        )
+        return runtime
+    except Exception:
+        logger.exception("Failed to build conditional trigger runtime; continuing without it")
+        return None
+
+
 def _print_gateway_health_endpoint(host: str, port: int) -> None:
     """Print a usable health URL and make non-loopback binds explicit."""
     console.print(
@@ -413,6 +451,7 @@ def _run_gateway(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     trigger_store = LocalTriggerStore(config.workspace_path)
+    conditional_runtime = _build_conditional_trigger_runtime(config, trigger_store)
 
     turn_delivery_factory = TurnDeliveryFactory(
         bus,
@@ -908,6 +947,16 @@ def _run_gateway(
                         is_channel_enabled=lambda name: channels.get_channel(name) is not None,
                     ),
                     name="nanobot-local-triggers",
+                ),
+                *(
+                    [
+                        asyncio.create_task(
+                            conditional_runtime.run(),
+                            name="nanobot-conditional-triggers",
+                        )
+                    ]
+                    if conditional_runtime is not None
+                    else []
                 ),
                 asyncio.create_task(
                     _monitor_local_clients(),
