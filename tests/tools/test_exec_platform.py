@@ -527,8 +527,8 @@ class TestSandboxPlatform:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
-    async def test_sandbox_skipped_on_windows(self, backend):
-        """Configured Unix backends preserve the Windows native fallback."""
+    async def test_sandbox_fails_closed_on_windows(self, backend):
+        """No backend runs on Windows, so restricted commands are rejected."""
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"ok", b"")
         mock_proc.returncode = 0
@@ -541,9 +541,8 @@ class TestSandboxPlatform:
             tool = ExecTool(sandbox=backend)
             result = await tool.execute(command="dir")
 
-        assert "ok" in result
-        spawned_cmd = mock_spawn.call_args[0][0]
-        assert backend not in spawned_cmd
+        assert "requires a supported OS-level sandbox" in result
+        mock_spawn.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
