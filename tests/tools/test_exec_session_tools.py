@@ -331,7 +331,7 @@ def test_exec_rejects_unsupported_shell(tmp_path):
 
 
 def test_exec_can_continue_with_stdin(tmp_path):
-    async def run() -> tuple[str, str]:
+    async def run() -> tuple[str, str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
@@ -340,17 +340,21 @@ def test_exec_can_continue_with_stdin(tmp_path):
             "line=sys.stdin.readline(); print('got:' + line.strip(), flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
-        sid = _session_id(initial)
-        result = await stdin_tool.execute(session_id=sid, chars="ping\n", yield_time_ms=1000)
-        return initial, result
+        try:
+            initial = await exec_tool.execute(command=command, yield_time_ms=500)
+            sid = _session_id(initial)
+            result = await stdin_tool.execute(session_id=sid, chars="ping\n", yield_time_ms=1000)
+            observed, final = await _poll_if_running(result, stdin_tool)
+            return initial, observed, final
+        finally:
+            await manager.close_all()
 
-    initial, result = asyncio.run(run())
+    initial, result, final = asyncio.run(run())
     assert "ready" in initial + result
     assert "Process running" in initial
     assert "Elapsed:" in initial
     assert "got:ping" in result
-    assert "Exit code: 0" in result
+    assert "Exit code: 0" in final
     assert "Elapsed:" in result
 
 
