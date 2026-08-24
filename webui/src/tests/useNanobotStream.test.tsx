@@ -70,6 +70,7 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const errorHandlers = new Set<(error: StreamError) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const unsettledRunByChatId = new Map<string, boolean>();
@@ -110,6 +111,11 @@ function fakeClient() {
         statusHandlers.add(handler);
         handler(status);
         return () => statusHandlers.delete(handler);
+      },
+      onRunStatus(handler: (chatId: string, startedAt: number | null) => void) {
+        runStatusHandlers.add(handler);
+        for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
+        return () => runStatusHandlers.delete(handler);
       },
       onError(handler: (error: StreamError) => void) {
         errorHandlers.add(handler);
@@ -153,6 +159,11 @@ function fakeClient() {
     emitStatus(nextStatus: ConnectionStatus) {
       status = nextStatus;
       statusHandlers.forEach((handler) => handler(status));
+    },
+    emitRunStatus(chatId: string, startedAt: number | null) {
+      if (startedAt === null) runStartedAtByChatId.delete(chatId);
+      else runStartedAtByChatId.set(chatId, startedAt);
+      runStatusHandlers.forEach((handler) => handler(chatId, startedAt));
     },
     emitError(error: StreamError) {
       errorHandlers.forEach((handler) => handler(error));
@@ -324,6 +335,39 @@ describe("useNanobotStream", () => {
       id: assistantId,
       content: "partial resumed",
       isStreaming: true,
+    });
+  });
+
+  it("clears stale stream state when the transport resets a run", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-reconnect-reset", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-reconnect-reset", {
+        event: "goal_status",
+        chat_id: "chat-reconnect-reset",
+        status: "running",
+        started_at: 1_700,
+      });
+      fake.emit("chat-reconnect-reset", {
+        event: "delta",
+        chat_id: "chat-reconnect-reset",
+        text: "partial",
+      });
+    });
+    await flushStreamFrame();
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => fake.emitRunStatus("chat-reconnect-reset", null));
+
+    expect(result.current.runStartedAt).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages[0]).toMatchObject({
+      content: "partial",
+      isStreaming: false,
     });
   });
 

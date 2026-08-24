@@ -643,6 +643,28 @@ export function useNanobotStream(
     return () => document.removeEventListener("visibilitychange", flushOnReturn);
   }, [flushPendingStreamEvents]);
 
+  useEffect(() => {
+    if (!chatId) return;
+    return client.onRunStatus((runChatId, startedAt) => {
+      if (runChatId !== chatId) return;
+      if (startedAt !== null) {
+        setRunStartedAt(startedAt);
+        setIsStreaming(true);
+        return;
+      }
+      flushPendingStreamEvents();
+      buffer.current = null;
+      activeAssistantRef.current = null;
+      closedAssistantStreamIdsRef.current.clear();
+      clearActivitySegment();
+      setMessages((prev) => prev.map((message) => (
+        message.isStreaming ? { ...message, isStreaming: false } : message
+      )));
+      setRunStartedAt(null);
+      setIsStreaming(false);
+    });
+  }, [chatId, client, clearActivitySegment, flushPendingStreamEvents]);
+
   // Reset local state when switching chats. Do not reset on every
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.

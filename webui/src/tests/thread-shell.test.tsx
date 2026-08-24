@@ -21,6 +21,7 @@ function makeClient() {
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const runGenerationByChatId = new Map<string, number>();
   const latestRunTurnIdByChatId = new Map<string, string>();
@@ -98,6 +99,13 @@ function makeClient() {
         statusHandlers.delete(handler);
       };
     },
+    onRunStatus: (handler: (chatId: string, startedAt: number | null) => void) => {
+      runStatusHandlers.add(handler);
+      for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
+      return () => {
+        runStatusHandlers.delete(handler);
+      };
+    },
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
     ) => {
@@ -157,11 +165,13 @@ function makeClient() {
       ) {
         advanceRunGeneration(chatId, ev.turn_id);
         runStartedAtByChatId.set(chatId, ev.started_at);
+        for (const h of runStatusHandlers) h(chatId, ev.started_at);
       } else if (
         (ev.event === "goal_status" && ev.status === "idle")
         || ev.event === "turn_end"
       ) {
         runStartedAtByChatId.delete(chatId);
+        for (const h of runStatusHandlers) h(chatId, null);
       }
       if (ev.event === "goal_state") {
         goalStateByChatId.set(chatId, ev.goal_state);
