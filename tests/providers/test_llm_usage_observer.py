@@ -43,6 +43,26 @@ class _BlockingProvider(LLMProvider):
         return "test-model"
 
 
+class _StreamingProvider(LLMProvider):
+    async def chat(self, **_kwargs: object) -> LLMResponse:
+        raise AssertionError("streaming path expected")
+
+    async def chat_stream(self, **kwargs: object) -> LLMResponse:
+        on_thinking_delta = kwargs.get("on_thinking_delta")
+        if callable(on_thinking_delta):
+            await on_thinking_delta("thinking")
+        on_content_delta = kwargs.get("on_content_delta")
+        if callable(on_content_delta):
+            await on_content_delta("ok")
+        return LLMResponse(
+            content="ok",
+            usage=LLMUsage.reported(input_tokens=12, output_tokens=2),
+        )
+
+    def get_default_model(self) -> str:
+        return "test-model"
+
+
 @pytest.mark.asyncio
 async def test_observer_receives_every_retry_attempt() -> None:
     provider = _SequenceProvider(
@@ -112,6 +132,40 @@ async def test_observer_failure_never_breaks_provider_call() -> None:
     )
 
     assert response.content == "ok"
+
+
+@pytest.mark.asyncio
+async def test_stream_observer_records_physical_attempt_timing(monkeypatch) -> None:
+    provider = _StreamingProvider(provider_name="streaming-provider")
+    events: list[LLMCallRecord] = []
+    provider.set_llm_call_observer(events.append)
+    monotonic_values = iter(
+        [
+            1_000_000_000,
+            1_005_000_000,
+            1_012_000_000,
+            1_013_000_000,
+        ]
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.base.time.monotonic_ns",
+        lambda: next(monotonic_values),
+    )
+
+    response = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_content_delta=lambda _delta: asyncio.sleep(0),
+        on_thinking_delta=lambda _delta: asyncio.sleep(0),
+    )
+
+    assert len(events) == 1
+    usage = events[0].usage
+    assert usage is not None
+    assert usage.ttft_ms == 5
+    assert usage.generation_ms == 7
+    assert usage.timed_requests == 1
+    assert usage.measured_output_tokens == 2
+    assert response.usage == usage
 
 
 @pytest.mark.asyncio

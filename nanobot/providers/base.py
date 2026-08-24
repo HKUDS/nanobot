@@ -1259,6 +1259,53 @@ class LLMProvider(ABC):
         """Call chat_stream() and convert unexpected exceptions to error responses."""
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
+        first_output_at_ns: int | None = None
+
+        def _mark_output(delta: str) -> None:
+            nonlocal first_output_at_ns
+            if delta and first_output_at_ns is None:
+                first_output_at_ns = time.monotonic_ns()
+
+        if self._llm_call_observer is not None:
+            content_callback = kwargs.get("on_content_delta")
+            if callable(content_callback):
+                typed_content_callback = cast(
+                    Callable[[str], Awaitable[None]],
+                    content_callback,
+                )
+
+                async def _timed_content_delta(delta: str) -> None:
+                    _mark_output(delta)
+                    await typed_content_callback(delta)
+
+                kwargs["on_content_delta"] = _timed_content_delta
+
+            thinking_callback = kwargs.get("on_thinking_delta")
+            if callable(thinking_callback):
+                typed_thinking_callback = cast(
+                    Callable[[str], Awaitable[None]],
+                    thinking_callback,
+                )
+
+                async def _timed_thinking_delta(delta: str) -> None:
+                    _mark_output(delta)
+                    await typed_thinking_callback(delta)
+
+                kwargs["on_thinking_delta"] = _timed_thinking_delta
+
+        def _attach_stream_timing(response: LLMResponse) -> LLMResponse:
+            if first_output_at_ns is None:
+                return response
+            finished_at_ns = time.monotonic_ns()
+            if response.ttft_ms is None:
+                response.ttft_ms = max(0, round((first_output_at_ns - started_at_ns) / 1_000_000))
+            if response.generation_ms is None:
+                response.generation_ms = max(
+                    1,
+                    round((finished_at_ns - first_output_at_ns) / 1_000_000),
+                )
+            return response
+
         try:
             provider_context = kwargs.pop("provider_context", None)
             if isinstance(provider_context, ProviderCallContext):
@@ -1284,7 +1331,7 @@ class LLMProvider(ABC):
         except Exception as exc:
             response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
         return self._observe_llm_call(
-            response,
+            _attach_stream_timing(response),
             kwargs,
             started_at_ms=started_at_ms,
             started_at_ns=started_at_ns,
