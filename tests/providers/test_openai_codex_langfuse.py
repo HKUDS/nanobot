@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import types
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ import pytest
 
 import nanobot.providers.base as provider_base
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider, _CodexHTTPError
+from nanobot.providers.openai_responses import build_responses_state
 
 LANGFUSE_MISSING_WARNING = (
     "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
@@ -42,15 +44,20 @@ def _capture_codex_warnings(monkeypatch: pytest.MonkeyPatch) -> _WarningCaptureL
 
 
 class _FakeGeneration:
-    def __init__(self, start_kwargs: dict[str, Any]) -> None:
+    def __init__(self, start_kwargs: dict[str, Any], *, fail_update: bool = False) -> None:
         self.start_kwargs = start_kwargs
         self.update_calls: list[dict[str, Any]] = []
         self.ended = False
+        self.end_calls = 0
+        self._fail_update = fail_update
 
     def update(self, **kwargs: Any) -> None:
         self.update_calls.append(kwargs)
+        if self._fail_update:
+            raise RuntimeError("langfuse update failed")
 
     def end(self) -> None:
+        self.end_calls += 1
         self.ended = True
 
 
@@ -195,3 +202,138 @@ async def test_codex_langfuse_tracing_failure_does_not_break_codex_call(monkeypa
     assert len(capture.calls) == 1
     message, _args = capture.calls[0]
     assert "Langfuse tracing failed for Codex request" in message
+
+
+async def test_codex_langfuse_generation_still_ends_when_update_raises(monkeypatch) -> None:
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    capture = _capture_codex_warnings(monkeypatch)
+    generations: list[_FakeGeneration] = []
+
+    def start_generation(**kwargs: Any) -> _FakeGeneration:
+        gen = _FakeGeneration(kwargs, fail_update=True)
+        generations.append(gen)
+        return gen
+
+    _install_fake_langfuse(monkeypatch, start_generation)
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex", _fake_request_success
+    )
+
+    provider = OpenAICodexProvider()
+    result = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert result.content == "hello"
+    assert len(generations) == 1
+    gen = generations[0]
+    assert gen.end_calls == 1  # end() still attempted, exactly once, despite update() raising
+    assert gen.ended is True
+    assert len(capture.calls) == 1
+    assert "Langfuse tracing failed for Codex request" in capture.calls[0][0]
+
+
+async def test_codex_langfuse_generation_ends_on_cancellation(monkeypatch) -> None:
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    generations: list[_FakeGeneration] = []
+
+    def start_generation(**kwargs: Any) -> _FakeGeneration:
+        gen = _FakeGeneration(kwargs)
+        generations.append(gen)
+        return gen
+
+    _install_fake_langfuse(monkeypatch, start_generation)
+
+    async def fake_request_cancelled(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex", fake_request_cancelled
+    )
+
+    provider = OpenAICodexProvider()
+    with pytest.raises(asyncio.CancelledError):
+        await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert len(generations) == 1
+    gen = generations[0]
+    assert gen.end_calls == 1  # closed exactly once even though neither record_* method ran
+    assert gen.ended is True
+    assert gen.update_calls == []  # no output/usage known - nothing to attach
+
+
+async def test_codex_langfuse_traces_each_request_during_native_compaction(monkeypatch) -> None:
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    _mock_codex_token(monkeypatch)
+    generations: list[_FakeGeneration] = []
+
+    def start_generation(**kwargs: Any) -> _FakeGeneration:
+        gen = _FakeGeneration(kwargs)
+        generations.append(gen)
+        return gen
+
+    _install_fake_langfuse(monkeypatch, start_generation)
+
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state_provider = provider._responses_state_provider()
+    state = build_responses_state(
+        provider=state_provider,
+        model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old question"}],
+        output_items=[
+            {"type": "reasoning", "encrypted_content": "old opaque reasoning"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "old answer"}],
+            },
+        ],
+        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+    )
+
+    async def fake_request(
+        url, headers, body, verify, proxy=None, on_content_delta=None,
+        on_thinking_delta=None, on_tool_call_delta=None,
+    ):
+        _ = url, headers, verify, proxy, on_content_delta, on_thinking_delta, on_tool_call_delta
+        if body["input"][-1].get("type") == "compaction_trigger":
+            compact_item = {"type": "compaction", "encrypted_content": "compacted opaque state"}
+            return provider_base.LLMResponse(
+                content=None,
+                provider_state=build_responses_state(
+                    provider=state_provider,
+                    model="gpt-5.6-sol",
+                    input_items=body["input"],
+                    output_items=[compact_item],
+                    usage={"prompt_tokens": 95, "completion_tokens": 2, "total_tokens": 97},
+                ),
+            )
+        return provider_base.LLMResponse(
+            content="done",
+            usage={"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+        )
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    response = await provider.chat_with_retry(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "new question"},
+        ],
+        max_tokens=5,
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([
+                {"role": "user", "content": "new question"},
+            ]),
+            context_window_tokens=100,
+        ),
+    )
+
+    assert response.content == "done"
+    # Both the compaction sub-request and the main request are real Codex
+    # HTTP calls; each must get its own generation, not just the last one.
+    assert len(generations) == 2
+    assert generations[0].start_kwargs["name"] == "codex_compaction"
+    assert generations[1].start_kwargs["name"] == "codex_request"
+    assert all(gen.ended for gen in generations)
+    assert generations[1].update_calls[-1]["output"] == "done"
