@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
+import os
 import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -50,6 +52,88 @@ DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.144.0"
 DEFAULT_ORIGINATOR = "nanobot"
 _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
+
+
+class _CodexGenerationTracer:
+    """Best-effort Langfuse generation for one Codex request.
+
+    No OpenAI SDK client to swap here (raw httpx + OAuth), so this logs
+    manually. Every method swallows its own failures.
+    """
+
+    def __init__(self, generation: Any | None) -> None:
+        self._generation = generation
+
+    def record_success(self, result: LLMResponse) -> None:
+        if self._generation is None:
+            return
+        output: Any = result.content
+        if result.tool_calls:
+            output = {
+                "content": result.content,
+                "tool_calls": [
+                    {"name": call.name, "arguments": call.arguments}
+                    for call in result.tool_calls
+                ],
+            }
+        self._update(output=output, usage_details=result.usage or None)
+
+    def record_error(self, response: LLMResponse) -> None:
+        if self._generation is None:
+            return
+        self._update(
+            output=response.content,
+            level="ERROR",
+            status_message=response.content,
+        )
+
+    def _update(self, **kwargs: Any) -> None:
+        generation = self._generation
+        if generation is None:
+            return
+        try:
+            generation.update(**{k: v for k, v in kwargs.items() if v is not None})
+            generation.end()
+        except Exception as exc:
+            logger.warning("Langfuse tracing failed for Codex request: {}", exc)
+
+
+def _start_codex_langfuse_generation(
+    *,
+    model: str,
+    body: dict[str, Any],
+) -> _CodexGenerationTracer:
+    """Start a Langfuse generation for a Codex request, or a no-op tracer."""
+    if not (os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse")):
+        if os.environ.get("LANGFUSE_SECRET_KEY"):
+            logger.warning(
+                "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+                "run `nanobot plugins enable langfuse` to enable tracing"
+            )
+        return _CodexGenerationTracer(None)
+
+    try:
+        from langfuse import get_client
+
+        langfuse = get_client()
+        generation = langfuse.start_generation(
+            name="codex_request",
+            model=model,
+            input={
+                "instructions": body.get("instructions"),
+                "input": body.get("input"),
+                "tools": body.get("tools"),
+            },
+            model_parameters={
+                key: body[key]
+                for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
+                if key in body
+            },
+        )
+        return _CodexGenerationTracer(generation)
+    except Exception as exc:
+        logger.warning("Langfuse tracing failed for Codex request: {}", exc)
+        return _CodexGenerationTracer(None)
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -142,6 +226,7 @@ class OpenAICodexProvider(LLMProvider):
         stage = "oauth_token"
         native_compaction_applied = False
         native_compaction_state: ProviderConversationState | None = None
+        tracer: _CodexGenerationTracer | None = None
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(
@@ -240,6 +325,7 @@ class OpenAICodexProvider(LLMProvider):
                     )
 
             stage = "codex_request"
+            tracer = _start_codex_langfuse_generation(model=_strip_model_prefix(model), body=body)
             result = await _send(body, emit_deltas=True)
             result.provider_compaction_applied = (
                 result.provider_compaction_applied or native_compaction_applied
@@ -247,9 +333,12 @@ class OpenAICodexProvider(LLMProvider):
             if native_compaction_state is not None:
                 result.provider_compaction_state = native_compaction_state
                 result.provider_compaction_scope = "prior_context"
+            tracer.record_success(result)
             return result
         except Exception as e:
             response = _codex_error_response(e)
+            if tracer is not None:
+                tracer.record_error(response)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
             logger.warning(
                 "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
