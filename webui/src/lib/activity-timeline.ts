@@ -53,8 +53,9 @@ export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
  * Messages use ``turnSeq`` when every row in the turn provides it and fall
  * back to stable arrival order otherwise. Only contiguous rows of the same
  * display class are combined: activity rows share a collapsible surface, and
- * adjacent answer slices share an answer bubble. An answer is always a hard
- * boundary between activity surfaces.
+ * adjacent answer slices share an answer bubble. A visible answer is always a
+ * hard boundary between activity surfaces; completed empty transport frames
+ * have no display semantics and therefore create no boundary.
  */
 export function normalizeActivityTimeline(
   messages: UIMessage[],
@@ -71,10 +72,23 @@ export function normalizeActivityTimeline(
       return;
     }
 
-    units.push(...projectOrderedTurn(
+    const projected = projectOrderedTurn(
       orderMessagesByTurnSeq(turnMessages),
       activeTurnStartedAtMs,
-    ));
+    );
+    if (projected.length) {
+      units.push(...projected);
+    } else if (units.length) {
+      // A turn containing only completed transport placeholders has no
+      // display surface. Keep its source count on the preceding prompt so
+      // persisted fork-boundary offsets still map to a visible unit.
+      const lastIndex = units.length - 1;
+      const last = units[lastIndex];
+      units[lastIndex] = {
+        ...last,
+        sourceMessageCount: last.sourceMessageCount + turnMessages.length,
+      };
+    }
 
     turnMessages = [];
     activeTurnId = undefined;
@@ -112,6 +126,8 @@ function projectOrderedTurn(
   let activity: UIMessage[] = [];
   let activitySourceMessageCount = 0;
   let answers: UIMessage[] = [];
+  let answerSourceMessageCount = 0;
+  let leadingNoopSourceMessageCount = 0;
 
   const flushActivity = () => {
     if (!activity.length) return;
@@ -130,18 +146,39 @@ function projectOrderedTurn(
     units.push({
       type: "message",
       message: mergeAssistantAnswers(answers),
-      sourceMessageCount: answers.length,
+      sourceMessageCount: answerSourceMessageCount,
     });
     answers = [];
+    answerSourceMessageCount = 0;
+  };
+
+  const claimLeadingNoops = () => {
+    const count = leadingNoopSourceMessageCount;
+    leadingNoopSourceMessageCount = 0;
+    return count;
   };
 
   const appendActivity = (message: UIMessage, sourceMessageCount: number) => {
     flushAnswers();
     activity.push(message);
-    activitySourceMessageCount += sourceMessageCount;
+    activitySourceMessageCount += sourceMessageCount + claimLeadingNoops();
+  };
+
+  const absorbDisplayNoop = () => {
+    if (activity.length) {
+      activitySourceMessageCount += 1;
+    } else if (answers.length) {
+      answerSourceMessageCount += 1;
+    } else {
+      leadingNoopSourceMessageCount += 1;
+    }
   };
 
   for (const message of messages) {
+    if (isCompletedDisplayNoop(message)) {
+      absorbDisplayNoop();
+      continue;
+    }
     if (isRawActivity(message)) {
       appendActivity(message, 1);
       continue;
@@ -153,7 +190,9 @@ function projectOrderedTurn(
         appendActivity(reasoningOnlyMessageFromAnswer(message), 0);
       }
       flushActivity();
+      answerSourceMessageCount += claimLeadingNoops();
       answers.push(stripInlineReasoning(message));
+      answerSourceMessageCount += 1;
       continue;
     }
     appendActivity(message, 1);
@@ -182,6 +221,26 @@ function projectOrderedTurn(
 
 function isRawActivity(message: UIMessage): boolean {
   return isAgentActivityMember(message);
+}
+
+/** A completed transport placeholder carries ordering/accounting metadata but
+ * no user-visible semantics, so it cannot define a display boundary. */
+function isCompletedDisplayNoop(message: UIMessage): boolean {
+  return (
+    message.role === "assistant"
+    && message.kind !== "trace"
+    && message.activityKind !== "model"
+    && !message.isStreaming
+    && !message.reasoningStreaming
+    && message.content.trim().length === 0
+    && !message.reasoning?.trim()
+    && !message.media?.length
+    && !message.images?.length
+    && !message.traces?.some((line) => line.trim().length > 0)
+    && !message.toolEvents?.length
+    && !message.fileEdits?.length
+    && !message.sessionMessage
+  );
 }
 
 function isAssistantAnswer(message: UIMessage): boolean {

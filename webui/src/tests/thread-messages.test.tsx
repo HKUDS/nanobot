@@ -324,6 +324,158 @@ describe("ThreadMessages", () => {
       .toBeTruthy();
   });
 
+  it("ignores a completed empty answer frame without splitting contiguous activity", () => {
+    const turnId = "turn-empty-answer-frame";
+    const segmentId = "activity-1";
+    const messages: UIMessage[] = [
+      {
+        id: "user",
+        role: "user",
+        content: "reply ok, then check",
+        turnId,
+        turnPhase: "user",
+        turnSeq: 1,
+        createdAt: 1,
+      },
+      {
+        id: "reasoning-before",
+        role: "assistant",
+        content: "",
+        reasoning: "Planning confirmation",
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "reasoning",
+        turnSeq: 3,
+        createdAt: 2,
+      },
+      {
+        id: "ok",
+        role: "assistant",
+        content: "ok",
+        reasoning: "Preparing first query",
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 7,
+        createdAt: 3,
+      },
+      {
+        id: "first-tool",
+        role: "tool",
+        kind: "trace",
+        content: "first()",
+        traces: ["first()"],
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "activity",
+        turnSeq: 9,
+        createdAt: 4,
+      },
+      {
+        id: "empty-answer-frame",
+        role: "assistant",
+        content: "",
+        isStreaming: false,
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 10,
+        createdAt: 5,
+      },
+      {
+        id: "second-tool",
+        role: "tool",
+        kind: "trace",
+        content: "second()",
+        traces: ["second()"],
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "activity",
+        turnSeq: 12,
+        createdAt: 6,
+      },
+      {
+        id: "final",
+        role: "assistant",
+        content: "finished",
+        reasoning: "Summarizing result",
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 113,
+        createdAt: 7,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+    expect(units.map((unit) => (
+      unit.type === "activity"
+        ? `activity:${unit.messages.map((message) => message.id).join(",")}`
+        : unit.message.id
+    ))).toEqual([
+      "user",
+      "activity:reasoning-before,ok-reasoning",
+      "ok",
+      "activity:first-tool,second-tool,final-reasoning",
+      "final",
+    ]);
+    expect(units.map((unit) => unit.sourceMessageCount)).toEqual([1, 1, 1, 3, 1]);
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+
+    const activityShells = screen.getAllByRole("button", { name: /worked/i });
+    const ok = screen.getByText("ok");
+    const final = screen.getByText("finished");
+    expect(activityShells).toHaveLength(2);
+    expect(activityShells[0].compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(ok.compareDocumentPosition(activityShells[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(activityShells[1].compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it("keeps empty frame source counts on the nearest visible unit", () => {
+    const emptyFrame: UIMessage = {
+      id: "empty",
+      role: "assistant",
+      content: "",
+      isStreaming: false,
+      turnPhase: "answer",
+      createdAt: 2,
+    };
+    const answerUnits = buildDisplayUnits([
+      { id: "a1", role: "assistant", content: "first", createdAt: 1 },
+      emptyFrame,
+      { id: "a2", role: "assistant", content: "second", createdAt: 3 },
+    ]);
+    expect(answerUnits).toMatchObject([{
+      type: "message",
+      message: { content: "first\n\nsecond" },
+      sourceMessageCount: 3,
+    }]);
+
+    const emptyTurnUnits = buildDisplayUnits([
+      { id: "user", role: "user", content: "hello", createdAt: 1 },
+      emptyFrame,
+    ]);
+    expect(emptyTurnUnits).toMatchObject([{
+      type: "message",
+      message: { id: "user" },
+      sourceMessageCount: 2,
+    }]);
+
+    const streamingUnits = buildDisplayUnits([{
+      ...emptyFrame,
+      id: "streaming-placeholder",
+      isStreaming: true,
+    }]);
+    expect(streamingUnits).toMatchObject([{
+      type: "activity",
+      messages: [{ id: "streaming-placeholder" }],
+      sourceMessageCount: 1,
+    }]);
+  });
+
   it("offers a follow-up action for text selected within one completed answer", async () => {
     const onQuoteSelection = vi.fn();
     render(
