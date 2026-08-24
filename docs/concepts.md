@@ -128,8 +128,11 @@ nanobot uses two related stores:
 |---|---|---|
 | Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` | Recent conversation turns replayed into context |
 | Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
+| Subagent transcripts | `<workspace>/memory/subagents/*.jsonl` | Full conversation transcript of each background subagent run |
 
 Dream is a periodic consolidation job. It reads accumulated history and updates workspace memory so useful context can survive beyond short session replay.
+
+Subagent transcripts are written per run at `<workspace>/memory/subagents/<task_id>.jsonl`, one JSON message object per line (the same shape as session history, plus a trailing metadata record with the stop reason). They are kept separate from sessions and `history.jsonl`, so they never leak into main-agent prompt injection or Dream consolidation. The store keeps the newest 50 transcripts per workspace. The main agent can read a transcript with the `read_file` tool using the task id returned by the `spawn` tool, or by listing the `memory/subagents/` directory. Transcript content may include tool outputs the subagent processed, so treat it as untrusted data when re-reading it into a prompt.
 
 The configured workspace contains a `.nanobot/workspace-id` file. It contains only an
 opaque random identifier—never conversation content or credentials. Keep it with workspace
