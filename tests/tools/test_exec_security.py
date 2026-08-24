@@ -47,6 +47,36 @@ async def test_exec_blocks_wget_localhost():
     assert "Error" in result
 
 
+@pytest.mark.asyncio
+async def test_exec_restricted_workspace_requires_os_sandbox(tmp_path):
+    """Restricted shell execution must not rely on command-string parsing alone."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    result = await tool.execute(command="echo should-not-run")
+
+    assert "requires a supported OS-level sandbox" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+async def test_exec_restricted_workspace_blocks_relative_symlink_escape(tmp_path):
+    """A relative symlink must not let a restricted command read outside the workspace."""
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside-secret", encoding="utf-8")
+    (workspace / "link.txt").symlink_to(outside / "secret.txt")
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    result = await tool.execute(command="cat link.txt")
+
+    assert "requires a supported OS-level sandbox" in result
+    assert "outside-secret" not in result
+
+
 def test_exec_full_workspace_scope_allows_loopback(tmp_path):
     tool = ExecTool(working_dir=str(tmp_path))
     scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
@@ -254,27 +284,41 @@ async def test_exec_blocks_absolute_rm_via_hijacked_working_dir(tmp_path):
     assert victim.exists(), "victim file must not have been deleted"
 
 
-@pytest.mark.asyncio
-async def test_exec_allows_working_dir_within_workspace(tmp_path):
+def test_exec_allows_working_dir_within_workspace(tmp_path):
     """A working_dir that is a subdirectory of the workspace is fine."""
     workspace = tmp_path / "workspace"
     subdir = workspace / "project"
     subdir.mkdir(parents=True)
-    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(subdir))
-    assert "ok" in result
-    assert "outside the configured workspace" not in result
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, sandbox="bwrap")
+    with (
+        patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+        patch(
+            "nanobot.agent.tools.shell.wrap_command",
+            side_effect=lambda _sandbox, command, *_args, **_kwargs: command,
+        ) as mock_wrap,
+    ):
+        prepared = tool._prepare_command("echo ok", working_dir=str(subdir))
+
+    assert not isinstance(prepared, str)
+    assert mock_wrap.call_args.args[3] == str(subdir.resolve())
 
 
-@pytest.mark.asyncio
-async def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
+def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
     """Passing working_dir equal to the workspace root must be allowed."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(workspace))
-    assert "ok" in result
-    assert "outside the configured workspace" not in result
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, sandbox="bwrap")
+    with (
+        patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+        patch(
+            "nanobot.agent.tools.shell.wrap_command",
+            side_effect=lambda _sandbox, command, *_args, **_kwargs: command,
+        ),
+    ):
+        prepared = tool._prepare_command("echo ok", working_dir=str(workspace))
+
+    assert not isinstance(prepared, str)
+    assert prepared.cwd == str(workspace.resolve())
 
 
 @pytest.mark.asyncio

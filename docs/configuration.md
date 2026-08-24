@@ -2077,7 +2077,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 ## Security
 
 > [!TIP]
-> For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides process-level isolation for shell commands.
+> For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides the process-level isolation required for restricted shell commands. Restricted shell execution fails closed when no supported OS-level sandbox is available.
 
 For API keys, tokens, and other secrets, see [Environment Variables for Secrets](#environment-variables-for-secrets) — avoid storing them directly in `config.json`.
 
@@ -2093,9 +2093,9 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, enables nanobot's application-level workspace guards for workspace-aware tools. File tools resolve paths under the active workspace; selected internal roots can be added as read-only or explicitly write-enabled roots, and media uploads are read-only by default. Shell execution rejects workspace-external `working_dir` values and applies best-effort command path checks, but this is not an OS sandbox. |
+| `tools.restrictToWorkspace` | `false` | When `true`, enables nanobot's application-level workspace guards for workspace-aware tools. File tools resolve paths under the active workspace; selected internal roots can be added as read-only or explicitly write-enabled roots, and media uploads are read-only by default. Restricted shell execution also requires a supported OS-level sandbox; it rejects workspace-external `working_dir` values and fails closed when no process boundary is available. |
 | `tools.maxSessionMessagesPerMinute` | `6` | Maximum messages one source session may send during any rolling 60-second window. Additional sends are rejected to stop runaway agent loops. |
-| `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables workspace restriction for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
+| `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables workspace restriction for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). On unsupported platforms, restricted shell execution fails closed rather than falling back to an unsandboxed native shell. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
