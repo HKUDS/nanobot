@@ -71,6 +71,11 @@ function resolveCopy(
         title: t("errors.turnRejected.title"),
         body: t("errors.turnRejected.body"),
       };
+    case "model_request_failed":
+      return {
+        title: t("errors.modelRequestFailed.title"),
+        body: t("errors.modelRequestFailed.body"),
+      };
     default: {
       // Exhaustiveness guard: if a new StreamError kind is added, TS will
       // complain here until we add a corresponding i18n branch.

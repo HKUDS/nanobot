@@ -1542,6 +1542,10 @@
     "turnRejected": {
       "title": "A mensagem não foi enviada",
       "body": "O gateway rejeitou esta mensagem. Revise o texto ou os anexos e tente novamente."
+    },
+    "modelRequestFailed": {
+      "title": "A solicitação ao modelo falhou",
+      "body": "Este turno foi encerrado. Envie uma nova mensagem para tentar novamente."
     }
   },
   "workspace": {

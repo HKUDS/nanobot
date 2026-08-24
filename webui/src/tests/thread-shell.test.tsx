@@ -3793,6 +3793,49 @@ describe("ThreadShell", () => {
     });
   });
 
+  it("keeps a terminal model failure visible until the next user action", async () => {
+    const client = makeClient();
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-model-failure")}
+          title="Chat model failure"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await act(async () => {});
+    act(() => {
+      client._emitChat("chat-model-failure", {
+        event: "turn_end",
+        chat_id: "chat-model-failure",
+        turn_id: "turn-model-failure",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_message: "Unlocalized server failure",
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Model request failed");
+    expect(banner).toHaveTextContent("This turn has ended. Send a new message to try again.");
+    expect(banner).not.toHaveTextContent("Unlocalized server failure");
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "try again" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
   it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {
     const client = makeClient();
 

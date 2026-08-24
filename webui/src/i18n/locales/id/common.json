@@ -1528,6 +1528,10 @@
     "turnRejected": {
       "title": "Pesan tidak terkirim",
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
+    },
+    "modelRequestFailed": {
+      "title": "Permintaan model gagal",
+      "body": "Giliran ini telah berakhir. Kirim pesan baru untuk mencoba lagi."
     }
   },
   "workspace": {

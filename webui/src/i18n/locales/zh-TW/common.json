@@ -1528,6 +1528,10 @@
     "turnRejected": {
       "title": "訊息未傳送",
       "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
+    },
+    "modelRequestFailed": {
+      "title": "模型請求失敗",
+      "body": "本輪已結束。請傳送新訊息以重試。"
     }
   },
   "workspace": {

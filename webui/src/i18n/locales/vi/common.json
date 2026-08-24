@@ -1528,6 +1528,10 @@
     "turnRejected": {
       "title": "Tin nhắn chưa được gửi",
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
+    },
+    "modelRequestFailed": {
+      "title": "Yêu cầu mô hình không thành công",
+      "body": "Lượt này đã kết thúc. Hãy gửi tin nhắn mới để thử lại."
     }
   },
   "workspace": {

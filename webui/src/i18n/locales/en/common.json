@@ -1542,6 +1542,10 @@
     "turnRejected": {
       "title": "Message was not sent",
       "body": "The gateway rejected this message. Review its text or attachments, then try again."
+    },
+    "modelRequestFailed": {
+      "title": "Model request failed",
+      "body": "This turn has ended. Send a new message to try again."
     }
   },
   "workspace": {

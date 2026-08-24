@@ -369,6 +369,7 @@ export function useNanobotStream(
     // still be shown in the mounted thread, but cannot roll back any turn.
     if (!chatId || (err.chatId && err.chatId !== chatId)) return;
     setStreamError(err);
+    if (err.kind === "model_request_failed") return;
     if (!err.turnId) return;
 
     const rejectedTurnId = err.turnId;
@@ -856,6 +857,7 @@ export function useNanobotStream(
 
       if (ev.event === "goal_status") {
         if (ev.status === "running" && typeof ev.started_at === "number") {
+          setStreamError(null);
           setRunStartedAt(ev.started_at);
           setIsStreaming(true);
         } else {
@@ -898,6 +900,14 @@ export function useNanobotStream(
         // Definitive signal that the turn is fully complete, so stop the
         // loading indicator immediately.
         setIsStreaming(false);
+        const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model";
+        if (modelRequestFailed) {
+          setStreamError({
+            kind: "model_request_failed",
+            chatId,
+            ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
+          });
+        }
         const completedAt = Date.now();
         setMessages((prev) => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
@@ -926,8 +936,12 @@ export function useNanobotStream(
         });
         suppressStreamUntilTurnEndRef.current = false;
         notifyInBackground(
-          ev.outcome === "failed"
-            ? ev.failure_message || "Model request failed. This turn has ended."
+          modelRequestFailed
+            ? t("errors.modelRequestFailed.body", {
+                defaultValue: "This turn has ended. Send a new message to try again.",
+              })
+            : ev.outcome === "failed"
+              ? ev.failure_message || "This turn failed and has ended."
             : t("recovery.completed", { defaultValue: "Task completed" }),
         );
         onTurnEnd?.();
@@ -1221,6 +1235,7 @@ export function useNanobotStream(
       // them via ``media`` paths.
       if (!hasAttachments && !content.trim()) return null;
 
+      setStreamError(null);
       const sideChannel = options?.sideChannel === true;
       const finalizeActiveTurn = options?.finalizeActiveTurn === true;
       const continueActiveTurn = options?.continueActiveTurn === true;

@@ -1528,6 +1528,10 @@
     "turnRejected": {
       "title": "Le message n’a pas été envoyé",
       "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
+    },
+    "modelRequestFailed": {
+      "title": "La requête au modèle a échoué",
+      "body": "Ce tour est terminé. Envoyez un nouveau message pour réessayer."
     }
   },
   "workspace": {
