@@ -52,19 +52,22 @@ OPENAI_CODEX_CATALOG_CLIENT_VERSION = "99.99.99"
 DEFAULT_ORIGINATOR = "nanobot"
 
 
+_LANGFUSE_TRACE_WARNING = "Langfuse tracing failed for Codex request: {}"
+
+
 class _CodexGenerationTracer:
     """Best-effort Langfuse generation for one Codex request.
 
     No OpenAI SDK client to swap here (raw httpx + OAuth), so this logs
-    manually. Every method swallows its own failures.
+    manually. Failures never break the real call, and finalization is
+    idempotent so a cancelled request can't double-end.
     """
 
     def __init__(self, generation: Any | None) -> None:
         self._generation = generation
+        self._ended = False
 
     def record_success(self, result: LLMResponse) -> None:
-        if self._generation is None:
-            return
         output: Any = result.content
         if result.tool_calls:
             output = {
@@ -74,63 +77,76 @@ class _CodexGenerationTracer:
                     for call in result.tool_calls
                 ],
             }
-        self._update(output=output, usage_details=result.usage or None)
+        self._finish(output=output, usage_details=result.usage or None)
 
     def record_error(self, response: LLMResponse) -> None:
-        if self._generation is None:
-            return
-        self._update(
+        self._finish(
             output=response.content,
             level="ERROR",
             status_message=response.content,
         )
 
-    def _update(self, **kwargs: Any) -> None:
+    def close_if_open(self) -> None:
+        """Best-effort ``.end()`` for a generation neither method above closed."""
+        self._finish()
+
+    def _finish(self, **kwargs: Any) -> None:
         generation = self._generation
-        if generation is None:
+        if generation is None or self._ended:
             return
+        self._ended = True
+        filtered = {k: v for k, v in kwargs.items() if v is not None}
         try:
-            generation.update(**{k: v for k, v in kwargs.items() if v is not None})
+            if filtered:
+                generation.update(**filtered)
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+        try:
             generation.end()
         except Exception as exc:
-            logger.warning("Langfuse tracing failed for Codex request: {}", exc)
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
 
 
 def _start_codex_langfuse_generation(
     *,
+    name: str,
     model: str,
     body: dict[str, Any],
 ) -> _CodexGenerationTracer:
-    """Start a Langfuse generation for a Codex request, or a no-op tracer."""
-    if not (os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse")):
+    """Start a Langfuse generation for a Codex request, or a no-op tracer.
+
+    Detection and the SDK call share one try/except so a broken
+    ``find_spec`` can't fail the Codex request itself.
+    """
+    try:
+        if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+            from langfuse import get_client
+
+            langfuse = get_client()
+            generation = langfuse.start_generation(
+                name=name,
+                model=model,
+                input={
+                    "instructions": body.get("instructions"),
+                    "input": body.get("input"),
+                    "tools": body.get("tools"),
+                },
+                model_parameters={
+                    key: body[key]
+                    for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
+                    if key in body
+                },
+            )
+            return _CodexGenerationTracer(generation)
+
         if os.environ.get("LANGFUSE_SECRET_KEY"):
             logger.warning(
                 "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
                 "run `nanobot plugins enable langfuse` to enable tracing"
             )
         return _CodexGenerationTracer(None)
-
-    try:
-        from langfuse import get_client
-
-        langfuse = get_client()
-        generation = langfuse.start_generation(
-            name="codex_request",
-            model=model,
-            input={
-                "instructions": body.get("instructions"),
-                "input": body.get("input"),
-                "tools": body.get("tools"),
-            },
-            model_parameters={
-                key: body[key]
-                for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
-                if key in body
-            },
-        )
-        return _CodexGenerationTracer(generation)
     except Exception as exc:
-        logger.warning("Langfuse tracing failed for Codex request: {}", exc)
+        logger.warning(_LANGFUSE_TRACE_WARNING, exc)
         return _CodexGenerationTracer(None)
 
 
@@ -246,7 +262,6 @@ class OpenAICodexProvider(LLMProvider):
                     input_budget,
                     provider_context.context_window_tokens - max_tokens - CONTEXT_SAFETY_BUFFER,
                 )
-        tracer: _CodexGenerationTracer | None = None
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(
@@ -261,52 +276,69 @@ class OpenAICodexProvider(LLMProvider):
                 request_body: dict[str, Any],
                 *,
                 emit_deltas: bool,
+                trace_name: str,
             ) -> LLMResponse:
                 wire_body = await prepare_inline_images(without_response_item_ids(request_body))
-                if session_id:
-                    websocket_result = await self._responses.websocket_request(
-                        session_id, DEFAULT_CODEX_URL, headers, wire_body,
-                        provider=self._responses_state_provider(),
-                        verify=self._ssl_context(verify=True), proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
-                    if websocket_result is not None:
-                        return websocket_result
+                tracer = _start_codex_langfuse_generation(
+                    name=trace_name,
+                    model=_strip_model_prefix(str(wire_body.get("model") or model)),
+                    body=wire_body,
+                )
                 try:
-                    return await _request_codex(
-                        DEFAULT_CODEX_URL,
-                        headers,
-                        wire_body,
-                        verify=self._ssl_context(verify=True),
-                        proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
+                    result = None
+                    if session_id:
+                        result = await self._responses.websocket_request(
+                            session_id, DEFAULT_CODEX_URL, headers, wire_body,
+                            provider=self._responses_state_provider(),
+                            verify=self._ssl_context(verify=True), proxy=self.proxy,
+                            on_content_delta=on_content_delta if emit_deltas else None,
+                            on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                            on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                        )
+                    if result is None:
+                        try:
+                            result = await _request_codex(
+                                DEFAULT_CODEX_URL,
+                                headers,
+                                wire_body,
+                                verify=self._ssl_context(verify=True),
+                                proxy=self.proxy,
+                                on_content_delta=on_content_delta if emit_deltas else None,
+                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                            )
+                        except Exception as exc:
+                            if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
+                                raise
+                            logger.warning(
+                                "SSL verification failed for Codex API; retrying with verify=False"
+                            )
+                            result = await _request_codex(
+                                DEFAULT_CODEX_URL,
+                                headers,
+                                wire_body,
+                                verify=self._ssl_context(verify=False),
+                                proxy=self.proxy,
+                                on_content_delta=on_content_delta if emit_deltas else None,
+                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                            )
                 except Exception as exc:
-                    if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
-                        raise
-                    logger.warning(
-                        "SSL verification failed for Codex API; retrying with verify=False"
-                    )
-                    return await _request_codex(
-                        DEFAULT_CODEX_URL,
-                        headers,
-                        wire_body,
-                        verify=self._ssl_context(verify=False),
-                        proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
+                    tracer.record_error(_codex_error_response(exc))
+                    raise
+                else:
+                    tracer.record_success(result)
+                    return result
+                finally:
+                    # Covers cancellation: neither branch above ran, so the
+                    # generation would otherwise stay open indefinitely.
+                    tracer.close_if_open()
 
             if self.supports_native_compaction(model) and replayed and sanitized_state is not None:
                 stage = "codex_compaction"
 
                 async def send_compaction(request: dict[str, Any]) -> LLMResponse:
-                    return await _send(request, emit_deltas=False)
+                    return await _send(request, emit_deltas=False, trace_name="codex_compaction")
 
                 native_compaction_state = await self._responses.compact_before_request(
                     body, state=sanitized_state,
@@ -334,22 +366,18 @@ class OpenAICodexProvider(LLMProvider):
                         preserve_provider_state_on_error=True,
                     )
             stage = "codex_request"
-            tracer = _start_codex_langfuse_generation(model=_strip_model_prefix(model), body=body)
-            result = await _send(body, emit_deltas=True)
+            result = await _send(body, emit_deltas=True, trace_name="codex_request")
             result.provider_compaction_applied = (
                 result.provider_compaction_applied or native_compaction_applied
             )
             if native_compaction_state is not None:
                 result.provider_compaction_state = native_compaction_state
                 result.provider_compaction_scope = "prior_context"
-            tracer.record_success(result)
             return result
         except Exception as e:
             response = _codex_error_response(e)
             if input_budget is not None and stage != "codex_request":
                 response.preserve_provider_state_on_error = True
-            if tracer is not None:
-                tracer.record_error(response)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
             logger.warning(
                 "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
