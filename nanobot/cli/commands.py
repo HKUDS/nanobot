@@ -92,6 +92,11 @@ app = typer.Typer(
 
 console = Console()
 
+
+def _interactive_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def version_callback(value: bool):
     if value:
         console.print(f"{__logo__} nanobot v{__version__}")
@@ -122,7 +127,11 @@ def main(
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
+    wizard: bool = typer.Option(
+        False,
+        "--wizard",
+        help="Open the complete Agent TUI configuration editor",
+    ),
     non_interactive_refresh: bool = typer.Option(False, "--refresh", help="Refresh config, preserving existing settings without prompting"),
 ):
     """Initialize nanobot configuration and workspace."""
@@ -172,31 +181,46 @@ def onboard(
                 )
     else:
         loaded_config = _apply_workspace_override(Config())
-        # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
+        # Wizard mode persists only after the interactive-terminal check below.
         if not wizard:
             save_config(loaded_config, config_path)
             console.print(f"[green]✓[/green] Created config at {config_path}")
 
     assert loaded_config is not None
 
-    # Run interactive wizard if enabled
+    # The native editor needs a real config path because it shares the gateway's
+    # settings service. Default onboarding still follows the unchanged path below.
     if wizard:
-        from nanobot.cli.onboard import run_onboard
+        if not _interactive_terminal():
+            raise typer.BadParameter(
+                "the setup wizard requires an interactive terminal",
+                param_hint="--wizard",
+            )
+
+        from nanobot.cli.tui_launcher import TuiSessionError, TuiUnavailableError, launch_tui
 
         try:
-            result = run_onboard(initial_config=loaded_config)
-            if not result.should_save:
-                console.print("[yellow]Configuration discarded. No changes were saved.[/yellow]")
-                return
-
-            loaded_config = result.config
             save_config(loaded_config, config_path)
+            _onboard_plugins(config_path)
+            loaded_config = load_config(config_path)
+            exit_code = launch_tui(
+                loaded_config,
+                config_path=config_path,
+                workspace_override=str(get_workspace_path(loaded_config.workspace_path)),
+                session_id=None,
+                theme="auto",
+                initial_view="config",
+            )
+            if exit_code:
+                raise typer.Exit(exit_code)
+            loaded_config = load_config(config_path)
             console.print(f"[green]✓[/green] Config saved at {config_path}")
-        except Exception as e:
+        except (TuiSessionError, TuiUnavailableError) as e:
             console.print(f"[red]✗[/red] Error during configuration: {e}")
-            console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
+            console.print("[yellow]Please run 'nanobot onboard --wizard' again.[/yellow]")
             raise typer.Exit(1)
-    _onboard_plugins(config_path)
+    else:
+        _onboard_plugins(config_path)
 
     # Create workspace, preferring the configured workspace path.
     workspace_path = get_workspace_path(loaded_config.workspace_path)

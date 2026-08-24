@@ -328,6 +328,56 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("correlates authenticated configuration mutations without leaking them into chat", async () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const events: InboundEvent[] = []
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        onEvent: (event) => events.push(event),
+        onStatus: () => undefined,
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+
+      const pending = client.requestMutation("settings.config_editor.update", {
+        revision: "before",
+        config: { agents: {} },
+      })
+      const request = JSON.parse(socket.sent.at(-1) || "{}") as Record<string, unknown>
+      expect(request).toMatchObject({
+        type: "webui_request",
+        action: "settings.config_editor.update",
+        payload: { revision: "before", config: { agents: {} } },
+      })
+      expect(request.request_id).toMatch(/^tui-/u)
+
+      socket.emit("message", { data: JSON.stringify({
+        event: "webui_response",
+        request_id: request.request_id,
+        ok: true,
+        result: { revision: "after" },
+      }) })
+
+      await expect(pending).resolves.toEqual({ revision: "after" })
+      expect(events).toEqual([])
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("starts a fresh chat in the launch workspace", () => {
     const original = globalThis.WebSocket
     let socket: FakeSocket | undefined

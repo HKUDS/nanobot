@@ -9,7 +9,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
-| Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
+| Use guided setup | `nanobot onboard --wizard` | Opens the complete Agent TUI configuration editor |
 | Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
 | Check readiness without calling a model | `nanobot status` | Summarizes config/workspace and validates the active provider/model configuration |
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
@@ -60,7 +60,7 @@ with `--background`, use `nanobot gateway stop`.
 |---|---|
 | `nanobot onboard` | Initialize or refresh the default config and workspace |
 | `nanobot onboard --refresh` | Refresh an existing config without prompting, preserving existing values |
-| `nanobot onboard --wizard` | Use the interactive setup wizard |
+| `nanobot onboard --wizard` | Open the Agent TUI directly in the complete configuration editor |
 | `nanobot onboard --config <path> --workspace <path>` | Initialize or refresh a specific instance |
 
 Default paths:
@@ -93,8 +93,13 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 | `nanobot agent --config <path>` | Use a specific config file |
 | `nanobot agent --classic` | Use the classic Python prompt instead of the native terminal UI |
 | `nanobot agent --theme auto\|dark\|light` | Auto-detect the terminal appearance or force a TUI palette |
+| `nanobot agent --open config` | Start the terminal Agent directly in Configuration |
 | `nanobot agent --no-markdown` | Use the classic prompt and print plain text instead of Markdown |
 | `nanobot agent --logs` | Use the classic prompt and show runtime logs while chatting |
+
+Inside the native terminal Agent, enter `/config` at any time to edit configuration. The first page
+keeps the essential workspace and model choices visible; section links and `/` search expose the
+complete advanced configuration. Press `Ctrl+S` to persist staged changes.
 
 Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved
 conversation, and `/context` explains the compacted summary and raw session suffix available to

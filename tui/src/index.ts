@@ -10,6 +10,13 @@ function themePreference(): AppOptions["theme"] {
   throw new Error("NANOBOT_TUI_THEME must be auto, dark, or light")
 }
 
+function initialView(): AppOptions["initialView"] {
+  const value = process.env.NANOBOT_TUI_OPEN?.trim()
+  if (!value) return undefined
+  if (value === "config") return value
+  throw new Error("NANOBOT_TUI_OPEN must be config")
+}
+
 const workspace = process.env.NANOBOT_TUI_WORKSPACE?.trim() || ""
 const hostWorkspace = process.cwd()
 const bootstrapUrl = process.env.NANOBOT_TUI_BOOTSTRAP_URL?.trim() || ""
@@ -37,6 +44,7 @@ const options: AppOptions = {
   version: process.env.NANOBOT_TUI_VERSION?.trim() || "dev",
   access: process.env.NANOBOT_TUI_ACCESS?.trim() || "workspace access",
   theme: themePreference(),
+  initialView: initialView(),
   onDetach: (chatId) => {
     process.exitCode = TUI_DETACH_EXIT_CODE
     process.stdout.write("Detached; the agent continues in the background.\n")

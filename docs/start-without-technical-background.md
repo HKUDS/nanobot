@@ -94,7 +94,10 @@ nanobot webui
 
 If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `webui`. That command may begin with `uv tool run`, `pipx run`, or the full path to nanobot's private Python environment.
 
-On SSH, a computer without a desktop, an existing configuration, or an older nanobot release, the installer may open the terminal wizard instead. Choose **Quick Start** there and follow its prompts.
+On SSH, a computer without a desktop, or an existing configuration, run
+`nanobot onboard --wizard`. It opens nanobot Agent directly in **Configuration**. The first page
+contains the essential setup; use the section links or `/` search for every advanced setting, then
+press `Ctrl+S` to save.
 
 ## 5. Get the First Reply
 

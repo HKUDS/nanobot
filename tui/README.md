@@ -38,6 +38,12 @@ activity already visible in the transcript.
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 
+Use `/config` to edit the complete nanobot configuration without leaving the agent. The first
+view contains only workspace, model, provider, and credentials; domain pages keep low-frequency
+settings under an explicit Advanced row, while `/` inside the editor searches every schema and
+plugin field. Changes remain staged until `Ctrl+S`, secrets never render in the terminal, and
+`Esc` asks before discarding unsaved work.
+
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` steers the current
 turn, `Tab` queues a follow-up for the next turn, and `Option+Up` on macOS (`Alt+Up` on

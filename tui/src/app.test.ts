@@ -7,6 +7,7 @@ import {
 } from "@opentui/core/testing"
 
 import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
+import { configSnapshot } from "./config-editor-fixture"
 import type {
   MessageOptions,
   RecoveryState,
@@ -2447,6 +2448,81 @@ describe("NanobotTui layout", () => {
 
     expect(sent).toEqual([])
     expect(setup.renderer.isDestroyed).toBe(true)
+  })
+
+  test("opens the complete local configuration surface without sending a chat turn", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((() => Promise.resolve(
+      new Response(JSON.stringify(configSnapshot())),
+    ))) as unknown as typeof fetch
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "token" },
+      client(sent),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      configEditor: { visible: boolean; hide(): boolean }
+    }
+
+    try {
+      ui.composer.setText("/config")
+      ui.composer.submit()
+      await waitUntil(() => ui.configEditor.visible)
+      await setup.renderOnce()
+
+      const frame = setup.captureCharFrame()
+      expect(frame).toContain("Configuration · Essentials")
+      expect(frame).toContain("Models and providers")
+      expect(frame).not.toContain("Max tokens")
+      expect(sent).toEqual([])
+
+      ui.configEditor.hide()
+      expect(ui.configEditor.visible).toBe(false)
+    } finally {
+      globalThis.fetch = original
+      app.stop()
+    }
+  })
+
+  test("opens the requested configuration view after bootstrap credentials arrive", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes("/api/settings/config-editor")
+        ? configSnapshot()
+        : { commands: [], mentions: [] }
+      return Promise.resolve(new Response(JSON.stringify(body)))
+    }) as typeof fetch
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    setup.renderer.waitForThemeMode = async () => null
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, initialView: "config" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const ui = app as unknown as {
+      configEditor: { visible: boolean }
+      useGatewayConnection(apiUrl: string, apiToken: string): void
+    }
+
+    try {
+      await app.start()
+      expect(ui.configEditor.visible).toBe(false)
+
+      ui.useGatewayConnection("http://nanobot.test", "token")
+      await waitUntil(() => ui.configEditor.visible)
+      await setup.renderOnce()
+
+      expect(setup.captureCharFrame()).toContain("Configuration · Essentials")
+    } finally {
+      globalThis.fetch = original
+      app.stop()
+    }
   })
 
   test("detaches without sending a message or reporting a normal exit", async () => {

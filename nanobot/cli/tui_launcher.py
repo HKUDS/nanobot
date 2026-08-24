@@ -14,7 +14,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
 from nanobot.cli.process_identity import named_executable
@@ -78,6 +78,7 @@ def launch_tui(
     workspace_override: str | None,
     session_id: str | None,
     theme: str,
+    initial_view: Literal["config"] | None = None,
 ) -> int:
     """Run the native TUI against the shared local gateway."""
     chat_id = _initial_tui_chat_id(session_id)
@@ -90,6 +91,7 @@ def launch_tui(
         env = os.environ.copy()
         env.pop("NANOBOT_TUI_WS_URL", None)
         env.pop("NANOBOT_TUI_API_TOKEN", None)
+        env.pop("NANOBOT_TUI_OPEN", None)
         env.update(
             {
                 "NANOBOT_TUI_BOOTSTRAP_URL": f"{base_url}/webui/bootstrap",
@@ -117,6 +119,8 @@ def launch_tui(
             env["NANOBOT_TUI_CHAT_ID"] = chat_id
         else:
             env.pop("NANOBOT_TUI_CHAT_ID", None)
+        if initial_view:
+            env["NANOBOT_TUI_OPEN"] = initial_view
         try:
             process = subprocess.Popen(command, env=env)
         except OSError as exc:
