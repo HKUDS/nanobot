@@ -346,6 +346,7 @@ interface ThreadShellProps {
   hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   hideHeaderTitle?: boolean;
+  inlineHandle?: boolean;
   hideHeader?: boolean;
   headerActions?: ReactNode;
   headerPortalTarget?: HTMLElement | null;
@@ -645,6 +646,7 @@ export function ThreadShell({
   hostChromeTitleInset = false,
   hideThemeButton = false,
   hideHeaderTitle = false,
+  inlineHandle = false,
   hideHeader = false,
   headerActions,
   headerPortalTarget,
@@ -1614,7 +1616,7 @@ export function ThreadShell({
   const threadHeader = !hideHeader ? (
     <ThreadHeader
       title={title}
-      handle={temporary || hideHeaderTitle ? null : session?.handle}
+      handle={temporary || (hideHeaderTitle && inlineHandle) ? null : session?.handle}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -1638,7 +1640,7 @@ export function ThreadShell({
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {hideHeaderTitle && !temporary && session?.handle ? (
+        {hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
           <div
             aria-label={`Session @${session.handle.name}`}
             className="flex h-8 shrink-0 items-center px-3 text-[12px]"

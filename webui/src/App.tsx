@@ -2816,6 +2816,7 @@ function Shell({
                       hostChromeTitleInset={hostSidebarCollapsed}
                       hideThemeButton={!context.active}
                       hideHeaderTitle
+                      inlineHandle={workbenchPaneSessions.length > 1}
                       headerActions={context.headerActions}
                       headerPortalTarget={context.headerPortalTarget}
                       headerActive={context.active}

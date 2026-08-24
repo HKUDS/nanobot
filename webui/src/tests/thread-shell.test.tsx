@@ -417,6 +417,52 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("moves the session handle into the pane only when the workbench is split", () => {
+    const client = makeClient();
+    const portal = document.createElement("div");
+    document.body.append(portal);
+    const activeSession = {
+      ...session("pane-handle"),
+      handle: {
+        id: "handle_11111111111111111111111111111111",
+        name: "soro",
+      },
+    };
+
+    const { unmount } = render(wrap(
+      client,
+      <ThreadShell
+        session={activeSession}
+        title="Single pane"
+        onToggleSidebar={() => {}}
+        hideHeaderTitle
+        headerPortalTarget={portal}
+      />,
+    ));
+
+    expect(within(portal).getByText("@soro")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session @soro")).not.toBeInTheDocument();
+
+    unmount();
+    const splitView = render(wrap(
+      client,
+      <ThreadShell
+        session={activeSession}
+        title="Split pane"
+        onToggleSidebar={() => {}}
+        hideHeaderTitle
+        inlineHandle
+        headerPortalTarget={portal}
+      />,
+    ));
+
+    expect(screen.getByLabelText("Session @soro")).toHaveTextContent("@soro");
+    expect(within(portal).queryByText("@soro")).not.toBeInTheDocument();
+
+    splitView.unmount();
+    portal.remove();
+  });
+
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
     await preloadMarkdownText();
     const client = makeClient();
