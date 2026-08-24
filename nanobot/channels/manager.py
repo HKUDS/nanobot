@@ -34,11 +34,13 @@ from nanobot.channels.contracts import (
 )
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
+from nanobot.utils.helpers import contains_leaked_tool_call_markup
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
     format_restart_completed_message,
 )
+from nanobot.utils.runtime import LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
     from nanobot.cron.service import CronService
@@ -855,6 +857,22 @@ class ChannelManager:
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
         elif not isinstance(event, StreamedResponseEvent):
+            if contains_leaked_tool_call_markup(msg.content):
+                # Last-mile safety net for every channel: whatever produced
+                # this (a model finalizing with no tools offered and
+                # emitting tool-call-shaped text anyway, or any other path)
+                # should never reach a user-facing channel as raw unexecuted
+                # tool syntax. Content is deliberately not logged -- it may
+                # contain leaked tool arguments (shell commands, session
+                # IDs, etc).
+                logger.warning(
+                    "Blocked outbound message to {}:{} containing leaked "
+                    "tool-call markup ({} chars)",
+                    msg.channel,
+                    msg.chat_id,
+                    len(msg.content or ""),
+                )
+                msg.content = LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE
             await channel.send(msg)
 
     def _coalesce_stream_deltas(

@@ -1867,3 +1867,41 @@ async def test_send_with_media_and_reply_subject_and_in_reply_to(tmp_path, monke
             attachment_parts.append(part)
     assert len(attachment_parts) == 1
     assert attachment_parts[0].get_filename() == "summary.pdf"
+
+
+@pytest.mark.asyncio
+async def test_send_passes_through_normal_content_unchanged(monkeypatch) -> None:
+    """Negative case for the leak filter -- ordinary replies, including ones
+    that mention code or angle brackets in prose, must not be mangled."""
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    normal = "Scan complete: 3 findings, all low severity. See <link> in the dashboard."
+    channel = EmailChannel(_make_config(), MessageBus())
+    await channel.send(
+        OutboundMessage(channel="email", chat_id="alice@example.com", content=normal)
+    )
+
+    assert len(sent_messages) == 1
+    body = sent_messages[0].get_body(preferencelist=("plain",)).get_content()
+    assert body.strip() == normal

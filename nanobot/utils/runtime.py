@@ -21,6 +21,11 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
     "Please try again or narrow the task."
 )
 
+LEAKED_TOOL_CALL_FINAL_RESPONSE_MESSAGE = (
+    "I ran into an internal formatting issue producing this response. "
+    "No action was taken from this reply -- please try again."
+)
+
 FINALIZATION_RETRY_PROMPT = (
     "Please provide your response to the user based on the conversation above."
 )
