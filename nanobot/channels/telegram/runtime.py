@@ -897,6 +897,47 @@ class TelegramChannel(BaseChannel):
             self.logger.debug("sendRichMessage failed: {}", exc)
             return False
 
+    async def _try_edit_rich(self, chat_id: int, message_id: int, content: str) -> bool:
+        """Upgrade an existing message to rich in place via editMessageText (Bot API 10.1).
+
+        Editing in place keeps the message identity, so the streaming preview is
+        upgraded without the delete-and-resend pattern that caused flickering and
+        dropped line breaks (issue #4470). Returns True on success; on capability
+        errors (server older than Bot API 10.1) the rich latch is tripped so the
+        legacy HTML path is used from then on.
+        """
+        if not self._app:
+            return False
+
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "rich_message": {
+                "markdown": content,
+            },
+        }
+        try:
+            await self._call_with_retry(
+                self._app.bot.do_api_request,
+                "editMessageText",
+                api_kwargs=payload,
+            )
+            return True
+        except BadRequest as exc:
+            if self._is_rich_capability_error(exc):
+                self.logger.debug("editMessageText rich_message not available, disabling")
+                self._rich_send_disabled = True
+            else:
+                self.logger.debug("editMessageText rich_message rejected: {}", exc)
+            return False
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "timed out" in err_str or isinstance(exc, TimedOut):
+                self.logger.debug("editMessageText rich_message timeout, falling back to legacy path")
+                return False
+            self.logger.debug("editMessageText rich_message failed: {}", exc)
+            return False
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         app = await self._wait_for_app()
@@ -1136,26 +1177,16 @@ class TelegramChannel(BaseChannel):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
 
-            # Try sendRichMessage for final output (Bot API 10.1).
-            # Skip when a streaming preview already exists to avoid the
-            # delete-and-resend pattern that causes flickering and drops
-            # line breaks (issue #4470).
-            if not buf.message_id and self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
-                reply_params = None
-                if reply_to_message_id := meta.get("message_id"):
-                    reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
-                rich_ok = await self._try_send_rich(
-                    int_chat_id, raw_text, reply_params, thread_kwargs, None,
-                )
+            # Try upgrading the streaming preview to rich in place (Bot API 10.1:
+            # editMessageText gained a rich_message parameter). Editing in place
+            # keeps the message identity, so there is no delete-and-resend and
+            # none of the flickering / dropped line breaks from issue #4470.
+            # The previous branch here was unreachable: it was guarded by
+            # ``not buf.message_id`` after an early return had already ensured
+            # ``buf.message_id`` is set (issue #5516).
+            if self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
+                rich_ok = await self._try_edit_rich(int_chat_id, buf.message_id, raw_text)
                 if rich_ok:
-                    # Delete the streaming preview message
-                    try:
-                        await self._call_with_retry(
-                            app.bot.delete_message,
-                            chat_id=int_chat_id, message_id=buf.message_id,
-                        )
-                    except Exception:
-                        pass  # Preview stays if delete fails
                     self._stream_bufs.pop(chat_id, None)
                     return
 
