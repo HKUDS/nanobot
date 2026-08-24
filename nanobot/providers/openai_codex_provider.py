@@ -23,6 +23,7 @@ from nanobot import __version__
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ProviderCallContext,
     ProviderConversationState,
     resolve_stream_idle_timeout_s,
@@ -57,6 +58,22 @@ _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
 _LANGFUSE_TRACE_WARNING = "Langfuse tracing failed for Codex request: {}"
 
 
+def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
+    """Langfuse wants a plain token-count dict, not our LLMUsage dataclass."""
+    if usage is None:
+        return None
+    details = {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+    }
+    if usage.cache_read_tokens is not None:
+        details["cache_read_tokens"] = usage.cache_read_tokens
+    if usage.cache_write_tokens is not None:
+        details["cache_write_tokens"] = usage.cache_write_tokens
+    return details
+
+
 class _CodexGenerationTracer:
     """Best-effort Langfuse generation for one Codex request.
 
@@ -79,7 +96,7 @@ class _CodexGenerationTracer:
                     for call in result.tool_calls
                 ],
             }
-        self._finish(output=output, usage_details=result.usage or None)
+        self._finish(output=output, usage_details=_usage_details(result.usage))
 
     def record_error(self, response: LLMResponse) -> None:
         self._finish(
