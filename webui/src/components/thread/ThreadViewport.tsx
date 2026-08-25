@@ -744,8 +744,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               ref={messageRegionRef}
               data-testid="thread-message-region"
               className={cn(
-                "thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden px-3 pb-4 pt-4 sm:px-4",
+                "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
+                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-4 sm:px-4",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
@@ -768,6 +768,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onQuoteSelection={onQuoteSelection}
                 />
               </div>
+              <div aria-hidden className="thread-message-end-gap shrink-0" />
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />
             </div>
           ) : (
@@ -808,7 +809,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               }}
               className={cn(
                 "row-start-2 z-10 w-full",
-                hasMessages ? "relative bg-background" : "relative self-center",
+                hasMessages ? "thread-composer-dock relative" : "relative self-center",
               )}
             >
               <div

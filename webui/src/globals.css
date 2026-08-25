@@ -377,6 +377,7 @@
    * bottom without a remount or a transform clone.
    */
   .thread-layout {
+    --thread-composer-fade-height: 2.25rem;
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -390,6 +391,33 @@
     .thread-layout[data-layout="hero"] {
       grid-template-rows: minmax(min-content, 1fr) auto 1fr;
     }
+  }
+
+  /**
+   * Keep the transcript and composer visually continuous. The scrollport owns
+   * the fade because overflow clips its contents before an adjacent overlay
+   * can soften the edge. The matching in-flow gap keeps the last line fully
+   * visible once the user reaches the bottom.
+   */
+  .thread-message-viewport {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+  }
+  .thread-message-end-gap {
+    height: var(--thread-composer-fade-height);
+  }
+  .thread-composer-dock {
+    background: hsl(var(--background));
   }
 
   @keyframes composer-status-strip-enter {

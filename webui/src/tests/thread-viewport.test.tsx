@@ -259,7 +259,8 @@ describe("ThreadViewport", () => {
     const messageRegion = screen.getByTestId("thread-message-region");
     expect(messageRegion).toHaveClass("justify-start");
     expect(messageRegion).not.toHaveClass("justify-end");
-    expect(messageRegion).toHaveClass("pb-4");
+    expect(messageRegion).toHaveClass("thread-message-viewport");
+    expect(messageRegion).toHaveClass("pb-0");
     expect(messageRegion.className).not.toContain("5rem");
   });
 
@@ -316,7 +317,9 @@ describe("ThreadViewport", () => {
     expect(scroller).not.toContainElement(composerDock);
     expect(scroller.parentElement).toContainElement(composerDock);
     expect(composerDock).toHaveClass("relative");
+    expect(composerDock).toHaveClass("thread-composer-dock");
     expect(composerDock).not.toHaveClass("sticky");
+    expect(scroller.querySelector(".thread-message-end-gap")).toBeInTheDocument();
     expect(scroller.lastElementChild).toHaveClass("h-px", "shrink-0");
   });
 
