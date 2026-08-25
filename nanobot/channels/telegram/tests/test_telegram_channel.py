@@ -1639,7 +1639,7 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
     )
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "@nanobot_test photo"
+    assert handled[0]["content"] == "[Alice]: @nanobot_test photo"
 
 
 @pytest.mark.asyncio
@@ -1757,7 +1757,7 @@ async def test_on_message_includes_reply_context() -> None:
     await channel._on_message(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"].startswith("[Reply to: Hello]")
+    assert handled[0]["content"].startswith("[Alice]: [Reply to: Hello]")
     assert "translate this" in handled[0]["content"]
 
 
@@ -1891,7 +1891,7 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
     await channel._on_message(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"].startswith("[Reply to: [image:")
+    assert handled[0]["content"].startswith("[Alice]: [Reply to: [image:")
     assert "what is the image?" in handled[0]["content"]
     assert len(handled[0]["media"]) == 1
     assert "reply_photo_fid" in handled[0]["media"][0]
@@ -2199,7 +2199,69 @@ async def test_on_message_location_content() -> None:
     await channel._on_message(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "[location: 48.8566, 2.3522]"
+    assert handled[0]["content"] == "[Alice]: [location: 48.8566, 2.3522]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_name", "username", "user_id", "expected_sender"),
+    [
+        ("Alice", "alice", 12345, "Alice"),
+        (None, "alice", 12345, "alice"),
+        (None, None, 12345, "12345"),
+    ],
+)
+async def test_group_message_includes_sender_attribution(
+    first_name: str | None,
+    username: str | None,
+    user_id: int,
+    expected_sender: str,
+) -> None:
+    """Group messages identify their author before reaching the agent."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+    update = _make_telegram_update(text="hello", chat_type="group")
+    update.effective_user.first_name = first_name
+    update.effective_user.username = username
+    update.effective_user.id = user_id
+
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == f"[{expected_sender}]: hello"
+
+
+@pytest.mark.asyncio
+async def test_private_message_does_not_include_sender_attribution() -> None:
+    """Private messages retain their existing content format."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+    update = _make_telegram_update(text="hello", chat_type="private")
+
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "hello"
 
 
 @pytest.mark.asyncio

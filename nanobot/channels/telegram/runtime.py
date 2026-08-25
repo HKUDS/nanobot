@@ -1352,6 +1352,12 @@ class TelegramChannel(BaseChannel):
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
 
+    @staticmethod
+    def _with_group_sender(content: str, user: User) -> str:
+        """Prefix group-chat content with the Telegram sender's display name."""
+        sender = user.first_name or user.username or str(user.id)
+        return f"[{sender}]: {content}"
+
     async def _send_pairing_code_if_private(
         self, sender_id: str, message: Message, user: User
     ) -> None:
@@ -1714,6 +1720,9 @@ class TelegramChannel(BaseChannel):
             if tag:
                 content_parts.insert(0, tag)
         content = "\n".join(content_parts) if content_parts else "[empty message]"
+
+        if message.chat.type != "private":
+            content = self._with_group_sender(content, user)
 
         self.logger.debug("message from {}: {}...", sender_id, content[:50])
 
