@@ -346,7 +346,7 @@ class GrepTool(_SearchTool):
                 },
                 "pages": {
                     "type": "string",
-                    "description": "PDF page range, e.g. '101-200' (max 100 pages per call)",
+                    "description": "PDF page number or range, e.g. '7' or '101-200' (max 100 pages)",
                 },
                 "case_insensitive": {
                     "type": "boolean",
@@ -639,8 +639,7 @@ class GrepTool(_SearchTool):
                     if target.is_file():
                         if isinstance(e, PdfPageRangeError):
                             return ToolResult.error(
-                                f"Error: Invalid PDF page range '{pages}'. "
-                                "Use format like '1-5'."
+                                f"Error: Invalid PDF page range '{pages}': {e!s}."
                             )
                         return ToolResult.error(
                             f"Error searching document {display_path}: {e!s}"

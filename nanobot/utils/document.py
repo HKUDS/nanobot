@@ -484,16 +484,21 @@ def extract_pdf_pages(
 def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int]:
     if not pages:
         return 0, total_pages - 1
+    page_word = "page" if total_pages == 1 else "pages"
+    guidance = (
+        f"document has {total_pages} {page_word}; "
+        f"use a page number or range within 1-{total_pages}"
+    )
     values = pages.strip().split("-")
     if len(values) not in {1, 2}:
-        raise PdfPageRangeError(f"invalid page range: {pages}")
+        raise PdfPageRangeError(guidance)
     try:
         start = int(values[0])
         end = int(values[-1])
     except ValueError as e:
-        raise PdfPageRangeError(f"invalid page range: {pages}") from e
+        raise PdfPageRangeError(guidance) from e
     if start < 1 or end < start or start > total_pages:
-        raise PdfPageRangeError(f"invalid page range: {pages}")
+        raise PdfPageRangeError(guidance)
     return start - 1, min(end, total_pages) - 1
 
 

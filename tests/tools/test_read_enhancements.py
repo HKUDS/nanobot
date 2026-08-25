@@ -233,6 +233,12 @@ class TestReadPdf:
 
         assert "Invalid page range" in result
 
+        out_of_bounds = await tool.execute(path=str(pdf_path), pages="99")
+        assert out_of_bounds == (
+            "Error: Invalid page range '99': document has 1 page; "
+            "use a page number or range within 1-1."
+        )
+
     @pytest.mark.asyncio
     async def test_pdf_file_not_found_error(self, tool, tmp_path):
         result = await tool.execute(path=str(tmp_path / "nope.pdf"))

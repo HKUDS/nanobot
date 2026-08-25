@@ -355,6 +355,16 @@ async def test_grep_reports_an_invalid_pdf_page_range(tmp_path: Path) -> None:
     assert result.startswith("Error: Invalid PDF page range 'bad'")
     assert "binary/unreadable" not in result
 
+    out_of_bounds = await tool.execute(
+        pattern="needle",
+        path="one-page.pdf",
+        pages="99",
+    )
+    assert out_of_bounds == (
+        "Error: Invalid PDF page range '99': document has 1 page; "
+        "use a page number or range within 1-1."
+    )
+
 
 @pytest.mark.asyncio
 async def test_grep_supports_case_insensitive_search(tmp_path: Path) -> None:

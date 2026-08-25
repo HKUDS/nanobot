@@ -48,6 +48,11 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
     assert "source locators" in grep
     assert len(grep) < 150
 
+    read_pages = ReadFileTool().parameters["properties"]["pages"]["description"].lower()
+    grep_pages = GrepTool().parameters["properties"]["pages"]["description"].lower()
+    assert "page number or range" in read_pages
+    assert "page number or range" in grep_pages
+
     assert "tests, builds" in exec_tool
     assert "prefer read_file/find_files/grep" in exec_tool
     assert "apply_patch/write_file/edit_file" in exec_tool

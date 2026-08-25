@@ -258,7 +258,7 @@ def _builtin_skill_read_path(path: str) -> Path | None:
             description="Maximum lines to return (default 2000)",
             minimum=1,
         ),
-        pages=StringSchema("PDF page range, e.g. '1-5' (max 20 pages)"),
+        pages=StringSchema("PDF page number or range, e.g. '7' or '1-5' (max 20 pages)"),
         force=BooleanSchema(
             description="Return an unchanged range again",
             default=False,
@@ -454,8 +454,8 @@ class ReadFileTool(_FsTool):
                 max_pages=self._MAX_PDF_PAGES,
                 max_chars=self._MAX_CHARS,
             )
-        except PdfPageRangeError:
-            return ToolResult.error(f"Error: Invalid page range '{pages}'. Use format like '1-5'.")
+        except PdfPageRangeError as e:
+            return ToolResult.error(f"Error: Invalid page range '{pages}': {e!s}.")
         except PdfSafetyError as e:
             return ToolResult.error(f"Error reading PDF: {e}")
         except Exception as e:
