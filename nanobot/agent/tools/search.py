@@ -158,11 +158,8 @@ class FindFilesTool(_SearchTool):
     @property
     def description(self) -> str:
         return (
-            "Find files by path fragment, glob, or file type. "
-            "Use this before read_file when you need to locate files, and "
-            "prefer it over shell find/ls for ordinary workspace discovery. "
-            "Returns workspace-relative paths and skips common dependency/build "
-            "directories."
+            "Find workspace paths by name, glob, or file type. "
+            "Returns relative paths and skips dependency/build directories."
         )
 
     @property
@@ -176,41 +173,38 @@ class FindFilesTool(_SearchTool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Directory or file to search in (default '.')",
+                    "description": "Search root (default '.')",
                 },
                 "query": {
                     "type": "string",
-                    "description": (
-                        "Optional case-insensitive path fragment search. "
-                        "Whitespace-separated terms must all be present."
-                    ),
+                    "description": "Case-insensitive path terms; all must match",
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Optional file filter, e.g. '*.py' or 'tests/**/test_*.py'",
+                    "description": "Path filter, e.g. '*.py' or 'tests/**/test_*.py'",
                 },
                 "type": {
                     "type": "string",
-                    "description": "Optional file type shorthand, e.g. 'py', 'ts', 'md', 'json'",
+                    "description": "File type, e.g. 'py', 'ts', 'md', or 'json'",
                 },
                 "include_dirs": {
                     "type": "boolean",
-                    "description": "Include matching directories as well as files (default false)",
+                    "description": "Include directories (default false)",
                 },
                 "sort": {
                     "type": "string",
                     "enum": ["path", "modified"],
-                    "description": "Sort by path or most recently modified first (default path)",
+                    "description": "Sort order (default path)",
                 },
                 "head_limit": {
                     "type": "integer",
-                    "description": "Maximum number of paths to return (default 200, 0 for all, max 1000)",
+                    "description": "Maximum paths (default 200; 0 for all)",
                     "minimum": 0,
                     "maximum": 1000,
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "Skip the first N results before applying head_limit",
+                    "description": "Paths to skip before head_limit",
                     "minimum": 0,
                     "maximum": 100000,
                 },
@@ -320,12 +314,8 @@ class GrepTool(_SearchTool):
     @property
     def description(self) -> str:
         return (
-            "Search text, PDF, DOCX, XLSX, and PPTX contents with a regex pattern. "
-            "By default, return each match with five lines of surrounding context "
-            "and stable line/page/paragraph/sheet/slide locators. Prefer this "
-            "over shell grep for ordinary workspace searches. "
-            "Binary and file-size limits are enforced by the tool; explicit file paths "
-            "use a larger bounded limit than directory searches. Supports glob/type filtering."
+            "Search text, PDF, DOCX, XLSX, and PPTX content. "
+            "Returns matches with five context lines and source locators by default."
         )
 
     @property
@@ -339,87 +329,62 @@ class GrepTool(_SearchTool):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Regex or plain text pattern to search for",
+                    "description": "Regex, or literal text when fixed_strings=true",
                     "minLength": 1,
                 },
                 "path": {
                     "type": "string",
-                    "description": "File or directory to search in (default '.')",
+                    "description": "Search root (default '.')",
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Optional file filter, e.g. '*.py' or 'tests/**/test_*.py'",
+                    "description": "Path filter, e.g. '*.py' or 'tests/**/test_*.py'",
                 },
                 "type": {
                     "type": "string",
-                    "description": "Optional file type shorthand, e.g. 'py', 'ts', 'md', 'json'",
+                    "description": "File type, e.g. 'py', 'ts', 'md', or 'json'",
                 },
                 "pages": {
                     "type": "string",
-                    "description": (
-                        "Optional PDF page range, e.g. '101-200'. PDF searches scan at "
-                        "most 100 pages per call and return a continuation range."
-                    ),
+                    "description": "PDF page range, e.g. '101-200' (max 100 pages per call)",
                 },
                 "case_insensitive": {
                     "type": "boolean",
-                    "description": "Case-insensitive search (default false)",
+                    "description": "Ignore case (default false)",
                 },
                 "fixed_strings": {
                     "type": "boolean",
-                    "description": "Treat pattern as plain text instead of regex (default false)",
+                    "description": "Treat pattern literally (default false)",
                 },
                 "output_mode": {
                     "type": "string",
                     "enum": ["content", "files_with_matches", "count"],
                     "description": (
-                        "content: matching lines with optional context; "
-                        "files_with_matches: only matching file paths; "
-                        "count: matching line counts per file. "
-                        "Default: content"
+                        "content: matches with context (default); "
+                        "files_with_matches: paths; count: matches per file"
                     ),
                 },
                 "context_before": {
                     "type": "integer",
-                    "description": "Number of lines of context before each match (default 5)",
+                    "description": "Context lines before a match (default 5)",
                     "minimum": 0,
                     "maximum": 20,
                 },
                 "context_after": {
                     "type": "integer",
-                    "description": "Number of lines of context after each match (default 5)",
+                    "description": "Context lines after a match (default 5)",
                     "minimum": 0,
                     "maximum": 20,
                 },
-                "max_matches": {
-                    "type": "integer",
-                    "description": (
-                        "Legacy alias for head_limit in content mode"
-                    ),
-                    "minimum": 1,
-                    "maximum": 1000,
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": (
-                        "Legacy alias for head_limit in files_with_matches or count mode"
-                    ),
-                    "minimum": 1,
-                    "maximum": 1000,
-                },
                 "head_limit": {
                     "type": "integer",
-                    "description": (
-                        "Maximum number of results to return. In content mode this limits "
-                        "matching line blocks; in other modes it limits file entries. "
-                        "Default 250"
-                    ),
+                    "description": "Maximum matches or file entries (default 250; 0 for all)",
                     "minimum": 0,
                     "maximum": 1000,
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "Skip the first N results before applying head_limit",
+                    "description": "Matches or file entries to skip before head_limit",
                     "minimum": 0,
                     "maximum": 100000,
                 },

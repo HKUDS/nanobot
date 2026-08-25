@@ -223,6 +223,8 @@ class TestBundledToolContract:
         assert "Use the narrowest structured tool" in content
         assert "Do not use `exec` as a universal workaround" in content
         assert "## File and Coding Workflows" in content
+        assert "`grep` returns matches with five context lines by default" in content
+        assert 'defaults to `output_mode="files_with_matches"`' not in content
         assert "apply_patch" in content
         assert "acceptance criteria into concrete checks" in content
         assert "visual evidence reaches the model" in content

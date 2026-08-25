@@ -34,12 +34,19 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
     write_stdin = WriteStdinTool().description.lower()
     list_sessions = ListExecSessionsTool().description.lower()
 
-    assert "find_files/list_dir first" in read_file
-    assert "before editing" in read_file
-    assert "uploaded non-image attachments are referenced by path" in read_file
-    assert "only when their contents are needed" in read_file
-    assert "prefer it over shell find/ls" in find_files
-    assert "prefer this over shell grep" in grep
+    assert "text, images, pdfs, and office documents" in read_file
+    assert "line-numbered" in read_file
+    assert "targeted ranges" in read_file
+    assert len(read_file) < 160
+
+    assert "workspace paths" in find_files
+    assert "relative paths" in find_files
+    assert len(find_files) < 140
+
+    assert "pdf, docx, xlsx, and pptx" in grep
+    assert "five context lines" in grep
+    assert "source locators" in grep
+    assert len(grep) < 150
 
     assert "tests, builds" in exec_tool
     assert "prefer read_file/find_files/grep" in exec_tool

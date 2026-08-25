@@ -18,11 +18,9 @@
 
 ## Discovery and Reading
 
-- Use `find_files` or `list_dir` to locate workspace paths before `read_file` when a path is uncertain.
-- Use `grep` for content search inside the workspace; prefer it over shell grep for ordinary searches.
-- `grep` defaults to `output_mode="files_with_matches"`; use `output_mode="content"` for matching lines with context.
+- Use `find_files` or `list_dir` for uncertain paths, `grep` for content, and `read_file` for a known path.
+- `grep` returns matches with five context lines by default; use `files_with_matches` for paths or `count` for totals.
 - Use `fixed_strings=true` for literal keywords containing regex characters.
-- Use `output_mode="count"` to size a broad search before reading full matches.
 - Use `head_limit` and `offset` to page across large result sets.
 - Search tools enforce binary and file-size limits and report skipped files in the result.
 

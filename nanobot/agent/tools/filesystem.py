@@ -251,19 +251,16 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
         offset=IntegerSchema(
-            description=(
-                "Line number to start reading from, including extracted Office document "
-                "text (1-indexed, default 1)"
-            ),
+            description="1-based text or extracted-document line (default 1)",
             minimum=1,
         ),
         limit=IntegerSchema(
-            description="Maximum number of lines to read (default 2000)",
+            description="Maximum lines to return (default 2000)",
             minimum=1,
         ),
-        pages=StringSchema("Page range for PDF files, e.g. '1-5' (default: all, max 20 pages)"),
+        pages=StringSchema("PDF page range, e.g. '1-5' (max 20 pages)"),
         force=BooleanSchema(
-            description="Bypass same-file read deduplication and return content again.",
+            description="Return an unchanged range again",
             default=False,
         ),
         required=["path"],
@@ -285,18 +282,8 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read a file (text, image, or document). "
-            "Text output format: LINE_NUM|CONTENT. "
-            "Images return visual content for analysis. "
-            "Supports PDF, DOCX, XLSX, PPTX documents. "
-            "Uploaded non-image attachments are referenced by path; read them "
-            "with this tool only when their contents are needed. "
-            "Use find_files/list_dir first when the path is uncertain. "
-            "Read the relevant range before editing so replacements or patches "
-            "are based on current content. "
-            "Use offset and limit for large text files or extracted Office document text. "
-            "Use force=true to re-read content even if unchanged. "
-            "Reads exceeding ~128K chars are truncated."
+            "Read text, images, PDFs, and Office documents by path. "
+            "Text is line-numbered; use offset/limit or pages for targeted ranges."
         )
 
     @property
