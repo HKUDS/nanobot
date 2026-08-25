@@ -7,13 +7,19 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+from collections import deque
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, TypeVar
+from typing import Any, Iterable, Iterator, TypeVar
 
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
-from nanobot.utils.document import extract_document_lines
+from nanobot.utils.document import (
+    LocatedDocumentLine,
+    PdfPageRangeError,
+    open_document_line_source,
+)
 
 _DEFAULT_HEAD_LIMIT = 250
 _DEFAULT_FILE_HEAD_LIMIT = 200
@@ -41,6 +47,14 @@ _TYPE_GLOB_MAP = {
     "html": ("*.html", "*.htm"),
     "css": ("*.css", "*.scss", "*.sass"),
 }
+
+
+@dataclass(slots=True)
+class _PendingContextMatch:
+    lines: list[LocatedDocumentLine]
+    match_index: int
+    match_start: int
+    remaining_after: int
 
 
 def _normalize_pattern(pattern: str) -> str:
@@ -295,6 +309,7 @@ class GrepTool(_SearchTool):
     _scopes = {"core", "subagent"}
 
     _MAX_RESULT_CHARS = 128_000
+    _MAX_RENDERED_LINE_CHARS = 2_000
     _MAX_FILE_BYTES = 2_000_000
     _MAX_EXPLICIT_FILE_BYTES = 100_000_000
 
@@ -413,34 +428,96 @@ class GrepTool(_SearchTool):
         }
 
     @staticmethod
-    def _format_block(
-        display_path: str,
-        lines: list[str],
-        match_line: int,
+    def _clip_rendered_line(text: str, match_start: int | None = None) -> str:
+        limit = GrepTool._MAX_RENDERED_LINE_CHARS
+        if len(text) <= limit:
+            return text
+
+        marker = "..."
+        available = limit - len(marker)
+        if match_start is None:
+            return text[:available] + marker
+
+        start = max(0, match_start - available // 3)
+        start = min(start, len(text) - available)
+        end = start + available
+        prefix = marker if start else ""
+        suffix = marker if end < len(text) else ""
+        visible = text[start:end]
+        if prefix and suffix:
+            visible = visible[: available - len(marker)]
+        return prefix + visible + suffix
+
+    @staticmethod
+    def _matching_contexts(
+        lines: Iterable[LocatedDocumentLine],
+        regex: re.Pattern[str],
         before: int,
         after: int,
-        extracted_lines: list[int] | None = None,
-        locators: list[str] | None = None,
+    ) -> Iterable[tuple[list[LocatedDocumentLine], int, int]]:
+        history: deque[LocatedDocumentLine] = deque(maxlen=before)
+        pending: list[_PendingContextMatch] = []
+
+        for line in lines:
+            if not line.searchable:
+                continue
+
+            still_pending: list[_PendingContextMatch] = []
+            for item in pending:
+                item.lines.append(line)
+                item.remaining_after -= 1
+                if item.remaining_after == 0:
+                    yield item.lines, item.match_index, item.match_start
+                else:
+                    still_pending.append(item)
+            pending = still_pending
+
+            match = regex.search(line.text)
+            if match is not None:
+                context_lines = [*history, line]
+                item = _PendingContextMatch(
+                    lines=context_lines,
+                    match_index=len(context_lines) - 1,
+                    match_start=match.start(),
+                    remaining_after=after,
+                )
+                if after == 0:
+                    yield item.lines, item.match_index, item.match_start
+                else:
+                    pending.append(item)
+            history.append(line)
+
+        for item in pending:
+            yield item.lines, item.match_index, item.match_start
+
+    @staticmethod
+    def _format_block(
+        display_path: str,
+        lines: list[LocatedDocumentLine],
+        match_index: int,
         match_start: int = 0,
     ) -> str:
-        start = max(1, match_line - before)
-        end = min(len(lines), match_line + after)
-        source_line = extracted_lines[match_line - 1] if extracted_lines else match_line
-        match_locator = locators[match_line - 1] if locators else ""
+        match_line = lines[match_index]
+        source_line = match_line.extracted_line
+        match_locator = match_line.locator
         if match_locator.startswith("sheet="):
-            column = _excel_column(lines[match_line - 1][:match_start].count("\t") + 1)
+            column = _excel_column(match_line.text[:match_start].count("\t") + 1)
             row_match = re.search(r",row=(\d+)$", match_locator)
             if row_match:
                 match_locator += f",cell={column}{row_match.group(1)}"
         suffix = f" [{match_locator}]" if match_locator else ""
         block = [f"{display_path}:{source_line}{suffix}"]
-        for line_no in range(start, end + 1):
-            marker = ">" if line_no == match_line else " "
-            if extracted_lines and locators:
-                coordinate = f"{extracted_lines[line_no - 1]} [{locators[line_no - 1]}]"
-            else:
-                coordinate = str(line_no)
-            block.append(f"{marker} {coordinate}| {lines[line_no - 1]}")
+        for index, line in enumerate(lines):
+            is_match = index == match_index
+            marker = ">" if is_match else " "
+            coordinate = str(line.extracted_line)
+            if line.locator:
+                coordinate += f" [{line.locator}]"
+            rendered = GrepTool._clip_rendered_line(
+                line.text,
+                match_start if is_match else None,
+            )
+            block.append(f"{marker} {coordinate}| {rendered}")
         return "\n".join(block)
 
     async def execute(
@@ -490,7 +567,7 @@ class GrepTool(_SearchTool):
             size_truncated = False
             skipped_binary = 0
             skipped_large = 0
-            truncated_documents = 0
+            document_errors: list[str] = []
             document_continuations: list[str] = []
             matching_files: list[str] = []
             counts: dict[str, int] = {}
@@ -520,73 +597,96 @@ class GrepTool(_SearchTool):
                     mtime = file_path.stat().st_mtime
                 except OSError:
                     mtime = 0.0
-                extracted_lines: list[int] | None = None
-                locators: list[str] | None = None
-                if file_path.suffix.lower() in _DOCUMENT_EXTENSIONS:
-                    extraction = extract_document_lines(file_path, pages=pages)
-                    if extraction is None or extraction.error is not None:
-                        skipped_binary += 1
-                        continue
-                    lines = [line.text for line in extraction.lines]
-                    extracted_lines = [line.extracted_line for line in extraction.lines]
-                    locators = [line.locator for line in extraction.lines]
-                    if extraction.truncated:
-                        truncated_documents += 1
-                    if extraction.continuation:
-                        document_continuations.append(
-                            f"({display_path}: continue PDF search with "
-                            f"{extraction.continuation})"
+                source_iterator: Iterator[LocatedDocumentLine] | None = None
+                is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
+                try:
+                    if is_document:
+                        source = open_document_line_source(file_path, pages=pages)
+                        if source is None:
+                            skipped_binary += 1
+                            continue
+                        source_iterator = source.lines
+                        source_lines: Iterable[LocatedDocumentLine] = source_iterator
+                        if source.continuation:
+                            document_continuations.append(
+                                f"({display_path}: continue PDF search with "
+                                f"{source.continuation})"
+                            )
+                    else:
+                        with file_path.open("rb") as file:
+                            raw = file.read(max_file_bytes + 1)
+                        if _is_binary(raw):
+                            skipped_binary += 1
+                            continue
+                        try:
+                            content = raw.decode("utf-8")
+                        except UnicodeDecodeError:
+                            skipped_binary += 1
+                            continue
+                        source_lines = (
+                            LocatedDocumentLine(text, line_no, "")
+                            for line_no, text in enumerate(content.splitlines(), 1)
                         )
-                else:
-                    with file_path.open("rb") as file:
-                        raw = file.read(max_file_bytes + 1)
-                    if _is_binary(raw):
-                        skipped_binary += 1
-                        continue
-                    try:
-                        content = raw.decode("utf-8")
-                    except UnicodeDecodeError:
-                        skipped_binary += 1
-                        continue
-                    lines = content.splitlines()
-                file_had_match = False
-                for idx, line in enumerate(lines, start=1):
-                    match = regex.search(line)
-                    if match is None:
-                        continue
-                    file_had_match = True
 
-                    if output_mode == "count":
-                        counts[display_path] = counts.get(display_path, 0) + 1
-                        continue
-                    if output_mode == "files_with_matches":
-                        if display_path not in matching_files:
-                            matching_files.append(display_path)
-                            file_mtimes[display_path] = mtime
-                        break
-
-                    seen_content_matches += 1
-                    if seen_content_matches <= offset:
-                        continue
-                    if limit is not None and len(blocks) >= limit:
-                        truncated = True
-                        break
-                    block = self._format_block(
-                        display_path,
-                        lines,
-                        idx,
-                        context_before,
-                        context_after,
-                        extracted_lines,
-                        locators,
-                        match.start(),
-                    )
-                    extra_sep = 2 if blocks else 0
-                    if result_chars + extra_sep + len(block) > self._MAX_RESULT_CHARS:
-                        size_truncated = True
-                        break
-                    blocks.append(block)
-                    result_chars += extra_sep + len(block)
+                    file_had_match = False
+                    if output_mode == "content":
+                        contexts = self._matching_contexts(
+                            source_lines,
+                            regex,
+                            context_before,
+                            context_after,
+                        )
+                        for context_lines, match_index, match_start in contexts:
+                            file_had_match = True
+                            seen_content_matches += 1
+                            if seen_content_matches <= offset:
+                                continue
+                            if limit is not None and len(blocks) >= limit:
+                                truncated = True
+                                break
+                            block = self._format_block(
+                                display_path,
+                                context_lines,
+                                match_index,
+                                match_start,
+                            )
+                            extra_sep = 2 if blocks else 0
+                            if result_chars + extra_sep + len(block) > self._MAX_RESULT_CHARS:
+                                size_truncated = True
+                                break
+                            blocks.append(block)
+                            result_chars += extra_sep + len(block)
+                    else:
+                        for line in source_lines:
+                            if not line.searchable or regex.search(line.text) is None:
+                                continue
+                            file_had_match = True
+                            if output_mode == "count":
+                                counts[display_path] = counts.get(display_path, 0) + 1
+                                continue
+                            if display_path not in matching_files:
+                                matching_files.append(display_path)
+                                file_mtimes[display_path] = mtime
+                            break
+                except Exception as e:
+                    if not is_document:
+                        raise
+                    if target.is_file():
+                        if isinstance(e, PdfPageRangeError):
+                            return ToolResult.error(
+                                f"Error: Invalid PDF page range '{pages}'. "
+                                "Use format like '1-5'."
+                            )
+                        return ToolResult.error(
+                            f"Error searching document {display_path}: {e!s}"
+                        )
+                    skipped_binary += 1
+                    document_errors.append(f"{display_path}: {e!s}")
+                    continue
+                finally:
+                    close = getattr(source_iterator, "close", None)
+                    if close is not None:
+                        close()
                 if output_mode == "count" and file_had_match:
                     if display_path not in matching_files:
                         matching_files.append(display_path)
@@ -615,8 +715,8 @@ class GrepTool(_SearchTool):
                         key=lambda name: (-file_mtimes.get(name, 0.0), name),
                     )
                     ordered, truncated = _paginate(ordered_files, limit, offset)
-                    lines = [f"{name}: {counts[name]}" for name in ordered]
-                    result = "\n".join(lines)
+                    count_lines = [f"{name}: {counts[name]}" for name in ordered]
+                    result = "\n".join(count_lines)
             else:
                 if not blocks:
                     result = f"No matches found for pattern '{pattern}' in {path}"
@@ -626,10 +726,14 @@ class GrepTool(_SearchTool):
             notes: list[str] = []
             if output_mode == "content" and truncated:
                 notes.append(
-                    f"(pagination: limit={limit}, offset={offset})"
+                    f"(pagination: limit={limit}, offset={offset}; "
+                    f"use offset={offset + len(blocks)} to continue)"
                 )
             elif output_mode == "content" and size_truncated:
-                notes.append("(output truncated due to size)")
+                notes.append(
+                    "(output truncated due to size; "
+                    f"use offset={offset + len(blocks)} to continue)"
+                )
             elif truncated and output_mode in {"count", "files_with_matches"}:
                 notes.append(
                     f"(pagination: limit={limit}, offset={offset})"
@@ -642,10 +746,8 @@ class GrepTool(_SearchTool):
                 notes.append(f"(skipped {skipped_binary} binary/unreadable files)")
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
-            if truncated_documents:
-                notes.append(
-                    f"(searched bounded text from {truncated_documents} truncated documents)"
-                )
+            if document_errors:
+                notes.append(f"(first document error: {document_errors[0]})")
             notes.extend(document_continuations[:10])
             if output_mode == "count" and counts:
                 notes.append(

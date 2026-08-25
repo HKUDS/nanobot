@@ -493,45 +493,79 @@ class ReadFileTool(_FsTool):
         offset: int,
         limit: int | None,
     ) -> str:
-        from nanobot.utils.document import extract_text
+        from nanobot.utils.document import open_document_line_source
 
-        result = extract_text(fp)
-
-        if result is None:
-            return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
-
-        if result.startswith("[error:"):
-            return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {result}")
-
-        if not result:
-            return f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
-
-        all_lines = result.splitlines()
-        total = len(all_lines)
         offset = max(1, offset)
-        if offset > total:
-            return ToolResult.error(
-                f"Error: offset {offset} is beyond end of extracted document ({total} lines)"
-            )
-        start = offset - 1
-        end = min(start + (limit or self._DEFAULT_LIMIT), total)
-        numbered = [
-            f"{line_no}| {all_lines[line_no - 1]}"
-            for line_no in range(offset, end + 1)
-        ]
-        output = "\n".join(numbered)
-        char_truncated = len(output) > self._MAX_CHARS
-        if char_truncated:
-            output = output[:self._MAX_CHARS]
-            output += "\n\n(Document text truncated at ~128K chars)"
-        elif end < total:
-            output += (
-                f"\n\n(Showing extracted lines {offset}-{end} of {total}. "
-                f"Use offset={end + 1} to continue.)"
-            )
-        else:
-            output += f"\n\n(End of document — {total} extracted lines total)"
-        return output
+        requested_limit = limit or self._DEFAULT_LIMIT
+        source_iterator = None
+        try:
+            source = open_document_line_source(fp)
+            if source is None:
+                return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
+            source_iterator = source.lines
+            numbered: list[str] = []
+            output_chars = 0
+            total_seen = 0
+            end = offset - 1
+            has_more = False
+            line_was_clipped = False
+
+            for line in source_iterator:
+                total_seen = line.extracted_line
+                if line.extracted_line < offset:
+                    continue
+                if len(numbered) >= requested_limit:
+                    has_more = True
+                    break
+
+                rendered = f"{line.extracted_line}| {line.text}"
+                extra = 1 if numbered else 0
+                if output_chars + extra + len(rendered) > self._MAX_CHARS:
+                    if numbered:
+                        has_more = True
+                        break
+                    prefix = f"{line.extracted_line}| "
+                    available = max(0, self._MAX_CHARS - len(prefix) - 3)
+                    rendered = f"{prefix}{line.text[:available]}..."
+                    line_was_clipped = True
+                    has_more = True
+                numbered.append(rendered)
+                output_chars += extra + len(rendered)
+                end = line.extracted_line
+                if line_was_clipped:
+                    break
+
+            if not numbered:
+                if total_seen == 0:
+                    return (
+                        f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
+                    )
+                return ToolResult.error(
+                    f"Error: offset {offset} is beyond end of extracted document "
+                    f"({total_seen} lines)"
+                )
+
+            output = "\n".join(numbered)
+            if has_more:
+                if line_was_clipped:
+                    output += (
+                        "\n\n(Document text truncated at ~128K chars; line clipped. "
+                        f"Use offset={end + 1} to continue.)"
+                    )
+                else:
+                    output += (
+                        f"\n\n(Showing extracted lines {offset}-{end}. "
+                        f"Use offset={end + 1} to continue.)"
+                    )
+            else:
+                output += f"\n\n(End of document — {total_seen} extracted lines total)"
+            return output
+        except Exception as e:
+            return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {e!s}")
+        finally:
+            close = getattr(source_iterator, "close", None)
+            if close is not None:
+                close()
 
 
 # ---------------------------------------------------------------------------

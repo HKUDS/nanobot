@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -169,6 +170,190 @@ async def test_grep_searches_xlsx_with_sheet_cell_locator(tmp_path: Path) -> Non
     assert "people.xlsx:3" in result
     assert "sheet='People',row=2,cell=B2" in result
     assert "Ada\tEngineer" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_docx_with_paragraph_locator(tmp_path: Path) -> None:
+    from docx import Document
+
+    document_path = tmp_path / "notes.docx"
+    document = Document()
+    document.add_paragraph("Introduction")
+    document.add_paragraph("late needle")
+    document.save(document_path)
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="late needle",
+        path="notes.docx",
+        fixed_strings=True,
+    )
+
+    assert "notes.docx:3 [paragraph=2]" in result
+    assert "late needle" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_pptx_with_slide_locator(tmp_path: Path) -> None:
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    presentation_path = tmp_path / "deck.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(
+        Inches(1), Inches(1), Inches(4), Inches(1)
+    )
+    textbox.text_frame.text = "slide needle"
+    presentation.save(presentation_path)
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="slide needle",
+        path="deck.pptx",
+        fixed_strings=True,
+    )
+
+    assert "deck.pptx:2 [slide=1,line=1]" in result
+    assert "slide needle" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_pdf_with_page_locator(tmp_path: Path) -> None:
+    import fitz
+
+    pdf_path = tmp_path / "notes.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "pdf needle")
+    document.save(pdf_path)
+    document.close()
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="pdf needle",
+        path="notes.pdf",
+        fixed_strings=True,
+    )
+
+    assert "notes.pdf:2 [page=1,line=1]" in result
+    assert "pdf needle" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_xlsx_beyond_attachment_preview_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openpyxl import Workbook
+
+    from nanobot.utils import document as document_utils
+
+    workbook_path = tmp_path / "long.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    for row in range(1, 20):
+        sheet.append([f"ordinary-row-{row}"])
+    sheet.append(["late-needle"])
+    workbook.save(workbook_path)
+    workbook.close()
+    monkeypatch.setattr(document_utils, "_MAX_TEXT_LENGTH", 50)
+
+    preview = document_utils.extract_text(workbook_path)
+    assert preview is not None
+    assert "late-needle" not in preview
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="late-needle",
+        path="long.xlsx",
+        fixed_strings=True,
+    )
+
+    assert "late-needle" in result
+    assert "sheet='Data',row=20,cell=A20" in result
+    assert "No matches found" not in result
+
+
+@pytest.mark.asyncio
+async def test_grep_keeps_an_oversized_matching_line_visible(tmp_path: Path) -> None:
+    long_line = "x" * 130_000 + "needle" + "y" * 10_000
+    (tmp_path / "huge-line.txt").write_text(long_line, encoding="utf-8")
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(
+        pattern="needle",
+        path="huge-line.txt",
+        fixed_strings=True,
+        context_before=0,
+        context_after=0,
+    )
+
+    assert "huge-line.txt:1" in result
+    assert "needle" in result
+    assert "No matches found" not in result
+    assert len(result) < GrepTool._MAX_RESULT_CHARS
+
+
+@pytest.mark.asyncio
+async def test_grep_size_limit_returns_a_resumable_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = "\n".join(f"needle-{line}-" + "x" * 80 for line in range(1, 11))
+    (tmp_path / "many.txt").write_text(content, encoding="utf-8")
+    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 350)
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    first = await tool.execute(
+        pattern="needle",
+        path="many.txt",
+        fixed_strings=True,
+        context_before=0,
+        context_after=0,
+        head_limit=10,
+    )
+    continuation = re.search(r"use offset=(\d+) to continue", first)
+
+    assert continuation is not None
+    next_offset = int(continuation.group(1))
+    assert next_offset > 0
+
+    second = await tool.execute(
+        pattern="needle",
+        path="many.txt",
+        fixed_strings=True,
+        context_before=0,
+        context_after=0,
+        head_limit=10,
+        offset=next_offset,
+    )
+    first_headers = {
+        line for line in first.splitlines() if line.startswith("many.txt:")
+    }
+    second_headers = {
+        line for line in second.splitlines() if line.startswith("many.txt:")
+    }
+    assert second_headers
+    assert first_headers.isdisjoint(second_headers)
+
+
+@pytest.mark.asyncio
+async def test_grep_reports_an_invalid_pdf_page_range(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+
+    pdf_path = tmp_path / "one-page.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    with pdf_path.open("wb") as output:
+        writer.write(output)
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(pattern="needle", path="one-page.pdf", pages="bad")
+
+    assert result.startswith("Error: Invalid PDF page range 'bad'")
+    assert "binary/unreadable" not in result
 
 
 @pytest.mark.asyncio
