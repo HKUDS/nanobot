@@ -40,8 +40,8 @@ to move, `Tab` to complete, and `Esc` to close the menu.
 
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` queues a follow-up
-for the next turn instead. `Tab` remains a queue shortcut, and `Option+Up` on macOS (`Alt+Up` on
-Windows/Linux) returns the latest queued message to the composer for editing. The pending queue
+for the next turn instead. `Option+Up` on macOS (`Alt+Up` on Windows/Linux) returns the latest
+queued message to the composer for editing. The pending queue
 stays visible above the composer.
 Use `Shift+Enter` for a newline; `Ctrl+J` is the universal fallback when a terminal cannot
 distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable.

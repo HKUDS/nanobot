@@ -212,7 +212,7 @@ nanobot agent
 This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI.
 
 - Type `/` to discover commands, `/sessions` to switch conversations, or `@` to mention an app, MCP server, or saved session.
-- Press `Enter` to send. While a turn is running, `Enter` queues a visible follow-up instead; `Tab` remains a queue shortcut. Press `Shift+Enter` to add a newline (`Ctrl+J` works in terminals that cannot distinguish modified Enter keys).
+- Press `Enter` to send. While a turn is running, `Enter` queues a visible follow-up instead. Press `Shift+Enter` to add a newline (`Ctrl+J` works in terminals that cannot distinguish modified Enter keys).
 - Use `/detach` to leave the current task running, or start with `nanobot gateway --background` when nanobot should stay online after all local clients exit.
 
 Each launch starts a new session by default. Use `--session` to resume one and `--workspace` to choose another workspace. See the [CLI reference](./docs/cli-reference.md#agent-cli) for session branching, diffs, history, shortcuts, gateway lifecycle, and compatibility options.

@@ -1667,11 +1667,6 @@ export class NanobotTui {
         return
       }
     }
-    if (this.activeTurn && !key.ctrl && !key.meta && key.name === "tab") {
-      this.queueFollowUp()
-      key.preventDefault()
-      return
-    }
     if (this.promptQueue.length && key.meta && key.name === "up") {
       if (this.editLastFollowUp()) key.preventDefault()
       return

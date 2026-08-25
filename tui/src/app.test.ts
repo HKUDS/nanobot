@@ -306,7 +306,7 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.plainText).toBe("")
   })
 
-  test("queues busy Enter submissions, ignores empty Enter, and keeps the Tab shortcut", async () => {
+  test("queues busy Enter submissions without using Tab as a queue shortcut", async () => {
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
@@ -351,7 +351,14 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.plainText).toBe("ask @github next")
     expect(ui.queuePreview.root.visible).toBeFalse()
     setup.mockInput.pressTab()
+    await setup.flush()
+    expect(ui.composer.plainText).not.toBe("")
+    expect(ui.queuePreview.root.visible).toBeFalse()
+
+    ui.composer.setText("ask @github next")
+    ui.composer.submit()
     await waitUntil(() => ui.composer.plainText === "")
+    expect(ui.queuePreview.root.visible).toBeTrue()
 
     ui.composer.setText("after this turn")
     ui.composer.submit()
