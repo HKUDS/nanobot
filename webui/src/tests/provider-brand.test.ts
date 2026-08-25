@@ -93,4 +93,9 @@ describe("provider brand logos", () => {
     expect(providerBrand("keenable")?.logoUrls).toContain("https://keenable.ai/favicon.ico");
     expect(providerBrand("keenable")?.initials).toBe("K");
   });
+
+  it("keeps AnySearch web search settings on the first-party brand domain", () => {
+    expect(providerBrand("anysearch")?.logoUrls).toContain("https://anysearch.com/favicon.ico");
+    expect(providerBrand("anysearch")?.initials).toBe("AS");
+  });
 });

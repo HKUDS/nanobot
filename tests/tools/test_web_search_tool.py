@@ -202,6 +202,95 @@ async def test_keenable_search_http_error(monkeypatch):
     assert "Error: Keenable search failed (401)" in result
 
 
+def test_anysearch_without_api_key_is_concurrency_safe(monkeypatch):
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    tool = _tool(provider="anysearch", api_key="")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.anysearch.com/v1/search"
+        assert kw["headers"]["Authorization"] == "Bearer any-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {"query": "anysearch", "max_results": 1, "format": "json"}
+        return _response(json={
+            "code": 0,
+            "message": "success",
+            "data": {
+                "results": [
+                    {"title": "AnySearch", "url": "https://anysearch.com", "snippet": "unified search"}
+                ]
+            },
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="anysearch", api_key="any-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="anysearch", count=1)
+    assert "AnySearch" in result
+    assert "https://anysearch.com" in result
+    assert "unified search" in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_without_api_key_is_anonymous(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "Authorization" not in kw["headers"]
+        return _response(json={
+            "code": 0,
+            "message": "success",
+            "data": {"results": [{"title": "Anon", "url": "https://anysearch.com/anon", "snippet": "ok"}]},
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    tool = _tool(provider="anysearch", api_key="")
+    result = await tool.execute(query="anysearch", count=1)
+    assert "Anon" in result
+    assert "https://anysearch.com/anon" in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["Authorization"] == "Bearer env-any-key"
+        return _response(json={
+            "code": 0,
+            "message": "success",
+            "data": {"results": [{"title": "Env", "url": "https://anysearch.com/env", "snippet": "ok"}]},
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("ANYSEARCH_API_KEY", "env-any-key")
+    tool = _tool(provider="anysearch", api_key="")
+    result = await tool.execute(query="anysearch", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_api_error_code(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(json={"code": -1, "message": "Rate limited, retry after 300 seconds."})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="anysearch", api_key="any-key")
+    result = await tool.execute(query="anysearch")
+    assert "Error: AnySearch search error: Rate limited, retry after 300 seconds." in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"code": -1, "message": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="anysearch", api_key="bad-any-key")
+    result = await tool.execute(query="anysearch")
+    assert "Error: AnySearch search failed (401)" in result
+
+
 def test_serper_without_api_key_is_treated_as_duckduckgo(monkeypatch):
     # Serper requires a key; without one we fall back to DuckDuckGo for concurrency.
     monkeypatch.delenv("SERPER_API_KEY", raising=False)
