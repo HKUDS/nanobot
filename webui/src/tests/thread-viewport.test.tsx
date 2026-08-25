@@ -1521,8 +1521,18 @@ describe("ThreadViewport", () => {
         dispatchUserScroll(scroller);
       });
 
+      const replacement = anchor.cloneNode(true) as HTMLElement;
+      anchor.replaceWith(replacement);
       anchorDocumentTop += 180;
       scrollHeight += 180;
+      Object.defineProperty(replacement, "getBoundingClientRect", {
+        configurable: true,
+        value: () => DOMRect.fromRect({
+          y: anchorDocumentTop - scroller.scrollTop,
+          width: 800,
+          height: 40,
+        }),
+      });
       const content = screen.getByTestId("thread-message-region").firstElementChild;
       const observer = resizeObserver.observers.find((candidate) =>
         content ? candidate.elements.includes(content) : false,
@@ -1533,7 +1543,7 @@ describe("ThreadViewport", () => {
       });
 
       expect(scroller.scrollTop).toBe(260);
-      expect(anchor.getBoundingClientRect().top).toBe(120);
+      expect(replacement.getBoundingClientRect().top).toBe(120);
     } finally {
       resizeObserver.restore();
     }

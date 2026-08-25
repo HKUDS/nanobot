@@ -136,6 +136,7 @@ export function ThreadMessages({
         return (
           <ThreadDisplayUnit
             key={unitKeys[index]}
+            unitKey={unitKeys[index]}
             unit={unit}
             marginTop={marginTop}
             userPromptId={userPromptId}
@@ -225,6 +226,7 @@ function pendingTurnProjection(
 }
 
 interface ThreadDisplayUnitProps {
+  unitKey: string;
   unit: DisplayUnit;
   marginTop: string;
   userPromptId?: string;
@@ -243,6 +245,7 @@ interface ThreadDisplayUnitProps {
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
+  unitKey,
   unit,
   marginTop,
   userPromptId,
@@ -273,7 +276,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     <>
       <div
         className={`${marginTop}${stableDeferOffscreenRender ? " thread-render-unit" : ""}`}
-        data-thread-display-unit
+        data-thread-display-unit={unitKey}
         data-user-prompt-id={userPromptId}
       >
         {unit.type === "activity" ? (

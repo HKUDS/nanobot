@@ -73,7 +73,7 @@ export const INITIAL_HISTORY_WINDOW = 160;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
 interface HistoryScrollAnchor {
-  element: HTMLElement;
+  key: string;
   offsetTop: number;
 }
 
@@ -316,8 +316,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     for (const element of units) {
       const bounds = element.getBoundingClientRect();
       if (bounds.bottom <= scrollerTop + 0.5) continue;
+      const key = element.dataset.threadDisplayUnit;
+      if (!key) continue;
       historyScrollAnchorRef.current = {
-        element,
+        key,
         offsetTop: bounds.top - scrollerTop,
       };
       return true;
@@ -328,15 +330,19 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   const reconcileHistoryScrollAnchor = useCallback(() => {
     const scroller = scrollRef.current;
+    const content = messageContentRef.current;
     const anchor = historyScrollAnchorRef.current;
-    if (!scroller || !anchor) return false;
-    if (!anchor.element.isConnected) {
+    if (!scroller || !content || !anchor) return false;
+    const element = Array.from(
+      content.querySelectorAll<HTMLElement>("[data-thread-display-unit]"),
+    ).find((candidate) => candidate.dataset.threadDisplayUnit === anchor.key);
+    if (!element) {
       historyScrollAnchorRef.current = null;
       return false;
     }
 
     const nextOffset =
-      anchor.element.getBoundingClientRect().top
+      element.getBoundingClientRect().top
       - scroller.getBoundingClientRect().top;
     const delta = nextOffset - anchor.offsetTop;
     if (Math.abs(delta) < 0.5) return true;
@@ -344,7 +350,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
     threadMotionRef.current?.jumpTo(nextTop);
     return true;
-  }, [captureHistoryScrollAnchor]);
+  }, []);
 
   const scrollToBottomNow = useCallback((smooth = false) => {
     historyScrollAnchorRef.current = null;
