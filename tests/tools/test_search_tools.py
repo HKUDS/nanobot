@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +20,11 @@ from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
 from nanobot.providers.base import GenerationSettings
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    default_workspace_scope,
+    reset_workspace_scope,
+)
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -96,6 +103,152 @@ async def test_find_files_rejects_paths_outside_workspace(tmp_path: Path) -> Non
     result = await tool.execute(path=str(outside))
 
     assert result.startswith("Error:")
+
+
+@pytest.mark.asyncio
+async def test_find_files_worker_preserves_current_workspace_scope(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "inside.txt").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("nope\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, restrict_to_workspace=False)
+    token = bind_workspace_scope(default_workspace_scope(project, True))
+    try:
+        result = await tool.execute(path=".")
+    finally:
+        reset_workspace_scope(token)
+
+    assert result == "inside.txt"
+
+
+@pytest.mark.asyncio
+async def test_find_files_scan_keeps_event_loop_responsive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "match.txt"
+    target.write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    original_iter_paths = tool._iter_paths
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_iter_paths(root: Path, *, include_dirs: bool, budget):
+        started.set()
+        if not release.wait(timeout=1):
+            raise TimeoutError("test did not release find_files traversal")
+        yield from original_iter_paths(root, include_dirs=include_dirs, budget=budget)
+
+    monkeypatch.setattr(tool, "_iter_paths", blocking_iter_paths)
+    task = asyncio.create_task(tool.execute(path="."))
+    try:
+        assert await asyncio.to_thread(started.wait, 0.5)
+        for _ in range(3):
+            await asyncio.sleep(0.01)
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert await asyncio.wait_for(task, timeout=0.5) == "match.txt"
+
+
+@pytest.mark.asyncio
+async def test_find_files_cancellation_stops_worker_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def cancellable_iter_paths(root: Path, *, include_dirs: bool, budget):
+        del root, include_dirs
+        started.set()
+        if not budget.cancelled.wait(timeout=1):
+            raise TimeoutError("find_files worker did not receive cancellation")
+        stopped.set()
+        if False:
+            yield
+
+    monkeypatch.setattr(tool, "_iter_paths", cancellable_iter_paths)
+    task = asyncio.create_task(tool.execute(path="."))
+    assert await asyncio.to_thread(started.wait, 0.5)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.2)
+
+    assert await asyncio.to_thread(stopped.wait, 0.5)
+
+
+@pytest.mark.asyncio
+async def test_find_files_path_limit_stops_after_pagination_lookahead(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = [tmp_path / name for name in ("a.txt", "b.txt", "c.txt")]
+    for path in paths:
+        path.write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    visited: list[str] = []
+
+    def ordered_iter_paths(root: Path, *, include_dirs: bool, budget):
+        del include_dirs
+        for path in paths:
+            budget.checkpoint()
+            visited.append(path.name)
+            yield tool._entry(path, root, is_dir=False)
+
+    monkeypatch.setattr(tool, "_iter_paths", ordered_iter_paths)
+    result = await tool.execute(path=".", head_limit=1)
+
+    assert result.splitlines()[0] == "a.txt"
+    assert "pagination: limit=1, offset=0" in result
+    assert visited == ["a.txt", "b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_files_path_budget_counts_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_PATHS", 1)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".")
+
+    assert result.startswith("Error: find_files scan exceeded 1 paths")
+
+
+@pytest.mark.asyncio
+async def test_find_files_enforces_time_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "match.txt").write_text("ok\n", encoding="utf-8")
+    monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_SECONDS", 0.0)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".")
+
+    assert result.startswith("Error: find_files scan exceeded 0 seconds")
+
+
+@pytest.mark.asyncio
+async def test_find_files_path_sort_matches_existing_lexicographic_contract(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "inside.txt").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "a+").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".", head_limit=0)
+
+    assert result.splitlines() == ["a+", "a.py", "a/inside.txt"]
 
 
 @pytest.mark.asyncio
