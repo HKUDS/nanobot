@@ -369,21 +369,6 @@ class TestRunSubagent:
             assert mock_announce.call_args.args[-2] == "ok"
 
     @pytest.mark.asyncio
-    async def test_tool_error_run(self, tmp_path):
-        sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
-            final_content=None, messages=[], stop_reason="tool_error",
-            tool_events=[{"name": "read_file", "status": "error", "detail": "not found"}],
-        ))
-        status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
-        with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"}, status, _runtime(),
-            )
-            assert mock_announce.call_args.args[-2] == "error"
-
-    @pytest.mark.asyncio
     async def test_exception_run(self, tmp_path):
         sm = _manager(tmp_path)
         sm.runner.run = AsyncMock(side_effect=RuntimeError("LLM down"))
@@ -502,73 +487,6 @@ class TestAnnounceResult:
         )
 
         assert published[0].metadata["origin_message_id"] == "msg-123"
-
-
-# ---------------------------------------------------------------------------
-# _format_partial_progress
-# ---------------------------------------------------------------------------
-
-
-class TestFormatPartialProgress:
-    def _make_result(self, tool_events=None, error=None):
-        return MagicMock(tool_events=tool_events or [], error=error)
-
-    def test_completed_only(self):
-        result = self._make_result(tool_events=[
-            {"name": "read_file", "status": "ok", "detail": "file content"},
-            {"name": "exec", "status": "ok", "detail": "output"},
-        ])
-        text = SubagentManager._format_partial_progress(result)
-        assert "Completed steps:" in text
-        assert "read_file" in text
-        assert "exec" in text
-
-    def test_failure_only(self):
-        result = self._make_result(tool_events=[
-            {"name": "read_file", "status": "error", "detail": "not found"},
-        ])
-        text = SubagentManager._format_partial_progress(result)
-        assert "Failure:" in text
-        assert "not found" in text
-
-    def test_completed_and_failure(self):
-        result = self._make_result(tool_events=[
-            {"name": "read_file", "status": "ok", "detail": "content"},
-            {"name": "exec", "status": "error", "detail": "timeout"},
-        ])
-        text = SubagentManager._format_partial_progress(result)
-        assert "Completed steps:" in text
-        assert "Failure:" in text
-
-    def test_limited_to_last_three(self):
-        result = self._make_result(tool_events=[
-            {"name": f"tool_{i}", "status": "ok", "detail": f"result_{i}"}
-            for i in range(5)
-        ])
-        text = SubagentManager._format_partial_progress(result)
-        assert "tool_2" in text
-        assert "tool_3" in text
-        assert "tool_4" in text
-        assert "tool_0" not in text
-        assert "tool_1" not in text
-
-    def test_error_without_failure_event(self):
-        result = self._make_result(
-            tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-            error="Something went wrong",
-        )
-        text = SubagentManager._format_partial_progress(result)
-        assert "Something went wrong" in text
-
-    def test_empty_events_with_error(self):
-        result = self._make_result(error="Total failure")
-        text = SubagentManager._format_partial_progress(result)
-        assert "Total failure" in text
-
-    def test_empty_no_error_returns_fallback(self):
-        result = self._make_result()
-        text = SubagentManager._format_partial_progress(result)
-        assert "Error" in text
 
 
 # ---------------------------------------------------------------------------

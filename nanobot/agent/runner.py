@@ -109,7 +109,6 @@ class AgentRunSpec:
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
-    fail_on_tool_error: bool = False
     workspace: Path | None = None
     session_key: str | None = None
     context_block_limit: int | None = None
@@ -570,7 +569,7 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
-                results, new_events, fatal_error = await self._execute_tools(
+                results, new_events = await self._execute_tools(
                     spec,
                     response.tool_calls,
                     external_lookup_counts,
@@ -601,24 +600,6 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
-                if fatal_error is not None:
-                    error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
-                    final_content = error
-                    stop_reason = "tool_error"
-                    self._append_final_message(messages, final_content)
-                    context.final_content = final_content
-                    context.error = error
-                    context.stop_reason = stop_reason
-                    await hook.after_iteration(context)
-                    should_continue, injection_cycles = await self._try_drain_injections(
-                        spec, messages, None, injection_cycles,
-                        phase="after tool error",
-                    )
-                    if should_continue:
-                        had_injections = True
-                        length_recovery_parts.clear()
-                        continue
-                    break
                 checkpoint_model_messages = (
                     self.context_governor.prepare_for_model(
                         governance_config,
@@ -1422,11 +1403,11 @@ class AgentRunner:
         workspace_violation_counts: dict[str, int],
         hook: AgentHook | None = None,
         context: AgentHookContext | None = None,
-    ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+    ) -> tuple[list[Any], list[dict[str, str]]]:
         hook = hook or AgentHook()
         context = context or AgentHookContext(iteration=0, messages=[])
         batches = self._partition_tool_batches(spec, tool_calls)
-        tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
+        tool_results: list[tuple[Any, dict[str, str]]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
@@ -1442,7 +1423,7 @@ class AgentRunner:
                 ))
                 tool_results.extend(batch_results)
             else:
-                batch_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
+                batch_results: list[tuple[Any, dict[str, str]]] = []
                 for tool_call in batch:
                     result = await self._run_tool(
                         spec,
@@ -1457,13 +1438,10 @@ class AgentRunner:
 
         results: list[Any] = []
         events: list[dict[str, str]] = []
-        fatal_error: BaseException | None = None
-        for result, event, error in tool_results:
+        for result, event in tool_results:
             results.append(result)
             events.append(event)
-            if error is not None and fatal_error is None:
-                fatal_error = error
-        return results, events, fatal_error
+        return results, events
 
     async def _run_tool(
         self,
@@ -1473,7 +1451,7 @@ class AgentRunner:
         workspace_violation_counts: dict[str, int],
         hook: AgentHook | None = None,
         context: AgentHookContext | None = None,
-    ) -> tuple[Any, dict[str, str], BaseException | None]:
+    ) -> tuple[Any, dict[str, str]]:
         hook = hook or AgentHook()
         context = context or AgentHookContext(iteration=0, messages=[])
         hint = "\n\n[Analyze the error above and try a different approach.]"
@@ -1488,9 +1466,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": "repeated external lookup blocked",
             }
-            if spec.fail_on_tool_error:
-                return lookup_error + hint, event, RuntimeError(lookup_error)
-            return lookup_error + hint, event, None
+            return lookup_error + hint, event
         prepare_call = cast(
             Callable[[str, Any], object] | None,
             getattr(spec.tools, "prepare_call", None),
@@ -1517,9 +1493,7 @@ class AgentRunner:
             )
             if handled is not None:
                 return handled
-            return prep_error + hint, event, (
-                RuntimeError(prep_error) if spec.fail_on_tool_error else None
-            )
+            return prep_error + hint, event
         await hook.before_execute_tool(context, tool_call, tool, params)
         try:
             if tool is not None:
@@ -1546,9 +1520,7 @@ class AgentRunner:
             )
             if handled is not None:
                 return handled
-            if spec.fail_on_tool_error:
-                return payload, event, exc
-            return payload, event, None
+            return payload, event
 
         if is_tool_error_result(result):
             await hook.on_execute_tool_error(context, tool_call, tool, params, result)
@@ -1566,9 +1538,7 @@ class AgentRunner:
             )
             if handled is not None:
                 return handled
-            if spec.fail_on_tool_error:
-                return result + hint, event, RuntimeError(result)
-            return result + hint, event, None
+            return result + hint, event
 
         await hook.after_execute_tool(context, tool_call, tool, params, result)
 
@@ -1578,7 +1548,7 @@ class AgentRunner:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
-        return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+        return result, {"name": tool_call.name, "status": "ok", "detail": detail}
 
     # SSRF is a hard security block at the tool boundary, but the agent turn
     # should recover conversationally instead of aborting the runtime.
@@ -1631,7 +1601,7 @@ class AgentRunner:
         event: dict[str, str],
         tool_call: ToolCallRequest,
         workspace_violation_counts: dict[str, int],
-    ) -> tuple[Any, dict[str, str], BaseException | None] | None:
+    ) -> tuple[Any, dict[str, str]] | None:
         """Classify safety-boundary failures, or return ``None`` to pass through."""
         if self._is_ssrf_violation(raw_text):
             logger.warning(
@@ -1640,7 +1610,7 @@ class AgentRunner:
                 raw_text.replace("\n", " ").strip()[:200],
             )
             event["detail"] = self._event_detail("ssrf_violation: ", raw_text)
-            return self._ssrf_soft_payload(raw_text), event, None
+            return self._ssrf_soft_payload(raw_text), event
 
         if self._is_workspace_violation(raw_text):
             escalation = repeated_workspace_violation_error(
@@ -1658,8 +1628,8 @@ class AgentRunner:
                     "workspace_violation_escalated: ",
                     raw_text,
                 )
-                return escalation, event, None
-            return soft_payload, event, None
+                return escalation, event
+            return soft_payload, event
 
         return None
 

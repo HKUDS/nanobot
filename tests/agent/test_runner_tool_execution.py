@@ -398,24 +398,27 @@ async def test_runner_rejects_openai_responses_array_arguments_without_executing
 
 
 @pytest.mark.asyncio
-async def test_runner_treats_legacy_entry_point_error_prefix_as_tool_error(tmp_path):
+async def test_runner_returns_legacy_entry_point_error_to_model(tmp_path):
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="legacy_plugin", arguments={})],
-        usage=None,
-    ))
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="legacy_plugin", arguments={})],
+            usage=None,
+        ),
+        LLMResponse(content="reported plugin failure", tool_calls=[], usage=None),
+    ])
 
     result = await AgentRunner().run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "run plugin"}],
         tools=_load_entry_point_plugin(_LegacyErrorPluginTool, tmp_path),
         model="test-model",
-        max_iterations=1,
+        max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
     ))
 
-    assert result.stop_reason == "tool_error"
+    assert result.stop_reason == "completed"
+    assert result.final_content == "reported plugin failure"
     assert result.tool_events == [
         {"name": "legacy_plugin", "status": "error", "detail": "Error: legacy plugin failed"}
     ]
@@ -441,7 +444,6 @@ async def test_runner_preserves_structured_plugin_success_that_starts_with_error
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
     ))
 
     assert result.stop_reason == "completed"

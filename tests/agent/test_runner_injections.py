@@ -1448,7 +1448,7 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
     """Messages left in the pending queue after _dispatch are re-published to the bus.
 
     This tests the finally-block cleanup that prevents message loss when
-    the runner exits early (e.g., max_iterations, tool_error) with messages
+    the runner exits early (e.g., max_iterations) with messages
     still in the queue.
     """
     from nanobot.bus.events import InboundMessage
@@ -1488,8 +1488,8 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_drain_injections_on_fatal_tool_error():
-    """A fatal tool error must not leak recovered content into an injected follow-up."""
+async def test_drain_injections_after_recoverable_tool_error():
+    """A tool error and injected follow-up continue in the same runner conversation."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1532,7 +1532,6 @@ async def test_drain_injections_on_fatal_tool_error():
         model="test-model",
         max_iterations=5,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
         injection_callback=inject_cb,
     ))
 

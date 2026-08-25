@@ -124,6 +124,35 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
     assert "max_messages" not in saved["agents"]["defaults"]
 
 
+@pytest.mark.parametrize("field_name", ["failOnToolError", "fail_on_tool_error"])
+def test_load_config_ignores_removed_fail_on_tool_error(tmp_path, field_name) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {field_name: True, "maxTokens": 1234}}}),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.agents.defaults.max_tokens == 1234
+    assert not hasattr(config.agents.defaults, "fail_on_tool_error")
+
+
+def test_save_config_drops_removed_fail_on_tool_error(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"failOnToolError": True}}}),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    save_config(config, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert "failOnToolError" not in saved["agents"]["defaults"]
+    assert "fail_on_tool_error" not in saved["agents"]["defaults"]
+
+
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
     from nanobot.channels.plugin import load_channel_package
 
