@@ -72,6 +72,11 @@ const SESSION_HANDOFF_OPACITY = 0.82;
 export const INITIAL_HISTORY_WINDOW = 160;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
+interface HistoryScrollAnchor {
+  element: HTMLElement;
+  offsetTop: number;
+}
+
 export function windowMessages(messages: UIMessage[], visibleCount: number): UIMessage[] {
   if (messages.length <= visibleCount) return messages;
   let start = Math.max(0, messages.length - visibleCount);
@@ -210,6 +215,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const pendingPromptJumpRef = useRef<string | null>(null);
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
+  const historyScrollAnchorRef = useRef<HistoryScrollAnchor | null>(null);
   const composerInputScrollTopRef = useRef<number | null>(null);
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
@@ -298,7 +304,50 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     threadMotionRef.current?.takeUserControl();
   }, []);
 
+  const captureHistoryScrollAnchor = useCallback(() => {
+    const scroller = scrollRef.current;
+    const content = messageContentRef.current;
+    if (!scroller || !content) {
+      historyScrollAnchorRef.current = null;
+      return false;
+    }
+    const scrollerTop = scroller.getBoundingClientRect().top;
+    const units = content.querySelectorAll<HTMLElement>("[data-thread-display-unit]");
+    for (const element of units) {
+      const bounds = element.getBoundingClientRect();
+      if (bounds.bottom <= scrollerTop + 0.5) continue;
+      historyScrollAnchorRef.current = {
+        element,
+        offsetTop: bounds.top - scrollerTop,
+      };
+      return true;
+    }
+    historyScrollAnchorRef.current = null;
+    return false;
+  }, []);
+
+  const reconcileHistoryScrollAnchor = useCallback(() => {
+    const scroller = scrollRef.current;
+    const anchor = historyScrollAnchorRef.current;
+    if (!scroller || !anchor) return false;
+    if (!anchor.element.isConnected) {
+      historyScrollAnchorRef.current = null;
+      return false;
+    }
+
+    const nextOffset =
+      anchor.element.getBoundingClientRect().top
+      - scroller.getBoundingClientRect().top;
+    const delta = nextOffset - anchor.offsetTop;
+    if (Math.abs(delta) < 0.5) return true;
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
+    threadMotionRef.current?.jumpTo(nextTop);
+    return true;
+  }, [captureHistoryScrollAnchor]);
+
   const scrollToBottomNow = useCallback((smooth = false) => {
+    historyScrollAnchorRef.current = null;
     const el = scrollRef.current;
     const marker = bottomRef.current;
     const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
@@ -328,10 +377,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const loadEarlierMessages = useCallback(() => {
     const el = scrollRef.current;
     if (el) {
-      restoreScrollAfterPrependRef.current = {
-        height: el.scrollHeight,
-        top: el.scrollTop,
-      };
+      if (captureHistoryScrollAnchor()) {
+        restoreScrollAfterPrependRef.current = null;
+      } else {
+        restoreScrollAfterPrependRef.current = {
+          height: el.scrollHeight,
+          top: el.scrollTop,
+        };
+      }
     }
     threadMotionRef.current?.takeUserControl();
     setAtBottom(false);
@@ -345,7 +398,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       setVisibleMessageCount((count) => count + HISTORY_WINDOW_INCREMENT);
       void onLoadOlder();
     }
-  }, [hasMoreBefore, hiddenMessageCount, loadingOlder, messages.length, onLoadOlder]);
+  }, [
+    captureHistoryScrollAnchor,
+    hasMoreBefore,
+    hiddenMessageCount,
+    loadingOlder,
+    messages.length,
+    onLoadOlder,
+  ]);
 
   const maybeLoadEarlierFromScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -360,6 +420,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const scrollEl = scrollRef.current;
     const prompt = scrollEl ? findPromptElement(scrollEl, promptId) : null;
     if (!scrollEl || !prompt) return false;
+    historyScrollAnchorRef.current = null;
     setAtBottom(false);
     const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
     threadMotionRef.current?.navigateHistoryTo(
@@ -442,6 +503,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     conversationHandoffAnimationRef.current = null;
     conversationHandoffPendingRef.current = true;
     pendingConversationScrollRef.current = true;
+    historyScrollAnchorRef.current = null;
+    restoreScrollAfterPrependRef.current = null;
     threadMotionRef.current?.reset();
     setAtBottom(true);
     setVisibleMessageCount(INITIAL_HISTORY_WINDOW);
@@ -505,17 +568,18 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   useLayoutEffect(() => {
     const pending = restoreScrollAfterPrependRef.current;
-    if (!pending) return;
     const el = scrollRef.current;
     restoreScrollAfterPrependRef.current = null;
     if (!el) return;
+    if (reconcileHistoryScrollAnchor()) return;
+    if (!pending) return;
     const delta = el.scrollHeight - pending.height;
     const nextTop = Math.min(
       Math.max(0, el.scrollHeight - el.clientHeight),
       Math.max(0, pending.top + delta),
     );
     threadMotionRef.current?.jumpTo(nextTop);
-  }, [visibleMessages.length, messages.length]);
+  }, [reconcileHistoryScrollAnchor, visibleMessages.length, messages.length]);
 
   useLayoutEffect(() => {
     const promptId = pendingPromptJumpRef.current;
@@ -593,6 +657,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       threadMotionRef.current?.invalidateGeometry();
     };
     const reconcileObservedGeometry = () => {
+      reconcileHistoryScrollAnchor();
       threadMotionRef.current?.reconcileObservedGeometry();
     };
     reconcileObservedGeometry();
@@ -609,7 +674,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       observer?.disconnect();
       window.removeEventListener("resize", invalidateGeometry);
     };
-  }, [hasMessages]);
+  }, [hasMessages, reconcileHistoryScrollAnchor]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -623,7 +688,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       setAtBottom((current) =>
         current === logicallyAtBottom ? current : logicallyAtBottom,
       );
-      if (allowHistoryLoad && owner === "user") maybeLoadEarlierFromScroll();
+      if (owner === "user") {
+        captureHistoryScrollAnchor();
+        if (allowHistoryLoad) maybeLoadEarlierFromScroll();
+      } else if (near) {
+        historyScrollAnchorRef.current = null;
+      }
     };
 
     onScroll(false);
@@ -709,7 +779,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       el.removeEventListener("pointerdown", handlePointerDown);
       el.removeEventListener("keydown", handleKeyDown);
     };
-  }, [hasMessages, maybeLoadEarlierFromScroll, yieldCameraToUser]);
+  }, [
+    captureHistoryScrollAnchor,
+    hasMessages,
+    maybeLoadEarlierFromScroll,
+    yieldCameraToUser,
+  ]);
 
   return (
     <div className="thread-viewport relative flex min-h-0 flex-1 overflow-hidden">

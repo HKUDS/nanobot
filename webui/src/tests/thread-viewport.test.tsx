@@ -1481,6 +1481,64 @@ describe("ThreadViewport", () => {
     expect(screen.getAllByText("message 299").length).toBeGreaterThan(0);
   });
 
+  it("keeps the first visible history item fixed while deferred rows materialize", () => {
+    const resizeObserver = stubResizeObserver();
+    try {
+      const { container } = render(
+        <ThreadViewport
+          messages={makeLongMessages(300)}
+          isStreaming={false}
+          composer={<div />}
+        />,
+      );
+
+      const scroller = getScroller(container);
+      let scrollHeight = 2_400;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, get: () => scrollHeight },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, writable: true, value: 80 },
+        getBoundingClientRect: {
+          configurable: true,
+          value: () => DOMRect.fromRect({ y: 0, width: 800, height: 600 }),
+        },
+      });
+
+      const anchor = screen.getByText("message 140")
+        .closest<HTMLElement>("[data-thread-display-unit]");
+      expect(anchor).not.toBeNull();
+      let anchorDocumentTop = 200;
+      Object.defineProperty(anchor, "getBoundingClientRect", {
+        configurable: true,
+        value: () => DOMRect.fromRect({
+          y: anchorDocumentTop - scroller.scrollTop,
+          width: 800,
+          height: 40,
+        }),
+      });
+
+      act(() => {
+        dispatchUserScroll(scroller);
+      });
+
+      anchorDocumentTop += 180;
+      scrollHeight += 180;
+      const content = screen.getByTestId("thread-message-region").firstElementChild;
+      const observer = resizeObserver.observers.find((candidate) =>
+        content ? candidate.elements.includes(content) : false,
+      );
+      expect(observer).toBeDefined();
+      act(() => {
+        observer?.callback([], observer as unknown as ResizeObserver);
+      });
+
+      expect(scroller.scrollTop).toBe(260);
+      expect(anchor.getBoundingClientRect().top).toBe(120);
+    } finally {
+      resizeObserver.restore();
+    }
+  });
+
   it("automatically requests older transcript pages near the top", () => {
     const onLoadOlder = vi.fn();
 

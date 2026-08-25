@@ -273,6 +273,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     <>
       <div
         className={`${marginTop}${stableDeferOffscreenRender ? " thread-render-unit" : ""}`}
+        data-thread-display-unit
         data-user-prompt-id={userPromptId}
       >
         {unit.type === "activity" ? (
