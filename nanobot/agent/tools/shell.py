@@ -269,11 +269,7 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Execute a shell command. "
-            "Restricted workspace execution requires a supported OS-level "
-            "sandbox and fails closed when none is available."
-        )
+        return "Execute a shell command."
 
     @property
     def exclusive(self) -> bool:
