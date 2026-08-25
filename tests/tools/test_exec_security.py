@@ -370,11 +370,20 @@ async def test_exec_3599_regression_rm_with_dev_null_redirect(tmp_path):
     workspace.mkdir()
     target = workspace / "test_print.txt"
     target.write_text("scratch")
-    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(
-        command=f'rm {target} 2>/dev/null; echo "done"',
+    tool = ExecTool(
         working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="bwrap",
+        timeout=5,
     )
+    with patch(
+        "nanobot.agent.tools.shell.wrap_command",
+        side_effect=lambda _sandbox, command, *_args, **_kwargs: command,
+    ):
+        result = await tool.execute(
+            command=f'rm {target} 2>/dev/null; echo "done"',
+            working_dir=str(workspace),
+        )
     assert "done" in result
     assert "path outside working dir" not in result
     assert not target.exists()
