@@ -3697,6 +3697,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             return cls(**extra)
 
         def __init__(self, **_kwargs) -> None:
+            seen["prepare_turn"] = _kwargs.get("prepare_turn")
             self.model = "test-model"
             self.provider = object()
             self.sessions = _FakeSessionManager()
@@ -3806,6 +3807,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     assert seen["cron_stopped"] is True
     mcp_provider = seen["mcp_provider"]
     assert isinstance(mcp_provider, _FakeMCPProvider)
+    assert seen["prepare_turn"] == mcp_provider.connect
     assert mcp_provider.connect_task is seen["agent_task"]
     assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
     assert len(mcp_provider.close_tasks) == 2

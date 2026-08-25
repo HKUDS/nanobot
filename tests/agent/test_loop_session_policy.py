@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     RUNTIME_CONTROL_SESSION_DISCARD,
@@ -72,6 +73,50 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     ]
     assert loop.sessions.read_session_file(key) is None
     loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_turn_recovers_tools_before_session_policy_snapshot(tmp_path) -> None:
+    registry = ToolRegistry()
+    attempts = 0
+
+    async def prepare_turn() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return
+        tool = MagicMock()
+        tool.name = "mcp_demo_ping"
+        tool.to_schema.return_value = {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": "Recovered MCP tool",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        tool.runtime_context_provider.return_value = None
+        registry.register(tool)
+
+    loop = _loop(
+        tmp_path,
+        ["recovered"],
+        tool_registry=registry,
+        prepare_turn=prepare_turn,
+    )
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    key = "websocket:mcp-recovery"
+    loop.sessions.get_or_create_transient(key, disabled_tools={"cron"})
+
+    await prepare_turn()  # Gateway startup readiness fails once.
+    await loop._process_message(_message(key, "retry on this normal turn"))
+
+    tool_names = {
+        item["function"]["name"]
+        for item in loop.provider.chat_with_retry.await_args.kwargs["tools"]
+    }
+    assert attempts == 2
+    assert "mcp_demo_ping" in tool_names
 
 
 @pytest.mark.asyncio

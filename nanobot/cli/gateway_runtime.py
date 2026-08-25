@@ -447,6 +447,7 @@ def _run_gateway(
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
         tool_registry=tools,
+        prepare_turn=mcp_provider.connect,
         recovery_admission=recovery,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
