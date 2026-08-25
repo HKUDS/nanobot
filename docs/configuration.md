@@ -2225,7 +2225,7 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 }
 ```
 
-Tool execution errors are returned to the subagent model so it can retry or choose a different approach within the same run. Provider failures, cancellation, and the maximum tool-iteration limit still stop the run.
+The deprecated `agents.defaults.failOnToolError` field is silently ignored when present in older configs.
 
 | Option | Default | Description |
 |--------|---------|-------------|
