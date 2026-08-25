@@ -82,6 +82,111 @@ def _json_object(value: object) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
+# TODO(0.3.2): Remove the write_stdin replay migration after 0.3.1.
+def _migrate_legacy_exec_arguments(container: dict[str, Any]) -> bool:
+    raw_arguments = cast(object, container.get("arguments"))
+    encoded = isinstance(raw_arguments, str)
+    if encoded:
+        try:
+            decoded: object = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            return False
+    else:
+        decoded = raw_arguments
+    if not isinstance(decoded, dict):
+        return False
+
+    arguments = cast(dict[str, Any], decoded)
+    changed = False
+    if "chars" in arguments:
+        if "input" not in arguments:
+            arguments["input"] = arguments["chars"]
+        arguments.pop("chars")
+        changed = True
+
+    wait_key = (
+        "wait_timeout_ms"
+        if arguments.get("wait_for") or arguments.get("until_exit")
+        else "yield_time_ms"
+    )
+    if "timeout_ms" not in arguments and wait_key in arguments:
+        arguments["timeout_ms"] = arguments[wait_key]
+    for key in ("yield_time_ms", "wait_timeout_ms", "max_output_chars", "max_output_tokens"):
+        if key in arguments:
+            arguments.pop(key)
+            changed = True
+
+    if changed:
+        container["arguments"] = (
+            json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
+            if encoded
+            else arguments
+        )
+    return changed
+
+
+def _migrate_legacy_exec_tool_call(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    tool_call = cast(dict[str, Any], value)
+    function_value = cast(object, tool_call.get("function"))
+    function = (
+        cast(dict[str, Any], function_value)
+        if isinstance(function_value, dict)
+        else tool_call
+    )
+    name = function.get("name")
+    if name not in {"write_stdin", "exec_session"}:
+        return False
+
+    changed = name == "write_stdin"
+    if changed:
+        function["name"] = "exec_session"
+    return _migrate_legacy_exec_arguments(function) or changed
+
+
+def _migrate_legacy_exec_message(message: dict[str, Any]) -> bool:
+    changed = False
+    if message.get("name") == "write_stdin":
+        message["name"] = "exec_session"
+        changed = True
+    tool_calls = cast(object, message.get("tool_calls"))
+    if isinstance(tool_calls, list):
+        for tool_call in cast(list[object], tool_calls):
+            changed = _migrate_legacy_exec_tool_call(tool_call) or changed
+    return changed
+
+
+def _migrate_legacy_exec_session_records(
+    messages: list[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> bool:
+    changed = False
+    for message in messages:
+        changed = _migrate_legacy_exec_message(message) or changed
+
+    checkpoint_value = cast(object, metadata.get(_RUNTIME_CHECKPOINT_KEY))
+    if not isinstance(checkpoint_value, dict):
+        return changed
+    checkpoint = cast(dict[str, Any], checkpoint_value)
+    assistant = cast(object, checkpoint.get("assistant_message"))
+    if isinstance(assistant, dict):
+        changed = _migrate_legacy_exec_message(cast(dict[str, Any], assistant)) or changed
+    pending = cast(object, checkpoint.get("pending_tool_calls"))
+    if isinstance(pending, list):
+        for tool_call in cast(list[object], pending):
+            changed = _migrate_legacy_exec_tool_call(tool_call) or changed
+    completed = cast(object, checkpoint.get("completed_tool_results"))
+    if isinstance(completed, list):
+        for result in cast(list[object], completed):
+            if isinstance(result, dict):
+                result_data = cast(dict[str, Any], result)
+                if result_data.get("name") == "write_stdin":
+                    result_data["name"] = "exec_session"
+                    changed = True
+    return changed
+
+
 def _is_provider_state_record_line(line: str) -> bool:
     """Recognize the canonical private record without decoding its opaque payload."""
     return _PROVIDER_STATE_RECORD_PREFIX_RE.match(line) is not None
@@ -1085,6 +1190,8 @@ class JsonlSessionStore:
                 provider_state=provider_state,
             )
             self._overlay_runtime_checkpoint_unlocked(session, path)
+            if _migrate_legacy_exec_session_records(session.messages, session.metadata):
+                session.provider_state = None
             return session
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -1180,6 +1287,8 @@ class JsonlSessionStore:
                 provider_state=provider_state,
             )
             self._overlay_runtime_checkpoint_unlocked(session, path)
+            if _migrate_legacy_exec_session_records(session.messages, session.metadata):
+                session.provider_state = None
             return session
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Repair failed for session {}: {}", key, e)
@@ -1454,6 +1563,7 @@ class JsonlSessionStore:
                         continue
                     else:
                         messages.append(data)
+            _migrate_legacy_exec_session_records(messages, metadata)
             return {
                 "key": stored_key or key,
                 "created_at": created_at,

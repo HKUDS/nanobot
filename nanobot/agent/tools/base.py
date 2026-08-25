@@ -204,7 +204,6 @@ class Tool(ABC):
     # --- Plugin metadata ---
 
     config_key: str = ""
-    aliases: tuple[str, ...] = ()
     _plugin_discoverable: bool = True
     _scopes: set[str] = {"core"}
 

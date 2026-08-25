@@ -47,9 +47,18 @@ def test_exec_tool_descriptions_are_concise() -> None:
     assert "omit to wait for exit" in exec_parameters["yield_time_ms"]["description"]
 
     session_parameters = ExecSessionTool().parameters["properties"]
+    assert set(session_parameters) == {
+        "session_id",
+        "input",
+        "close_stdin",
+        "terminate",
+        "wait_for",
+        "until_exit",
+        "timeout_ms",
+    }
     assert session_parameters["until_exit"]["description"] == "Wait for the process to exit."
-    assert "wait_for" in session_parameters["wait_timeout_ms"]["description"]
-    assert "until_exit" in session_parameters["wait_timeout_ms"]["description"]
+    assert "wait_for" in session_parameters["timeout_ms"]["description"]
+    assert "until_exit" in session_parameters["timeout_ms"]["description"]
 
 
 def test_exec_shell_parameter_guidance_matches_platform() -> None:

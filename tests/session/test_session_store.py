@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 import nanobot.session as session_api
@@ -162,6 +163,108 @@ def test_runtime_checkpoint_does_not_rewrite_long_session(tmp_path) -> None:
     assert restored.metadata["runtime_checkpoint"]["phase"] == "tools_completed"
     assert restored.provider_state is not None
     assert restored.provider_state.payload == {"response_id": "private-response"}
+
+
+def test_load_migrates_legacy_write_stdin_history(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:legacy-exec")
+    session.messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "write_stdin",
+                        "arguments": json.dumps(
+                            {
+                                "session_id": "abc",
+                                "chars": "yes\n",
+                                "wait_for": "ready",
+                                "wait_timeout_ms": 5000,
+                                "yield_time_ms": 0,
+                                "max_output_tokens": 1000,
+                            }
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "write_stdin",
+            "content": "ready",
+        },
+    ]
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"response_id": "legacy-response"},
+    )
+    manager.save(session)
+
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+    function = restored.messages[0]["tool_calls"][0]["function"]
+    arguments = json.loads(function["arguments"])
+
+    assert function["name"] == "exec_session"
+    assert arguments == {
+        "session_id": "abc",
+        "wait_for": "ready",
+        "input": "yes\n",
+        "timeout_ms": 5000,
+    }
+    assert restored.messages[1]["name"] == "exec_session"
+    assert restored.provider_state is None
+
+
+def test_load_migrates_legacy_write_stdin_runtime_checkpoint(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:legacy-checkpoint")
+    session.add_message("user", "continue")
+    manager.save(session)
+    legacy_call = {
+        "id": "call-1",
+        "type": "function",
+        "function": {
+            "name": "write_stdin",
+            "arguments": {"session_id": "abc", "chars": "", "yield_time_ms": 1000},
+        },
+    }
+    session.metadata["runtime_checkpoint"] = {
+        "phase": "awaiting_tools",
+        "assistant_message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [legacy_call],
+        },
+        "completed_tool_results": [],
+        "pending_tool_calls": [legacy_call],
+    }
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"response_id": "legacy-response"},
+    )
+    manager.save_runtime_checkpoint(session)
+
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+    checkpoint = restored.metadata["runtime_checkpoint"]
+    pending_function = checkpoint["pending_tool_calls"][0]["function"]
+
+    assert pending_function == {
+        "name": "exec_session",
+        "arguments": {"session_id": "abc", "input": "", "timeout_ms": 1000},
+    }
+    assert checkpoint["assistant_message"]["tool_calls"][0]["function"] == pending_function
+    assert restored.provider_state is None
 
 
 def test_completed_session_supersedes_stale_checkpoint(tmp_path) -> None:

@@ -497,46 +497,31 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
 @tool_parameters(
     tool_parameters_schema(
         session_id=StringSchema("Session ID returned by exec."),
-        chars=StringSchema(
-            "Text to write to stdin; omit to poll output.",
+        input=StringSchema(
+            "Text to send to stdin; omit to poll output.",
             nullable=True,
         ),
         close_stdin=BooleanSchema(
-            description="Close stdin after writing chars.",
+            description="Close stdin after sending input.",
             default=False,
         ),
         terminate=BooleanSchema(
-            description="Terminate the session.",
+            description="Terminate the session; use alone.",
             default=False,
-        ),
-        yield_time_ms=IntegerSchema(
-            description="Wait for output before returning (default 1000ms, max 30000ms).",
-            minimum=0,
-            maximum=MAX_YIELD_MS,
         ),
         wait_for=StringSchema(
             "Return when this text appears in output.",
+            min_length=1,
             nullable=True,
         ),
         until_exit=BooleanSchema(
             description="Wait for the process to exit.",
             default=False,
         ),
-        wait_timeout_ms=IntegerSchema(
-            description="Wait timeout: 10000ms for wait_for, 600000ms for until_exit by default.",
+        timeout_ms=IntegerSchema(
+            description="Maximum wait: 1s normally, 10s for wait_for, 10m for until_exit.",
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
-            nullable=True,
-        ),
-        max_output_chars=IntegerSchema(
-            description="Output limit in characters (default 10000, max 50000).",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
-        ),
-        max_output_tokens=IntegerSchema(
-            description="Compatibility alias for max_output_chars.",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
             nullable=True,
         ),
         required=["session_id"],
@@ -547,7 +532,6 @@ class ExecSessionTool(Tool):
 
     _scopes = {"core", "subagent"}
     config_key = "exec"
-    aliases = ("write_stdin",)
 
     @classmethod
     def config_cls(cls):
@@ -585,142 +569,94 @@ class ExecSessionTool(Tool):
     async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         session_id: str,
-        chars: str | None = None,
+        input: str | None = None,
         close_stdin: bool = False,
         terminate: bool = False,
-        yield_time_ms: int | None = None,
         wait_for: str | None = None,
         until_exit: bool = False,
-        wait_timeout_ms: int | None = None,
-        max_output_chars: int | None = None,
-        max_output_tokens: int | None = None,
+        timeout_ms: int | None = None,
         **kwargs: Any,
     ) -> str:
         try:
-            if max_output_chars is None:
-                max_output_chars = max_output_tokens
-            output_limit = clamp_session_int(
-                max_output_chars,
-                DEFAULT_MAX_OUTPUT_CHARS,
-                1000,
-                MAX_OUTPUT_CHARS,
-            )
-            if wait_for and until_exit:
+            if wait_for == "":
+                return ToolResult.error("Error: wait_for must not be empty.")
+            if wait_for is not None and until_exit:
                 return ToolResult.error(
                     "Error: wait_for and until_exit are mutually exclusive."
                 )
-            if wait_for:
-                return await self._wait_for_output(
+            if terminate:
+                if any(
+                    (
+                        input is not None,
+                        close_stdin,
+                        wait_for is not None,
+                        until_exit,
+                        timeout_ms is not None,
+                    )
+                ):
+                    return ToolResult.error("Error: terminate must be used alone.")
+                poll = await self._manager.write(
                     session_id=session_id,
-                    chars=chars,
-                    close_stdin=close_stdin,
-                    terminate=terminate,
-                    wait_for=wait_for,
-                    wait_timeout_ms=clamp_session_int(
-                        wait_timeout_ms,
-                        DEFAULT_WAIT_FOR_MS,
-                        0,
-                        MAX_WAIT_FOR_MS,
-                    ),
-                    max_output_chars=output_limit,
+                    chars=None,
+                    close_stdin=False,
+                    terminate=True,
+                    yield_time_ms=0,
+                    max_output_chars=DEFAULT_MAX_OUTPUT_CHARS,
+                    owner_session_key=current_request_session_key(),
                 )
-            if until_exit:
-                return await self._wait_until_exit(
-                    session_id=session_id,
-                    chars=chars,
-                    close_stdin=close_stdin,
-                    terminate=terminate,
-                    wait_timeout_ms=clamp_session_int(
-                        wait_timeout_ms,
-                        DEFAULT_UNTIL_EXIT_MS,
-                        0,
-                        MAX_WAIT_FOR_MS,
-                    ),
-                    max_output_chars=output_limit,
-                )
-            poll = await self._manager.write(
-                session_id=session_id,
-                chars=chars,
-                close_stdin=close_stdin,
-                terminate=terminate,
-                yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
-                max_output_chars=output_limit,
-                owner_session_key=current_request_session_key(),
+                result = format_session_poll(session_id, poll)
+                return ToolResult.error(result) if poll.timed_out else result
+
+            default_timeout_ms = (
+                DEFAULT_UNTIL_EXIT_MS
+                if until_exit
+                else DEFAULT_WAIT_FOR_MS
+                if wait_for is not None
+                else DEFAULT_YIELD_MS
             )
-            result = format_session_poll(session_id, poll)
-            return ToolResult.error(result) if poll.timed_out else result
+            return await self._wait(
+                session_id=session_id,
+                input=input,
+                close_stdin=close_stdin,
+                wait_for=wait_for,
+                until_exit=until_exit,
+                timeout_ms=clamp_session_int(
+                    timeout_ms,
+                    default_timeout_ms,
+                    0,
+                    MAX_WAIT_FOR_MS,
+                ),
+            )
         except KeyError:
             return ToolResult.error(f"Error: exec session not found: {session_id!r}")
         except Exception as exc:
             return ToolResult.error(f"Error managing exec session: {exc}")
 
-    async def _wait_until_exit(
+    async def _wait(
         self,
         *,
         session_id: str,
-        chars: str | None,
+        input: str | None,
         close_stdin: bool,
-        terminate: bool,
-        wait_timeout_ms: int,
-        max_output_chars: int,
+        wait_for: str | None,
+        until_exit: bool,
+        timeout_ms: int,
     ) -> str:
-        deadline = time.monotonic() + (wait_timeout_ms / 1000)
-        aggregate = _BoundedOutputBuffer(max_output_chars)
-        upstream_truncated = 0
-        first = True
-
-        while True:
-            remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-            poll = await self._manager.write(
-                session_id=session_id,
-                chars=chars if first else None,
-                close_stdin=close_stdin if first else False,
-                terminate=terminate if first else False,
-                yield_time_ms=min(MAX_YIELD_MS, remaining_ms),
-                max_output_chars=MAX_OUTPUT_CHARS,
-                owner_session_key=current_request_session_key(),
-            )
-            first = False
-            upstream_truncated += poll.truncated_chars
-            if poll.output:
-                aggregate.append(poll.output)
-            if poll.done or remaining_ms <= 0:
-                poll.output, aggregate_truncated = aggregate.drain()
-                poll.truncated_chars = upstream_truncated + aggregate_truncated
-                result = format_session_poll(session_id, poll)
-                if not poll.done:
-                    result += (
-                        f"\nWait timed out after {wait_timeout_ms / 1000:g}s; "
-                        "session remains active."
-                    )
-                return ToolResult.error(result) if poll.timed_out else result
-
-    async def _wait_for_output(
-        self,
-        *,
-        session_id: str,
-        chars: str | None,
-        close_stdin: bool,
-        terminate: bool,
-        wait_for: str,
-        wait_timeout_ms: int,
-        max_output_chars: int,
-    ) -> str:
-        deadline = time.monotonic() + (wait_timeout_ms / 1000)
-        aggregate = _BoundedOutputBuffer(max_output_chars)
+        deadline = time.monotonic() + (timeout_ms / 1000)
+        aggregate = _BoundedOutputBuffer(DEFAULT_MAX_OUTPUT_CHARS)
         upstream_truncated = 0
         search_overlap = ""
         first = True
-        poll: _SessionPoll | None = None
+        matched = False
 
         while True:
             remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-            step_ms = min(500, remaining_ms)
+            step_ms = min(MAX_YIELD_MS if until_exit else 500, remaining_ms)
             poll = await self._manager.write(
                 session_id=session_id,
-                chars=chars if first else None,
+                chars=input if first else None,
                 close_stdin=close_stdin if first else False,
-                terminate=terminate if first else False,
+                terminate=False,
                 yield_time_ms=step_ms,
                 max_output_chars=MAX_OUTPUT_CHARS,
                 owner_session_key=current_request_session_key(),
@@ -729,25 +665,26 @@ class ExecSessionTool(Tool):
             upstream_truncated += poll.truncated_chars
             if poll.output:
                 aggregate.append(poll.output)
-                searchable = search_overlap + poll.output
-                if wait_for in searchable:
-                    poll.output, aggregate_truncated = aggregate.drain()
-                    poll.truncated_chars = upstream_truncated + aggregate_truncated
-                    result = format_session_poll(session_id, poll)
-                    return ToolResult.error(result) if poll.timed_out else result
-                overlap_chars = max(0, len(wait_for) - 1)
-                search_overlap = searchable[-overlap_chars:] if overlap_chars else ""
-            if poll.done or remaining_ms <= 0:
+                if wait_for is not None:
+                    searchable = search_overlap + poll.output
+                    matched = wait_for in searchable
+                    overlap_chars = len(wait_for) - 1
+                    search_overlap = searchable[-overlap_chars:] if overlap_chars else ""
+
+            expired = time.monotonic() >= deadline
+            has_activity = wait_for is None and not until_exit and bool(poll.output)
+            if poll.done or matched or has_activity or expired:
                 poll.output, aggregate_truncated = aggregate.drain()
                 poll.truncated_chars = upstream_truncated + aggregate_truncated
                 result = format_session_poll(session_id, poll)
-                if wait_for not in poll.output:
+                if wait_for is not None and not matched:
                     result += f"\nWait target not observed: {wait_for!r}"
+                elif until_exit and not poll.done:
+                    result += (
+                        f"\nWait timed out after {timeout_ms / 1000:g}s; "
+                        "session remains active."
+                    )
                 return ToolResult.error(result) if poll.timed_out else result
-
-
-# TODO(0.3.2): Remove the write_stdin tool-call and class aliases after 0.3.1.
-WriteStdinTool = ExecSessionTool
 
 
 @tool_parameters(tool_parameters_schema())

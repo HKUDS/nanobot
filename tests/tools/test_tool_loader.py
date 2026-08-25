@@ -161,8 +161,7 @@ def test_loader_wires_shared_exec_session_manager(tmp_path):
 
     assert registry.get("exec")._session_manager is manager
     assert registry.get("exec_session")._manager is manager
-    # Compatibility through 0.3.1; the alias is removed in 0.3.2.
-    assert registry.get("write_stdin")._manager is manager
+    assert registry.get("write_stdin") is None
     assert registry.get("list_exec_sessions")._manager is manager
     definition_names = {
         definition["function"]["name"]

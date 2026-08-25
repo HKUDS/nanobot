@@ -907,16 +907,16 @@ class TestWindowsRealExec:
                 session_id = result.split("session_id:", 1)[1].splitlines()[0].strip()
                 poll_result = await ExecSessionTool(manager=manager).execute(
                     session_id=session_id,
-                    chars="",
+                    input="",
                     wait_for="café λ 你好",
-                    wait_timeout_ms=120_000,
+                    timeout_ms=120_000,
                 )
                 result += "\n" + poll_result
                 if "Process running." in poll_result:
                     final_result = await ExecSessionTool(manager=manager).execute(
                         session_id=session_id,
-                        chars="",
-                        yield_time_ms=30_000,
+                        input="",
+                        timeout_ms=30_000,
                     )
                     result += "\n" + final_result
                     assert "Process running." not in final_result
