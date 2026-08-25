@@ -118,6 +118,7 @@ class AgentRunSpec:
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     injection_callback: InjectionCallback | None = None
+    terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: GoalContinueMessage | None = None
@@ -274,6 +275,7 @@ class AgentRunner:
         phase: str = "after error",
         iteration: int | None = None,
         allow_goal_continue: bool = False,
+        wait_at_terminal: bool = False,
     ) -> tuple[bool, int]:
         """Drain pending injections. Returns (should_continue, updated_cycles).
 
@@ -291,6 +293,13 @@ class AgentRunner:
             predicate = spec.goal_active_predicate
             if predicate is not None and predicate():
                 injections = [self._build_goal_continue_message(spec)]
+        if (
+            not injections
+            and wait_at_terminal
+            and injection_cycles < _MAX_INJECTION_CYCLES
+        ):
+            injections = await self._drain_injections(spec, terminal=True)
+            real_injection = bool(injections)
         if not injections:
             return False, injection_cycles
         if real_injection:
@@ -334,7 +343,12 @@ class AgentRunner:
                 custom = None
         return build_goal_continue_message(custom)
 
-    async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
+    async def _drain_injections(
+        self,
+        spec: AgentRunSpec,
+        *,
+        terminal: bool = False,
+    ) -> list[dict[str, Any]]:
         """Drain pending user messages via the injection callback.
 
         Returns normalized user messages (capped by
@@ -342,10 +356,15 @@ class AgentRunner:
         nothing to inject. Messages beyond the cap are logged so they
         are not silently lost.
         """
-        if spec.injection_callback is None:
+        callback = (
+            spec.terminal_injection_callback
+            if terminal
+            else spec.injection_callback
+        )
+        if callback is None:
             return []
         try:
-            signature = inspect.signature(spec.injection_callback)
+            signature = inspect.signature(callback)
             accepts_limit = (
                 "limit" in signature.parameters
                 or any(
@@ -354,9 +373,9 @@ class AgentRunner:
                 )
             )
             if accepts_limit:
-                items = await spec.injection_callback(limit=_MAX_INJECTIONS_PER_TURN)
+                items = await callback(limit=_MAX_INJECTIONS_PER_TURN)
             else:
-                items = await spec.injection_callback()
+                items = await callback()
         except Exception:
             logger.exception("injection_callback failed")
             return []
@@ -752,6 +771,11 @@ class AgentRunner:
                 iteration=iteration,
                 allow_goal_continue=(
                     response.finish_reason not in {"refusal", "content_filter"}
+                ),
+                wait_at_terminal=(
+                    assistant_message is not None
+                    and response.finish_reason
+                    not in {"error", "length", "refusal", "content_filter"}
                 ),
             )
             if should_continue:

@@ -985,6 +985,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    terminal_injection_callback = AsyncMock(return_value=[])
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -994,9 +995,11 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         goal_active_predicate=lambda: True,
+        terminal_injection_callback=terminal_injection_callback,
     ))
 
     assert provider.chat_with_retry.await_count == 1
+    terminal_injection_callback.assert_not_awaited()
     assert result.final_content == "Request blocked by provider policy."
     assert result.stop_reason == "completed"
 

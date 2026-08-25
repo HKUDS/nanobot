@@ -300,6 +300,130 @@ async def test_checkpoint1_injects_after_tool_execution():
 
 
 @pytest.mark.asyncio
+async def test_terminal_wait_does_not_block_next_iteration_after_tools():
+    """Background waits begin only after a no-tool response is ready to finish."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    second_request_started = asyncio.Event()
+    allow_final_response = asyncio.Event()
+    terminal_wait_started = asyncio.Event()
+    release_terminal_result = asyncio.Event()
+    call_count = 0
+    terminal_result_delivered = False
+
+    async def chat_with_retry(*, messages, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="c1", name="read_file", arguments={"path": "x"})],
+            )
+        if call_count == 2:
+            second_request_started.set()
+            await allow_final_response.wait()
+            return LLMResponse(content="main work finished", tool_calls=[])
+        return LLMResponse(content="combined final answer", tool_calls=[])
+
+    async def drain_available():
+        return []
+
+    async def wait_at_terminal():
+        nonlocal terminal_result_delivered
+        if terminal_result_delivered:
+            return []
+        terminal_wait_started.set()
+        await release_terminal_result.wait()
+        terminal_result_delivered = True
+        return [
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="c",
+                content="background result",
+            )
+        ]
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner()
+    run_task = asyncio.create_task(runner.run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=drain_available,
+        terminal_injection_callback=wait_at_terminal,
+    )))
+
+    await asyncio.wait_for(second_request_started.wait(), timeout=1.0)
+    assert not terminal_wait_started.is_set()
+
+    allow_final_response.set()
+    await asyncio.wait_for(terminal_wait_started.wait(), timeout=1.0)
+    assert not run_task.done()
+
+    release_terminal_result.set()
+    result = await asyncio.wait_for(run_task, timeout=1.0)
+
+    assert call_count == 3
+    assert result.had_injections is True
+    assert result.final_content == "combined final answer"
+
+
+@pytest.mark.asyncio
+async def test_goal_continuation_precedes_terminal_wait():
+    """An active sustained goal keeps running without joining background work."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="goal checkpoint", tool_calls=[]),
+        LLMResponse(content="goal complete", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    goal_checks = 0
+    terminal_waits = 0
+
+    def goal_active() -> bool:
+        nonlocal goal_checks
+        goal_checks += 1
+        return goal_checks == 1
+
+    async def drain_available():
+        return []
+
+    async def wait_at_terminal():
+        nonlocal terminal_waits
+        terminal_waits += 1
+        return []
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "complete the goal"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=drain_available,
+        terminal_injection_callback=wait_at_terminal,
+        goal_active_predicate=goal_active,
+    ))
+
+    assert provider.chat_with_retry.await_count == 2
+    assert terminal_waits == 1
+    assert result.final_content == "goal complete"
+
+
+@pytest.mark.asyncio
 async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     """After final response, if injections exist, stream_end should get resuming=True."""
     from nanobot.agent.hook import AgentHook, AgentHookContext

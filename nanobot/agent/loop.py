@@ -112,6 +112,7 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 _SUBAGENT_PROVIDER_TASK_META = "subagent_provider_task_id"
+_SUBAGENT_TERMINAL_WAIT_SECONDS = 300.0
 
 
 class TurnKind(Enum):
@@ -1000,15 +1001,12 @@ class AgentLoop:
                 )
             self._set_runtime_checkpoint(session, public_payload)
 
-        async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
-            """Drain follow-up messages from the pending queue.
-
-            When no messages are immediately available but sub-agents
-            spawned in this dispatch are still running, blocks until at
-            least one result arrives (or timeout).  This keeps the runner
-            loop alive so subsequent sub-agent completions are consumed
-            in-order rather than dispatched separately.
-            """
+        async def _drain_pending(
+            *,
+            limit: int = _MAX_INJECTIONS_PER_TURN,
+            first_msg: InboundMessage | None = None,
+        ) -> list[dict[str, Any]]:
+            """Drain only messages that are already available."""
             if pending_queue is None:
                 return []
 
@@ -1080,34 +1078,51 @@ class AgentLoop:
                 return row
 
             items: list[dict[str, Any]] = []
+            if first_msg is not None:
+                items.append(await _to_user_message(first_msg))
             while len(items) < limit:
                 try:
                     items.append(await _to_user_message(pending_queue.get_nowait()))
                 except asyncio.QueueEmpty:
                     break
 
-            # Block if nothing drained but sub-agents spawned in this dispatch
-            # are still running.  Keeps the runner loop alive so subsequent
-            # completions are injected in-order rather than dispatched separately.
-            if (not items
-                    and session is not None
-                    and self.subagents.get_running_count_by_session(session.key) > 0):
-                try:
-                    msg = await asyncio.wait_for(pending_queue.get(), timeout=300)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Timeout waiting for sub-agent completion in session {}",
-                        session.key,
-                    )
-                    return items
-                items.append(await _to_user_message(msg))
-                while len(items) < limit:
-                    try:
-                        items.append(await _to_user_message(pending_queue.get_nowait()))
-                    except asyncio.QueueEmpty:
-                        break
-
             return items
+
+        terminal_wait_deadline: float | None = None
+
+        async def _wait_for_pending(
+            *,
+            limit: int = _MAX_INJECTIONS_PER_TURN,
+        ) -> list[dict[str, Any]]:
+            """Wait for a pending result only when the runner is ready to exit."""
+            nonlocal terminal_wait_deadline
+
+            items = await _drain_pending(limit=limit)
+            if (
+                items
+                or pending_queue is None
+                or session is None
+                or self.subagents.get_running_count_by_session(session.key) == 0
+            ):
+                return items
+
+            now = asyncio.get_running_loop().time()
+            if terminal_wait_deadline is None:
+                terminal_wait_deadline = now + _SUBAGENT_TERMINAL_WAIT_SECONDS
+            remaining = terminal_wait_deadline - now
+            if remaining <= 0:
+                return []
+
+            try:
+                msg = await asyncio.wait_for(pending_queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timeout waiting for sub-agent completion before session {} exits",
+                    session.key,
+                )
+                return []
+
+            return await _drain_pending(limit=limit, first_msg=msg)
 
         active_session_key = session.key if session else session_key
         effective_scope = self.workspace_scopes.for_turn(
@@ -1184,6 +1199,7 @@ class AgentLoop:
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
+                terminal_injection_callback=_wait_for_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
                 # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
