@@ -561,6 +561,69 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("keeps a completed file edit at its original position in the turn", () => {
+    const before: UIMessage = {
+      id: "model-before-edit",
+      role: "assistant",
+      content: "Before the edit",
+      activityKind: "model",
+      createdAt: 1,
+    };
+    const after: UIMessage = {
+      id: "model-after-edit",
+      role: "assistant",
+      content: "After the edit",
+      activityKind: "model",
+      createdAt: 3,
+    };
+    const fileEdit = (status: "editing" | "done"): UIMessage => ({
+      id: "file-edit-in-place",
+      role: "tool",
+      kind: "trace",
+      content: "edit_file()",
+      traces: ["edit_file()"],
+      fileEdits: [{
+        call_id: "call-edit-in-place",
+        tool: "edit_file",
+        path: "src/app.tsx",
+        phase: status === "editing" ? "start" : "end",
+        added: status === "editing" ? 0 : 2,
+        deleted: 0,
+        approximate: false,
+        status,
+      }],
+      createdAt: 2,
+    });
+    const assertBetween = (middle: HTMLElement) => {
+      const beforeElement = screen.getByText("Before the edit");
+      const afterElement = screen.getByText("After the edit");
+      expect(beforeElement.compareDocumentPosition(middle) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+      expect(middle.compareDocumentPosition(afterElement) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+    };
+
+    const { rerender } = render(
+      <AgentActivityCluster
+        messages={[before, fileEdit("editing"), after]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    assertBetween(screen.getByText("Editing"));
+
+    rerender(
+      <AgentActivityCluster
+        messages={[before, fileEdit("done"), after]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    assertBetween(screen.getByText("Edited"));
+  });
+
   it("renders file edit diffs and responds to preference changes", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",

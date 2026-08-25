@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -43,10 +52,11 @@ import {
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import { usePageVisibility } from "@/hooks/usePageVisibility";
 import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
@@ -156,9 +166,13 @@ export function AgentActivityCluster({
   const fileEditDisplayMode = useFileEditDisplayMode();
   const pageVisible = usePageVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
-  const fileEdits = useMemo(
-    () => summarizeFileEdits(collectFileEdits(activityMessages), isTurnStreaming),
+  const fileEditsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(activityMessages, isTurnStreaming),
     [activityMessages, isTurnStreaming],
+  );
+  const fileEdits = useMemo(
+    () => [...fileEditsByMessage.values()].flat(),
+    [fileEditsByMessage],
   );
   const cliRuns = useMemo(() => collectCliRuns(activityMessages), [activityMessages]);
   const mcpRuns = useMemo(() => collectMcpRuns(activityMessages), [activityMessages]);
@@ -348,15 +362,10 @@ export function AgentActivityCluster({
           active={isTurnStreaming}
           cliAppsByName={cliAppsByName}
           mcpPresetsByName={mcpPresetsByName}
+          fileEditsByMessage={fileEditsByMessage}
+          fileEditDisplayMode={fileEditDisplayMode}
           onOpenFilePreview={onOpenFilePreview}
         />
-        {fileEdits.length ? (
-          <FileEditGroup
-            edits={fileEdits}
-            displayMode={fileEditDisplayMode}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        ) : null}
       </ThinkingReasoningShell>
     </div>
   );
@@ -414,12 +423,16 @@ function ActivityMessageTimeline({
   active,
   cliAppsByName,
   mcpPresetsByName,
+  fileEditsByMessage,
+  fileEditDisplayMode,
   onOpenFilePreview,
 }: {
   messages: UIMessage[];
   active: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
+  fileEditsByMessage: Map<string, FileEditSummary[]>;
+  fileEditDisplayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
 }) {
   const items: ReactNode[] = [];
@@ -447,14 +460,21 @@ function ActivityMessageTimeline({
       return;
     }
     if (message.kind === "trace") {
+      const fileEdits = fileEditsByMessage.get(message.id) ?? [];
       items.push(
-        <ActivityTraceTimeline
-          key={message.id}
-          message={message}
-          active={active && index === messages.length - 1}
-          cliAppsByName={cliAppsByName}
-          mcpPresetsByName={mcpPresetsByName}
-        />,
+        <Fragment key={message.id}>
+          <ActivityTraceTimeline
+            message={message}
+            active={active && index === messages.length - 1}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+          />
+          <FileEditGroup
+            edits={fileEdits}
+            displayMode={fileEditDisplayMode}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        </Fragment>,
       );
     }
   });
@@ -1061,16 +1081,6 @@ function fileEditCallKey(edit: UIFileEdit): string {
   return `${edit.tool}|${edit.path}`;
 }
 
-function collectFileEdits(messages: UIMessage[]): UIFileEdit[] {
-  const edits: UIFileEdit[] = [];
-  for (const message of messages) {
-    if (message.kind === "trace" && message.fileEdits?.length) {
-      edits.push(...message.fileEdits);
-    }
-  }
-  return edits;
-}
-
 function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   const order: string[] = [];
   const byKey = new Map<string, UIFileEdit>();
@@ -1080,6 +1090,33 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
     byKey.set(key, edit);
   }
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
+}
+
+/** Keep each edit at the point where its call first appeared. Later lifecycle
+ * events update that row in place instead of moving completed edits to the end. */
+function summarizeFileEditsByMessage(
+  messages: UIMessage[],
+  active: boolean,
+): Map<string, FileEditSummary[]> {
+  const messageByEdit = new Map<string, string>();
+  const edits: UIFileEdit[] = [];
+  for (const message of messages) {
+    for (const edit of message.fileEdits ?? []) {
+      const key = fileEditCallKey(edit);
+      if (!messageByEdit.has(key)) messageByEdit.set(key, message.id);
+      edits.push(edit);
+    }
+  }
+
+  const grouped = new Map<string, FileEditSummary[]>();
+  for (const edit of summarizeFileEdits(edits, active)) {
+    const messageId = messageByEdit.get(edit.key);
+    if (!messageId) continue;
+    const group = grouped.get(messageId) ?? [];
+    group.push(edit);
+    grouped.set(messageId, group);
+  }
+  return grouped;
 }
 
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
