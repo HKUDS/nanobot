@@ -49,6 +49,7 @@ from nanobot.session.webui_turns import (
     WebuiTurnCoordinator,
     clean_generated_title,
     maybe_generate_webui_title,
+    maybe_generate_webui_title_after_turn,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
@@ -392,6 +393,68 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    loop.provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_projects_onto_chat_session_under_unified_routing(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content='"查询临期 IP"', finish_reason="stop")
+    )
+    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    unified.metadata[WEBUI_TITLE_METADATA_KEY] = "开启私聊Topic功能"
+    unified.add_message("user", "很早以前的问题")
+    unified.add_message("assistant", "很久以前的回答。")
+    unified.add_message("user", "帮我查一下临期IP有哪些")
+    unified.add_message("assistant", "以下是临期 IP 列表。")
+    loop.sessions.save(unified)
+
+    generated = await maybe_generate_webui_title_after_turn(
+        channel="websocket",
+        chat_id="chat-projection",
+        metadata={WEBUI_SESSION_METADATA_KEY: True},
+        sessions=loop.sessions,
+        session_key=UNIFIED_SESSION_KEY,
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is True
+    chat = loop.sessions.get_or_create("websocket:chat-projection")
+    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "查询临期 IP"
+    assert unified.metadata[WEBUI_TITLE_METADATA_KEY] == "开启私聊Topic功能"
+    prompt = loop.provider.chat_with_retry.await_args.args[0][1]["content"]
+    assert "帮我查一下临期IP有哪些" in prompt
+    assert "很早以前的问题" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    unified.add_message("user", "帮我查一下临期IP有哪些")
+    unified.add_message("assistant", "以下是临期 IP 列表。")
+    chat = loop.sessions.get_or_create("websocket:chat-existing")
+    chat.metadata[WEBUI_TITLE_METADATA_KEY] = "Existing title"
+    loop.sessions.save(unified)
+
+    generated = await maybe_generate_webui_title_after_turn(
+        channel="websocket",
+        chat_id="chat-existing",
+        metadata={WEBUI_SESSION_METADATA_KEY: True},
+        sessions=loop.sessions,
+        session_key=UNIFIED_SESSION_KEY,
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is False
+    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "Existing title"
     loop.provider.chat_with_retry.assert_not_awaited()
 
 
