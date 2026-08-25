@@ -1,6 +1,7 @@
 """Document text extraction utilities for nanobot."""
 
 import mimetypes
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +75,25 @@ class PdfExtraction:
     end_page: int
 
 
+@dataclass(frozen=True, slots=True)
+class LocatedDocumentLine:
+    """One searchable document line with a stable, human-readable locator."""
+
+    text: str
+    extracted_line: int
+    locator: str
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentLineExtraction:
+    """Bounded document text prepared for targeted content search."""
+
+    lines: tuple[LocatedDocumentLine, ...]
+    truncated: bool = False
+    error: str | None = None
+    continuation: str | None = None
+
+
 def extract_text(path: str | Path) -> str | None:
     """Extract text from a file.
 
@@ -85,13 +105,8 @@ def extract_text(path: str | Path) -> str | None:
         or error string for failures.
     """
     path = Path(path)
-    if not path.exists():
-        return f"[error: file not found: {path}]"
-    try:
-        if path.stat().st_size > _MAX_EXTRACT_FILE_SIZE:
-            return f"[error: file exceeds {_MAX_EXTRACT_FILE_SIZE // (1024 * 1024)} MB limit]"
-    except OSError as e:
-        return f"[error: failed to inspect file: {e!s}]"
+    if error := _extraction_path_error(path):
+        return error
 
     ext = path.suffix.lower()
 
@@ -113,6 +128,100 @@ def extract_text(path: str | Path) -> str | None:
     else:
         # Unsupported extension
         return None
+
+
+def extract_document_lines(
+    path: str | Path,
+    *,
+    pages: str | None = None,
+) -> DocumentLineExtraction | None:
+    """Extract bounded searchable lines from PDF and Office documents.
+
+    ``extracted_line`` addresses the same line in :func:`extract_text` output,
+    while ``locator`` exposes the document's natural coordinate (page,
+    paragraph, sheet row, or slide). Unsupported file types return ``None``.
+    """
+    path = Path(path)
+    ext = path.suffix.lower()
+    if ext not in {".pdf", ".docx", ".xlsx", ".pptx"}:
+        return None
+    if error := _extraction_path_error(path):
+        return DocumentLineExtraction((), error=error)
+    if ext == ".xlsx":
+        return _extract_xlsx_lines(path)
+
+    if ext == ".pdf":
+        try:
+            extraction = extract_pdf_pages(
+                path,
+                pages=pages,
+                max_pages=_MAX_PDF_ATTACHMENT_PAGES,
+                max_chars=_MAX_TEXT_LENGTH,
+            )
+        except Exception as e:
+            return DocumentLineExtraction((), error=f"[error: failed to extract PDF: {e!s}]")
+        text = extraction.text
+        marker = re.compile(r"^--- Page (\d+) ---$")
+        label = "page"
+        truncated = extraction.end_page < extraction.total_pages - 1 or "(truncated" in text
+        continuation = None
+        if extraction.end_page < extraction.total_pages - 1:
+            next_start = extraction.end_page + 2
+            next_end = min(
+                extraction.end_page + 1 + _MAX_PDF_ATTACHMENT_PAGES,
+                extraction.total_pages,
+            )
+            continuation = f"pages='{next_start}-{next_end}'"
+    elif ext == ".pptx":
+        text = _extract_pptx(path)
+        marker = re.compile(r"^--- Slide (\d+) ---$")
+        label = "slide"
+        truncated = "(truncated" in text
+        continuation = None
+    else:
+        text = _extract_docx(path)
+        marker = None
+        label = "paragraph"
+        truncated = "(truncated" in text
+        continuation = None
+
+    if text.startswith("[error:"):
+        return DocumentLineExtraction((), error=text)
+
+    lines: list[LocatedDocumentLine] = []
+    section = 1
+    section_line = 0
+    paragraph = 0
+    for extracted_line, line in enumerate(text.splitlines(), 1):
+        if marker is not None and (match := marker.fullmatch(line)):
+            section = int(match.group(1))
+            section_line = 0
+            continue
+        if not line:
+            continue
+        if marker is None:
+            paragraph += 1
+            locator = f"{label}={paragraph}"
+        else:
+            section_line += 1
+            locator = f"{label}={section},line={section_line}"
+        lines.append(LocatedDocumentLine(line, extracted_line, locator))
+    return DocumentLineExtraction(
+        tuple(lines),
+        truncated=truncated,
+        continuation=continuation,
+    )
+
+
+def _extraction_path_error(path: Path) -> str | None:
+    if not path.exists():
+        return f"[error: file not found: {path}]"
+    try:
+        if path.stat().st_size > _MAX_EXTRACT_FILE_SIZE:
+            return f"[error: file exceeds {_MAX_EXTRACT_FILE_SIZE // (1024 * 1024)} MB limit]"
+    except OSError as e:
+        return f"[error: failed to inspect file: {e!s}]"
+    return None
 
 
 def _extract_pdf(path: Path) -> str:
@@ -284,6 +393,64 @@ def _extract_xlsx(path: Path) -> str:
     except Exception as e:
         logger.exception("Failed to extract XLSX {}", path)
         return f"[error: failed to extract XLSX: {e!s}]"
+
+
+def _extract_xlsx_lines(path: Path) -> DocumentLineExtraction:
+    """Extract spreadsheet rows with exact sheet and row coordinates."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return DocumentLineExtraction((), error="[error: openpyxl not installed]")
+    try:
+        if error := _office_archive_error(path):
+            return DocumentLineExtraction((), error=error)
+        wb = load_workbook(path, read_only=True, data_only=True)
+        try:
+            lines: list[LocatedDocumentLine] = []
+            output_chars = 0
+            extracted_line = 0
+            wrote_document_content = False
+            truncated = False
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                wrote_header = False
+                for row_index, row in enumerate(ws.iter_rows(values_only=True), 1):
+                    row_text = "\t".join(
+                        str(cell) if cell is not None else "" for cell in row
+                    )
+                    if not row_text.strip():
+                        continue
+                    if not wrote_header:
+                        header = f"--- Sheet: {sheet_name} ---"
+                        separator_size = 2 if wrote_document_content else 0
+                        if output_chars + separator_size + len(header) > _MAX_TEXT_LENGTH:
+                            truncated = True
+                            break
+                        output_chars += separator_size + len(header)
+                        extracted_line += 2 if wrote_document_content else 1
+                        wrote_document_content = True
+                        wrote_header = True
+                    if output_chars + 1 + len(row_text) > _MAX_TEXT_LENGTH:
+                        truncated = True
+                        break
+                    output_chars += 1 + len(row_text)
+                    extracted_line += 1
+                    lines.append(LocatedDocumentLine(
+                        row_text,
+                        extracted_line,
+                        f"sheet={sheet_name!r},row={row_index}",
+                    ))
+                if truncated:
+                    break
+            return DocumentLineExtraction(tuple(lines), truncated=truncated)
+        finally:
+            wb.close()
+    except Exception as e:
+        logger.exception("Failed to extract searchable XLSX lines {}", path)
+        return DocumentLineExtraction(
+            (),
+            error=f"[error: failed to extract XLSX: {e!s}]",
+        )
 
 
 def _extract_pptx(path: Path) -> str:

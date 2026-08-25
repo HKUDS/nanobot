@@ -251,7 +251,10 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
         offset=IntegerSchema(
-            description="Line number to start reading from (1-indexed, default 1)",
+            description=(
+                "Line number to start reading from, including extracted Office document "
+                "text (1-indexed, default 1)"
+            ),
             minimum=1,
         ),
         limit=IntegerSchema(
@@ -291,7 +294,7 @@ class ReadFileTool(_FsTool):
             "Use find_files/list_dir first when the path is uncertain. "
             "Read the relevant range before editing so replacements or patches "
             "are based on current content. "
-            "Use offset and limit for large text files. "
+            "Use offset and limit for large text files or extracted Office document text. "
             "Use force=true to re-read content even if unchanged. "
             "Reads exceeding ~128K chars are truncated."
         )
@@ -342,7 +345,7 @@ class ReadFileTool(_FsTool):
 
             # Office document support
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-                return self._read_office_doc(fp)
+                return self._read_office_doc(fp, offset, limit)
 
             raw = fp.read_bytes()
             if not raw:
@@ -484,7 +487,12 @@ class ReadFileTool(_FsTool):
             )
         return result
 
-    def _read_office_doc(self, fp: Path) -> str:
+    def _read_office_doc(
+        self,
+        fp: Path,
+        offset: int,
+        limit: int | None,
+    ) -> str:
         from nanobot.utils.document import extract_text
 
         result = extract_text(fp)
@@ -498,10 +506,32 @@ class ReadFileTool(_FsTool):
         if not result:
             return f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
 
-        if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(Document text truncated at ~128K chars)"
-
-        return result
+        all_lines = result.splitlines()
+        total = len(all_lines)
+        offset = max(1, offset)
+        if offset > total:
+            return ToolResult.error(
+                f"Error: offset {offset} is beyond end of extracted document ({total} lines)"
+            )
+        start = offset - 1
+        end = min(start + (limit or self._DEFAULT_LIMIT), total)
+        numbered = [
+            f"{line_no}| {all_lines[line_no - 1]}"
+            for line_no in range(offset, end + 1)
+        ]
+        output = "\n".join(numbered)
+        char_truncated = len(output) > self._MAX_CHARS
+        if char_truncated:
+            output = output[:self._MAX_CHARS]
+            output += "\n\n(Document text truncated at ~128K chars)"
+        elif end < total:
+            output += (
+                f"\n\n(Showing extracted lines {offset}-{end} of {total}. "
+                f"Use offset={end + 1} to continue.)"
+            )
+        else:
+            output += f"\n\n(End of document — {total} extracted lines total)"
+        return output
 
 
 # ---------------------------------------------------------------------------

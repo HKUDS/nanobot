@@ -363,6 +363,18 @@ class TestReadOfficeDocuments:
         assert "Alice" in result
 
     @pytest.mark.asyncio
+    async def test_office_documents_support_extracted_line_ranges(self, tool, tmp_path):
+        extracted = "--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30\nBob\t25"
+        with patch("nanobot.utils.document.extract_text", return_value=extracted):
+            f = tmp_path / "test.xlsx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f), offset=3, limit=1)
+
+        assert "3| Alice\t30" in result
+        assert "Name\tAge" not in result
+        assert "Use offset=4 to continue" in result
+
+    @pytest.mark.asyncio
     async def test_pptx_returns_extracted_text(self, tool, tmp_path):
         with patch("nanobot.utils.document.extract_text", return_value="--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"):
             f = tmp_path / "test.pptx"

@@ -124,9 +124,14 @@ async def test_grep_respects_glob_filter_and_context(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_grep_defaults_to_files_with_matches(tmp_path: Path) -> None:
+async def test_grep_defaults_to_match_context(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "main.py").write_text("match_here\n", encoding="utf-8")
+    (tmp_path / "src" / "main.py").write_text(
+        "\n".join(f"line {line}" for line in range(1, 6))
+        + "\nmatch_here\n"
+        + "\n".join(f"line {line}" for line in range(7, 13)),
+        encoding="utf-8",
+    )
 
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
     result = await tool.execute(
@@ -134,8 +139,36 @@ async def test_grep_defaults_to_files_with_matches(tmp_path: Path) -> None:
         path="src",
     )
 
-    assert result.splitlines() == ["src/main.py"]
-    assert "1|" not in result
+    assert "src/main.py:6" in result
+    assert "  1| line 1" in result
+    assert "> 6| match_here" in result
+    assert "  11| line 11" in result
+    assert "line 12" not in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_xlsx_with_sheet_cell_locator(tmp_path: Path) -> None:
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "people.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "People"
+    sheet.append(["Name", "Role"])
+    sheet.append(["Ada", "Engineer"])
+    workbook.save(workbook_path)
+    workbook.close()
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="Engineer",
+        path="people.xlsx",
+        fixed_strings=True,
+    )
+
+    assert "people.xlsx:3" in result
+    assert "sheet='People',row=2,cell=B2" in result
+    assert "Ada\tEngineer" in result
 
 
 @pytest.mark.asyncio
@@ -169,6 +202,7 @@ async def test_grep_type_filter_limits_files(tmp_path: Path) -> None:
         pattern="needle",
         path="src",
         type="py",
+        output_mode="files_with_matches",
     )
 
     assert result.splitlines() == ["src/a.py"]
@@ -224,6 +258,7 @@ async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: 
     result = await tool.execute(
         pattern="needle",
         path="src",
+        output_mode="files_with_matches",
         head_limit=1,
         offset=1,
     )

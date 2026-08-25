@@ -8,6 +8,7 @@ import pytest
 from nanobot.utils.document import (
     PdfSafetyError,
     _is_text_extension,
+    extract_document_lines,
     extract_pdf_pages,
     extract_text,
 )
@@ -86,6 +87,32 @@ class TestExtractText:
 
         result = extract_text(json_file)
         assert result == content
+
+    def test_pdf_search_lines_expose_page_continuation(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from nanobot.utils import document as document_utils
+
+        pdf_file = tmp_path / "large.pdf"
+        pdf_file.write_bytes(b"%PDF")
+        monkeypatch.setattr(
+            document_utils,
+            "extract_pdf_pages",
+            lambda *args, **kwargs: document_utils.PdfExtraction(
+                text="--- Page 101 ---\nneedle",
+                total_pages=250,
+                start_page=100,
+                end_page=199,
+            ),
+        )
+
+        result = extract_document_lines(pdf_file, pages="101-200")
+
+        assert result is not None
+        assert result.lines[0].locator == "page=101,line=1"
+        assert result.continuation == "pages='201-250'"
 
     def test_extract_text_xlsx(self, tmp_path: Path):
         """Test extracting text from an .xlsx file."""

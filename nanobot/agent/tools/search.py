@@ -13,9 +13,11 @@ from typing import Any, Iterable, TypeVar
 
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
+from nanobot.utils.document import extract_document_lines
 
 _DEFAULT_HEAD_LIMIT = 250
 _DEFAULT_FILE_HEAD_LIMIT = 200
+_DOCUMENT_EXTENSIONS = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
 T = TypeVar("T")
 _TYPE_GLOB_MAP = {
     "py": ("*.py", "*.pyi"),
@@ -62,6 +64,15 @@ def _is_binary(raw: bytes) -> bool:
         return False
     non_text = sum(byte < 9 or 13 < byte < 32 for byte in sample)
     return (non_text / len(sample)) > 0.2
+
+
+def _excel_column(index: int) -> str:
+    """Return a 1-indexed spreadsheet column label without importing openpyxl."""
+    label = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        label = chr(ord("A") + remainder) + label
+    return label
 
 
 def _paginate(items: list[T], limit: int | None, offset: int) -> tuple[list[T], bool]:
@@ -280,7 +291,7 @@ class FindFilesTool(_SearchTool):
 
 
 class GrepTool(_SearchTool):
-    """Search file contents using a regex-like pattern."""
+    """Search text and document contents using a regex-like pattern."""
     _scopes = {"core", "subagent"}
 
     _MAX_RESULT_CHARS = 128_000
@@ -294,9 +305,9 @@ class GrepTool(_SearchTool):
     @property
     def description(self) -> str:
         return (
-            "Search file contents with a regex pattern. "
-            "Default output_mode is files_with_matches (file paths only); "
-            "use content mode for matching lines with context. Prefer this "
+            "Search text, PDF, DOCX, XLSX, and PPTX contents with a regex pattern. "
+            "By default, return each match with five lines of surrounding context "
+            "and stable line/page/paragraph/sheet/slide locators. Prefer this "
             "over shell grep for ordinary workspace searches. "
             "Binary and file-size limits are enforced by the tool; explicit file paths "
             "use a larger bounded limit than directory searches. Supports glob/type filtering."
@@ -328,6 +339,13 @@ class GrepTool(_SearchTool):
                     "type": "string",
                     "description": "Optional file type shorthand, e.g. 'py', 'ts', 'md', 'json'",
                 },
+                "pages": {
+                    "type": "string",
+                    "description": (
+                        "Optional PDF page range, e.g. '101-200'. PDF searches scan at "
+                        "most 100 pages per call and return a continuation range."
+                    ),
+                },
                 "case_insensitive": {
                     "type": "boolean",
                     "description": "Case-insensitive search (default false)",
@@ -343,18 +361,18 @@ class GrepTool(_SearchTool):
                         "content: matching lines with optional context; "
                         "files_with_matches: only matching file paths; "
                         "count: matching line counts per file. "
-                        "Default: files_with_matches"
+                        "Default: content"
                     ),
                 },
                 "context_before": {
                     "type": "integer",
-                    "description": "Number of lines of context before each match",
+                    "description": "Number of lines of context before each match (default 5)",
                     "minimum": 0,
                     "maximum": 20,
                 },
                 "context_after": {
                     "type": "integer",
-                    "description": "Number of lines of context after each match",
+                    "description": "Number of lines of context after each match (default 5)",
                     "minimum": 0,
                     "maximum": 20,
                 },
@@ -401,13 +419,28 @@ class GrepTool(_SearchTool):
         match_line: int,
         before: int,
         after: int,
+        extracted_lines: list[int] | None = None,
+        locators: list[str] | None = None,
+        match_start: int = 0,
     ) -> str:
         start = max(1, match_line - before)
         end = min(len(lines), match_line + after)
-        block = [f"{display_path}:{match_line}"]
+        source_line = extracted_lines[match_line - 1] if extracted_lines else match_line
+        match_locator = locators[match_line - 1] if locators else ""
+        if match_locator.startswith("sheet="):
+            column = _excel_column(lines[match_line - 1][:match_start].count("\t") + 1)
+            row_match = re.search(r",row=(\d+)$", match_locator)
+            if row_match:
+                match_locator += f",cell={column}{row_match.group(1)}"
+        suffix = f" [{match_locator}]" if match_locator else ""
+        block = [f"{display_path}:{source_line}{suffix}"]
         for line_no in range(start, end + 1):
             marker = ">" if line_no == match_line else " "
-            block.append(f"{marker} {line_no}| {lines[line_no - 1]}")
+            if extracted_lines and locators:
+                coordinate = f"{extracted_lines[line_no - 1]} [{locators[line_no - 1]}]"
+            else:
+                coordinate = str(line_no)
+            block.append(f"{marker} {coordinate}| {lines[line_no - 1]}")
         return "\n".join(block)
 
     async def execute(
@@ -416,11 +449,12 @@ class GrepTool(_SearchTool):
         path: str = ".",
         glob: str | None = None,
         type: str | None = None,
+        pages: str | None = None,
         case_insensitive: bool = False,
         fixed_strings: bool = False,
-        output_mode: str = "files_with_matches",
-        context_before: int = 0,
-        context_after: int = 0,
+        output_mode: str = "content",
+        context_before: int = 5,
+        context_after: int = 5,
         max_matches: int | None = None,
         max_results: int | None = None,
         head_limit: int | None = None,
@@ -456,6 +490,8 @@ class GrepTool(_SearchTool):
             size_truncated = False
             skipped_binary = 0
             skipped_large = 0
+            truncated_documents = 0
+            document_continuations: list[str] = []
             matching_files: list[str] = []
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
@@ -470,30 +506,53 @@ class GrepTool(_SearchTool):
                     continue
                 if not _matches_type(file_path.name, type):
                     continue
+                display_path = self._display_path(file_path, root)
 
-                with file_path.open("rb") as file:
-                    raw = file.read(max_file_bytes + 1)
-                if len(raw) > max_file_bytes:
-                    skipped_large += 1
-                    continue
-                if _is_binary(raw):
+                try:
+                    file_size = file_path.stat().st_size
+                except OSError:
                     skipped_binary += 1
+                    continue
+                if file_size > max_file_bytes:
+                    skipped_large += 1
                     continue
                 try:
                     mtime = file_path.stat().st_mtime
                 except OSError:
                     mtime = 0.0
-                try:
-                    content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    skipped_binary += 1
-                    continue
-
-                lines = content.splitlines()
-                display_path = self._display_path(file_path, root)
+                extracted_lines: list[int] | None = None
+                locators: list[str] | None = None
+                if file_path.suffix.lower() in _DOCUMENT_EXTENSIONS:
+                    extraction = extract_document_lines(file_path, pages=pages)
+                    if extraction is None or extraction.error is not None:
+                        skipped_binary += 1
+                        continue
+                    lines = [line.text for line in extraction.lines]
+                    extracted_lines = [line.extracted_line for line in extraction.lines]
+                    locators = [line.locator for line in extraction.lines]
+                    if extraction.truncated:
+                        truncated_documents += 1
+                    if extraction.continuation:
+                        document_continuations.append(
+                            f"({display_path}: continue PDF search with "
+                            f"{extraction.continuation})"
+                        )
+                else:
+                    with file_path.open("rb") as file:
+                        raw = file.read(max_file_bytes + 1)
+                    if _is_binary(raw):
+                        skipped_binary += 1
+                        continue
+                    try:
+                        content = raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        skipped_binary += 1
+                        continue
+                    lines = content.splitlines()
                 file_had_match = False
                 for idx, line in enumerate(lines, start=1):
-                    if not regex.search(line):
+                    match = regex.search(line)
+                    if match is None:
                         continue
                     file_had_match = True
 
@@ -518,6 +577,9 @@ class GrepTool(_SearchTool):
                         idx,
                         context_before,
                         context_after,
+                        extracted_lines,
+                        locators,
+                        match.start(),
                     )
                     extra_sep = 2 if blocks else 0
                     if result_chars + extra_sep + len(block) > self._MAX_RESULT_CHARS:
@@ -580,6 +642,11 @@ class GrepTool(_SearchTool):
                 notes.append(f"(skipped {skipped_binary} binary/unreadable files)")
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
+            if truncated_documents:
+                notes.append(
+                    f"(searched bounded text from {truncated_documents} truncated documents)"
+                )
+            notes.extend(document_continuations[:10])
             if output_mode == "count" and counts:
                 notes.append(
                     f"(total matches: {sum(counts.values())} in {len(counts)} files)"
