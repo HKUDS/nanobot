@@ -260,6 +260,7 @@ describe("ThreadViewport", () => {
     expect(messageRegion).toHaveClass("justify-start");
     expect(messageRegion).not.toHaveClass("justify-end");
     expect(messageRegion).toHaveClass("thread-message-viewport");
+    expect(messageRegion).toHaveClass("pt-3");
     expect(messageRegion).toHaveClass("pb-0");
     expect(messageRegion.className).not.toContain("5rem");
   });

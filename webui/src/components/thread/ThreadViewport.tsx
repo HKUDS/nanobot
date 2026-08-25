@@ -745,7 +745,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-4 sm:px-4",
+                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-3 sm:px-4",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
@@ -841,7 +841,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-background to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-3 bg-gradient-to-b from-background to-transparent"
       />
 
       {hasMessages ? (
