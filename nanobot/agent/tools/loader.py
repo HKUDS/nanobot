@@ -116,9 +116,12 @@ class ToolLoader:
                             tool.name, cls_label,
                         )
                     registry.register(tool)
+                    for alias in tool.aliases:
+                        registry.register_alias(alias, tool.name)
                     registered.append(tool.name)
                     if not is_plugin_source:
                         builtin_names.add(tool.name)
+                        builtin_names.update(tool.aliases)
                 except Exception:
                     logger.exception("Failed to register tool: %s", cls_label)
         return registered

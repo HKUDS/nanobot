@@ -25,21 +25,39 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._aliases: dict[str, str] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
+        self._aliases.pop(tool.name, None)
         self._tools[tool.name] = tool
         self._cached_definitions = None
 
+    def register_alias(self, alias: str, target: str) -> None:
+        """Register a dispatch-only alias without exposing another tool definition."""
+        if target not in self._tools:
+            raise KeyError(f"cannot alias unknown tool: {target}")
+        if alias in self._tools:
+            raise ValueError(f"tool alias conflicts with registered tool: {alias}")
+        self._aliases[alias] = target
+
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
+        if name in self._aliases:
+            self._aliases.pop(name)
+            return
         self._tools.pop(name, None)
+        self._aliases = {
+            alias: target
+            for alias, target in self._aliases.items()
+            if target != name
+        }
         self._cached_definitions = None
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
-        return self._tools.get(name)
+        return self._tools.get(self._aliases.get(name, name))
 
     def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
         """Return tool-owned providers in stable tool-name order."""
@@ -70,7 +88,7 @@ class ToolRegistry:
 
     def has(self, name: str) -> bool:
         """Check if a tool is registered."""
-        return name in self._tools
+        return self.get(name) is not None
 
     @staticmethod
     def _schema_name(schema: dict[str, Any]) -> str:
@@ -113,7 +131,7 @@ class ToolRegistry:
         params: Any,
     ) -> tuple[Tool | None, Any, str | None]:
         """Resolve, cast, and validate one tool call."""
-        tool = self._tools.get(name)
+        tool = self.get(name)
         if not tool:
             suggestion = self._suggest_name(str(name))
             hint = f" Did you mean '{suggestion}'? Tool names must match exactly." if suggestion else ""
@@ -209,4 +227,4 @@ class ToolRegistry:
         return len(self._tools)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._tools
+        return self.has(name)

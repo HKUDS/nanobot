@@ -2,7 +2,7 @@ import sys
 from unittest.mock import patch
 
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
-from nanobot.agent.tools.exec_session import ListExecSessionsTool, WriteStdinTool
+from nanobot.agent.tools.exec_session import ExecSessionTool, ListExecSessionsTool
 from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
@@ -31,7 +31,7 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
     find_files = FindFilesTool().description.lower()
     grep = GrepTool().description.lower()
     exec_tool = ExecTool().description.lower()
-    write_stdin = WriteStdinTool().description.lower()
+    exec_session = ExecSessionTool().description.lower()
     list_sessions = ListExecSessionsTool().description.lower()
 
     assert "find_files/list_dir first" in read_file
@@ -46,8 +46,9 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
     assert "apply_patch/write_file/edit_file" in exec_tool
     assert "yield_time_ms" in exec_tool
 
-    assert "do not use this to start new commands" in write_stdin
-    assert "wait_for" in write_stdin
+    assert "do not use this to start new commands" in exec_session
+    assert "until_exit=true" in exec_session
+    assert "wait_for" in exec_session
     assert "recover a session_id" in list_sessions
 
 

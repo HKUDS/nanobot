@@ -58,6 +58,31 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
     ]
 
 
+async def test_dispatch_alias_is_callable_but_hidden_from_definitions() -> None:
+    registry = ToolRegistry()
+    tool = _FakeTool("exec_session")
+    registry.register(tool)
+    registry.register_alias("write_stdin", "exec_session")
+
+    assert registry.has("write_stdin")
+    assert registry.get("write_stdin") is tool
+    assert "write_stdin" in registry
+    assert registry.tool_names == ["exec_session"]
+    assert _tool_names(registry.get_definitions()) == ["exec_session"]
+    assert await registry.execute("write_stdin", {"chars": "hello"}) == {"chars": "hello"}
+
+
+def test_unregister_canonical_tool_removes_its_aliases() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("exec_session"))
+    registry.register_alias("write_stdin", "exec_session")
+
+    registry.unregister("exec_session")
+
+    assert not registry.has("exec_session")
+    assert not registry.has("write_stdin")
+
+
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))

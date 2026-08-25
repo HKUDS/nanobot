@@ -150,8 +150,8 @@ class _PreparedCommand:
             description=(
                 "Optional milliseconds to wait before returning output. "
                 "When set, a still-running command returns a session_id that "
-                "can be polled or written to with write_stdin. Omit this field "
-                "to keep one-shot exec behavior."
+                "can be managed with exec_session. Omit this field to wait for a "
+                "non-interactive command to finish in this exec call."
             ),
             minimum=0,
             maximum=MAX_YIELD_MS,
@@ -298,9 +298,10 @@ class ExecTool(Tool):
             "instead of cat, shell find/grep, echo, or sed. "
             "Use -y or --yes flags to avoid interactive prompts. "
             f"{platform_note}"
-            "For long-running or interactive commands, pass yield_time_ms; "
-            "if the command keeps running, exec returns a session_id that can "
-            "be polled or written to with write_stdin. Output is truncated at "
+            "Omit yield_time_ms for non-interactive commands whose final result "
+            "you need. For interactive commands or early progress, pass "
+            "yield_time_ms; if the command keeps running, exec returns a "
+            "session_id managed with exec_session. Output is truncated at "
             "10 000 chars; timeout defaults to 60s."
         )
 

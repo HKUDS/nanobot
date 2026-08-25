@@ -22,7 +22,8 @@ from nanobot.agent.tools.schema import (
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
 DEFAULT_WAIT_FOR_MS = 10_000
-MAX_WAIT_FOR_MS = 120_000
+DEFAULT_UNTIL_EXIT_MS = 600_000
+MAX_WAIT_FOR_MS = 600_000
 DEFAULT_MAX_OUTPUT_CHARS = 10_000
 MAX_OUTPUT_CHARS = 50_000
 OUTPUT_DRAIN_GRACE_S = 0.1
@@ -518,8 +519,18 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             "Useful for interactive commands and dev servers.",
             nullable=True,
         ),
+        until_exit=BooleanSchema(
+            description=(
+                "Wait for the process to exit within this tool call. Use this instead of "
+                "repeated polling when no more interaction is needed."
+            ),
+            default=False,
+        ),
         wait_timeout_ms=IntegerSchema(
-            description="Maximum milliseconds to wait for wait_for text (default 10000, max 120000).",
+            description=(
+                "Maximum milliseconds to wait. Defaults to 10000 for wait_for and "
+                "600000 for until_exit; maximum 600000."
+            ),
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
             nullable=True,
@@ -538,11 +549,12 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
         required=["session_id"],
     )
 )
-class WriteStdinTool(Tool):
-    """Write to or poll a running exec session."""
+class ExecSessionTool(Tool):
+    """Interact with or wait for a running exec session."""
 
     _scopes = {"core", "subagent"}
     config_key = "exec"
+    aliases = ("write_stdin",)
 
     @classmethod
     def config_cls(cls):
@@ -571,16 +583,17 @@ class WriteStdinTool(Tool):
 
     @property
     def name(self) -> str:
-        return "write_stdin"
+        return "exec_session"
 
     @property
     def description(self) -> str:
         return (
-            "Interact with a running exec session created by exec with "
-            "yield_time_ms. Use chars='' to poll without writing, chars to send "
-            "stdin, close_stdin=true to send EOF, or terminate=true to stop the "
-            "process. Use wait_for with wait_timeout_ms for dev servers, test "
-            "watchers, and prompts where you need to wait for expected output. "
+            "Manage a running session created by exec with yield_time_ms. Use "
+            "until_exit=true to wait for a non-interactive process to finish in one "
+            "tool call. Use chars to send stdin, close_stdin=true to send EOF, "
+            "terminate=true to stop the process, or wait_for to wait for expected "
+            "output from dev servers, test watchers, and prompts. Poll without "
+            "writing only when you need an intermediate status. "
             "Do not use this to start new commands; start them with exec."
         )
 
@@ -592,6 +605,7 @@ class WriteStdinTool(Tool):
         terminate: bool = False,
         yield_time_ms: int | None = None,
         wait_for: str | None = None,
+        until_exit: bool = False,
         wait_timeout_ms: int | None = None,
         max_output_chars: int | None = None,
         max_output_tokens: int | None = None,
@@ -606,6 +620,10 @@ class WriteStdinTool(Tool):
                 1000,
                 MAX_OUTPUT_CHARS,
             )
+            if wait_for and until_exit:
+                return ToolResult.error(
+                    "Error: wait_for and until_exit are mutually exclusive."
+                )
             if wait_for:
                 return await self._wait_for_output(
                     session_id=session_id,
@@ -616,6 +634,20 @@ class WriteStdinTool(Tool):
                     wait_timeout_ms=clamp_session_int(
                         wait_timeout_ms,
                         DEFAULT_WAIT_FOR_MS,
+                        0,
+                        MAX_WAIT_FOR_MS,
+                    ),
+                    max_output_chars=output_limit,
+                )
+            if until_exit:
+                return await self._wait_until_exit(
+                    session_id=session_id,
+                    chars=chars,
+                    close_stdin=close_stdin,
+                    terminate=terminate,
+                    wait_timeout_ms=clamp_session_int(
+                        wait_timeout_ms,
+                        DEFAULT_UNTIL_EXIT_MS,
                         0,
                         MAX_WAIT_FOR_MS,
                     ),
@@ -635,7 +667,48 @@ class WriteStdinTool(Tool):
         except KeyError:
             return ToolResult.error(f"Error: exec session not found: {session_id!r}")
         except Exception as exc:
-            return ToolResult.error(f"Error writing to exec session: {exc}")
+            return ToolResult.error(f"Error managing exec session: {exc}")
+
+    async def _wait_until_exit(
+        self,
+        *,
+        session_id: str,
+        chars: str | None,
+        close_stdin: bool,
+        terminate: bool,
+        wait_timeout_ms: int,
+        max_output_chars: int,
+    ) -> str:
+        deadline = time.monotonic() + (wait_timeout_ms / 1000)
+        aggregate = _BoundedOutputBuffer(max_output_chars)
+        upstream_truncated = 0
+        first = True
+
+        while True:
+            remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+            poll = await self._manager.write(
+                session_id=session_id,
+                chars=chars if first else None,
+                close_stdin=close_stdin if first else False,
+                terminate=terminate if first else False,
+                yield_time_ms=min(MAX_YIELD_MS, remaining_ms),
+                max_output_chars=MAX_OUTPUT_CHARS,
+                owner_session_key=current_request_session_key(),
+            )
+            first = False
+            upstream_truncated += poll.truncated_chars
+            if poll.output:
+                aggregate.append(poll.output)
+            if poll.done or remaining_ms <= 0:
+                poll.output, aggregate_truncated = aggregate.drain()
+                poll.truncated_chars = upstream_truncated + aggregate_truncated
+                result = format_session_poll(session_id, poll)
+                if not poll.done:
+                    result += (
+                        f"\nWait timed out after {wait_timeout_ms / 1000:g}s; "
+                        "session remains active."
+                    )
+                return ToolResult.error(result) if poll.timed_out else result
 
     async def _wait_for_output(
         self,
@@ -688,6 +761,10 @@ class WriteStdinTool(Tool):
                 return ToolResult.error(result) if poll.timed_out else result
 
 
+# TODO(0.3.2): Remove the write_stdin tool-call and class aliases after 0.3.1.
+WriteStdinTool = ExecSessionTool
+
+
 @tool_parameters(tool_parameters_schema())
 class ListExecSessionsTool(Tool):
     """List active exec sessions."""
@@ -726,7 +803,7 @@ class ListExecSessionsTool(Tool):
             "List active long-running exec sessions, including session_id, cwd, "
             "elapsed time, idle time, remaining timeout, and command preview. "
             "Use this to recover a session_id after context shifts before "
-            "polling, writing stdin, or terminating with write_stdin."
+            "waiting, polling, writing stdin, or terminating with exec_session."
         )
 
     @property

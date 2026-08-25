@@ -52,8 +52,9 @@
 - Prefer dedicated file/search tools over `cat`, shell `find`, shell `grep`, `sed`, or `echo` for ordinary workspace inspection and edits.
 - Use non-interactive flags such as `-y` or `--yes` when available.
 - Commands have a configurable timeout (default 60s), dangerous commands are blocked, and output is truncated.
-- For long-running or interactive commands, pass `yield_time_ms`; if the process keeps running, continue with `write_stdin`.
-- Use `write_stdin` to poll, provide stdin, close stdin, wait for expected output with `wait_for`, or terminate an existing exec session.
+- For non-interactive commands whose final result you need, omit `yield_time_ms` so `exec` waits for completion in one call.
+- Use `yield_time_ms` only for interaction or early progress. If the process keeps running, use `exec_session` with `until_exit=true` once no more interaction is needed.
+- Use `exec_session` to wait for exit, poll intermediate status, provide stdin, close stdin, wait for expected output with `wait_for`, or terminate an existing exec session.
 - Use `list_exec_sessions` to recover active session IDs after context shifts.
 
 ## CLI App Attachments
