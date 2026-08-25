@@ -20,10 +20,8 @@ describe("PromptQueue", () => {
     queue.enqueue(prompt("first"))
     queue.enqueue(prompt("second"))
 
-    const first = queue.takeFollowUp()
-    expect(first?.content).toBe("first")
-    if (first) queue.prepend(first)
-    expect(queue.restore().map(({ content }) => content)).toEqual(["first", "second"])
+    expect(queue.takeFollowUp()?.content).toBe("first")
+    expect(queue.restore().map(({ content }) => content)).toEqual(["second"])
     expect(queue.length).toBe(0)
   })
 })

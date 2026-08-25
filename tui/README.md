@@ -31,18 +31,19 @@ When you scroll away from the latest output, the scrollbar and `Ctrl+End` hint a
 you return to the bottom. Large pastes are represented by a short editable placeholder in the
 composer; nanobot sends the original text unchanged.
 
-While a turn is running, the composer remains available for follow-ups and uses `Queue a follow-up…`
-as its prompt. The footer shows the lifecycle and elapsed time without repeating the latest tool
-activity already visible in the transcript.
+While nanobot is working, the composer uses `Ask a follow-up…` and keeps
+`Enter send now · Tab send next` visible below the input. Narrow terminals shorten the hint to
+`Enter now · Tab next`. The footer shows progress and elapsed time without repeating the latest
+tool activity already visible in the transcript.
 
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
-same gateway metadata used by the WebUI. While nanobot is working, `Enter` queues a follow-up
-for the next turn instead. `Option+Up` on macOS (`Alt+Up` on Windows/Linux) returns the latest
-queued message to the composer for editing. The pending queue
-stays visible above the composer.
+same gateway metadata used by the WebUI. While nanobot is working, `Enter` sends immediately,
+`Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on
+Windows/Linux) returns the latest waiting message to the composer for editing. Waiting messages
+stay visible above the composer.
 Use `Shift+Enter` for a newline; `Ctrl+J` is the universal fallback when a terminal cannot
 distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable.
 Unsent prompts return to the composer if the turn stops or fails.

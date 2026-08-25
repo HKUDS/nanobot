@@ -306,7 +306,7 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.plainText).toBe("")
   })
 
-  test("queues busy Enter submissions without using Tab as a queue shortcut", async () => {
+  test("steers with Enter, queues with Tab, and restores queued text with Alt+Up", async () => {
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
@@ -320,9 +320,11 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       ready: boolean
       composer: TextareaRenderable
+      composerHint: TextRenderable
+      composerHintRow: BoxRenderable
       mentionCandidates: Array<Record<string, unknown>>
-      promptHistory: string[]
       queuePreview: { root: { visible: boolean } }
+      status: { plainText: string }
     }
     await waitUntil(() => ui.ready)
     ui.mentionCandidates = [{
@@ -335,157 +337,57 @@ describe("NanobotTui layout", () => {
     ui.composer.setText("first")
     ui.composer.submit()
     await waitUntil(() => sent.length === 1)
+    expect(ui.composer.placeholder).toBe("Ask a follow-up…")
+    expect(ui.composerHint.plainText).toBe("Enter send now · Tab send next")
+    expect(ui.composerHintRow.visible).toBeTrue()
+    await setup.renderOnce()
+    expect(ui.composerHint.x).toBeGreaterThan(ui.composer.x)
 
-    ui.composer.setText("ask @github next")
-    ui.composer.submit()
-    await waitUntil(() => ui.composer.plainText === "")
-    expect(sent).toHaveLength(1)
-    expect(ui.queuePreview.root.visible).toBeTrue()
-
-    ui.composer.submit()
-    await Bun.sleep(10)
-    expect(sent).toHaveLength(1)
-    expect(ui.queuePreview.root.visible).toBeTrue()
-
-    setup.mockInput.pressArrow("up", { meta: true })
-    expect(ui.composer.plainText).toBe("ask @github next")
-    expect(ui.queuePreview.root.visible).toBeFalse()
-    setup.mockInput.pressTab()
+    ui.composer.setText("one more detail")
     await setup.flush()
-    expect(ui.composer.plainText).not.toBe("")
-    expect(ui.queuePreview.root.visible).toBeFalse()
+    expect(ui.composer.placeholder).toBeNull()
+    expect(ui.composerHintRow.visible).toBeTrue()
 
     ui.composer.setText("ask @github next")
     ui.composer.submit()
-    await waitUntil(() => ui.composer.plainText === "")
-    expect(ui.queuePreview.root.visible).toBeTrue()
-
-    ui.composer.setText("after this turn")
-    ui.composer.submit()
-    await waitUntil(() => ui.composer.plainText === "")
-    expect(sent).toHaveLength(1)
-    expect(ui.queuePreview.root.visible).toBeTrue()
-
-    ui.composer.setText("draft while follow-ups run")
-    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
     await waitUntil(() => sent.length === 2)
-    expect(sent[1]).toBe("ask @github next")
+    expect(ui.status.plainText).not.toContain("Steering")
+    expect(ui.composerHintRow.visible).toBeTrue()
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],
       mcpPresets: [],
       sessionMentions: [],
     })
-    expect(ui.composer.plainText).toBe("draft while follow-ups run")
+
+    ui.composer.setText("after this turn")
+    setup.mockInput.pressTab()
+    await waitUntil(() => ui.composer.plainText === "")
+    expect(sent).toHaveLength(2)
     expect(ui.queuePreview.root.visible).toBeTrue()
 
+    setup.mockInput.pressArrow("up", { meta: true })
+    expect(ui.composer.plainText).toBe("after this turn")
+    expect(ui.queuePreview.root.visible).toBeFalse()
+    setup.mockInput.pressTab()
+    await waitUntil(() => ui.composer.plainText === "")
+
+    app.accept({
+      event: "error",
+      chat_id: "chat",
+      turn_id: "failed-steering",
+      reason: "steering rejected",
+    })
+    expect((app as unknown as { activeTurn: boolean }).activeTurn).toBeTrue()
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => ui.ready)
+    app.accept({ event: "goal_status", chat_id: "chat", status: "running", turn_id: "turn" })
     app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
     await waitUntil(() => sent.length === 3)
     expect(sent[2]).toBe("after this turn")
-    expect(ui.composer.plainText).toBe("draft while follow-ups run")
-    expect(ui.promptHistory).toEqual(["first", "ask @github next", "after this turn"])
     expect(ui.queuePreview.root.visible).toBeFalse()
-  })
-
-  test("keeps a queued follow-up after send failure and retries it after reconnect", async () => {
-    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
-    const original = globalThis.fetch
-    globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
-      messages: [{ role: "user", content: "first", turnId: "turn" }],
-      page: { has_more_before: false },
-    })))) as unknown as typeof fetch
-    const sent: string[] = []
-    let rejectFollowUp = false
-    const transport = {
-      ...client(),
-      send(content: string) {
-        if (content === "retry after reconnect" && rejectFollowUp) throw new Error("offline")
-        sent.push(content)
-        return "turn"
-      },
-    }
-    const app = NanobotTui.mount(
-      setup.renderer,
-      { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
-      transport,
-      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
-    )
-    const ui = app as unknown as {
-      ready: boolean
-      activeTurn: boolean
-      composer: TextareaRenderable
-      promptHistory: string[]
-      queuePreview: { root: { visible: boolean } }
-      status: { plainText: string }
-    }
-
-    try {
-      app.accept({ event: "attached", chat_id: "chat" })
-      await waitUntil(() => ui.ready)
-      ui.composer.setText("first")
-      ui.composer.submit()
-      await waitUntil(() => sent.length === 1)
-
-      ui.composer.setText("retry after reconnect")
-      ui.composer.submit()
-      await waitUntil(() => ui.composer.plainText === "")
-      rejectFollowUp = true
-      app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
-      await waitUntil(() => ui.status.plainText === "offline")
-      expect(sent).toEqual(["first"])
-      expect(ui.activeTurn).toBeFalse()
-      expect(ui.queuePreview.root.visible).toBeTrue()
-
-      ui.composer.setText("newer follow-up")
-      ui.composer.submit()
-      await waitUntil(() => ui.composer.plainText === "")
-      expect(sent).toEqual(["first"])
-
-      rejectFollowUp = false
-      app.accept({
-        event: "attached",
-        chat_id: "chat",
-        recovery_state: {
-          status: "awaiting_user",
-          recovery_id: "recovery-1",
-          reason: "tool execution interrupted",
-        },
-      })
-      await waitUntil(() => ui.ready)
-      await Bun.sleep(10)
-      expect(sent).toEqual(["first"])
-      expect(ui.activeTurn).toBeFalse()
-      expect(ui.promptHistory).toEqual(["first", "retry after reconnect", "newer follow-up"])
-      expect(ui.queuePreview.root.visible).toBeTrue()
-
-      app.accept({
-        event: "recovery_state",
-        chat_id: "chat",
-        status: "resuming",
-        recovery_id: "recovery-1",
-      })
-      expect(ui.activeTurn).toBeTrue()
-      app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
-      await Bun.sleep(10)
-      expect(sent).toEqual(["first"])
-
-      app.accept({
-        event: "recovery_state",
-        chat_id: "chat",
-        status: "recovered",
-        recovery_id: "recovery-1",
-      })
-      await waitUntil(() => sent.length === 2)
-      expect(sent).toEqual(["first", "retry after reconnect"])
-      expect(ui.activeTurn).toBeTrue()
-      expect(ui.queuePreview.root.visible).toBeTrue()
-
-      app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
-      await waitUntil(() => sent.length === 3)
-      expect(sent).toEqual(["first", "retry after reconnect", "newer follow-up"])
-      expect(ui.queuePreview.root.visible).toBeFalse()
-    } finally {
-      globalThis.fetch = original
-    }
+    app.accept({ event: "goal_status", chat_id: "chat", status: "idle", turn_id: "prior" })
+    expect((app as unknown as { activeTurn: boolean }).activeTurn).toBeTrue()
   })
 
   test("projects user turns from another terminal without duplicating replayed history", async () => {
@@ -873,7 +775,7 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => ui.ready)
       app.accept({ event: "goal_status", chat_id: "chat", status: "running", turn_id: "turn" })
       ui.composer.setText("follow up in chat")
-      ui.composer.submit()
+      setup.mockInput.pressTab()
       await waitUntil(() => ui.composer.plainText === "")
       expect(ui.queuePreview.root.visible).toBe(true)
 
@@ -1756,9 +1658,15 @@ describe("NanobotTui layout", () => {
       expect(setup.renderer.width).toBe(width)
       expect(setup.renderer.height).toBe(height)
       expect(frame).not.toContain("undefined")
-      expect(occurrences(frame, "Queue a follow-up…")).toBeLessThanOrEqual(1)
+      expect(frame).not.toContain("Steer this turn…")
+      expect(occurrences(frame, "Ask a follow-up…")).toBeLessThanOrEqual(1)
       if (width >= 30 && height >= 9) {
-        expect(occurrences(frame, "Queue a follow-up…")).toBe(1)
+        expect(occurrences(frame, "Ask a follow-up…")).toBe(1)
+      }
+      if (width >= 40 && height >= 6) {
+        expect(frame).toContain("Enter send now · Tab send next")
+      } else if (width >= 28 && height >= 6) {
+        expect(frame).toContain("Enter now · Tab next")
       }
       expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 14 ? 1 : 0)
     }
@@ -2286,11 +2194,15 @@ describe("NanobotTui layout", () => {
       }
       composer: TextareaRenderable
       composerFrame: BoxRenderable
+      composerHint: TextRenderable
+      composerHintRow: BoxRenderable
     }
     const status = ui.status
     expect(status.plainText).toMatch(/^Thinking\s+0s/u)
-    expect(ui.composer.placeholder).toBe("Queue a follow-up…")
-    expect(ui.composerFrame.height).toBe(3)
+    expect(ui.composer.placeholder).toBe("Ask a follow-up…")
+    expect(ui.composerHint.plainText).toBe("Enter send now · Tab send next")
+    expect(ui.composerHintRow.visible).toBeTrue()
+    expect(ui.composerFrame.height).toBe(4)
     const shimmerColors = new Set(
       status.content.chunks
         .slice(0, "Thinking".length)
@@ -2816,8 +2728,8 @@ describe("NanobotTui in a Herdr pane", () => {
     const activeFrame = setup.captureCharFrame()
     expect(occurrences(activeFrame, "› Ship the Herdr integration")).toBe(1)
     expect(occurrences(activeFrame, "app.ts")).toBe(1)
-    expect(ui.composer.placeholder).toBe("Queue a follow-up…")
-    expect(ui.composerFrame.height).toBe(3)
+    expect(ui.composer.placeholder).toBe("Ask a follow-up…")
+    expect(ui.composerFrame.height).toBe(4)
     app.accept({
       event: "turn_end",
       chat_id: "chat",

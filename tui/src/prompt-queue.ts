@@ -17,10 +17,6 @@ export class PromptQueue {
     this.prompts.push(prompt)
   }
 
-  prepend(prompt: QueuedPrompt): void {
-    this.prompts.unshift(prompt)
-  }
-
   takeLast(): QueuedPrompt | null {
     return this.prompts.pop() ?? null
   }
