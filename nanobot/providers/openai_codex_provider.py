@@ -112,10 +112,11 @@ class OpenAICodexProvider(LLMProvider):
             "instructions": system_prompt,
             "input": input_items,
             "text": {"verbosity": "medium"},
-            "prompt_cache_key": _prompt_cache_key(messages[:2], session_id=session_id),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
+        if session_id:
+            body["prompt_cache_key"] = _prompt_cache_key(session_id)
         body["include"] = ["reasoning.encrypted_content"]
         reasoning_options = _build_reasoning_options(reasoning_effort)
         if replayed and "gpt-5.6" in _strip_model_prefix(model).lower():
@@ -497,13 +498,8 @@ async def _request_codex(
             return result
 
 
-def _prompt_cache_key(
-    messages: list[dict[str, Any]],
-    *,
-    session_id: str | None = None,
-) -> str:
-    raw = session_id or json.dumps(messages, ensure_ascii=True, sort_keys=True)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def _prompt_cache_key(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
 def _friendly_error(status_code: int, raw: str) -> str:
