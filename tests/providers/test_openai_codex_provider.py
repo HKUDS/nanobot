@@ -20,7 +20,6 @@ from nanobot.providers.openai_codex_provider import (
     _CodexHTTPError,
     _friendly_error,
     _request_codex,
-    _retained_compaction_messages,
     _should_retry_status,
 )
 from nanobot.providers.openai_responses import build_responses_state
@@ -636,20 +635,6 @@ def test_codex_reasoning_options_request_summary_without_forcing_effort() -> Non
     assert _build_reasoning_options(None) == {"summary": "auto"}
     assert _build_reasoning_options("high") == {"summary": "auto", "effort": "high"}
     assert _build_reasoning_options("none") == {"effort": "none"}
-
-
-def test_codex_does_not_retain_superseded_retrieval_ledger() -> None:
-    ledger = {
-        "type": "message",
-        "role": "developer",
-        "content": [{
-            "type": "input_text",
-            "text": "nanobot.retrieval_evidence.v1\n{\"entries\":[]}",
-        }],
-    }
-    user = {"type": "message", "role": "user", "content": "latest request"}
-
-    assert _retained_compaction_messages([ledger, user]) == [user]
 
 
 @pytest.mark.asyncio

@@ -29,7 +29,6 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     is_compaction_compatibility_error,
     is_replayable_finish_reason,
-    is_retrieval_evidence_item,
     prepare_responses_input,
     resolve_compact_threshold,
     responses_state_context_tokens,
@@ -363,8 +362,6 @@ def _retained_compaction_messages(
     retained_reversed: list[dict[str, Any]] = []
     remaining = _COMPACTION_RETAINED_CHAR_BUDGET
     for item in reversed(input_items):
-        if is_retrieval_evidence_item(item):
-            continue
         if item.get("type") not in {None, "message"} or item.get("role") not in {
             "user",
             "developer",

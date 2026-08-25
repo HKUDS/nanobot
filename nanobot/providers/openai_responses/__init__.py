@@ -20,7 +20,6 @@ from nanobot.providers.openai_responses.parsing import (
 from nanobot.providers.openai_responses.state import (
     build_responses_state,
     is_compaction_compatibility_error,
-    is_retrieval_evidence_item,
     prepare_responses_input,
     resolve_compact_threshold,
     responses_state_context_tokens,
@@ -43,7 +42,6 @@ __all__ = [
     "parse_response_output",
     "build_responses_state",
     "is_compaction_compatibility_error",
-    "is_retrieval_evidence_item",
     "prepare_responses_input",
     "resolve_compact_threshold",
     "responses_state_context_tokens",
