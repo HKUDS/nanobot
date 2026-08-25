@@ -178,7 +178,7 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-const ACTIVE_COMPOSER_PLACEHOLDER = "Steer this turn…"
+const ACTIVE_COMPOSER_PLACEHOLDER = "Queue a follow-up…"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
@@ -934,15 +934,15 @@ export class NanobotTui {
       this.status.content = "Preparing chat…"
       return
     }
-    const prompt = { content, options: mentionOptions(content, this.availableMentions()) }
-    if (this.activeTurn) {
-      this.sendPrompt(prompt, true)
+    if (this.activeTurn || this.promptQueue.length) {
+      this.queueFollowUp()
+      this.sendNextFollowUp()
       return
     }
-    this.sendPrompt(prompt)
+    this.sendPrompt({ content, options: mentionOptions(content, this.availableMentions()) })
   }
 
-  private sendPrompt(prompt: QueuedPrompt, steering = false): boolean {
+  private sendPrompt(prompt: QueuedPrompt, source: "composer" | "queue" = "composer"): boolean {
     let turnId: string
     try {
       turnId = this.client.send(prompt.content, prompt.options)
@@ -950,19 +950,16 @@ export class NanobotTui {
       this.status.content = error instanceof Error ? error.message : String(error)
       return false
     }
-    this.clearComposer()
-    this.commandMenu.hide()
-    this.mentionMenu.hide()
-    this.skillMenu.hide()
-    this.recordPrompt(prompt.content)
+    if (source === "composer") {
+      this.clearComposer()
+      this.commandMenu.hide()
+      this.mentionMenu.hide()
+      this.skillMenu.hide()
+      this.recordPrompt(prompt.content)
+    }
     this.transcript.user(prompt.content, turnId)
     this.hostBlocked = false
     this.setCurrentTask(prompt.content)
-    if (steering) {
-      this.status.content = `Steering current turn${this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""}`
-      this.updateMeta()
-      return true
-    }
     this.beginTurn(turnId)
     return true
   }
@@ -998,7 +995,6 @@ export class NanobotTui {
 
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
-      const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
       this.currentChatId = event.chat_id
       this.host.reportSession(event.chat_id)
       if (event.usage) this.lastUsage = event.usage
@@ -1025,7 +1021,7 @@ export class NanobotTui {
         this.applyRecoveryState(event.recovery_state ?? null)
         this.flushPendingEvents()
         this.syncQueuePreview()
-        if (switchedSession) this.sendNextFollowUp()
+        this.sendNextFollowUp()
       })
       return
     }
@@ -1164,6 +1160,7 @@ export class NanobotTui {
         return
       case "recovery_state":
         this.applyRecoveryState(event)
+        if (event.status === "recovered") queueMicrotask(() => this.sendNextFollowUp())
         return
       case "turn_model_updated":
         if (typeof event.context_window_tokens === "number") {
@@ -1244,6 +1241,7 @@ export class NanobotTui {
         this.historyHasMore = history.hasMoreBefore
         this.transcript.history(history.messages)
         this.restorePromptHistory(history.messages)
+        for (const { content } of this.promptQueue.snapshot()) this.recordPrompt(content)
         const reversedHistory = [...history.messages].reverse()
         const lastUser = reversedHistory.find((message) => message.role === "user")
         if (lastUser) this.setCurrentTask(lastUser.content)
@@ -1342,6 +1340,7 @@ export class NanobotTui {
       )
       if (this.recoveryState?.recovery_id === state.recovery_id) {
         this.applyRecoveryState(next)
+        if (next.status === "recovered") this.sendNextFollowUp()
       }
     } catch (error) {
       if (this.recoveryState?.recovery_id !== state.recovery_id) return
@@ -1469,11 +1468,18 @@ export class NanobotTui {
   }
 
   private sendNextFollowUp(): void {
-    if (!this.ready || this.activeTurn || this.quitting) return
+    const recoveryBlocked = this.recoveryPending
+      || this.recoveryState?.status === "resuming"
+      || this.recoveryState?.status === "awaiting_user"
+      || this.recoveryState?.status === "failed"
+    if (!this.ready || this.activeTurn || recoveryBlocked || this.quitting) return
     const prompt = this.promptQueue.takeFollowUp()
     if (!prompt) return
     this.syncQueuePreview()
-    this.sendPrompt(prompt)
+    if (!this.sendPrompt(prompt, "queue")) {
+      this.promptQueue.prepend(prompt)
+      this.syncQueuePreview()
+    }
   }
 
   private get promptQueue(): PromptQueue {
@@ -1495,7 +1501,7 @@ export class NanobotTui {
   }
 
   private queueFollowUp(): void {
-    if (!this.activeTurn || !this.ready) return
+    if (!this.ready) return
     const visibleContent = this.composer.plainText.trim()
     const content = this.draft.expand(visibleContent).trim()
     if (!content) return
@@ -1509,7 +1515,7 @@ export class NanobotTui {
     this.skillMenu.hide()
     this.recordPrompt(content)
     this.syncQueuePreview()
-    this.renderActiveStatus()
+    if (this.activeTurn) this.renderActiveStatus()
     this.updateMeta()
   }
 
@@ -1519,7 +1525,7 @@ export class NanobotTui {
     const current = this.draft.expand(this.composer.plainText).trim()
     this.setComposer([prompt.content, current].filter(Boolean).join("\n\n"))
     this.syncQueuePreview()
-    this.renderActiveStatus()
+    if (this.activeTurn) this.renderActiveStatus()
     this.updateMeta()
     return true
   }
@@ -1666,7 +1672,7 @@ export class NanobotTui {
       key.preventDefault()
       return
     }
-    if (this.activeTurn && key.meta && key.name === "up") {
+    if (this.promptQueue.length && key.meta && key.name === "up") {
       if (this.editLastFollowUp()) key.preventDefault()
       return
     }
