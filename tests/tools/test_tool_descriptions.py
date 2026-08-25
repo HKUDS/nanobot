@@ -1,5 +1,4 @@
 import sys
-from unittest.mock import patch
 
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
 from nanobot.agent.tools.exec_session import ExecSessionTool, ListExecSessionsTool
@@ -26,13 +25,10 @@ def test_coding_tool_descriptions_steer_editing_priority() -> None:
     assert "prefer apply_patch" in write_file
 
 
-def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
+def test_coding_tool_descriptions_steer_discovery() -> None:
     read_file = ReadFileTool().description.lower()
     find_files = FindFilesTool().description.lower()
     grep = GrepTool().description.lower()
-    exec_tool = ExecTool().description.lower()
-    exec_session = ExecSessionTool().description.lower()
-    list_sessions = ListExecSessionsTool().description.lower()
 
     assert "find_files/list_dir first" in read_file
     assert "before editing" in read_file
@@ -41,39 +37,30 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
     assert "prefer it over shell find/ls" in find_files
     assert "prefer this over shell grep" in grep
 
-    assert "tests, builds" in exec_tool
-    assert "prefer read_file/find_files/grep" in exec_tool
-    assert "apply_patch/write_file/edit_file" in exec_tool
-    assert "yield_time_ms" in exec_tool
 
-    assert "do not use this to start new commands" in exec_session
-    assert "until_exit=true" in exec_session
-    assert "wait_for" in exec_session
-    assert "recover a session_id" in list_sessions
+def test_exec_tool_descriptions_are_concise() -> None:
+    assert ExecTool().description == "Execute a shell command."
+    assert ExecSessionTool().description == "Manage a session returned by exec."
+    assert ListExecSessionsTool().description == "List active exec sessions."
+
+    exec_parameters = ExecTool().parameters["properties"]
+    assert "omit to wait for exit" in exec_parameters["yield_time_ms"]["description"]
+
+    session_parameters = ExecSessionTool().parameters["properties"]
+    assert session_parameters["until_exit"]["description"] == "Wait for the process to exit."
+    assert "wait_for" in session_parameters["wait_timeout_ms"]["description"]
+    assert "until_exit" in session_parameters["wait_timeout_ms"]["description"]
 
 
-def test_exec_tool_shell_guidance_matches_platform() -> None:
-    with patch("nanobot.agent.tools.shell._IS_WINDOWS", False):
-        unix_description = ExecTool().description.lower()
-    assert "on unix" in unix_description
-    assert "powershell" not in unix_description
-    assert "cmd-specific" not in unix_description
-
-    with patch("nanobot.agent.tools.shell._IS_WINDOWS", True):
-        windows_description = ExecTool().description.lower()
-    assert "powershell syntax" in windows_description
-    assert "shell='cmd'" in windows_description
-
+def test_exec_shell_parameter_guidance_matches_platform() -> None:
     shell_parameter = ExecTool().parameters["properties"]["shell"]["description"].lower()
     if sys.platform == "win32":
-        assert "override the windows shell only when needed" in shell_parameter
-        assert "omit to use powershell by default" in shell_parameter
+        assert "omit for powershell" in shell_parameter
         assert "powershell" in shell_parameter
         assert "cmd" in shell_parameter
-        assert "unix" not in shell_parameter
+        assert "bash" not in shell_parameter
     else:
-        assert "override the unix shell only when needed" in shell_parameter
-        assert "omit to use bash by default" in shell_parameter
-        assert "unix" in shell_parameter
+        assert "omit for bash" in shell_parameter
+        assert "zsh" in shell_parameter
         assert "powershell" not in shell_parameter
         assert "cmd" not in shell_parameter

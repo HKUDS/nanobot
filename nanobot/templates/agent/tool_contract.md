@@ -48,14 +48,9 @@
 
 ## Process Execution
 
-- Use `exec` for tests, builds, package commands, git commands, and other process execution.
-- Prefer dedicated file/search tools over `cat`, shell `find`, shell `grep`, `sed`, or `echo` for ordinary workspace inspection and edits.
-- Use non-interactive flags such as `-y` or `--yes` when available.
-- Commands have a configurable timeout (default 60s), dangerous commands are blocked, and output is truncated.
-- For non-interactive commands whose final result you need, omit `yield_time_ms` so `exec` waits for completion in one call.
-- Use `yield_time_ms` only for interaction or early progress. If the process keeps running, use `exec_session` with `until_exit=true` once no more interaction is needed.
-- Use `exec_session` to wait for exit, poll intermediate status, provide stdin, close stdin, wait for expected output with `wait_for`, or terminate an existing exec session.
-- Use `list_exec_sessions` to recover active session IDs after context shifts.
+- Use `exec` for processes, not file inspection or editing.
+- For interaction or early output, set `yield_time_ms` and continue with `exec_session` (`until_exit=true` when no further input is needed).
+- Use `list_exec_sessions` to recover session IDs.
 
 ## CLI App Attachments
 
