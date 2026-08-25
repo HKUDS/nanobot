@@ -178,9 +178,8 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-const ACTIVE_COMPOSER_PLACEHOLDER = "Ask a follow-up…"
-const ACTIVE_COMPOSER_HINT = "Enter send now · Tab send next"
-const COMPACT_ACTIVE_COMPOSER_HINT = "Enter now · Tab next"
+const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
+const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
@@ -422,8 +421,6 @@ export class NanobotTui {
   private readonly titleText: TextRenderable
   private readonly composerFrame: BoxRenderable
   private readonly composer: TextareaRenderable
-  private readonly composerHintRow: BoxRenderable
-  private readonly composerHint: TextRenderable
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
   private readonly host: TuiHost
@@ -694,7 +691,6 @@ export class NanobotTui {
       borderColor: this.palette.accent,
       paddingLeft: 1,
       paddingRight: 1,
-      flexDirection: "column",
       backgroundColor: composerSurface,
     })
     this.composer = new TextareaRenderable(renderer, {
@@ -740,25 +736,6 @@ export class NanobotTui {
       onSubmit: () => this.deferSubmit(),
       onPaste: (event) => this.handlePaste(event),
     })
-    this.composerHintRow = new BoxRenderable(renderer, {
-      id: "nanobot-tui-composer-hint-row",
-      width: "100%",
-      height: 1,
-      flexShrink: 0,
-      flexDirection: "row",
-      justifyContent: "flex-end",
-      visible: false,
-    })
-    this.composerHint = new TextRenderable(renderer, {
-      id: "nanobot-tui-composer-hint",
-      content: ACTIVE_COMPOSER_HINT,
-      width: "auto",
-      height: 1,
-      flexShrink: 0,
-      fg: this.palette.faint,
-      selectable: false,
-    })
-    this.composerHintRow.add(this.composerHint)
     this.status = new TextRenderable(renderer, {
       id: "nanobot-tui-status",
       content: "Connecting…",
@@ -790,7 +767,6 @@ export class NanobotTui {
       gap: 2,
     })
     this.composerFrame.add(this.composer)
-    this.composerFrame.add(this.composerHintRow)
     statusRow.add(this.status)
     statusRow.add(this.meta)
     this.shell.add(this.transcript.root)
@@ -1821,6 +1797,7 @@ export class NanobotTui {
 
   private handleResize = (): void => {
     this.resizeComposer()
+    this.syncComposerPlaceholder()
     this.contextPanel.resize(this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
     if (!this.host.hosted) this.title.visible = this.renderer.height >= 14
@@ -1830,7 +1807,6 @@ export class NanobotTui {
   }
 
   private updateMeta(): void {
-    this.resizeComposer()
     const mode: FooterMode = this.runtimeControls.visible ? "runtime"
       : this.mentionMenu.visible ? "mention"
       : this.skillMenu.visible ? "skill"
@@ -1971,32 +1947,14 @@ export class NanobotTui {
   }
 
   private resizeComposer(): void {
-    this.syncComposerHint()
     const verticalPadding = this.renderer.height >= 12 ? 1 : 0
-    const hintHeight = this.composerHintRow.visible ? 1 : 0
     const maxContentHeight = Math.max(1, Math.min(12, Math.floor(this.renderer.height / 3)))
     this.composer.minHeight = 1
     this.composer.maxHeight = maxContentHeight
     this.composerFrame.paddingTop = verticalPadding
     this.composerFrame.paddingBottom = verticalPadding
-    this.composerFrame.minHeight = 1 + hintHeight + verticalPadding * 2
-    this.composerFrame.maxHeight = maxContentHeight + hintHeight + verticalPadding * 2
-  }
-
-  private syncComposerHint(): void {
-    const available = !this.runtimeControls.visible
-      && !this.sessionMenu.visible
-      && !this.branchMenu.visible
-      && !this.mentionMenu.visible
-      && !this.skillMenu.visible
-      && !this.commandMenu.visible
-    const full = this.renderer.width >= 40
-    const compact = this.renderer.width >= 28
-    this.composerHintRow.visible = this.activeTurn
-      && available
-      && compact
-      && this.renderer.height >= 6
-    this.composerHint.content = full ? ACTIVE_COMPOSER_HINT : COMPACT_ACTIVE_COMPOSER_HINT
+    this.composerFrame.minHeight = 1 + verticalPadding * 2
+    this.composerFrame.maxHeight = maxContentHeight + verticalPadding * 2
   }
 
   private composerSurface(): RGBA {
@@ -2012,20 +1970,22 @@ export class NanobotTui {
     this.composer.backgroundColor = surface
     this.composer.focusedBackgroundColor = surface
     this.composer.placeholderColor = this.palette.muted
-    this.composerHint.fg = this.palette.faint
   }
 
   private syncComposerPlaceholder(): void {
     // OpenTUI normally suppresses placeholder glyphs while the editor is not
     // empty. Explicitly removing them also invalidates their old cells, which
     // prevents stale placeholder text in differential/embedded terminals.
+    const activePlaceholder = this.renderer.width >= 40
+      ? ACTIVE_COMPOSER_PLACEHOLDER
+      : COMPACT_ACTIVE_COMPOSER_PLACEHOLDER
     const placeholder = this.composer.plainText
       ? null
       : this.sessionMenu.visible
         ? "Search sessions"
         : this.branchMenu.visible
           ? "Search branch points"
-          : this.activeTurn ? ACTIVE_COMPOSER_PLACEHOLDER : COMPOSER_PLACEHOLDER
+          : this.activeTurn ? activePlaceholder : COMPOSER_PLACEHOLDER
     if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
   }
 

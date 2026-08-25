@@ -31,10 +31,10 @@ When you scroll away from the latest output, the scrollbar and `Ctrl+End` hint a
 you return to the bottom. Large pastes are represented by a short editable placeholder in the
 composer; nanobot sends the original text unchanged.
 
-While nanobot is working, the composer uses `Ask a follow-up…` and keeps
-`Enter send now · Tab send next` visible below the input. Narrow terminals shorten the hint to
-`Enter now · Tab next`. The footer shows progress and elapsed time without repeating the latest
-tool activity already visible in the transcript.
+While nanobot is working, the composer prompt becomes
+`Enter send now · Tab send next`; narrow terminals shorten it to `Enter now · Tab next`.
+The footer shows progress and elapsed time without repeating the latest tool activity already
+visible in the transcript.
 
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
