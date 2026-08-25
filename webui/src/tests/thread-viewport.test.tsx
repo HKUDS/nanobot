@@ -123,6 +123,25 @@ function stubResizeObserver() {
   };
 }
 
+function stubElementsFromPoint(resolve: () => Element[]) {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "elementsFromPoint");
+  const mock = vi.fn(resolve);
+  Object.defineProperty(document, "elementsFromPoint", {
+    configurable: true,
+    value: mock,
+  });
+  return {
+    mock,
+    restore: () => {
+      if (descriptor) {
+        Object.defineProperty(document, "elementsFromPoint", descriptor);
+      } else {
+        Reflect.deleteProperty(document, "elementsFromPoint");
+      }
+    },
+  };
+}
+
 function makeLongMessages(count: number): UIMessage[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `m${index}`,
@@ -1481,8 +1500,39 @@ describe("ThreadViewport", () => {
     expect(screen.getAllByText("message 299").length).toBeGreaterThan(0);
   });
 
+  it("prefetches earlier history within half a viewport of the top", () => {
+    const { container } = render(
+      <ThreadViewport
+        messages={makeLongMessages(300)}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 301 },
+    });
+
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
+
+    scroller.scrollTop = 250;
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+    expect(screen.getByText("message 20")).toBeInTheDocument();
+    expect(screen.queryByText("message 19")).not.toBeInTheDocument();
+  });
+
   it("keeps the first visible history item fixed while deferred rows materialize", () => {
     const resizeObserver = stubResizeObserver();
+    let hitTarget: Element | null = null;
+    const hitTest = stubElementsFromPoint(() => hitTarget ? [hitTarget] : []);
     try {
       const { container } = render(
         <ThreadViewport
@@ -1507,6 +1557,7 @@ describe("ThreadViewport", () => {
       const anchor = screen.getByText("message 140")
         .closest<HTMLElement>("[data-thread-display-unit]");
       expect(anchor).not.toBeNull();
+      hitTarget = anchor;
       let anchorDocumentTop = 200;
       Object.defineProperty(anchor, "getBoundingClientRect", {
         configurable: true,
@@ -1520,6 +1571,7 @@ describe("ThreadViewport", () => {
       act(() => {
         dispatchUserScroll(scroller);
       });
+      expect(hitTest.mock).toHaveBeenCalled();
 
       const replacement = anchor.cloneNode(true) as HTMLElement;
       anchor.replaceWith(replacement);
@@ -1545,6 +1597,7 @@ describe("ThreadViewport", () => {
       expect(scroller.scrollTop).toBe(260);
       expect(replacement.getBoundingClientRect().top).toBe(120);
     } finally {
+      hitTest.restore();
       resizeObserver.restore();
     }
   });

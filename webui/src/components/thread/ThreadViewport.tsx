@@ -61,7 +61,8 @@ interface ThreadViewportProps {
 }
 
 const NEAR_BOTTOM_PX = 48;
-const NEAR_TOP_PX = 96;
+const HISTORY_PREFETCH_MIN_PX = 160;
+const HISTORY_PREFETCH_MAX_PX = 480;
 const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
 const EXTERNAL_COMPOSER_SCROLL_BUTTON_BOTTOM_PX = 16;
 const SCROLL_BUTTON_COMPOSER_GAP_PX = 16;
@@ -75,6 +76,47 @@ export const HISTORY_WINDOW_INCREMENT = 120;
 interface HistoryScrollAnchor {
   key: string;
   offsetTop: number;
+}
+
+const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
+
+function historyPrefetchDistance(scroller: HTMLElement): number {
+  return Math.min(
+    HISTORY_PREFETCH_MAX_PX,
+    Math.max(HISTORY_PREFETCH_MIN_PX, scroller.clientHeight / 2),
+  );
+}
+
+function visibleHistoryUnit(
+  content: HTMLElement,
+  viewport: DOMRect,
+): HTMLElement | null {
+  // Scroll is a hot path. Hit-testing keeps the common case O(1) instead of
+  // forcing layout for every mounted message while the trackpad is moving.
+  if (typeof document.elementsFromPoint === "function" && viewport.height > 0) {
+    const contentBounds = content.getBoundingClientRect();
+    const left = Math.max(viewport.left, contentBounds.left);
+    const right = Math.min(viewport.right, contentBounds.right);
+    const x = left + Math.max(0, right - left) / 2;
+    const offsets = [1, Math.min(32, viewport.height / 3), viewport.height / 2];
+    for (const offset of offsets) {
+      for (const target of document.elementsFromPoint(x, viewport.top + offset)) {
+        const unit = target instanceof Element
+          ? target.closest<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR)
+          : null;
+        if (unit && content.contains(unit)) return unit;
+      }
+    }
+  }
+
+  // Deterministic fallback for pre-layout states, tests, and older browsers.
+  const units = Array.from(
+    content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR),
+  );
+  return units.find((unit) => {
+    const bounds = unit.getBoundingClientRect();
+    return bounds.bottom > viewport.top && bounds.top < viewport.bottom;
+  }) ?? units[0] ?? null;
 }
 
 export function windowMessages(messages: UIMessage[], visibleCount: number): UIMessage[] {
@@ -311,21 +353,18 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       historyScrollAnchorRef.current = null;
       return false;
     }
-    const scrollerTop = scroller.getBoundingClientRect().top;
-    const units = content.querySelectorAll<HTMLElement>("[data-thread-display-unit]");
-    for (const element of units) {
-      const bounds = element.getBoundingClientRect();
-      if (bounds.bottom <= scrollerTop + 0.5) continue;
-      const key = element.dataset.threadDisplayUnit;
-      if (!key) continue;
-      historyScrollAnchorRef.current = {
-        key,
-        offsetTop: bounds.top - scrollerTop,
-      };
-      return true;
+    const viewport = scroller.getBoundingClientRect();
+    const element = visibleHistoryUnit(content, viewport);
+    const key = element?.dataset.threadDisplayUnit;
+    if (!element || !key) {
+      historyScrollAnchorRef.current = null;
+      return false;
     }
-    historyScrollAnchorRef.current = null;
-    return false;
+    historyScrollAnchorRef.current = {
+      key,
+      offsetTop: element.getBoundingClientRect().top - viewport.top,
+    };
+    return true;
   }, []);
 
   const reconcileHistoryScrollAnchor = useCallback(() => {
@@ -417,7 +456,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const el = scrollRef.current;
     if (!el || !hasMessages || pendingConversationScrollRef.current) return;
     if (!threadMotionRef.current?.isBrowsingHistory()) return;
-    if (el.scrollTop > NEAR_TOP_PX) return;
+    if (el.scrollTop > historyPrefetchDistance(el)) return;
     if (hiddenMessageCount <= 0 && !hasMoreBefore) return;
     loadEarlierMessages();
   }, [hasMessages, hasMoreBefore, hiddenMessageCount, loadEarlierMessages]);
