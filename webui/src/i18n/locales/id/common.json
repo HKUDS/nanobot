@@ -1182,6 +1182,7 @@
       "modelNotConfigured": "Model belum dikonfigurasi",
       "configureModel": "Konfigurasi model",
       "switchModel": "Ganti model untuk percakapan ini",
+      "manageModels": "Kelola model",
       "context": {
         "tooltip": "Konteks · {{tokens}}{{capacity}}",
         "meterDescription": "{{context}}. {{percent}}% digunakan."

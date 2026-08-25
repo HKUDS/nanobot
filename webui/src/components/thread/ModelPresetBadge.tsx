@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { Check, CircleHelp, Sparkles } from "lucide-react";
+import { Check, CircleHelp, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -85,6 +85,7 @@ interface ModelPresetBadgeProps {
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
   onPresetChange?: (name: string) => void;
+  onManageModels?: () => void;
   onRequestComposerFocus?: () => void;
   provider?: string | null;
   providerLabel?: string | null;
@@ -100,6 +101,7 @@ export function ModelPresetBadge({
   modelPreset,
   modelPresets = [],
   onPresetChange,
+  onManageModels,
   onRequestComposerFocus,
   provider,
   providerLabel,
@@ -154,6 +156,11 @@ export function ModelPresetBadge({
     setOpen(false);
     if (name !== activeName) onPresetChange?.(name);
     requestAnimationFrame(() => onRequestComposerFocus?.());
+  };
+
+  const openModelSettings = () => {
+    setOpen(false);
+    onManageModels?.();
   };
 
   const clearGesture = () => {
@@ -418,6 +425,22 @@ export function ModelPresetBadge({
             />
           ))}
         </div>
+        {onManageModels ? (
+          <div className="mt-1 border-t border-border/55 pt-1">
+            <button
+              type="button"
+              onClick={openModelSettings}
+              className={cn(
+                floatingItemClassName,
+                floatingItemFocusClassName,
+                "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <SlidersHorizontal className="size-4 shrink-0" strokeWidth={1.75} />
+              <span>{t("thread.composer.manageModels")}</span>
+            </button>
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );

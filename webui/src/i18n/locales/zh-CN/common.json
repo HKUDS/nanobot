@@ -1195,6 +1195,7 @@
       "modelNotConfigured": "模型未配置",
       "configureModel": "配置模型",
       "switchModel": "切换本次对话所用模型",
+      "manageModels": "管理模型预设",
       "context": {
         "tooltip": "上下文 · {{tokens}}{{capacity}}",
         "meterDescription": "{{context}}。已使用 {{percent}}%。"

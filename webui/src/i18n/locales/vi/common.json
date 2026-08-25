@@ -1182,6 +1182,7 @@
       "modelNotConfigured": "Chưa cấu hình mô hình",
       "configureModel": "Cấu hình mô hình",
       "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
+      "manageModels": "Quản lý mô hình",
       "context": {
         "tooltip": "Ngữ cảnh · {{tokens}}{{capacity}}",
         "meterDescription": "{{context}}. Đã dùng {{percent}}%."

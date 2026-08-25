@@ -1196,6 +1196,7 @@
       "modelNotConfigured": "Modelo não configurado",
       "configureModel": "Configurar modelo",
       "switchModel": "Alternar o modelo desta conversa",
+      "manageModels": "Gerenciar modelos",
       "context": {
         "tooltip": "Contexto · {{tokens}}{{capacity}}",
         "meterDescription": "{{context}}. {{percent}}% usado."

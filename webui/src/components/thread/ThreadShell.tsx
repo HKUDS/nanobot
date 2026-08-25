@@ -1519,6 +1519,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
@@ -1567,6 +1568,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           variant="hero"
           slashCommands={availableSlashCommands}

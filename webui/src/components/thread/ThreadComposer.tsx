@@ -300,6 +300,7 @@ interface ThreadComposerProps {
   modelNeedsSetup?: boolean;
   fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
+  onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
@@ -998,6 +999,7 @@ export function ThreadComposer({
   modelNeedsSetup = false,
   fallbackModelName = null,
   onModelBadgeClick,
+  onManageModels,
   contextUsage = null,
   variant = "thread",
   slashCommands = [],
@@ -2539,6 +2541,7 @@ export function ThreadComposer({
                 modelPreset={modelPreset}
                 modelPresets={modelPresets}
                 onPresetChange={onModelPresetChange}
+                onManageModels={onManageModels}
                 onRequestComposerFocus={() => textareaRef.current?.focus()}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}

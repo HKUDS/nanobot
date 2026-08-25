@@ -322,7 +322,10 @@ const MODEL_PRESETS = [
   { name: "dspro", model: "deepseek/deepseek-v4-pro", provider: "deepseek" },
 ];
 
-function renderPresetComposer(variant: "thread" | "hero" = "thread") {
+function renderPresetComposer(
+  variant: "thread" | "hero" = "thread",
+  onManageModels?: () => void,
+) {
   const onPresetChange = vi.fn();
   render(
     <ThreadComposer
@@ -332,6 +335,7 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
       modelProvider="moonshot"
       modelPresets={MODEL_PRESETS}
       onModelPresetChange={onPresetChange}
+      onManageModels={onManageModels}
       placeholder={variant === "hero" ? "Ask anything..." : "Type your message..."}
       variant={variant}
     />,
@@ -608,6 +612,18 @@ describe("ThreadComposer", () => {
     expect(onPresetChange).toHaveBeenCalledWith("dspro");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(badge).toHaveClass("w-fit");
+  });
+
+  it("opens model settings from the picker footer", async () => {
+    const onManageModels = vi.fn();
+    const { badge } = renderPresetComposer("thread", onManageModels);
+
+    fireEvent.click(badge);
+    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
+    fireEvent.click(within(picker).getByRole("button", { name: "Manage models" }));
+
+    expect(onManageModels).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("keeps long-press drag switching alongside the click picker", () => {

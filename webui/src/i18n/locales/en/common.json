@@ -1196,6 +1196,7 @@
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
       "switchModel": "Switch model for this chat",
+      "manageModels": "Manage models",
       "context": {
         "tooltip": "Context · {{tokens}}{{capacity}}",
         "meterDescription": "{{context}}. {{percent}}% used."
