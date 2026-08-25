@@ -1627,6 +1627,8 @@ export class NanobotTui {
         this.skillMenu.hide()
         this.activeSkillQuery = null
         this.updateMeta()
+        key.preventDefault()
+        return
       }
       if (key.name === "escape") {
         this.skillMenu.hide()

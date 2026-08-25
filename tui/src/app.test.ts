@@ -577,6 +577,42 @@ describe("NanobotTui layout", () => {
     expect(ui.skillMenu.visible).toBe(false)
   })
 
+  test("does not queue unmatched skill text when Tab dismisses completion", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    const ui = app as unknown as {
+      ready: boolean
+      composer: TextareaRenderable
+      skillCandidates: SkillCandidate[]
+      skillMenu: { visible: boolean }
+      queuePreview: { root: { visible: boolean } }
+    }
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => ui.ready)
+    ui.skillCandidates = [{
+      name: "verify",
+      description: "Verify public behavior",
+      source: "builtin",
+    }]
+
+    ui.composer.setText("start an active turn")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+
+    await setup.mockInput.typeText("$missing")
+    expect(ui.skillMenu.visible).toBe(true)
+    setup.mockInput.pressTab()
+
+    expect(ui.composer.plainText).toBe("$missing")
+    expect(ui.skillMenu.visible).toBe(false)
+    expect(ui.queuePreview.root.visible).toBe(false)
+
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
+    await Bun.sleep(1)
+    expect(sent).toEqual(["start an active turn"])
+  })
+
   test("runs bang commands through the gateway without steering the agent", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const sent: string[] = []
