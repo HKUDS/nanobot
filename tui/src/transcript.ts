@@ -91,7 +91,7 @@ export class Transcript {
       id: "nanobot-tui-transcript",
       width: "100%",
       minHeight: 0,
-      flexGrow: 1,
+      flexGrow: 0,
       scrollX: false,
       scrollY: true,
       stickyScroll: true,
@@ -99,6 +99,7 @@ export class Transcript {
       viewportCulling: true,
       contentOptions: {
         flexDirection: "column",
+        minHeight: 0,
         paddingTop: 1,
         paddingBottom: 1,
         paddingLeft: 1,

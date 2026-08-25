@@ -14,6 +14,7 @@ import type {
   WorkspaceScopePayload,
 } from "./protocol"
 import type { HostAgentState, HostMetadata, TuiHost } from "./host"
+import type { Transcript } from "./transcript"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -122,6 +123,45 @@ describe("NanobotTui layout", () => {
   })
 
   const createRenderer = (options: Parameters<typeof createTestRenderer>[0]) => createTestRenderer(options)
+
+  test("keeps short transcripts and the composer anchored at the top", async () => {
+    setup = await createRenderer({
+      width: 100,
+      height: 18,
+      screenMode: "alternate-screen",
+      consoleMode: "disabled",
+    })
+    const app = mount(setup)
+    const ui = app as unknown as {
+      transcript: Transcript
+      title: BoxRenderable
+      status: TextRenderable
+    }
+    const positions = () => ({
+      transcriptHeight: ui.transcript.root.height,
+      titleY: ui.title.y,
+      statusY: ui.status.y,
+    })
+
+    let anchoredPositions: ReturnType<typeof positions> | undefined
+    for (const height of [18, 30, 36]) {
+      setup.resize(100, height)
+      await setup.renderOnce()
+      expect(ui.title.y).toBe(ui.transcript.root.y + ui.transcript.root.height)
+      expect(ui.status.y + ui.status.height).toBeLessThan(setup.renderer.height)
+      if (!anchoredPositions) anchoredPositions = positions()
+      else expect(positions()).toEqual(anchoredPositions)
+    }
+
+    ui.transcript.user("A short prompt")
+    await setup.renderOnce()
+    const promptPositions = positions()
+    expect(promptPositions.titleY).toBeGreaterThan(anchoredPositions?.titleY || 0)
+
+    setup.resize(100, 40)
+    await setup.renderOnce()
+    expect(positions()).toEqual(promptPositions)
+  })
 
   test("reflows a single retained layout across terminal resizes", async () => {
     setup = await createRenderer({
