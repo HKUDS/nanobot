@@ -55,6 +55,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.session.async_compat import call_session_manager
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
@@ -447,6 +448,26 @@ class WebSocketChannel(BaseChannel):
         if sessions is None:
             return {}
         snapshot = sessions.read_session_metadata(f"websocket:{chat_id}")
+        return self._attached_model_fields_from_snapshot(chat_id, snapshot)
+
+    async def _attached_model_fields_async(self, chat_id: str) -> dict[str, Any]:
+        """Build attach fields without blocking the gateway event loop."""
+        sessions = self.gateway.session_manager
+        if sessions is None:
+            return {}
+        snapshot = await call_session_manager(
+            sessions,
+            "read_session_metadata_async",
+            sessions.read_session_metadata,
+            f"websocket:{chat_id}",
+        )
+        return self._attached_model_fields_from_snapshot(chat_id, snapshot)
+
+    def _attached_model_fields_from_snapshot(
+        self,
+        chat_id: str,
+        snapshot: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
         fields: dict[str, Any] = {}
@@ -510,13 +531,16 @@ class WebSocketChannel(BaseChannel):
         fork_key: str,
     ) -> None:
         """Attach and hydrate a newly created WebUI chat fork."""
-        scope = self._workspaces.scope_for_session_key(fork_key)
+        scope = await asyncio.to_thread(
+            self._workspaces.scope_for_session_key,
+            fork_key,
+        )
         self._attach(connection, fork_id)
         await self._send_event(
             connection,
             "attached",
             chat_id=fork_id,
-            **self._attached_model_fields(fork_id),
+            **await self._attached_model_fields_async(fork_id),
         )
         await self._send_event(
             connection,
@@ -904,7 +928,7 @@ class WebSocketChannel(BaseChannel):
                 connection,
                 "attached",
                 chat_id=new_id,
-                **self._attached_model_fields(new_id),
+                **await self._attached_model_fields_async(new_id),
             )
             await self._send_event(
                 connection,
@@ -960,7 +984,7 @@ class WebSocketChannel(BaseChannel):
                 connection,
                 "attached",
                 chat_id=cid,
-                **self._attached_model_fields(cid),
+                **await self._attached_model_fields_async(cid),
             )
             await self._hydrate_after_subscribe(cid)
             return
@@ -1263,7 +1287,7 @@ class WebSocketChannel(BaseChannel):
                         else False
                     ),
                 )
-                self._workspaces.persist_scope(cid, scope)
+                await asyncio.to_thread(self._workspaces.persist_scope, cid, scope)
                 accepted = True
             finally:
                 if not accepted and queued_owner is not None:
@@ -1553,7 +1577,7 @@ class WebSocketChannel(BaseChannel):
         turn_id: str | None = None,
     ) -> Any | None:
         try:
-            return resolver()
+            return await asyncio.to_thread(resolver)
         except WorkspaceScopeError as exc:
             await self._send_event(
                 connection,

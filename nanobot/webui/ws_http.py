@@ -34,6 +34,7 @@ from nanobot.session.session_handles import (
     SessionHandleResolver,
 )
 from nanobot.triggers.local_types import LocalTrigger
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -134,6 +135,18 @@ _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
 _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _NO_STORE_HEADERS = [("Cache-Control", "no-store")]
+
+
+def _slow_http_operation(path: str) -> str:
+    """Return a route family without logging user-controlled path/query values."""
+    clean_path = path.split("?", 1)[0]
+    if clean_path == "/webui/bootstrap":
+        return clean_path
+    parts = [part for part in clean_path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "api":
+        return f"/api/{parts[1]}"
+    return "/webui"
+
 
 _WEBUI_MUTATION_PATHS = {
     "automation.enable": "/api/webui/automations/enable",
@@ -420,7 +433,12 @@ class GatewayHTTPHandler:
             response = await self._dispatch_resolved(connection, request, got)
             return response
         finally:
-            self._log_slow_http(got, response, started)
+            self._log_slow_http(
+                got,
+                response,
+                started,
+                input_chars=len(request.path),
+            )
 
     async def dispatch_webui_mutation(
         self,
@@ -556,7 +574,14 @@ class GatewayHTTPHandler:
 
         return connection.respond(404, "Not Found")
 
-    def _log_slow_http(self, path: str, response: Any | None, started: float) -> None:
+    def _log_slow_http(
+        self,
+        path: str,
+        response: Any | None,
+        started: float,
+        *,
+        input_chars: int,
+    ) -> None:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         if elapsed_ms < _SLOW_WEBUI_HTTP_LOG_MS:
             return
@@ -564,9 +589,10 @@ class GatewayHTTPHandler:
             return
         status = getattr(response, "status_code", None)
         self._log.warning(
-            "slow webui http route path={} status={} duration_ms={}",
-            path,
+            "slow webui http operation={} status={} input_chars={} duration_ms={}",
+            _slow_http_operation(path),
             status if status is not None else "none",
+            input_chars,
             elapsed_ms,
         )
 
@@ -694,7 +720,11 @@ class GatewayHTTPHandler:
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
-            return self._handle_webui_thread_get(request, m.group(1))
+            return await asyncio.to_thread(
+                self._handle_webui_thread_get,
+                request,
+                m.group(1),
+            )
 
         m = re.match(r"^/api/sessions/([^/]+)/context$", got)
         if m:
@@ -702,15 +732,27 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
-            return self._handle_file_preview(request, m.group(1))
+            return await asyncio.to_thread(
+                self._handle_file_preview,
+                request,
+                m.group(1),
+            )
 
         m = re.match(r"^/api/sessions/([^/]+)/automations$", got)
         if m:
-            return self._handle_session_automations(request, m.group(1))
+            return await self._run_cron_transaction(
+                self._handle_session_automations,
+                request,
+                m.group(1),
+            )
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._run_cron_transaction(
+                self._handle_session_delete,
+                request,
+                m.group(1),
+            )
 
         return None
 
@@ -957,13 +999,24 @@ class GatewayHTTPHandler:
 
     # -- Automation routes --------------------------------------------------
 
+    async def _run_cron_transaction(
+        self,
+        operation: Callable[..., Any],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        if self.cron_service is not None:
+            return await self.cron_service.run_sync(operation, *args, **kwargs)
+        return await shield_and_drain(asyncio.to_thread(operation, *args, **kwargs))
+
     async def _dispatch_automation_routes(
         self,
         request: WsRequest,
         got: str,
     ) -> Response | None:
         if got == "/api/webui/automations":
-            return self._handle_webui_automations(request)
+            return await self._run_cron_transaction(self._handle_webui_automations, request)
         m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", got)
         if m:
             return await self._handle_webui_automation_action(request, m.group(1))
@@ -1029,13 +1082,24 @@ class GatewayHTTPHandler:
         job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
         if not job_id:
             return _http_error(400, "missing automation id")
-        trigger = self.local_trigger_store.get(job_id) if self.local_trigger_store else None
+        trigger = (
+            await asyncio.to_thread(self.local_trigger_store.get, job_id)
+            if self.local_trigger_store
+            else None
+        )
         if trigger is not None:
-            return self._handle_local_trigger_action(request, action, trigger)
+            return await shield_and_drain(
+                asyncio.to_thread(
+                    self._handle_local_trigger_action,
+                    request,
+                    action,
+                    trigger,
+                )
+            )
 
         if self.cron_service is None:
             return _http_error(404, "automation not found")
-        job = self.cron_service.get_job(job_id)
+        job = await self.cron_service.run_sync(self.cron_service.get_job, job_id)
         if job is None:
             return _http_error(404, "automation not found")
         if job.payload.kind == "system_event":
@@ -1044,13 +1108,23 @@ class GatewayHTTPHandler:
             return _http_error(409, "automation has no linked chat")
 
         if action == "enable":
-            if self.cron_service.enable_job(job_id, enabled=True) is None:
+            result = await self.cron_service.run_sync(
+                self.cron_service.enable_job,
+                job_id,
+                enabled=True,
+            )
+            if result is None:
                 return _http_error(404, "automation not found")
         elif action == "disable":
-            if self.cron_service.enable_job(job_id, enabled=False) is None:
+            result = await self.cron_service.run_sync(
+                self.cron_service.enable_job,
+                job_id,
+                enabled=False,
+            )
+            if result is None:
                 return _http_error(404, "automation not found")
         elif action == "delete":
-            result = self.cron_service.remove_job(job_id)
+            result = await self.cron_service.run_sync(self.cron_service.remove_job, job_id)
             if result == "not_found":
                 return _http_error(404, "automation not found")
             if result == "protected":
@@ -1068,7 +1142,11 @@ class GatewayHTTPHandler:
             if isinstance(parsed, str):
                 return _http_error(400, parsed)
             try:
-                result = self.cron_service.update_job(job_id, **parsed)
+                result = await self.cron_service.run_sync(
+                    self.cron_service.update_job,
+                    job_id,
+                    **parsed,
+                )
             except ValueError as exc:
                 return _http_error(400, str(exc))
             if result == "not_found":
@@ -1078,7 +1156,7 @@ class GatewayHTTPHandler:
         else:
             return _http_error(404, "unknown automation action")
 
-        return self._handle_webui_automations(request)
+        return await self._run_cron_transaction(self._handle_webui_automations, request)
 
     def _handle_local_trigger_action(
         self,
@@ -1163,9 +1241,17 @@ class GatewayHTTPHandler:
         if got == "/api/webui/skills/install":
             return await self._handle_webui_skill_install(connection, request)
         if got == "/api/webui/skills/update":
-            return self._handle_webui_skill_update(request)
+            return await shield_and_drain(
+                asyncio.to_thread(self._handle_webui_skill_update, request)
+            )
         if got == "/api/webui/skills/delete":
-            return self._handle_webui_skill_delete(connection, request)
+            return await shield_and_drain(
+                asyncio.to_thread(
+                    self._handle_webui_skill_delete,
+                    connection,
+                    request,
+                )
+            )
         if got == "/api/webui/skills":
             return self._handle_webui_skills(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
@@ -1276,7 +1362,7 @@ class GatewayHTTPHandler:
     ) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if not self._allow_webui_package_install(connection, request):
+        if not await self._allow_webui_package_install(connection, request):
             return _http_error(403, "remote skill installation is disabled")
         if self._skill_install_lock.locked():
             return _http_error(409, "another skill installation is already in progress")
@@ -1308,13 +1394,16 @@ class GatewayHTTPHandler:
             "last_action": action,
         })
 
-    def _allow_webui_package_install(self, connection: Any, request: WsRequest) -> bool:
+    async def _allow_webui_package_install(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> bool:
         if _is_local_browser_request(connection, request.headers):
             return True
         try:
-            return bool(
-                self.settings.config.load().tools.webui_allow_remote_package_install
-            )
+            config = await self.settings.config.load_async()
+            return bool(config.tools.webui_allow_remote_package_install)
         except Exception:
             self._log.exception("failed to load remote package install policy")
             return False

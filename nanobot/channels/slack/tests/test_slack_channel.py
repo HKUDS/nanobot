@@ -859,13 +859,13 @@ def _patch_download_validation(
     monkeypatch: pytest.MonkeyPatch,
     validated: list[str],
 ) -> None:
-    def validate(url: str) -> tuple[bool, str]:
+    async def validate(url: str) -> tuple[bool, str]:
         validated.append(url)
         if "169.254.169.254" in url:
             return False, "blocked metadata address"
         return True, ""
 
-    monkeypatch.setattr("nanobot.channels.slack.runtime.validate_url_target", validate)
+    monkeypatch.setattr("nanobot.channels.slack.runtime.async_validate_url_target", validate)
 
 
 @pytest.mark.asyncio

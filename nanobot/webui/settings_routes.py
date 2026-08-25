@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import inspect
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, cast
@@ -18,6 +19,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
 from nanobot.pairing import approve_code, deny_code, list_pending
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.webui import settings_capabilities as capability_domain
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as model_domain
@@ -208,6 +210,16 @@ def _payload_query(payload: dict[str, Any]) -> QueryParams:
     }
 
 
+async def _call_settings_handler(
+    handler: Callable[[], Response | Awaitable[Response]],
+) -> Response:
+    """Keep synchronous handlers off-loop while supporting native async handlers."""
+    result = await asyncio.to_thread(handler)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
 class WebUISettingsRouter:
     """Authenticate and dispatch settings requests to transport-neutral domains."""
 
@@ -284,9 +296,9 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         if route == ("root", "settings"):
-            return await asyncio.to_thread(self._handle_settings)
+            return await _call_settings_handler(self._handle_settings)
         if route == ("root", "usage"):
-            return await asyncio.to_thread(self._handle_settings_usage)
+            return await _call_settings_handler(self._handle_settings_usage)
 
         domain, action = route
         domain_request = self._domain_request(
@@ -415,19 +427,18 @@ class WebUISettingsRouter:
                 )
         return self._json_response(payload)
 
-    def _handle_settings(self) -> Response:
-        return self._json_response(
-            self._with_restart_state(
-                self.settings.read(
-                    settings_payload,
-                    surface=self._runtime_surface,
-                    runtime_capability_overrides=self._runtime_capabilities,
-                )
-            )
+    async def _handle_settings(self) -> Response:
+        payload = await self.settings.read_async(
+            settings_payload,
+            surface=self._runtime_surface,
+            runtime_capability_overrides=self._runtime_capabilities,
         )
+        return self._json_response(self._with_restart_state(payload))
 
-    def _handle_settings_usage(self) -> Response:
-        return self._json_response(self.settings.read(settings_usage_payload))
+    async def _handle_settings_usage(self) -> Response:
+        return self._json_response(
+            await self.settings.read_async(settings_usage_payload)
+        )
 
     def _model_operations(self) -> model_domain.ModelSettingsOperations:
         return model_domain.ModelSettingsOperations(
@@ -560,7 +571,7 @@ class WebUISettingsRouter:
             allow_install=allow_install,
         )
 
-    def _allow_feature_package_install(
+    async def _allow_feature_package_install(
         self,
         connection: Any,
         request: WsRequest,
@@ -570,29 +581,33 @@ class WebUISettingsRouter:
             request,
             needs_local_browser=True,
         )
-        return self._system.allow_feature_package_install(domain_request)
+        return await self._system.allow_feature_package_install(domain_request)
 
     async def _handle_mcp_oauth_start(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
-        if self._mcp_oauth_redirect_uri is None:
+        redirect_uri_for_request = self._mcp_oauth_redirect_uri
+        if redirect_uri_for_request is None:
             return self._error_response(500, "MCP OAuth callback is not configured")
         query = self._parse_mcp_settings_query(request)
-        try:
-            name, cfg = await asyncio.to_thread(
-                self.settings.mutate,
+
+        async def mutate_and_start() -> dict[str, Any]:
+            name, cfg = await self.settings.mutate_async(
                 ensure_mcp_oauth_server,
                 query,
             )
-            redirect_uri = self._mcp_oauth_redirect_uri(request)
+            redirect_uri = redirect_uri_for_request(request)
             reset = (_query_first(query, "reset") or "").lower() in {"1", "true", "yes"}
-            payload = await self._mcp_oauth.start(
+            return await self._mcp_oauth.start(
                 name,
                 cfg,
                 redirect_uri,
                 reload_mcp=self._reload_mcp_runtime,
                 reset_credentials=reset,
             )
+
+        try:
+            payload = await shield_and_drain(mutate_and_start())
         except Exception as exc:
             return self._mcp_oauth_error_response(exc, action="start")
         return self._json_response(payload)

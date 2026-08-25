@@ -13,6 +13,19 @@ class AutomationTurnError(RuntimeError):
     """Raised when an automation turn reaches the agent and finishes with an error."""
 
 
+class AutomationTurnAcceptedCancellation(asyncio.CancelledError):
+    """Cancellation raised after an automation turn was accepted for processing.
+
+    Callers must not replay the turn: the accepted agent work now has independent
+    ownership and may continue after the submitting task is cancelled.
+    """
+
+
+def _consume_future_exception(future: asyncio.Future[object]) -> None:
+    if not future.cancelled():
+        future.exception()
+
+
 async def publish_next_deferred_turn(
     *,
     deferred_queues: dict[str, list[InboundMessage]],
@@ -70,19 +83,36 @@ class AutomationTurnCoordinator:
         future: asyncio.Future[OutboundMessage | None] = loop.create_future()
         self._waiters[turn_id] = future
         self._pending_messages_by_turn_id[turn_id] = msg
+        accepted = False
         try:
             if self._is_running():
                 await self._publish_inbound(msg)
+                accepted = True
             else:
-                await self._dispatch(msg)
+                # Direct dispatch is given independent task ownership for the
+                # same reason as publishing to the inbound queue: once admitted,
+                # cancelling this submitter must not cancel and then replay the
+                # already-running agent turn.
+                dispatch_future: asyncio.Future[object] = asyncio.ensure_future(
+                    self._dispatch(msg)
+                )
+                dispatch_future.add_done_callback(_consume_future_exception)
+                accepted = True
+                await asyncio.shield(dispatch_future)
             try:
                 return await future
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
+                if accepted:
+                    raise AutomationTurnAcceptedCancellation(*exc.args) from None
                 raise
             except AutomationTurnError:
                 raise
             except Exception as exc:
                 raise AutomationTurnError(str(exc) or exc.__class__.__name__) from exc
+        except asyncio.CancelledError as exc:
+            if accepted and not isinstance(exc, AutomationTurnAcceptedCancellation):
+                raise AutomationTurnAcceptedCancellation(*exc.args) from None
+            raise
         finally:
             self._waiters.pop(turn_id, None)
             self._pending_messages_by_turn_id.pop(turn_id, None)

@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from pathlib import Path
+from typing import TypedDict
 
 from pydantic import Field
 
@@ -22,6 +25,14 @@ from nanobot.apps.cli.utils import runtime_lines_for_request
 from nanobot.config_base import Base
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.security.workspace_access import current_tool_workspace
+
+
+class _CliAppRunKwargs(TypedDict):
+    args: list[str]
+    json_output: bool
+    working_dir: str | None
+    timeout: int | None
+    restrict_to_workspace: bool
 
 
 class CliAppsToolConfig(Base):
@@ -147,14 +158,17 @@ class CliAppsTool(Tool):
         )
         workspace = access.project_path or self.workspace
         manager = CliAppManager(workspace=workspace, runtime=self.runtime)
+        run_kwargs: _CliAppRunKwargs = {
+            "args": args or [],
+            "json_output": bool(json),
+            "working_dir": working_dir,
+            "timeout": timeout,
+            "restrict_to_workspace": access.restrict_to_workspace,
+        }
         try:
-            return manager.run(
-                name,
-                args=args or [],
-                json_output=bool(json),
-                working_dir=working_dir,
-                timeout=timeout,
-                restrict_to_workspace=access.restrict_to_workspace,
-            )
+            run_async = inspect.getattr_static(type(manager), "run_async", None)
+            if inspect.iscoroutinefunction(run_async):
+                return await manager.run_async(name, **run_kwargs)
+            return await asyncio.to_thread(manager.run, name, **run_kwargs)
         except CliAppError as exc:
             return ToolResult.error(f"Error: {exc.message}")

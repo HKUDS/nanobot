@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock
 
@@ -160,3 +162,50 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
 
     channel.logger.warning.assert_called_once_with("fork_chat failed: {}", ANY)
     channel.send_webui_protocol_error.assert_awaited_once_with(connection, "fork_chat_failed")
+
+
+@pytest.mark.asyncio
+async def test_fork_cancellation_waits_for_creation_and_client_attachment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    connection = object()
+
+    def blocked_create(*_args, **_kwargs) -> tuple[str, str]:
+        started.set()
+        assert release.wait(timeout=1)
+        return "fork-id", "websocket:fork-id"
+
+    channel = SimpleNamespace(
+        send_webui_protocol_error=AsyncMock(),
+        attach_webui_fork=AsyncMock(),
+        gateway=SimpleNamespace(session_manager=object()),
+        logger=SimpleNamespace(warning=MagicMock()),
+    )
+    monkeypatch.setattr(forking, "create_webui_chat_fork", blocked_create)
+    task = asyncio.create_task(
+        forking.handle_webui_fork_chat(
+            channel,
+            connection,
+            {"source_chat_id": "source", "before_user_index": 0},
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        channel.attach_webui_fork.assert_not_awaited()
+    finally:
+        release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    channel.attach_webui_fork.assert_awaited_once_with(
+        connection,
+        fork_id="fork-id",
+        fork_key="websocket:fork-id",
+    )
+    channel.send_webui_protocol_error.assert_not_awaited()

@@ -24,6 +24,7 @@ _MAX_RUN_HISTORY = 20
 _MAX_DELIVERY_ATTEMPTS = 10
 _RUN_RECORD_TEXT_MAX_CHARS = 4000
 _PROCESSING_RECOVERY_ERROR = "delivery was recovered from interrupted processing"
+_FILE_LOCK_TIMEOUT_SECONDS = 5
 
 
 class TriggerStoreError(RuntimeError):
@@ -49,7 +50,10 @@ class LocalTriggerStore:
         self.processing_dir = self.root / "processing"
         self.failed_dir = self.root / "failed"
         self.runs_dir = self.root / "runs"
-        self._lock = FileLock(str(self.root / ".lock"))
+        self._lock = FileLock(
+            str(self.root / ".lock"),
+            timeout=_FILE_LOCK_TIMEOUT_SECONDS,
+        )
 
     def create(
         self,

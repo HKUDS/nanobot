@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, Protocol
 
+from nanobot.agent.automation_turns import AutomationTurnAcceptedCancellation
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cron.session_delivery import origin_delivery_context
@@ -127,6 +128,15 @@ async def run_bound_cron_job(
                 session_key_override=session_key,
             )
         )
+    except AutomationTurnAcceptedCancellation:
+        cron.write_run_record(
+            run_id,
+            {
+                **run_record_base,
+                "status": "accepted",
+            },
+        )
+        raise
     except (Exception, asyncio.CancelledError) as exc:
         error_text = str(exc) or exc.__class__.__name__
         cron.write_run_record(

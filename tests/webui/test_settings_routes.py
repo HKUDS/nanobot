@@ -526,3 +526,179 @@ async def test_version_check_route_enforces_auth_and_bounds_failures(
     assert failed.status_code == 500
     assert json.loads(failed.body) == {"error": "version check failed"}
     assert "upstream secret body" not in failed.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_start_cancellation_waits_for_config_and_flow_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_started = threading.Event()
+    release_config = threading.Event()
+    start_entered = asyncio.Event()
+    release_start = asyncio.Event()
+    effects: list[str] = []
+    cfg = SimpleNamespace(
+        type="streamableHttp",
+        auth="oauth",
+        url="https://app.xmind.com/api/mcp",
+    )
+
+    def ensure_server(_query, *, config_path=None):
+        config_started.set()
+        assert release_config.wait(timeout=1)
+        effects.append("config_saved")
+        return "xmind", cfg
+
+    async def start(
+        name,
+        config,
+        redirect_uri,
+        *,
+        reload_mcp,
+        reset_credentials=False,
+    ):
+        assert (name, config, redirect_uri) == (
+            "xmind",
+            cfg,
+            "https://gateway.example/auth/mcp/callback",
+        )
+        assert callable(reload_mcp)
+        assert reset_credentials is False
+        effects.append("start_entered")
+        start_entered.set()
+        await release_start.wait()
+        effects.append("start_settled")
+        return {
+            "status": "authorization_required",
+            "flow_id": "flow-123",
+            "name": name,
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
+        ensure_server,
+    )
+    router = _router()
+    router._mcp_oauth = SimpleNamespace(start=start)
+    request = _mutation_request(
+        "/api/settings/mcp-oauth/start",
+        {"name": "xmind"},
+    )
+    task = asyncio.create_task(
+        router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+    )
+
+    assert await asyncio.to_thread(config_started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+
+        release_config.set()
+        await asyncio.wait_for(start_entered.wait(), timeout=1)
+        assert effects == ["config_saved", "start_entered"]
+        assert not task.done()
+    finally:
+        release_config.set()
+        release_start.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert effects == ["config_saved", "start_entered", "start_settled"]
+    await asyncio.sleep(0.05)
+    assert effects == ["config_saved", "start_entered", "start_settled"]
+
+
+@pytest.mark.asyncio
+async def test_model_settings_cancellation_waits_for_mutation_and_runtime_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mutation_started = threading.Event()
+    release_mutation = threading.Event()
+    effects: list[str] = []
+
+    def update(_query, *, config_path=None):
+        mutation_started.set()
+        assert release_mutation.wait(timeout=1)
+        effects.append("config_saved")
+        return {"updated": True}
+
+    def refresh_runtime_config() -> None:
+        effects.append("runtime_refreshed")
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.update_agent_settings",
+        update,
+    )
+    path = "/api/settings/update"
+    request = _mutation_request(path, {"model_preset": "Codex"})
+    task = asyncio.create_task(
+        _router(refresh_runtime_config=refresh_runtime_config).dispatch(
+            None,
+            request,
+            path,
+        )
+    )
+
+    assert await asyncio.to_thread(mutation_started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert effects == []
+    finally:
+        release_mutation.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert effects == ["config_saved", "runtime_refreshed"]
+    await asyncio.sleep(0.05)
+    assert effects == ["config_saved", "runtime_refreshed"]
+
+
+@pytest.mark.asyncio
+async def test_image_settings_cancellation_waits_for_runtime_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reload_started = asyncio.Event()
+    release_reload = asyncio.Event()
+    effects: list[str] = []
+
+    def update(_query, *, config_path=None):
+        effects.append("config_saved")
+        return {"requires_restart": True}
+
+    async def reload_image(_bus):
+        effects.append("reload_started")
+        reload_started.set()
+        await release_reload.wait()
+        effects.append("reload_settled")
+        return {"ok": True, "requires_restart": False}
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.update_image_generation_settings",
+        update,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.request_image_generation_reload",
+        reload_image,
+    )
+    path = "/api/settings/image-generation/update"
+    request = _mutation_request(path, {"enabled": True})
+    task = asyncio.create_task(_router().dispatch(None, request, path))
+
+    await asyncio.wait_for(reload_started.wait(), timeout=1)
+    assert effects == ["config_saved", "reload_started"]
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+
+    release_reload.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert effects == ["config_saved", "reload_started", "reload_settled"]
+    await asyncio.sleep(0.05)
+    assert effects == ["config_saved", "reload_started", "reload_settled"]

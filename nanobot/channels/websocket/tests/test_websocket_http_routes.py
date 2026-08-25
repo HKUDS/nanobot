@@ -4,6 +4,7 @@ import asyncio
 import json
 import random
 import socket
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -2577,6 +2578,69 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
 
 
 @pytest.mark.asyncio
+async def test_webui_cron_update_rearms_started_service_on_owner_loop(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    cron = CronService(store_path, max_sleep_ms=60_000)
+    job = cron.add_job(
+        name="Before update",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Check the repo status",
+        session_key="websocket:abc",
+        origin_channel="websocket",
+        origin_chat_id="abc",
+    )
+    await cron.start()
+
+    owner_thread_id = threading.get_ident()
+    initial_timer = cron._timer_task
+    request_thread_ids: list[int] = []
+    arm_thread_ids: list[int] = []
+    timer_rearmed = asyncio.Event()
+    original_request_timer_rearm = cron._request_timer_rearm
+    original_arm_timer = cron._arm_timer
+
+    def tracked_request_timer_rearm() -> None:
+        request_thread_ids.append(threading.get_ident())
+        original_request_timer_rearm()
+
+    def tracked_arm_timer() -> None:
+        arm_thread_ids.append(threading.get_ident())
+        original_arm_timer()
+        timer_rearmed.set()
+
+    monkeypatch.setattr(cron, "_request_timer_rearm", tracked_request_timer_rearm)
+    monkeypatch.setattr(cron, "_arm_timer", tracked_arm_timer)
+    channel = _ch(bus, cron_service=cron, port=_free_port())
+
+    try:
+        response = await _webui_mutate(
+            channel,
+            "automation.update",
+            {"id": job.id, "values": {"name": "After update"}},
+        )
+        await asyncio.wait_for(timer_rearmed.wait(), timeout=1)
+
+        assert response.status_code == 200
+        assert request_thread_ids
+        assert all(thread_id != owner_thread_id for thread_id in request_thread_ids)
+        assert arm_thread_ids and set(arm_thread_ids) == {owner_thread_id}
+        assert cron._timer_task is not None
+        assert cron._timer_task is not initial_timer
+        assert not cron._timer_task.done()
+
+        stored = json.loads(store_path.read_text(encoding="utf-8"))
+        assert len(stored["jobs"]) == 1
+        assert stored["jobs"][0]["name"] == "After update"
+    finally:
+        cron.stop()
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
 async def test_webui_automations_route_manages_local_triggers(
     bus: MagicMock, tmp_path: Path
 ) -> None:
@@ -3769,3 +3833,77 @@ def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_webui_skill_update_cancellation_waits_for_config_and_runtime_state(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.webui import ws_http
+
+    skill_dir = tmp_path / "skills" / "cancel-safe-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: cancel-safe-skill\ndescription: Cancellation test skill.\n---\n",
+        encoding="utf-8",
+    )
+    mutation_started = threading.Event()
+    release_mutation = threading.Event()
+    original_update = ws_http.set_webui_skill_enabled
+    update_calls = 0
+
+    def blocked_update(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal update_calls
+        update_calls += 1
+        mutation_started.set()
+        assert release_mutation.wait(timeout=1)
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(ws_http, "set_webui_skill_enabled", blocked_update)
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=_free_port(),
+    )
+    runtime_states: list[set[str]] = []
+    channel.gateway.http.skill_state_action = runtime_states.append
+    task = asyncio.create_task(
+        _webui_mutate(
+            channel,
+            "skill.update",
+            {"name": "cancel-safe-skill", "enabled": False},
+        )
+    )
+
+    assert await asyncio.to_thread(mutation_started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert runtime_states == []
+    finally:
+        release_mutation.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert update_calls == 1
+    assert "cancel-safe-skill" in channel.gateway.http.disabled_skills
+    assert runtime_states == [{"cancel-safe-skill"}]
+    saved = load_config(channel.gateway.settings.config.path)
+    assert "cancel-safe-skill" in saved.agents.defaults.disabled_skills
+
+    settled_state = (
+        update_calls,
+        set(channel.gateway.http.disabled_skills),
+        list(runtime_states),
+    )
+    await asyncio.sleep(0.05)
+    assert (
+        update_calls,
+        set(channel.gateway.http.disabled_skills),
+        runtime_states,
+    ) == settled_state

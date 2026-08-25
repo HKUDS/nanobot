@@ -8,10 +8,15 @@ block the stop.
 """
 
 import asyncio
+import threading
 import time
 from contextlib import suppress
 
-from nanobot.cli.gateway_runtime import _close_gateway_runtime
+from nanobot.cli.gateway_runtime import (
+    _call_session_manager,
+    _close_gateway_runtime,
+    _monitor_event_loop_lag,
+)
 
 
 class _FakeAgent:
@@ -216,3 +221,110 @@ async def test_cancelled_runtime_tasks_gather_does_not_raise() -> None:
     assert runtime_tasks.done()  # the cancelled gather was awaited without raising
     assert agent.close_calls == 1
     assert provider.close_calls == 1
+
+
+async def test_session_manager_call_prefers_class_declared_coroutine() -> None:
+    class _Manager:
+        async def list_sessions_async(self) -> list[str]:
+            return ["native-async"]
+
+        def list_sessions(self) -> list[str]:
+            raise AssertionError("sync fallback should not run")
+
+    manager = _Manager()
+
+    result = await _call_session_manager(
+        manager,
+        "list_sessions_async",
+        manager.list_sessions,
+    )
+
+    assert result == ["native-async"]
+
+
+async def test_session_manager_call_offloads_sync_compatibility_fallback() -> None:
+    calling_thread = threading.get_ident()
+    sync_threads: list[int] = []
+
+    class _Manager:
+        def list_sessions(self) -> list[str]:
+            sync_threads.append(threading.get_ident())
+            return ["sync-fallback"]
+
+    manager = _Manager()
+
+    async def _fabricated_async() -> list[str]:
+        raise AssertionError("instance-only async stand-in should not run")
+
+    setattr(manager, "list_sessions_async", _fabricated_async)
+    result = await _call_session_manager(
+        manager,
+        "list_sessions_async",
+        manager.list_sessions,
+    )
+
+    assert result == ["sync-fallback"]
+    assert sync_threads and sync_threads[0] != calling_thread
+
+
+async def test_session_manager_sync_fallback_cancellation_waits_for_worker() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    mutations: list[str] = []
+
+    class _Manager:
+        def save(self, value: str) -> str:
+            started.set()
+            assert release.wait(timeout=1)
+            mutations.append(value)
+            finished.set()
+            return "saved"
+
+    manager = _Manager()
+    task = asyncio.create_task(
+        _call_session_manager(manager, "save_async", manager.save, "mutation")
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        release.set()
+
+    with suppress(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert task.cancelled()
+    assert finished.is_set()
+    assert mutations == ["mutation"]
+    await asyncio.sleep(0.05)
+    assert mutations == ["mutation"]
+
+
+async def test_event_loop_lag_monitor_logs_gateway_scheduler_drift() -> None:
+    records: list[str] = []
+
+    class _Logger:
+        def warning(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    task = asyncio.create_task(
+        _monitor_event_loop_lag(
+            interval_s=0.01,
+            warning_threshold_s=0.015,
+            log=_Logger(),
+        )
+    )
+    await asyncio.sleep(0)
+    time.sleep(0.04)
+    await asyncio.sleep(0.02)
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+    assert records
+    assert "operation=gateway" in records[0]
+    assert "duration_ms=" in records[0]
+    assert "interval_ms=10" in records[0]

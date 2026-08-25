@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import ctypes
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from collections.abc import Iterable
+from contextlib import suppress
+from ctypes import wintypes
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -95,6 +100,141 @@ class CliAppsRuntimeConfig:
     install_timeout: int = 300
     run_timeout: int = 60
     catalog_ttl_seconds: int = 3600
+
+
+@dataclass(slots=True)
+class _PreparedCliRun:
+    name: str
+    entry: str
+    resolved: str
+    args: list[str]
+    cwd: Path
+    timeout: int
+    env: dict[str, str]
+    artifact_snapshot: dict[Path, tuple[int, int]]
+
+
+class _JobObjectBasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_int64),
+        ("PerJobUserTimeLimit", ctypes.c_int64),
+        ("LimitFlags", wintypes.DWORD),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", wintypes.DWORD),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", wintypes.DWORD),
+        ("SchedulingClass", wintypes.DWORD),
+    ]
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_uint64),
+        ("WriteOperationCount", ctypes.c_uint64),
+        ("OtherOperationCount", ctypes.c_uint64),
+        ("ReadTransferCount", ctypes.c_uint64),
+        ("WriteTransferCount", ctypes.c_uint64),
+        ("OtherTransferCount", ctypes.c_uint64),
+    ]
+
+
+class _JobObjectExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _JobObjectBasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+class _WindowsJob:
+    """Best-effort Windows process tree ownership for timeout/cancellation."""
+
+    _KILL_ON_JOB_CLOSE = 0x00002000
+    _EXTENDED_LIMIT_INFORMATION = 9
+    _PROCESS_TERMINATE = 0x0001
+    _PROCESS_SET_QUOTA = 0x0100
+
+    def __init__(self) -> None:
+        win_dll = getattr(ctypes, "WinDLL")
+        self._kernel32 = win_dll("kernel32", use_last_error=True)
+        self._kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        self._kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        self._kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self._kernel32.OpenProcess.restype = wintypes.HANDLE
+        self._kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        self._kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        self._kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        ]
+        self._kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        self._kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self._kernel32.TerminateJobObject.restype = wintypes.BOOL
+        self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._kernel32.CloseHandle.restype = wintypes.BOOL
+        self._handle: Any = self._kernel32.CreateJobObjectW(None, None)
+        if not self._handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+        try:
+            self._set_kill_on_close(True)
+        except OSError:
+            self._kernel32.CloseHandle(self._handle)
+            self._handle = None
+            raise
+
+    @classmethod
+    def create(cls) -> _WindowsJob | None:
+        if os.name != "nt":
+            return None
+        try:
+            return cls()
+        except OSError as exc:
+            logger.debug("CLI Apps: Windows job object unavailable: {}", exc)
+            return None
+
+    def _set_kill_on_close(self, enabled: bool) -> None:
+        info = _JobObjectExtendedLimitInformation()
+        info.BasicLimitInformation.LimitFlags = self._KILL_ON_JOB_CLOSE if enabled else 0
+        ok = self._kernel32.SetInformationJobObject(
+            self._handle,
+            self._EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if not ok:
+            raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+
+    def assign(self, pid: int) -> bool:
+        process_handle = self._kernel32.OpenProcess(
+            self._PROCESS_TERMINATE | self._PROCESS_SET_QUOTA,
+            False,
+            pid,
+        )
+        if not process_handle:
+            return False
+        try:
+            return bool(self._kernel32.AssignProcessToJobObject(self._handle, process_handle))
+        finally:
+            self._kernel32.CloseHandle(process_handle)
+
+    def terminate(self) -> None:
+        if self._handle and not self._kernel32.TerminateJobObject(self._handle, 1):
+            raise OSError(ctypes.get_last_error(), "TerminateJobObject failed")
+
+    def close(self, *, kill_descendants: bool) -> None:
+        if not self._handle:
+            return
+        if not kill_descendants:
+            with suppress(OSError):
+                self._set_kill_on_close(False)
+        self._kernel32.CloseHandle(self._handle)
+        self._handle = None
 
 
 _BRANDS: dict[str, tuple[str, str]] = {
@@ -1428,6 +1568,197 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             lines.append(f"- {rel} ({kind}, {self._format_artifact_size(path)})")
         return lines
 
+    def _prepare_run(
+        self,
+        name: str,
+        args: list[str] | None,
+        *,
+        json_output: bool,
+        working_dir: str | None,
+        timeout: int | None,
+        restrict_to_workspace: bool,
+    ) -> _PreparedCliRun:
+        app = self.get_app(name)
+        installed = self._load_installed()
+        app_name = str(app["name"])
+        if app_name not in installed:
+            raise CliAppError(f"CLI app '{name}' is not installed")
+        cwd = self._resolve_cwd(working_dir, restrict_to_workspace=restrict_to_workspace)
+        entry = str(installed[app_name].get("entry_point") or app.get("entry_point") or "")
+        resolved = shutil.which(entry)
+        if not entry or not resolved:
+            raise CliAppError(f"{entry or name} is not available on PATH")
+        clean_args = [str(arg) for arg in (args or [])]
+        if json_output and "--json" not in clean_args:
+            clean_args = ["--json", *clean_args]
+        effective_timeout = max(1, min(timeout or self.runtime.run_timeout, 600))
+        return _PreparedCliRun(
+            name=name,
+            entry=entry,
+            resolved=resolved,
+            args=clean_args,
+            cwd=cwd,
+            timeout=effective_timeout,
+            env=self._subprocess_env(),
+            artifact_snapshot=self._artifact_snapshot(cwd),
+        )
+
+    def _format_run_result(
+        self,
+        prepared: _PreparedCliRun,
+        *,
+        returncode: int,
+        stdout: str,
+        stderr: str,
+    ) -> str:
+        command = " ".join([prepared.entry, *(shlex.quote(arg) for arg in prepared.args)])
+        output = [
+            f"CLI app '{prepared.name}' exited {returncode}.",
+            f"Command: {command}",
+        ]
+        if stdout:
+            output.append("\nSTDOUT:\n" + stdout.rstrip())
+        if stderr:
+            output.append("\nSTDERR:\n" + stderr.rstrip())
+        artifacts = self._changed_artifacts(prepared.cwd, prepared.artifact_snapshot)
+        if artifacts:
+            output.append(
+                "\nArtifacts created or updated:\n"
+                + "\n".join(self._format_artifact_lines(prepared.cwd, artifacts))
+            )
+            if any(path.suffix.lower() in _INLINE_ARTIFACT_EXTENSIONS for path in artifacts):
+                output.append(
+                    "\nTo show a preview in WebUI, reference a raster artifact with Markdown "
+                    "using its workspace-relative path, for example `![diagram](diagram.png)`."
+                )
+        return _truncate("\n".join(output))
+
+    @staticmethod
+    def _terminate_run_process_sync(
+        process: subprocess.Popen[str],
+        job: _WindowsJob | None,
+    ) -> None:
+        if job is not None:
+            with suppress(OSError):
+                job.terminate()
+            job.close(kill_descendants=True)
+        elif os.name == "nt":
+            with suppress(OSError, subprocess.TimeoutExpired):
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+        else:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGKILL)
+        if process.poll() is None:
+            with suppress(ProcessLookupError):
+                process.kill()
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
+
+    @staticmethod
+    async def _terminate_run_process(
+        process: asyncio.subprocess.Process,
+        job: _WindowsJob | None,
+    ) -> None:
+        if job is not None:
+            with suppress(OSError):
+                await asyncio.to_thread(job.terminate)
+            job.close(kill_descendants=True)
+        elif os.name == "nt":
+            with suppress(OSError, asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.to_thread(
+                        subprocess.run,
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    ),
+                    timeout=6.0,
+                )
+        else:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGKILL)
+        if process.returncode is None:
+            with suppress(ProcessLookupError):
+                process.kill()
+        with suppress(asyncio.TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+
+    async def run_async(
+        self,
+        name: str,
+        args: list[str] | None = None,
+        *,
+        json_output: bool = False,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+        restrict_to_workspace: bool = False,
+    ) -> str:
+        prepared = await asyncio.to_thread(
+            self._prepare_run,
+            name,
+            args,
+            json_output=json_output,
+            working_dir=working_dir,
+            timeout=timeout,
+            restrict_to_workspace=restrict_to_workspace,
+        )
+        process_kwargs: dict[str, Any] = {}
+        if os.name == "nt":
+            process_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            process_kwargs["start_new_session"] = True
+        job = _WindowsJob.create()
+        try:
+            process = await asyncio.create_subprocess_exec(
+                prepared.resolved,
+                *prepared.args,
+                cwd=str(prepared.cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=prepared.env,
+                **process_kwargs,
+            )
+        except BaseException:
+            if job is not None:
+                job.close(kill_descendants=False)
+            raise
+        if job is not None and not job.assign(process.pid):
+            job.close(kill_descendants=False)
+            job = None
+        try:
+            stdout_raw, stderr_raw = await asyncio.wait_for(
+                process.communicate(),
+                timeout=prepared.timeout,
+            )
+        except asyncio.TimeoutError:
+            await self._terminate_run_process(process, job)
+            return f"CLI app '{prepared.name}' timed out after {prepared.timeout}s"
+        except asyncio.CancelledError:
+            await self._terminate_run_process(process, job)
+            raise
+        except BaseException:
+            await self._terminate_run_process(process, job)
+            raise
+        if job is not None:
+            job.close(kill_descendants=False)
+        stdout = stdout_raw.decode("utf-8", errors="replace")
+        stderr = stderr_raw.decode("utf-8", errors="replace")
+        return await asyncio.to_thread(
+            self._format_run_result,
+            prepared,
+            returncode=process.returncode or 0,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
     def run(
         self,
         name: str,
@@ -1438,50 +1769,52 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         timeout: int | None = None,
         restrict_to_workspace: bool = False,
     ) -> str:
-        app = self.get_app(name)
-        installed = self._load_installed()
-        if str(app["name"]) not in installed:
-            raise CliAppError(f"CLI app '{name}' is not installed")
-        cwd = self._resolve_cwd(working_dir, restrict_to_workspace=restrict_to_workspace)
-        entry = str(installed[str(app["name"])].get("entry_point") or app.get("entry_point") or "")
-        resolved = shutil.which(entry)
-        if not entry or not resolved:
-            raise CliAppError(f"{entry or name} is not available on PATH")
-        clean_args = [str(arg) for arg in (args or [])]
-        if json_output and "--json" not in clean_args:
-            clean_args = ["--json", *clean_args]
-        effective_timeout = max(1, min(timeout or self.runtime.run_timeout, 600))
-        artifact_snapshot = self._artifact_snapshot(cwd)
+        prepared = self._prepare_run(
+            name,
+            args,
+            json_output=json_output,
+            working_dir=working_dir,
+            timeout=timeout,
+            restrict_to_workspace=restrict_to_workspace,
+        )
+        process_kwargs: dict[str, Any] = {}
+        if os.name == "nt":
+            process_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            process_kwargs["start_new_session"] = True
+        job = _WindowsJob.create()
         try:
-            result = subprocess.run(
-                [resolved, *clean_args],
-                cwd=str(cwd),
-                capture_output=True,
+            process = subprocess.Popen(
+                [prepared.resolved, *prepared.args],
+                cwd=str(prepared.cwd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=effective_timeout,
-                env=self._subprocess_env(),
+                env=prepared.env,
+                **process_kwargs,
             )
+        except BaseException:
+            if job is not None:
+                job.close(kill_descendants=False)
+            raise
+        if job is not None and not job.assign(process.pid):
+            job.close(kill_descendants=False)
+            job = None
+        try:
+            stdout, stderr = process.communicate(timeout=prepared.timeout)
         except subprocess.TimeoutExpired:
-            return f"CLI app '{name}' timed out after {effective_timeout}s"
-        output = [
-            f"CLI app '{name}' exited {result.returncode}.",
-            f"Command: {entry} {' '.join(shlex.quote(arg) for arg in clean_args)}".rstrip(),
-        ]
-        if result.stdout:
-            output.append("\nSTDOUT:\n" + result.stdout.rstrip())
-        if result.stderr:
-            output.append("\nSTDERR:\n" + result.stderr.rstrip())
-        artifacts = self._changed_artifacts(cwd, artifact_snapshot)
-        if artifacts:
-            output.append(
-                "\nArtifacts created or updated:\n"
-                + "\n".join(self._format_artifact_lines(cwd, artifacts))
-            )
-            if any(path.suffix.lower() in _INLINE_ARTIFACT_EXTENSIONS for path in artifacts):
-                output.append(
-                    "\nTo show a preview in WebUI, reference a raster artifact with Markdown "
-                    "using its workspace-relative path, for example `![diagram](diagram.png)`."
-                )
-        return _truncate("\n".join(output))
+            self._terminate_run_process_sync(process, job)
+            return f"CLI app '{prepared.name}' timed out after {prepared.timeout}s"
+        except BaseException:
+            self._terminate_run_process_sync(process, job)
+            raise
+        if job is not None:
+            job.close(kill_descendants=False)
+        return self._format_run_result(
+            prepared,
+            returncode=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )

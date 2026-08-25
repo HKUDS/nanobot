@@ -23,8 +23,8 @@ from nanobot.config.schema import Base
 from nanobot.pairing import is_approved
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
+    async_validate_url_target,
     httpx_env_proxy_mounts,
-    validate_url_target,
 )
 from nanobot.utils.helpers import safe_filename, split_message
 
@@ -95,7 +95,7 @@ _HTML_DOWNLOAD_PREFIXES = (b"<!doctype html", b"<html")
 
 async def _validate_slack_download_request(request: httpx.Request) -> None:
     """Validate every Slack file request, including redirects, before transport."""
-    ok, error = validate_url_target(str(request.url))
+    ok, error = await async_validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(f"unsafe Slack file URL: {error}", request=request)
 

@@ -38,9 +38,12 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
     received: dict[str, object] = {}
     reload_calls = 0
 
+    async def validate_url_target(_url: str) -> tuple[bool, str]:
+        return True, ""
+
     monkeypatch.setattr(
-        "nanobot.webui.mcp_oauth_api.validate_url_target",
-        lambda _url: (True, ""),
+        "nanobot.webui.mcp_oauth_api.async_validate_url_target",
+        validate_url_target,
     )
 
     async def connect(servers, _registry, *, oauth_handlers):
@@ -115,9 +118,12 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
     connection = _Connection()
     received: dict[str, object] = {}
 
+    async def validate_url_target(_url: str) -> tuple[bool, str]:
+        return True, ""
+
     monkeypatch.setattr(
-        "nanobot.webui.mcp_oauth_api.validate_url_target",
-        lambda _url: (True, ""),
+        "nanobot.webui.mcp_oauth_api.async_validate_url_target",
+        validate_url_target,
     )
 
     async def connect(_servers, _registry, *, oauth_handlers):
@@ -187,9 +193,13 @@ async def test_browser_flow_surfaces_provider_denial_without_callback_descriptio
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = McpOAuthManager()
+
+    async def validate_url_target(_url: str) -> tuple[bool, str]:
+        return True, ""
+
     monkeypatch.setattr(
-        "nanobot.webui.mcp_oauth_api.validate_url_target",
-        lambda _url: (True, ""),
+        "nanobot.webui.mcp_oauth_api.async_validate_url_target",
+        validate_url_target,
     )
 
     async def connect(_servers, _registry, *, oauth_handlers):
@@ -233,9 +243,13 @@ async def test_browser_flow_blocks_unsafe_authorization_url(
     state: str,
 ) -> None:
     manager = McpOAuthManager()
+
+    async def validate_url_target(_url: str) -> tuple[bool, str]:
+        return url_is_safe, "private address"
+
     monkeypatch.setattr(
-        "nanobot.webui.mcp_oauth_api.validate_url_target",
-        lambda _url: (url_is_safe, "private address"),
+        "nanobot.webui.mcp_oauth_api.async_validate_url_target",
+        validate_url_target,
     )
 
     async def connect(_servers, _registry, *, oauth_handlers):

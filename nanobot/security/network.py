@@ -29,6 +29,7 @@ _BLOCKED_NETWORKS = [
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+_DNS_RESOLUTION_TIMEOUT_SECONDS = 5.0
 
 
 def is_loopback_host(host: str) -> bool:
@@ -75,6 +76,63 @@ def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(normalized in net for net in _BLOCKED_NETWORKS)
 
 
+def _parse_url_hostname(url: str) -> tuple[str | None, str | None]:
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        return None, str(exc)
+    if parsed.scheme not in ("http", "https"):
+        return None, f"Only http/https allowed, got '{parsed.scheme or 'none'}'"
+    if not parsed.netloc:
+        return None, "Missing domain"
+    if not parsed.hostname:
+        return None, "Missing hostname"
+    return parsed.hostname, None
+
+
+def _unresolved_target_result(
+    hostname: str,
+    *,
+    trust_remote_dns: bool,
+) -> tuple[bool, str, tuple[str, ...]]:
+    if not trust_remote_dns:
+        return False, f"Cannot resolve hostname: {hostname}", ()
+
+    normalized_hostname = hostname.rstrip(".").lower()
+    if normalized_hostname == "localhost" or normalized_hostname.endswith(".localhost"):
+        return False, f"Blocked local/internal hostname: {hostname}", ()
+
+    try:
+        literal_addr = ipaddress.ip_address(normalized_hostname)
+    except ValueError:
+        return True, "", ()
+    if _is_private(literal_addr):
+        return False, f"Blocked private/internal address: {literal_addr}", ()
+    return True, "", (str(_normalize_addr(literal_addr)),)
+
+
+def _resolved_target_result(
+    hostname: str,
+    infos: list[Any],
+    *,
+    allow_loopback: bool,
+) -> tuple[bool, str, tuple[str, ...]]:
+    addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except (IndexError, TypeError, ValueError):
+            continue
+        addrs.append(addr)
+    if allow_loopback and _is_allowed_loopback_target(hostname, addrs):
+        return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
+    for addr in addrs:
+        if _is_private(addr):
+            return False, f"Blocked: {hostname} resolves to private/internal address {addr}", ()
+
+    return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
+
+
 def resolve_url_target(
     url: str,
     *,
@@ -97,57 +155,58 @@ def resolve_url_target(
     resolved_ips contains the public IPs that were validated for this URL, or
     is empty when an unresolved hostname is delegated to a trusted proxy.
     """
-    try:
-        p = urlparse(url)
-    except Exception as e:
-        return False, str(e), ()
-
-    if p.scheme not in ("http", "https"):
-        return False, f"Only http/https allowed, got '{p.scheme or 'none'}'", ()
-    if not p.netloc:
-        return False, "Missing domain", ()
-
-    hostname = p.hostname
-    if not hostname:
-        return False, "Missing hostname", ()
-
+    hostname, error = _parse_url_hostname(url)
+    if hostname is None:
+        return False, error or "Missing hostname", ()
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
-        if not trust_remote_dns:
-            return False, f"Cannot resolve hostname: {hostname}", ()
+        return _unresolved_target_result(hostname, trust_remote_dns=trust_remote_dns)
+    return _resolved_target_result(hostname, infos, allow_loopback=allow_loopback)
 
-        normalized_hostname = hostname.rstrip(".").lower()
-        if normalized_hostname == "localhost" or normalized_hostname.endswith(".localhost"):
-            return False, f"Blocked local/internal hostname: {hostname}", ()
 
-        try:
-            literal_addr = ipaddress.ip_address(normalized_hostname)
-        except ValueError:
-            return True, "", ()
-        if _is_private(literal_addr):
-            return False, f"Blocked private/internal address: {literal_addr}", ()
-        return True, "", (str(_normalize_addr(literal_addr)),)
-
-    addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
-    for info in infos:
-        try:
-            addr = ipaddress.ip_address(info[4][0])
-        except ValueError:
-            continue
-        addrs.append(addr)
-    if allow_loopback and _is_allowed_loopback_target(hostname, addrs):
-        return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
-    for addr in addrs:
-        if _is_private(addr):
-            return False, f"Blocked: {hostname} resolves to private/internal address {addr}", ()
-
-    return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
+async def async_resolve_url_target(
+    url: str,
+    *,
+    allow_loopback: bool = False,
+    trust_remote_dns: bool = False,
+    timeout_s: float = _DNS_RESOLUTION_TIMEOUT_SECONDS,
+) -> tuple[bool, str, tuple[str, ...]]:
+    """Resolve and validate an HTTP target without blocking the event loop."""
+    hostname, error = _parse_url_hostname(url)
+    if hostname is None:
+        return False, error or "Missing hostname", ()
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(
+                hostname,
+                None,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+            ),
+            timeout=timeout_s,
+        )
+    except asyncio.TimeoutError:
+        return False, f"Timed out resolving hostname: {hostname}", ()
+    except socket.gaierror:
+        return _unresolved_target_result(hostname, trust_remote_dns=trust_remote_dns)
+    return _resolved_target_result(hostname, infos, allow_loopback=allow_loopback)
 
 
 def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs."""
     ok, error, _ = resolve_url_target(url, allow_loopback=allow_loopback)
+    return ok, error
+
+
+async def async_validate_url_target(
+    url: str,
+    *,
+    allow_loopback: bool = False,
+) -> tuple[bool, str]:
+    """Validate a URL using the event loop's asynchronous resolver."""
+    ok, error, _ = await async_resolve_url_target(url, allow_loopback=allow_loopback)
     return ok, error
 
 
@@ -277,7 +336,10 @@ class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        ok, error, resolved_ips = resolve_url_target(url, allow_loopback=self._allow_loopback)
+        ok, error, resolved_ips = await async_resolve_url_target(
+            url,
+            allow_loopback=self._allow_loopback,
+        )
         if not ok:
             raise UnsafeURLRequestError(error, request=request)
         async with self._resolver_lock:
@@ -317,6 +379,46 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
             if _is_private(addr):
                 return False, f"Redirect target {hostname} resolves to private address {addr}"
 
+    return True, ""
+
+
+async def async_validate_resolved_url(url: str) -> tuple[bool, str]:
+    """Validate a redirect target without blocking on domain resolution."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return True, ""
+    hostname = parsed.hostname
+    if not hostname:
+        return True, ""
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        loop = asyncio.get_running_loop()
+        try:
+            infos = await asyncio.wait_for(
+                loop.getaddrinfo(
+                    hostname,
+                    None,
+                    family=socket.AF_UNSPEC,
+                    type=socket.SOCK_STREAM,
+                ),
+                timeout=_DNS_RESOLUTION_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return False, f"Timed out resolving redirect hostname: {hostname}"
+        except socket.gaierror:
+            return True, ""
+        for info in infos:
+            try:
+                addr = ipaddress.ip_address(info[4][0])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if _is_private(addr):
+                return False, f"Redirect target {hostname} resolves to private address {addr}"
+        return True, ""
+    if _is_private(addr):
+        return False, f"Redirect target is a private address: {addr}"
     return True, ""
 
 

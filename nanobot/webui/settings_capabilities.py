@@ -27,6 +27,7 @@ from nanobot.providers.image_generation import (
 )
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import is_loopback_host
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -640,7 +641,11 @@ class CapabilitySettingsHandler:
     ) -> SettingsRouteResult:
         if action == "api-status":
             return SettingsRouteResult.success(
-                api_service_payload(self.settings, operations.api_runtime())
+                await asyncio.to_thread(
+                    api_service_payload,
+                    self.settings,
+                    operations.api_runtime(),
+                )
             )
         if action == "api-start":
             return await self._start_api(request, operations)
@@ -673,17 +678,22 @@ class CapabilitySettingsHandler:
             return SettingsRouteResult.failure(404, "unknown settings action")
 
         operation, section, apply_image_reload = mutation
-        try:
-            payload = self.settings.mutate(operation, request.query)
-        except WebUISettingsError as exc:
-            return SettingsRouteResult.failure(exc.status, exc.message)
-        if apply_image_reload:
-            payload, image_restart_cleared = await self.apply_image_runtime_change(
+
+        async def mutate_and_apply() -> tuple[dict[str, Any], bool]:
+            payload = await self.settings.mutate_async(operation, request.query)
+            if not apply_image_reload:
+                return payload, False
+            return await self.apply_image_runtime_change(
                 payload,
                 operations.reload_image,
             )
-        else:
-            image_restart_cleared = False
+
+        try:
+            payload, image_restart_cleared = await shield_and_drain(
+                mutate_and_apply()
+            )
+        except WebUISettingsError as exc:
+            return SettingsRouteResult.failure(exc.status, exc.message)
         return SettingsRouteResult.success(
             payload,
             decorate_restart=True,
@@ -726,16 +736,17 @@ class CapabilitySettingsHandler:
                 400,
                 "API service API key must be a string",
             )
-        try:
-            await asyncio.to_thread(
-                self.settings.mutate,
+        allow_install = await self._allow_feature_package_install(request)
+
+        async def mutate_and_start() -> Any:
+            await self.settings.mutate_async(
                 operations.nanobot_features_action,
                 "enable",
                 {"name": ["api"]},
-                allow_install=self._allow_feature_package_install(request),
+                allow_install=allow_install,
             )
-            self.settings.mutate(operations.update_api, request.query)
-            config = self.settings.config.load()
+            await self.settings.mutate_async(operations.update_api, request.query)
+            config = await self.settings.config.load_async()
             runtime = operations.api_runtime()
             options = ApiStartOptions(
                 host=config.api.host,
@@ -744,10 +755,13 @@ class CapabilitySettingsHandler:
                 config_path=str(self.settings.config.path),
             )
             current = runtime.status()
-            result = await asyncio.to_thread(
+            return await asyncio.to_thread(
                 runtime.restart if current.running else runtime.start_background,
                 options,
             )
+
+        try:
+            result = await shield_and_drain(mutate_and_start())
             if not result.ok:
                 return SettingsRouteResult.failure(
                     500,
@@ -762,7 +776,8 @@ class CapabilitySettingsHandler:
             self.logger.exception("failed to start managed API service")
             return SettingsRouteResult.failure(500, str(exc))
         return SettingsRouteResult.success(
-            api_service_payload(
+            await asyncio.to_thread(
+                api_service_payload,
                 self.settings,
                 operations.api_runtime(),
                 last_action="started",
@@ -775,7 +790,7 @@ class CapabilitySettingsHandler:
     ) -> SettingsRouteResult:
         runtime = operations.api_runtime()
         try:
-            result = await asyncio.to_thread(runtime.stop)
+            result = await shield_and_drain(asyncio.to_thread(runtime.stop))
         except Exception as exc:
             self.logger.exception("failed to stop managed API service")
             return SettingsRouteResult.failure(500, str(exc))
@@ -785,20 +800,20 @@ class CapabilitySettingsHandler:
                 api_runtime_message(result.message),
             )
         return SettingsRouteResult.success(
-            api_service_payload(
+            await asyncio.to_thread(
+                api_service_payload,
                 self.settings,
                 operations.api_runtime(),
                 last_action="stopped",
             )
         )
 
-    def _allow_feature_package_install(self, request: SettingsRequest) -> bool:
+    async def _allow_feature_package_install(self, request: SettingsRequest) -> bool:
         if request.local_browser:
             return True
         try:
-            return bool(
-                self.settings.config.load().tools.webui_allow_remote_package_install
-            )
+            config = await self.settings.config.load_async()
+            return bool(config.tools.webui_allow_remote_package_install)
         except Exception:
             self.logger.exception("failed to load remote package install policy")
             return False

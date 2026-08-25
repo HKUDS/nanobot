@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,9 +13,11 @@ from filelock import FileLock
 
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
+from nanobot.utils.cancellation import shield_and_drain
 
 _T = TypeVar("_T")
 _WEBUI_OAUTH_MAX_FLOWS = 8
+_SETTINGS_FILE_LOCK_TIMEOUT_SECONDS = 5
 
 
 class WebUISettingsConfig:
@@ -25,12 +28,19 @@ class WebUISettingsConfig:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
-        self._file_lock = FileLock(str(lock_path))
+        self._file_lock = FileLock(
+            str(lock_path),
+            timeout=_SETTINGS_FILE_LOCK_TIMEOUT_SECONDS,
+        )
 
     def load(self) -> Config:
         """Load this gateway's config without consulting the process-global path."""
         with self._lock:
             return load_config(self.path)
+
+    async def load_async(self) -> Config:
+        """Load config without running file I/O or lock waits on the event loop."""
+        return await asyncio.to_thread(self.load)
 
     def update(self, mutation: Callable[[Config], _T]) -> _T:
         """Apply and atomically persist one path-scoped read-modify-write operation."""
@@ -40,10 +50,20 @@ class WebUISettingsConfig:
             save_config(config, self.path)
             return result
 
+    async def update_async(self, mutation: Callable[[Config], _T]) -> _T:
+        """Update config without blocking the event loop."""
+        return await shield_and_drain(asyncio.to_thread(self.update, mutation))
+
     def run_serialized(self, operation: Callable[[Path], _T]) -> _T:
         """Run a path-aware read-modify-write operation under the config-file lock."""
         with self._lock, self._file_lock:
             return operation(self.path)
+
+    async def run_serialized_async(self, operation: Callable[[Path], _T]) -> _T:
+        """Run a serialized config operation without blocking the event loop."""
+        return await shield_and_drain(
+            asyncio.to_thread(self.run_serialized, operation)
+        )
 
 
 class WebUIOAuthFlowRegistry:
@@ -146,6 +166,16 @@ class WebUISettingsServices:
         """Run a settings read against this gateway's explicit config path."""
         return operation(*args, config_path=self.config.path, **kwargs)
 
+    async def read_async(
+        self,
+        operation: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        """Run a settings read without blocking the event loop."""
+        return await asyncio.to_thread(self.read, operation, *args, **kwargs)
+
     def mutate(
         self,
         operation: Callable[..., _T],
@@ -160,4 +190,16 @@ class WebUISettingsServices:
                 config_path=config_path,
                 **kwargs,
             )
+        )
+
+    async def mutate_async(
+        self,
+        operation: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        """Mutate settings without blocking the event loop."""
+        return await shield_and_drain(
+            asyncio.to_thread(self.mutate, operation, *args, **kwargs)
         )

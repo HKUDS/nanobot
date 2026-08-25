@@ -4,6 +4,7 @@ import asyncio
 import errno
 import json
 import os
+import threading
 from contextlib import suppress
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.triggers.local_runner import run_local_trigger_queue
 from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
+from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
@@ -277,6 +279,163 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_local_trigger_queue_cancellation_waits_for_claim_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    store.enqueue(trigger.id, "Review PR #4591")
+    claim_started = threading.Event()
+    allow_claim = threading.Event()
+    claim_finished = threading.Event()
+    claim_deliveries = store.claim_deliveries
+    submitted: list[InboundMessage] = []
+
+    def blocked_claim_deliveries(*, limit: int = 20) -> list[TriggerDelivery]:
+        claim_started.set()
+        if not allow_claim.wait(timeout=2):
+            raise TimeoutError("test did not release delivery claim")
+        try:
+            return claim_deliveries(limit=limit)
+        finally:
+            claim_finished.set()
+
+    async def submit_turn(msg: InboundMessage) -> None:
+        submitted.append(msg)
+
+    monkeypatch.setattr(store, "claim_deliveries", blocked_claim_deliveries)
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=submit_turn,
+            is_channel_enabled=_channel_is_enabled,
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(claim_started.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0)
+
+        assert not task.done()
+        assert len(list(store.inbox_dir.glob("*.json"))) == 1
+        assert list(store.processing_dir.glob("*.json")) == []
+
+        allow_claim.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+
+        assert claim_finished.is_set()
+        state_at_cancellation = (
+            sorted(path.name for path in store.inbox_dir.glob("*.json")),
+            sorted(path.name for path in store.processing_dir.glob("*.json")),
+        )
+        assert state_at_cancellation[0] == []
+        assert len(state_at_cancellation[1]) == 1
+        assert submitted == []
+
+        # The worker has returned before cancellation is visible, so no detached
+        # claim can move another file after the cancellation report.
+        await asyncio.sleep(0)
+        assert (
+            sorted(path.name for path in store.inbox_dir.glob("*.json")),
+            sorted(path.name for path in store.processing_dir.glob("*.json")),
+        ) == state_at_cancellation
+    finally:
+        allow_claim.set()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_local_trigger_queue_cancellation_waits_for_startup_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    store.enqueue(trigger.id, "Review PR #4591")
+    assert len(store.claim_deliveries()) == 1
+
+    restarted = LocalTriggerStore(tmp_path)
+    recovery_started = threading.Event()
+    allow_recovery = threading.Event()
+    recovery_finished = threading.Event()
+    recover_processing_deliveries = restarted.recover_processing_deliveries
+    submitted: list[InboundMessage] = []
+
+    def blocked_recovery() -> int:
+        recovery_started.set()
+        if not allow_recovery.wait(timeout=2):
+            raise TimeoutError("test did not release delivery recovery")
+        try:
+            return recover_processing_deliveries()
+        finally:
+            recovery_finished.set()
+
+    async def submit_turn(msg: InboundMessage) -> None:
+        submitted.append(msg)
+
+    monkeypatch.setattr(restarted, "recover_processing_deliveries", blocked_recovery)
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=restarted,
+            submit_turn=submit_turn,
+            is_channel_enabled=_channel_is_enabled,
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(recovery_started.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0)
+
+        assert not task.done()
+        assert list(restarted.inbox_dir.glob("*.json")) == []
+        assert len(list(restarted.processing_dir.glob("*.json"))) == 1
+
+        allow_recovery.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+
+        assert recovery_finished.is_set()
+        state_at_cancellation = (
+            sorted(path.name for path in restarted.inbox_dir.glob("*.json")),
+            sorted(path.name for path in restarted.processing_dir.glob("*.json")),
+        )
+        assert len(state_at_cancellation[0]) == 1
+        assert state_at_cancellation[1] == []
+        recovered_payload = json.loads(
+            (restarted.inbox_dir / state_at_cancellation[0][0]).read_text(encoding="utf-8")
+        )
+        assert recovered_payload["delivery"]["attempts"] == 1
+        assert submitted == []
+
+        await asyncio.sleep(0)
+        assert (
+            sorted(path.name for path in restarted.inbox_dir.glob("*.json")),
+            sorted(path.name for path in restarted.processing_dir.glob("*.json")),
+        ) == state_at_cancellation
+    finally:
+        allow_recovery.set()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(
@@ -390,6 +549,7 @@ async def test_local_trigger_queue_rejects_unavailable_target_channel(tmp_path: 
 @pytest.mark.asyncio
 async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(
@@ -401,6 +561,17 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
     delivery = store.enqueue(trigger.id, "Review failed CI")
     submitted: list[InboundMessage] = []
     release = asyncio.Event()
+    completion_started = threading.Event()
+    allow_completion = threading.Event()
+    complete_delivery = store.complete_delivery
+
+    def _complete_delivery(claimed: TriggerDelivery) -> None:
+        completion_started.set()
+        if not allow_completion.wait(timeout=1):
+            raise TimeoutError("test did not release delivery completion")
+        complete_delivery(claimed)
+
+    monkeypatch.setattr(store, "complete_delivery", _complete_delivery)
 
     async def _submit_turn(msg: InboundMessage):
         submitted.append(msg)
@@ -430,6 +601,13 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
         assert stored.last_status is None
 
         release.set()
+        assert await asyncio.to_thread(completion_started.wait, 1)
+        stored = store.get(trigger.id)
+        assert stored is not None
+        assert stored.last_status is None
+        assert list(store.processing_dir.glob("*.json"))
+
+        allow_completion.set()
         for _ in range(100):
             stored = store.get(trigger.id)
             if stored and stored.last_status == "ok":
@@ -444,6 +622,7 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
         record = _read_run_record(store, delivery.id)
         assert record["status"] == "ok"
     finally:
+        allow_completion.set()
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
@@ -496,8 +675,114 @@ async def test_local_trigger_queue_requeues_when_submitted_turn_is_interrupted(
 
 
 @pytest.mark.asyncio
+async def test_accepted_turn_cancellation_settles_delivery_without_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="CI review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    delivery = store.enqueue(trigger.id, "Review failed CI")
+    inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
+    work_accepted = asyncio.Event()
+    release_work = asyncio.Event()
+    effects: list[str] = []
+    publish_count = 0
+
+    async def publish(msg: InboundMessage) -> None:
+        nonlocal publish_count
+        publish_count += 1
+        await inbound.put(msg)
+
+    coordinator = LocalTriggerTurnCoordinator(
+        publish_inbound=publish,
+        dispatch=lambda _msg: asyncio.sleep(0),
+        is_running=lambda: True,
+    )
+
+    async def agent_worker() -> None:
+        msg = await inbound.get()
+        work_accepted.set()
+        await release_work.wait()
+        effects.append(msg.content)
+        coordinator.complete(msg)
+
+    agent_task = asyncio.create_task(agent_worker())
+    queue_task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=coordinator.submit,
+            is_channel_enabled=_channel_is_enabled,
+            poll_interval_s=0.01,
+        )
+    )
+    restarted_task: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(work_accepted.wait(), timeout=1)
+        queue_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(queue_task, timeout=1)
+
+        # The delivery is durably settled before cancellation is reported even
+        # though the independently-owned agent turn has not completed yet.
+        assert effects == []
+        assert not list(store.processing_dir.glob("*.json"))
+        assert _read_run_record(store, delivery.id)["status"] == "accepted"
+
+        restarted = LocalTriggerStore(tmp_path)
+        replayed: list[InboundMessage] = []
+        poll_completed = threading.Event()
+        claim_deliveries = restarted.claim_deliveries
+
+        def tracked_claim_deliveries(*, limit: int = 20) -> list[TriggerDelivery]:
+            try:
+                return claim_deliveries(limit=limit)
+            finally:
+                poll_completed.set()
+
+        async def replay_submit(msg: InboundMessage) -> None:
+            replayed.append(msg)
+
+        monkeypatch.setattr(restarted, "claim_deliveries", tracked_claim_deliveries)
+        restarted_task = asyncio.create_task(
+            run_local_trigger_queue(
+                store=restarted,
+                submit_turn=replay_submit,
+                is_channel_enabled=_channel_is_enabled,
+                poll_interval_s=1,
+            )
+        )
+        assert await asyncio.to_thread(poll_completed.wait, 1)
+        assert replayed == []
+        assert restarted.claim_deliveries() == []
+
+        release_work.set()
+        await asyncio.wait_for(agent_task, timeout=1)
+        assert effects == ["Review failed CI"]
+        assert publish_count == 1
+    finally:
+        release_work.set()
+        if restarted_task is not None:
+            restarted_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await restarted_task
+        queue_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await queue_task
+        if not agent_task.done():
+            agent_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await agent_task
+
+
+@pytest.mark.asyncio
 async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(
@@ -508,6 +793,17 @@ async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
     )
     delivery = store.enqueue(trigger.id, "Review failed CI")
     started = asyncio.Event()
+    completion_started = threading.Event()
+    allow_completion = threading.Event()
+    complete_delivery = store.complete_delivery
+
+    def _complete_delivery(claimed: TriggerDelivery) -> None:
+        completion_started.set()
+        if not allow_completion.wait(timeout=1):
+            raise TimeoutError("test did not release delivery completion")
+        complete_delivery(claimed)
+
+    monkeypatch.setattr(store, "complete_delivery", _complete_delivery)
 
     async def _submit_turn(_msg: InboundMessage):
         started.set()
@@ -523,6 +819,13 @@ async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
     )
     try:
         await asyncio.wait_for(started.wait(), timeout=1)
+        assert await asyncio.to_thread(completion_started.wait, 1)
+        stored = store.get(trigger.id)
+        assert stored is not None
+        assert stored.last_status is None
+        assert list(store.processing_dir.glob("*.json"))
+
+        allow_completion.set()
         for _ in range(100):
             stored = store.get(trigger.id)
             if stored and stored.last_status == "error":
@@ -540,6 +843,7 @@ async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
         assert record["status"] == "error"
         assert record["error"] == "model failed"
     finally:
+        allow_completion.set()
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task

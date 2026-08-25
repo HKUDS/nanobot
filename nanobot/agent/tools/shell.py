@@ -267,6 +267,7 @@ class ExecTool(Tool):
 
     _MAX_TIMEOUT = 600
     _MAX_OUTPUT = 10_000
+    _PREPARE_TIMEOUT_SECONDS = 6.0
 
     # Kernel device files safe as stdio redirect targets (#3599).
     _BENIGN_DEVICE_PATHS: frozenset[str] = frozenset({
@@ -324,7 +325,20 @@ class ExecTool(Tool):
         if max_output_chars is None:
             max_output_chars = max_output_tokens
 
-        prepared = self._prepare_command(command, working_dir, timeout, shell, login)
+        try:
+            prepared = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._prepare_command,
+                    command,
+                    working_dir,
+                    timeout,
+                    shell,
+                    login,
+                ),
+                timeout=self._PREPARE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return ToolResult.error("Error: command validation timed out")
         if isinstance(prepared, str):
             return prepared
 
@@ -916,6 +930,15 @@ class ExecTool(Tool):
                     if self._is_benign_device_path(expanded):
                         continue
                 except Exception:
+                    # ``Path.expanduser()`` raises when a named user's home
+                    # cannot be resolved (notably on Windows).  An extracted
+                    # home path must fail closed rather than bypass the guard.
+                    if raw.strip().startswith("~"):
+                        return ToolResult.error(
+                            "Error: Command blocked by safety guard "
+                            "(path outside working dir)"
+                            + _WORKSPACE_BOUNDARY_NOTE
+                        )
                     continue
 
                 if self._is_benign_device_path(str(p)):

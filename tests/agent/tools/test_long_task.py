@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,9 +22,9 @@ from nanobot.agent.tools.long_task import (
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventBus
+from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus
 from nanobot.session.goal_state import GOAL_STATE_KEY, MAX_GOAL_OBJECTIVE_CHARS
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
 from nanobot.session.turn_continuation import should_finalize_on_max_iterations
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 
@@ -179,13 +180,13 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     sess = sm.get_or_create("websocket:c1")
     sess.metadata["marker"] = {"keep": True}
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    original_save = sm.save
+    original_save_async = sm.save_async
     create_context = _request_context()
 
-    def fail_save(_session, **_kwargs):
+    async def fail_save(_session, **_kwargs):
         raise OSError("disk unavailable")
 
-    monkeypatch.setattr(sm, "save", fail_save)
+    monkeypatch.setattr(sm, "save_async", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(create, create_context, objective="Old")
 
@@ -195,13 +196,13 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     }
     assert GOAL_STATE_KEY not in SessionManager(tmp_path).get_or_create("websocket:c1").metadata
 
-    monkeypatch.setattr(sm, "save", original_save)
+    monkeypatch.setattr(sm, "save_async", original_save_async)
     assert "Goal recorded" in await _execute(create, create_context, objective="Old")
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
     sm.save(sess)
     replace_context = _request_context()
 
-    monkeypatch.setattr(sm, "save", fail_save)
+    monkeypatch.setattr(sm, "save_async", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(update, replace_context, action="replace", objective="New")
 
@@ -211,7 +212,7 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     assert persisted[GOAL_STATE_KEY]["objective"] == "Old"
     assert persisted["_sustained_goal_continuation_rounds"] == 12
 
-    monkeypatch.setattr(sm, "save", original_save)
+    monkeypatch.setattr(sm, "save_async", original_save_async)
     assert "Goal replaced" in await _execute(
         update,
         replace_context,
@@ -223,6 +224,57 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
         SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]
         == "New"
     )
+
+
+@pytest.mark.asyncio
+async def test_sync_goal_save_cancellation_settles_state_and_runtime_event() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    session = Session(key="websocket:c1")
+    durable_metadata: dict[str, object] = {}
+    save_calls = 0
+
+    class _SyncSessionManager:
+        def get_or_create(self, key: str) -> Session:
+            assert key == session.key
+            return session
+
+        def save(self, target: Session) -> None:
+            nonlocal durable_metadata, save_calls
+            save_calls += 1
+            started.set()
+            assert release.wait(timeout=1)
+            durable_metadata = dict(target.metadata)
+
+    runtime_events = RuntimeEventBus()
+    published: list[GoalStateChanged] = []
+    runtime_events.subscribe(published.append, GoalStateChanged)
+    create = CreateGoalTool(
+        sessions=_SyncSessionManager(),  # type: ignore[arg-type]
+        runtime_events=runtime_events,
+    )
+    task = asyncio.create_task(
+        _execute(create, _request_context(), objective="Persist through cancellation")
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert save_calls == 1
+    assert session.metadata[GOAL_STATE_KEY]["objective"] == "Persist through cancellation"
+    assert durable_metadata[GOAL_STATE_KEY] == session.metadata[GOAL_STATE_KEY]
+    assert len(published) == 1
+    assert published[0].session_metadata[GOAL_STATE_KEY] == session.metadata[GOAL_STATE_KEY]
+    await asyncio.sleep(0.05)
+    assert save_calls == 1
+    assert len(published) == 1
 
 
 @pytest.mark.asyncio

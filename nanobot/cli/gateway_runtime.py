@@ -34,6 +34,7 @@ from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayInstance
 from nanobot.security.network import is_loopback_host
+from nanobot.session.async_compat import call_session_manager as _call_session_manager
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
@@ -44,6 +45,30 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+_EVENT_LOOP_LAG_INTERVAL_S = 0.5
+_EVENT_LOOP_LAG_WARNING_S = 0.25
+
+
+async def _monitor_event_loop_lag(
+    *,
+    interval_s: float = _EVENT_LOOP_LAG_INTERVAL_S,
+    warning_threshold_s: float = _EVENT_LOOP_LAG_WARNING_S,
+    log: Any | None = None,
+) -> None:
+    """Log scheduler drift so gateway-wide stalls have direct evidence."""
+    loop = asyncio.get_running_loop()
+    lag_log = log or logger
+    while True:
+        expected = loop.time() + interval_s
+        await asyncio.sleep(interval_s)
+        lag_s = max(0.0, loop.time() - expected)
+        if lag_s >= warning_threshold_s:
+            lag_log.warning(
+                "event loop lag operation=gateway duration_ms={} interval_ms={}",
+                int(lag_s * 1000),
+                int(interval_s * 1000),
+            )
 
 
 def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
@@ -493,12 +518,22 @@ def _run_gateway(
             and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = session_manager.get_or_create(key)
+            session = await _call_session_manager(
+                session_manager,
+                "get_or_create_async",
+                session_manager.get_or_create,
+                key,
+            )
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
             session.add_message("assistant", msg.content, **extra)
-            session_manager.save(session)
+            await _call_session_manager(
+                session_manager,
+                "save_async",
+                session_manager.save,
+                session,
+            )
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")
@@ -568,14 +603,14 @@ def _run_gateway(
                 if sha:
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
-                prune_dream_sessions(agent.sessions)
+                await asyncio.to_thread(prune_dream_sessions, agent.sessions)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
         if job.name == "heartbeat":
             heartbeat_file = config.workspace_path / "HEARTBEAT.md"
             try:
-                content = heartbeat_file.read_text(encoding="utf-8")
+                content = await asyncio.to_thread(heartbeat_file.read_text, encoding="utf-8")
             except OSError:
                 logger.debug("Heartbeat: HEARTBEAT.md missing")
                 return None
@@ -583,7 +618,7 @@ def _run_gateway(
                 logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
                 return None
 
-            channel, chat_id = _pick_heartbeat_target()
+            channel, chat_id = await _pick_heartbeat_target()
             if channel == "cli":
                 return None
 
@@ -611,9 +646,19 @@ def _run_gateway(
                     message_tool.reset_suppress_delivery(suppress_token)
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
+            session = await _call_session_manager(
+                agent.sessions,
+                "get_or_create_async",
+                agent.sessions.get_or_create,
+                "heartbeat",
+            )
             session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
+            await _call_session_manager(
+                agent.sessions,
+                "save_async",
+                agent.sessions.save,
+                session,
+            )
 
             if not resp or not resp.content:
                 return
@@ -690,17 +735,27 @@ def _run_gateway(
         config_path=Path(config_path),
     )
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
+    async def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        sidebar_state = read_webui_sidebar_state()
+        sidebar_state = await asyncio.to_thread(read_webui_sidebar_state)
         unified_metadata = None
         if config.agents.defaults.unified_session:
-            record = session_manager.read_session_metadata(UNIFIED_SESSION_KEY)
+            record = await _call_session_manager(
+                session_manager,
+                "read_session_metadata_async",
+                session_manager.read_session_metadata,
+                UNIFIED_SESSION_KEY,
+            )
             if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
                 unified_metadata = record["metadata"]
+        sessions = await _call_session_manager(
+            session_manager,
+            "list_sessions_async",
+            session_manager.list_sessions,
+        )
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
-            sessions=session_manager.list_sessions(),
+            sessions=sessions,
             archived_keys=sidebar_state.get("archived_keys", []),
             unified_session_metadata=unified_metadata,
         )
@@ -907,6 +962,10 @@ def _run_gateway(
                     _monitor_local_clients(),
                     name="nanobot-gateway-client-monitor",
                 ),
+                asyncio.create_task(
+                    _monitor_event_loop_lag(),
+                    name="nanobot-event-loop-lag-monitor",
+                ),
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
@@ -974,7 +1033,11 @@ def _run_gateway(
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
-                flushed = agent.sessions.flush_all()
+                flushed = await _call_session_manager(
+                    agent.sessions,
+                    "flush_all_async",
+                    agent.sessions.flush_all,
+                )
                 if flushed:
                     logger.info("Shutdown: flushed {} session(s) to disk", flushed)
             finally:

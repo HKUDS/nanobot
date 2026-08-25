@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import os
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sized
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,6 +83,22 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_SLOW_TOOL_LOG_MS = 1_000
+
+
+def _tool_input_scale(params: object) -> tuple[int, int]:
+    """Return bounded structural counts without logging argument content."""
+    if not isinstance(params, dict):
+        return 0, len(params) if isinstance(params, str | bytes) else 0
+    params_dict = cast(dict[object, object], params)
+    items = len(params_dict)
+    chars = 0
+    for value in params_dict.values():
+        if isinstance(value, str | bytes):
+            chars += len(value)
+        elif isinstance(value, list | tuple | set | dict):
+            items += len(cast(Sized, value))
+    return items, chars
 
 
 def _restore_outer_whitespace(content: str, original: str | None) -> str:
@@ -1521,6 +1537,7 @@ class AgentRunner:
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None
             )
         await hook.before_execute_tool(context, tool_call, tool, params)
+        tool_started_at = time.perf_counter()
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -1549,6 +1566,17 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return payload, event, exc
             return payload, event, None
+        finally:
+            duration_ms = int((time.perf_counter() - tool_started_at) * 1000)
+            if duration_ms >= _SLOW_TOOL_LOG_MS:
+                input_items, input_chars = _tool_input_scale(params)
+                logger.warning(
+                    "slow tool operation={} input_items={} input_chars={} duration_ms={}",
+                    tool_call.name,
+                    input_items,
+                    input_chars,
+                    duration_ms,
+                )
 
         if is_tool_error_result(result):
             await hook.on_execute_tool_error(context, tool_call, tool, params, result)

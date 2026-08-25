@@ -357,3 +357,50 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
         "finish_reason='length' response with blank content"
     )
     assert result.final_content == "done"
+
+
+@pytest.mark.asyncio
+async def test_slow_tool_log_records_scale_without_argument_content(monkeypatch) -> None:
+    from nanobot.agent import runner as runner_module
+    from nanobot.agent.runner import AgentRunner
+
+    records: list[str] = []
+
+    class _Logger:
+        def warning(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    secret = "customer-token-do-not-log"
+
+    async def execute(_name, _args):
+        return "ok"
+
+    monkeypatch.setattr(runner_module, "_SLOW_TOOL_LOG_MS", 0)
+    monkeypatch.setattr(runner_module, "logger", _Logger())
+    runner = AgentRunner()
+    spec = make_run_spec(
+        MagicMock(spec=LLMProvider),
+        initial_messages=[],
+        tools=SimpleNamespace(execute=execute),
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    await runner._run_tool(
+        spec,
+        ToolCallRequest(
+            id="call_1",
+            name="edit_file",
+            arguments={"old_text": secret, "paths": ["one", "two"]},
+        ),
+        external_lookup_counts={},
+        workspace_violation_counts={},
+    )
+
+    assert len(records) == 1
+    assert "operation=edit_file" in records[0]
+    assert "input_items=4" in records[0]
+    assert f"input_chars={len(secret)}" in records[0]
+    assert "duration_ms=" in records[0]
+    assert secret not in records[0]

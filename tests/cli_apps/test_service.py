@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -944,19 +946,23 @@ def test_run_installed_cli_uses_argv_without_shell(
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert "shell" not in kwargs or kwargs["shell"] is False
+    class _Process:
+        returncode = 0
+
+        def communicate(self, *, timeout: int) -> tuple[str, str]:
+            assert timeout == 5
+            return "ARGS=['--json', 'project', 'list']", ""
+
+    def fake_popen(argv: list[str], **kwargs: object) -> _Process:
+        assert argv == [resolved, "--json", "project", "list"]
+        assert "shell" not in kwargs
         assert kwargs["text"] is True
         assert kwargs["encoding"] == "utf-8"
         assert kwargs["errors"] == "replace"
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout="ARGS=" + repr(argv[1:]),
-            stderr="",
-        )
+        return _Process()
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("nanobot.apps.cli.service._WindowsJob.create", lambda: None)
     manager._save_installed(
         {
             "gimp": {
@@ -986,12 +992,21 @@ def test_run_reports_created_artifacts(
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    class _Process:
+        returncode = 0
+
+        def communicate(self, *, timeout: int) -> tuple[str, str]:
+            assert timeout == 5
+            return "done", ""
+
+    def fake_popen(argv: list[str], **kwargs: object) -> _Process:
+        assert argv == [resolved, "render"]
         cwd = Path(str(kwargs["cwd"]))
         (cwd / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
-        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+        return _Process()
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("nanobot.apps.cli.service._WindowsJob.create", lambda: None)
     manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
 
     result = manager.run("gimp", ["render"])
@@ -1100,3 +1115,144 @@ def test_uninstall_uses_uv_pip_when_pip_unavailable(
         sys.executable,
         "suno-cli",
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_async_keeps_event_loop_responsive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({"gimp": {"entry_point": "python"}})
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry: sys.executable if entry == "python" else None,
+    )
+
+    task = asyncio.create_task(
+        manager.run_async(
+            "gimp",
+            ["-c", "import time; time.sleep(0.08); print('done')"],
+        )
+    )
+    for _ in range(3):
+        await asyncio.sleep(0.01)
+    assert not task.done()
+
+    result = await asyncio.wait_for(task, timeout=2)
+    assert "CLI app 'gimp' exited 0" in result
+    assert "done" in result
+
+
+@pytest.mark.asyncio
+async def test_run_async_cancellation_terminates_process_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({"gimp": {"entry_point": "python"}})
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry: sys.executable if entry == "python" else None,
+    )
+    started = manager.workspace / "parent-started.txt"
+    orphan_marker = manager.workspace / "orphan-survived.txt"
+    child_code = (
+        "import time; from pathlib import Path; time.sleep(0.5); "
+        f"Path({str(orphan_marker)!r}).write_text('orphan', encoding='utf-8')"
+    )
+    parent_code = (
+        "import subprocess, sys, time; from pathlib import Path; "
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+        f"Path({str(started)!r}).write_text('started', encoding='utf-8'); "
+        "time.sleep(30)"
+    )
+    task = asyncio.create_task(manager.run_async("gimp", ["-c", parent_code]))
+    try:
+        for _ in range(200):
+            if started.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert started.exists()
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=3)
+        await asyncio.sleep(0.8)
+        assert not orphan_marker.exists()
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+def _parent_exits_with_pipe_holding_descendant(started: Path, marker: Path) -> str:
+    child_code = (
+        "import time; from pathlib import Path; time.sleep(1.5); "
+        f"Path({str(marker)!r}).write_text('survived', encoding='utf-8')"
+    )
+    return (
+        "import subprocess, sys, time; from pathlib import Path; "
+        "time.sleep(0.25); "
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+        f"Path({str(started)!r}).write_text('spawned', encoding='utf-8')"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_async_timeout_kills_pipe_holding_descendant_after_parent_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({"gimp": {"entry_point": "python"}})
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry: sys.executable if entry == "python" else None,
+    )
+    started = manager.workspace / "descendant-started.txt"
+    marker = manager.workspace / "descendant-survived.txt"
+    parent_code = _parent_exits_with_pipe_holding_descendant(started, marker)
+
+    before = time.monotonic()
+    result = await asyncio.wait_for(
+        manager.run_async("gimp", ["-c", parent_code], timeout=1),
+        timeout=4,
+    )
+    elapsed = time.monotonic() - before
+
+    assert started.exists()
+    assert result == "CLI app 'gimp' timed out after 1s"
+    assert elapsed < 4
+    await asyncio.sleep(0.9)
+    assert not marker.exists()
+
+
+def test_run_timeout_kills_pipe_holding_descendant_after_parent_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({"gimp": {"entry_point": "python"}})
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry: sys.executable if entry == "python" else None,
+    )
+    started = manager.workspace / "sync-descendant-started.txt"
+    marker = manager.workspace / "sync-descendant-survived.txt"
+    parent_code = _parent_exits_with_pipe_holding_descendant(started, marker)
+
+    before = time.monotonic()
+    result = manager.run("gimp", ["-c", parent_code], timeout=1)
+    elapsed = time.monotonic() - before
+
+    assert started.exists()
+    assert result == "CLI app 'gimp' timed out after 1s"
+    assert elapsed < 4
+    time.sleep(0.9)
+    assert not marker.exists()

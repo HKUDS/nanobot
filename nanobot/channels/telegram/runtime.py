@@ -36,7 +36,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from nanobot.security.network import validate_url_target
+from nanobot.security.network import async_validate_url_target
 from nanobot.utils.helpers import split_message
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -956,7 +956,7 @@ class TelegramChannel(BaseChannel):
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
                 if self._is_remote_media_url(media_path):
-                    ok, error = validate_url_target(media_path)
+                    ok, error = await async_validate_url_target(media_path)
                     if not ok:
                         raise ValueError(f"unsafe media URL: {error}")
                     await self._call_with_retry(

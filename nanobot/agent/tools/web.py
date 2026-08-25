@@ -96,7 +96,7 @@ def _normalize(text: str) -> str:
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
-    """Validate URL scheme/domain. Does NOT check resolved IPs (use _validate_url_safe for that)."""
+    """Validate URL scheme/domain. Does not resolve IPs; use the async safe helper for that."""
     try:
         p = urlparse(url)
         if p.scheme not in ('http', 'https'):
@@ -108,18 +108,16 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def _validate_url_safe(url: str) -> tuple[bool, str]:
-    """Validate URL with SSRF protection: scheme, domain, and resolved IP check."""
-    from nanobot.security.network import validate_url_target
+async def _async_validate_url_safe(url: str) -> tuple[bool, str]:
+    from nanobot.security.network import async_validate_url_target
 
-    return validate_url_target(url)
+    return await async_validate_url_target(url)
 
 
-def _resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
-    """Validate URL and return the resolved IPs to pin during the request."""
-    from nanobot.security.network import resolve_url_target
+async def _async_resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
+    from nanobot.security.network import async_resolve_url_target
 
-    return resolve_url_target(url)
+    return await async_resolve_url_target(url)
 
 
 def _pinned_dns_transport() -> httpx.AsyncBaseTransport:
@@ -209,7 +207,7 @@ async def _get_with_safe_redirects(
     """GET a URL while validating every redirect target before requesting it."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg, _ = _resolve_url_safe(current_url)
+        is_valid, error_msg, _ = await _async_resolve_url_safe(current_url)
         if not is_valid:
             return None, f"Redirect blocked: {error_msg}"
 
@@ -229,7 +227,7 @@ async def _get_with_safe_redirects(
             return response, None
 
         next_url = urljoin(str(response.url), location)
-        is_valid, error_msg = _validate_url_safe(next_url)
+        is_valid, error_msg = await _async_validate_url_safe(next_url)
         if not is_valid:
             await response.aclose()
             return None, f"Redirect blocked: {error_msg}"
@@ -249,7 +247,7 @@ async def _stream_with_safe_redirects(
     current_url = url
     chain_carries_credentials = _url_carries_credentials(url)
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg, _ = _resolve_url_safe(current_url)
+        is_valid, error_msg, _ = await _async_resolve_url_safe(current_url)
         if not is_valid:
             return None, None, f"Redirect blocked: {error_msg}", chain_carries_credentials
 
@@ -283,7 +281,7 @@ async def _stream_with_safe_redirects(
         chain_carries_credentials = (
             chain_carries_credentials or _url_carries_credentials(next_url)
         )
-        is_valid, error_msg = _validate_url_safe(next_url)
+        is_valid, error_msg = await _async_validate_url_safe(next_url)
         if not is_valid:
             await stream.__aexit__(None, None, None)
             return None, None, f"Redirect blocked: {error_msg}", chain_carries_credentials
@@ -1106,7 +1104,7 @@ class WebFetchTool(Tool):
         url = url.strip(" \t\r\n`\"'")
         extract_mode = kwargs.pop("extractMode", extract_mode)
         max_chars = cast(int, kwargs.pop("maxChars", max_chars) or self.max_chars)
-        is_valid, error_msg = _validate_url_safe(url)
+        is_valid, error_msg = await _async_validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 

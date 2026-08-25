@@ -11,7 +11,7 @@ import pytest
 from nanobot.agent.tools.web import WebFetchTool, _validate_url
 
 
-def _fake_resolve_public(hostname, port, family=0, type_=0):
+def _fake_resolve_public(hostname, port, family=0, type_=0, proto=0, flags=0):
     import socket
     return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
 

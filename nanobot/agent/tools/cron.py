@@ -144,13 +144,40 @@ class CronTool(Tool):
         at: str | None = None,
         job_id: str | None = None,
     ) -> str:
+        if action == "add" and self._in_cron_context.get():
+            return ToolResult.error(
+                "Error: cannot schedule new jobs from within a cron job execution"
+            )
+        return await self._cron.run_sync(
+            self._execute_sync,
+            action,
+            name,
+            message,
+            every_seconds,
+            cron_expr,
+            tz,
+            at,
+            job_id,
+        )
+
+    def _execute_sync(
+        self,
+        action: str,
+        name: str | None,
+        message: str,
+        every_seconds: int | None,
+        cron_expr: str | None,
+        tz: str | None,
+        at: str | None,
+        job_id: str | None,
+    ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return ToolResult.error("Error: cannot schedule new jobs from within a cron job execution")
             return self._add_job(name, message, every_seconds, cron_expr, tz, at)
-        elif action == "list":
+        if action == "list":
             return self._list_jobs()
-        elif action == "remove":
+        if action == "remove":
             return self._remove_job(job_id)
         return f"Unknown action: {action}"
 

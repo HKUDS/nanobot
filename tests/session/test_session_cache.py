@@ -1,4 +1,6 @@
+import asyncio
 import gc
+import threading
 import weakref
 
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, SessionManager
@@ -87,3 +89,39 @@ def test_transient_session_never_reaches_storage(tmp_path) -> None:
     assert list(manager.sessions_dir.glob("*.jsonl")) == []
     manager.invalidate(session.key)
     assert manager.get_cached(session.key) is None
+
+
+async def test_concurrent_first_async_gets_share_cached_identity(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_path)
+    key = "test:concurrent-first-load"
+    load_started = threading.Event()
+    release_load = threading.Event()
+    load_calls = 0
+
+    def delayed_load(loaded_key: str):
+        nonlocal load_calls
+        assert loaded_key == key
+        load_calls += 1
+        load_started.set()
+        assert release_load.wait(timeout=1)
+        return None
+
+    monkeypatch.setattr(manager, "_load", delayed_load)
+    first_task = asyncio.create_task(manager.get_or_create_async(key))
+    try:
+        assert await asyncio.to_thread(load_started.wait, 0.5)
+        second_task = asyncio.create_task(manager.get_or_create_async(key))
+        await asyncio.sleep(0)
+        assert not second_task.done()
+    finally:
+        release_load.set()
+
+    first, second = await asyncio.gather(first_task, second_task)
+
+    assert load_calls == 1
+    assert first is second
+    assert manager.get_cached(key) is first
+    assert await manager.get_or_create_async(key) is first

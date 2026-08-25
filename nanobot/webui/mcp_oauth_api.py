@@ -16,7 +16,7 @@ from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import MCPServerConfig
-from nanobot.security.network import validate_url_target
+from nanobot.security.network import async_validate_url_target
 from nanobot.webui.http_utils import is_loopback_host
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
@@ -259,7 +259,7 @@ class McpOAuthManager:
         ):
             flow.error = "The MCP server returned an unsafe authorization URL."
             raise McpOAuthError(flow.error)
-        ok, _error = validate_url_target(authorization_url)
+        ok, _error = await async_validate_url_target(authorization_url)
         if not ok:
             flow.error = "The MCP server returned an unsafe authorization URL."
             raise McpOAuthError(flow.error)

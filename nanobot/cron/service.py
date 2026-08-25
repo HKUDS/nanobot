@@ -11,11 +11,12 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from types import EllipsisType
-from typing import Any, Callable, Coroutine, Literal
+from typing import Any, Callable, Coroutine, Literal, TypeVar
 
 from filelock import FileLock
 from loguru import logger
 
+from nanobot.agent.automation_turns import AutomationTurnAcceptedCancellation
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import (
     CronJob,
@@ -25,9 +26,13 @@ from nanobot.cron.types import (
     CronSchedule,
     CronStore,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
+
+_FILE_LOCK_TIMEOUT_SECONDS = 5
+_T = TypeVar("_T")
 
 
 class CronJobSkippedError(Exception):
@@ -164,10 +169,16 @@ class CronService:
         self.store_path = store_path
         self._action_path = store_path.parent / "action.jsonl"
         self._run_records_dir = store_path.parent / "runs"
-        self._lock = FileLock(str(self._action_path.parent) + ".lock")
+        self._lock = FileLock(
+            str(self._action_path.parent) + ".lock",
+            timeout=_FILE_LOCK_TIMEOUT_SECONDS,
+        )
         self.on_job = on_job
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task[None] | None = None
+        self._operation_lock = asyncio.Lock()
+        self._claimed_job_ids: set[str] = set()
+        self._event_loop: asyncio.AbstractEventLoop | None = None
         self._running = False
         self._active_executions = 0
         self._store_dirty = False
@@ -451,25 +462,58 @@ class CronService:
         """Write an internal audit record for one cron execution."""
         write_automation_run_record(self._run_records_dir, run_id, record)
 
-    async def start(self) -> None:
-        """Start the cron service."""
-        self._running = True
-        loaded = self._load_store()
-        if loaded is None:
-            # Store file existed but was corrupt and has been preserved with
-            # a ``.corrupt-<ts>`` suffix.  Bail out instead of starting with
-            # an empty store; that would call ``_save_store`` and overwrite
-            # the now-renamed (but still recoverable) data with [].
-            self._running = False
-            raise RuntimeError(
-                f"cron store at {self.store_path} is corrupt and was preserved; "
-                "refusing to start with an empty job list. "
-                "Inspect the .corrupt-<ts> backup and restore manually."
+    async def run_sync(
+        self,
+        operation: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        """Serialize a complete cron transaction in a worker thread.
+
+        A running thread cannot be cancelled safely.  Keep the transaction lock
+        until it exits so cancellation is never reported while that worker can
+        still mutate cron state behind a later operation.
+        """
+        async with self._operation_lock:
+            return await shield_and_drain(
+                asyncio.to_thread(operation, *args, **kwargs)
             )
-        self._recompute_next_runs()
-        self._save_store()
-        self._arm_timer()
-        logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
+
+    async def start(self) -> None:
+        """Start the cron service and settle accepted work before cancellation."""
+
+        async def settle_start() -> None:
+            self._event_loop = asyncio.get_running_loop()
+            self._running = True
+            try:
+                async with self._operation_lock:
+                    loaded = await asyncio.to_thread(self._load_store)
+                    if loaded is None:
+                        # Store file existed but was corrupt and has been preserved with
+                        # a ``.corrupt-<ts>`` suffix.  Bail out instead of starting with
+                        # an empty store; that would call ``_save_store`` and overwrite
+                        # the now-renamed (but still recoverable) data with [].
+                        raise RuntimeError(
+                            f"cron store at {self.store_path} is corrupt and was preserved; "
+                            "refusing to start with an empty job list. "
+                            "Inspect the .corrupt-<ts> backup and restore manually."
+                        )
+                    self._recompute_next_runs()
+                    await asyncio.to_thread(self._save_store)
+                self._arm_timer()
+                logger.info(
+                    "Cron service started with {} jobs",
+                    len(self._store.jobs if self._store else []),
+                )
+            except BaseException:
+                # A failed start must not retain ownership without a timer.  Caller
+                # cancellation is shielded until this composite either reaches the
+                # fully started state above or rolls back here.
+                self.stop()
+                raise
+
+        await shield_and_drain(settle_start())
 
     def stop(self) -> None:
         """Stop the cron service."""
@@ -497,8 +541,22 @@ class CronService:
                  if j.enabled and j.state.next_run_at_ms]
         return min(times) if times else None
 
+    def _request_timer_rearm(self) -> None:
+        """Re-arm on the owning event loop, including from persistence workers."""
+        if not self._running:
+            return
+        loop = self._event_loop
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is loop:
+            self._arm_timer()
+        elif loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(self._arm_timer)
+
     def _arm_timer(self) -> None:
-        """Schedule the next timer tick."""
+        """Schedule the next timer tick on the owning event loop."""
         if self._timer_task:
             self._timer_task.cancel()
 
@@ -520,7 +578,7 @@ class CronService:
         self._timer_task = asyncio.create_task(tick())
 
     async def _on_timer(self) -> None:
-        """Handle timer tick - run due jobs."""
+        """Run due jobs while keeping persistence transactions serialized."""
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:
@@ -528,11 +586,17 @@ class CronService:
             # to persist their advanced schedule.  Persist that exact snapshot
             # before reloading or executing anything else; otherwise the older
             # disk state can replay the same job.
-            if self._store_dirty:
-                self._save_store()
-                return
+            async with self._operation_lock:
+                if self._store_dirty:
+                    await shield_and_drain(asyncio.to_thread(self._save_store))
+                    return
 
-            store = self._load_store(reload_during_execution=reload_store)
+                store = await shield_and_drain(
+                    asyncio.to_thread(
+                        self._load_store,
+                        reload_during_execution=reload_store,
+                    )
+                )
             # If a hot reload found a corrupt store on disk, ``self._store``
             # may still hold the previous, known-good in-memory snapshot.
             if store is None:
@@ -547,7 +611,8 @@ class CronService:
             for job in due_jobs:
                 await self._execute_job(job)
 
-            self._save_store()
+            async with self._operation_lock:
+                await shield_and_drain(asyncio.to_thread(self._save_store))
         except Exception:
             # A load/persist failure must not kill the scheduler: keep the
             # in-memory store and retry on the next tick.  This mirrors the
@@ -564,58 +629,124 @@ class CronService:
             # single bad tick cannot silently stop all future jobs.
             self._arm_timer()
 
-    async def _execute_job(self, job: CronJob) -> None:
-        """Execute a single job."""
+    async def _claim_job(self, job_id: str) -> bool:
+        """Claim one job without serializing callbacks for different jobs."""
+        async with self._operation_lock:
+            if job_id in self._claimed_job_ids:
+                return False
+            self._claimed_job_ids.add(job_id)
+            return True
+
+    async def _release_job_claim(self, job_id: str) -> None:
+        async with self._operation_lock:
+            self._claimed_job_ids.discard(job_id)
+
+    async def _settle_job_execution(
+        self,
+        job: CronJob,
+        *,
+        start_ms: int,
+        status: Literal["ok", "error", "skipped"],
+        error: str | None,
+        persist: bool = False,
+    ) -> None:
+        end_ms = _now_ms()
+        async with self._operation_lock:
+            job.state.last_status = status
+            job.state.last_error = error
+            job.state.last_run_at_ms = start_ms
+            job.updated_at_ms = end_ms
+            job.state.run_history.append(CronRunRecord(
+                run_at_ms=start_ms,
+                status=status,
+                duration_ms=end_ms - start_ms,
+                error=error,
+            ))
+            job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
+
+            if job.schedule.kind == "at":
+                if job.delete_after_run:
+                    store = await shield_and_drain(
+                        asyncio.to_thread(self._require_store)
+                    )
+                    store.jobs = [item for item in store.jobs if item.id != job.id]
+                else:
+                    job.enabled = False
+                    job.state.next_run_at_ms = None
+            else:
+                job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+
+            if persist:
+                await shield_and_drain(asyncio.to_thread(self._save_store))
+
+    @staticmethod
+    async def _drain_settlement_on_cancellation(settlement: asyncio.Task[None]) -> None:
+        """Finish a short durable settlement despite repeated cancellation."""
+        while not settlement.done():
+            try:
+                await asyncio.shield(settlement)
+            except asyncio.CancelledError:
+                continue
+        settlement.result()
+
+    async def _execute_job(self, job: CronJob) -> bool:
+        """Execute a claimed job and serialize its in-memory settlement."""
+        if not await self._claim_job(job.id):
+            logger.info("Cron: job '{}' ({}) is already running", job.name, job.id)
+            return False
+
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        status: Literal["ok", "error", "skipped"]
+        error: str | None
+        accepted_cancellation: AutomationTurnAcceptedCancellation | None = None
 
         try:
-            if self.on_job:
-                await self.on_job(job)
+            try:
+                if self.on_job:
+                    await self.on_job(job)
+                status = "ok"
+                error = None
+                logger.info("Cron: job '{}' completed", job.name)
+            except AutomationTurnAcceptedCancellation as exc:
+                # The agent owns this turn now.  Advance and persist the schedule
+                # before allowing shutdown cancellation to unwind the timer.
+                status = "ok"
+                error = None
+                accepted_cancellation = exc
+                logger.info("Cron: job '{}' was accepted before cancellation", job.name)
+            except CronJobSkippedError as exc:
+                status = "skipped"
+                error = str(exc) or None
+                logger.warning("Cron: job '{}' skipped: {}", job.name, error or "")
+            except asyncio.CancelledError as exc:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                status = "error"
+                error = str(exc) or exc.__class__.__name__
+                logger.exception("Cron: job '{}' was cancelled", job.name)
+            except Exception as exc:
+                status = "error"
+                error = str(exc)
+                logger.exception("Cron: job '{}' failed", job.name)
 
-            job.state.last_status = "ok"
-            job.state.last_error = None
-            logger.info("Cron: job '{}' completed", job.name)
-
-        except CronJobSkippedError as e:
-            job.state.last_status = "skipped"
-            job.state.last_error = str(e) or None
-            logger.warning("Cron: job '{}' skipped: {}", job.name, job.state.last_error or "")
-        except asyncio.CancelledError as e:
-            current = asyncio.current_task()
-            if current is not None and current.cancelling():
-                raise
-            job.state.last_status = "error"
-            job.state.last_error = str(e) or e.__class__.__name__
-            logger.exception("Cron: job '{}' was cancelled", job.name)
-        except Exception as e:
-            job.state.last_status = "error"
-            job.state.last_error = str(e)
-            logger.exception("Cron: job '{}' failed", job.name)
-
-        end_ms = _now_ms()
-        job.state.last_run_at_ms = start_ms
-        job.updated_at_ms = end_ms
-
-        job.state.run_history.append(CronRunRecord(
-            run_at_ms=start_ms,
-            status=job.state.last_status,
-            duration_ms=end_ms - start_ms,
-            error=job.state.last_error,
-        ))
-        job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
-
-        # Handle one-shot jobs
-        if job.schedule.kind == "at":
-            if job.delete_after_run:
-                store = self._require_store()
-                store.jobs = [item for item in store.jobs if item.id != job.id]
-            else:
-                job.enabled = False
-                job.state.next_run_at_ms = None
-        else:
-            # Compute next run
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+            settlement = asyncio.create_task(
+                self._settle_job_execution(
+                    job,
+                    start_ms=start_ms,
+                    status=status,
+                    error=error,
+                    persist=accepted_cancellation is not None,
+                )
+            )
+            if accepted_cancellation is not None:
+                await self._drain_settlement_on_cancellation(settlement)
+                raise accepted_cancellation
+            await settlement
+            return True
+        finally:
+            await self._release_job_claim(job.id)
 
     def _append_action(
         self,
@@ -697,7 +828,7 @@ class CronService:
             store = self._require_store()
             store.jobs.append(job)
             self._save_store()
-            self._arm_timer()
+            self._request_timer_rearm()
         else:
             self._append_action("add", asdict(job))
 
@@ -714,7 +845,7 @@ class CronService:
         store.jobs = [j for j in store.jobs if j.id != job.id]
         store.jobs.append(job)
         self._save_store()
-        self._arm_timer()
+        self._request_timer_rearm()
         logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
         return job
 
@@ -726,7 +857,7 @@ class CronService:
         removed = len(store.jobs) < before
         if removed:
             self._save_store()
-            self._arm_timer()
+            self._request_timer_rearm()
             logger.info("Cron: removed system job {}", job_id)
         return removed
 
@@ -747,7 +878,7 @@ class CronService:
         if removed:
             if self._should_persist_store():
                 self._save_store()
-                self._arm_timer()
+                self._request_timer_rearm()
             else:
                 self._append_action("del", {"job_id": job_id})
             logger.info("Cron: removed job {}", job_id)
@@ -769,7 +900,7 @@ class CronService:
                     job.state.next_run_at_ms = None
                 if self._should_persist_store():
                     self._save_store()
-                    self._arm_timer()
+                    self._request_timer_rearm()
                 else:
                     self._append_action("update", asdict(job))
                 return job
@@ -825,7 +956,7 @@ class CronService:
 
         if self._should_persist_store():
             self._save_store()
-            self._arm_timer()
+            self._request_timer_rearm()
         else:
             self._append_action("update", asdict(job))
 
@@ -840,19 +971,31 @@ class CronService:
             # A manual run is another side-effecting entrypoint.  Do not start
             # it while the result of a previous timer execution is still only
             # in memory.
-            if self._store_dirty:
-                self._save_store()
-            store = self._require_store(reload_during_execution=reload_store)
+            async with self._operation_lock:
+                if self._store_dirty:
+                    await shield_and_drain(asyncio.to_thread(self._save_store))
+                store = await shield_and_drain(
+                    asyncio.to_thread(
+                        self._require_store,
+                        reload_during_execution=reload_store,
+                    )
+                )
             for job in store.jobs:
                 if job.id == job_id:
                     if self._is_unbound_agent_job(job):
-                        self._enforce_agent_binding(job)
-                        self._save_store()
+                        async with self._operation_lock:
+                            self._enforce_agent_binding(job)
+                            await shield_and_drain(
+                                asyncio.to_thread(self._save_store)
+                            )
                         return False
                     if not force and not job.enabled:
                         return False
-                    await self._execute_job(job)
-                    self._save_store()
+                    executed = await self._execute_job(job)
+                    if not executed:
+                        return False
+                    async with self._operation_lock:
+                        await shield_and_drain(asyncio.to_thread(self._save_store))
                     return True
             return False
         finally:

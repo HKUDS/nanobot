@@ -20,7 +20,7 @@ from nanobot.providers.registry import find_by_name
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
     UnsafeURLRequestError,
-    resolve_url_target,
+    async_resolve_url_target,
 )
 from nanobot.utils.helpers import detect_image_mime
 
@@ -174,7 +174,7 @@ async def _download_image_data_url(
             current_url = url
             for _ in range(_IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
                 if proxy:
-                    ok, error, _ = resolve_url_target(
+                    ok, error, _ = await async_resolve_url_target(
                         current_url,
                         trust_remote_dns=True,
                     )

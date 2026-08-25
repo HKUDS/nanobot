@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -95,6 +97,82 @@ async def test_find_files_rejects_paths_outside_workspace(tmp_path: Path) -> Non
     result = await tool.execute(path=str(outside))
 
     assert result.startswith("Error:")
+
+
+@pytest.mark.asyncio
+async def test_find_files_scan_keeps_event_loop_responsive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "match.txt"
+    target.write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    original_iter_paths = tool._iter_paths
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_iter_paths(root: Path, *, include_dirs: bool):
+        started.set()
+        if not release.wait(timeout=1):
+            raise TimeoutError("test did not release find_files traversal")
+        yield from original_iter_paths(root, include_dirs=include_dirs)
+
+    monkeypatch.setattr(tool, "_iter_paths", blocking_iter_paths)
+    task = asyncio.create_task(tool.execute(path="."))
+    try:
+        assert await asyncio.to_thread(started.wait, 0.5)
+        for _ in range(3):
+            await asyncio.sleep(0.01)
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert await asyncio.wait_for(task, timeout=0.5) == "match.txt"
+
+
+@pytest.mark.asyncio
+async def test_find_files_cancellation_is_prompt_and_stops_scan_before_next_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "match.txt").write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    original_iter_paths = tool._iter_paths
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_iter_paths(root: Path, *, include_dirs: bool):
+        started.set()
+        if not release.wait(timeout=1):
+            raise TimeoutError("test did not release find_files traversal")
+        yield from original_iter_paths(root, include_dirs=include_dirs)
+
+    monkeypatch.setattr(tool, "_iter_paths", blocking_iter_paths)
+    task = asyncio.create_task(tool.execute(path="."))
+    assert await asyncio.to_thread(started.wait, 0.5)
+    task.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=0.2)
+        await asyncio.sleep(0.01)
+    finally:
+        release.set()
+        await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_find_files_enforces_path_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("b\n", encoding="utf-8")
+    monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_PATHS", 1)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".")
+
+    assert result.startswith("Error: find_files scan exceeded 1 paths")
 
 
 @pytest.mark.asyncio

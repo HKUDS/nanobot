@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from inspect import Parameter, signature
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,9 +11,11 @@ import pytest
 
 from nanobot.command.builtin import (
     builtin_command_starts_agent_turn,
+    cmd_new,
     register_builtin_commands,
 )
 from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.session.manager import Session
 
 
 def test_command_context_requires_loop_as_keyword_dependency() -> None:
@@ -93,6 +97,55 @@ class TestIsDispatchableCommand:
 )
 def test_builtin_command_agent_turn_lifecycle(content: str, expected: bool) -> None:
     assert builtin_command_starts_agent_turn(content) is expected
+
+
+@pytest.mark.asyncio
+async def test_new_cancellation_waits_for_save_and_cache_invalidation() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    session = Session(key="test:chat1")
+    invalidated: list[str] = []
+    save_calls = 0
+
+    class _SyncSessionManager:
+        def save(self, target: Session) -> None:
+            nonlocal save_calls
+            assert target is session
+            save_calls += 1
+            started.set()
+            assert release.wait(timeout=1)
+
+        def invalidate(self, key: str) -> None:
+            invalidated.append(key)
+
+    loop = MagicMock()
+    loop.sessions = _SyncSessionManager()
+    loop._cancel_active_tasks = AsyncMock(return_value=0)
+    ctx = CommandContext(
+        msg=MagicMock(channel="test", chat_id="chat1", metadata={}),
+        session=session,
+        key=session.key,
+        raw="/new",
+        loop=loop,
+    )
+    task = asyncio.create_task(cmd_new(ctx))
+    assert await asyncio.to_thread(started.wait, 1)
+    try:
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert invalidated == []
+    finally:
+        release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert save_calls == 1
+    assert invalidated == [session.key]
+    await asyncio.sleep(0.05)
+    assert save_calls == 1
+    assert invalidated == [session.key]
 
 
 class TestMidTurnCommandDispatchedDirectly:

@@ -9,6 +9,7 @@ and tightens the runtime error for ``add`` without ``message``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 
 import pytest
@@ -20,6 +21,9 @@ from nanobot.agent.tools.registry import ToolRegistry
 
 class _SvcStub:
     """Minimal CronService stand-in; we only exercise schema/dispatch paths."""
+
+    async def run_sync(self, operation, /, *args, **kwargs):
+        return await asyncio.to_thread(operation, *args, **kwargs)
 
     def list_jobs(self):
         return []
@@ -74,8 +78,6 @@ class TestSchemaContract:
         # Schema permits omitting message; the runtime must return a message
         # that tells the LLM exactly what's missing and how to retry, so it
         # doesn't loop like #3113 reports.
-        import asyncio
-
         tool = registry._tools["cron"]  # type: ignore[attr-defined]
         out = asyncio.run(tool.execute(action="add", at="2030-01-01T00:00:00"))
         assert "message" in out

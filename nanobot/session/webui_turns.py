@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -176,7 +177,7 @@ async def maybe_generate_webui_title(
     model: str,
 ) -> bool:
     """Generate and persist a short title for WebUI-owned sessions only."""
-    session = sessions.get_or_create(session_key)
+    session = await sessions.get_or_create_async(session_key)
     if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
     if session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
@@ -187,7 +188,7 @@ async def maybe_generate_webui_title(
         if cleaned_current_title:
             if cleaned_current_title != current_title:
                 session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                sessions.save(session)
+                await sessions.save_async(session)
             return False
         session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
@@ -241,7 +242,7 @@ async def maybe_generate_webui_title(
         )
         return False
     session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    sessions.save(session)
+    await sessions.save_async(session)
     return True
 
 
@@ -437,8 +438,8 @@ class WebuiTurnRoutePolicy:
             )
             and route.channel == "websocket"
         ):
-            session = self.sessions.get_or_create(session_key)
-            if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is True:
+            session = self.sessions.get_cached(session_key)
+            if session is not None and session.metadata.get(WEBUI_SESSION_METADATA_KEY) is True:
                 metadata = dict(route.metadata)
                 turn_prefix = "session-input" if internal_user_input else "subagent"
                 metadata.update({
@@ -580,7 +581,7 @@ class WebuiTurnCoordinator:
             or not session_key.startswith("websocket:")
         ):
             return
-        persisted = self.sessions.read_session_metadata(session_key)
+        persisted = await self.sessions.read_session_metadata_async(session_key)
         metadata_value: object = persisted.get("metadata") if persisted is not None else None
         metadata = (
             cast(dict[str, Any], metadata_value)
@@ -591,7 +592,8 @@ class WebuiTurnCoordinator:
             return
         public_metadata = _session_message_public_metadata(envelope)
         try:
-            append_session_message_input(
+            await asyncio.to_thread(
+                append_session_message_input,
                 session_key,
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
@@ -616,8 +618,9 @@ class WebuiTurnCoordinator:
     def _handle_session_turn_started(self, event: SessionTurnStarted) -> None:
         if not self._is_websocket_event(event.context):
             return
-        session = self.sessions.get_or_create(event.context.session_key)
-        mark_webui_session(session, event.context.metadata)
+        session = self.sessions.get_cached(event.context.session_key)
+        if session is not None:
+            mark_webui_session(session, event.context.metadata)
 
     async def _handle_run_status_changed(self, event: TurnRunStatusChanged) -> None:
         if not self._is_websocket_event(event.context):
@@ -703,7 +706,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = self.sessions.get_or_create(session_key)
+        session = await self.sessions.get_or_create_async(session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

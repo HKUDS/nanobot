@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import socket
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -56,10 +55,12 @@ async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch)
     """When no port is present, probe the validated address on port 80."""
     attempts: list[tuple[str, int]] = []
 
-    monkeypatch.setattr(
-        "nanobot.agent.tools.mcp.resolve_url_target",
-        lambda _url: (True, "", ("93.184.216.34",)),
-    )
+    async def _resolve_url_target(
+        _url: str,
+    ) -> tuple[bool, str, tuple[str, ...]]:
+        return True, "", ("93.184.216.34",)
+
+    monkeypatch.setattr(mcp_mod, "async_resolve_url_target", _resolve_url_target)
 
     async def _open_connection(host: str, port: int):
         attempts.append((host, port))
@@ -72,32 +73,43 @@ async def test_probe_uses_default_port_for_http(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_probe_rejects_public_name_resolving_to_loopback():
-    def _resolver(hostname, port, family=0, type_=0):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+async def test_probe_rejects_public_name_resolving_to_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _resolve_url_target(
+        _url: str,
+    ) -> tuple[bool, str, tuple[str, ...]]:
+        return False, "Blocked: example.com resolves to private/internal address 127.0.0.1", ()
 
-    with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
-        assert await _probe_http_url("http://example.com:8765/mcp") is False
+    monkeypatch.setattr(mcp_mod, "async_resolve_url_target", _resolve_url_target)
+
+    assert await _probe_http_url("http://example.com:8765/mcp") is False
 
 
 @pytest.mark.asyncio
-async def test_probe_skips_direct_tcp_when_global_proxy_env_is_set(monkeypatch):
-    def _resolver(hostname, port, family=0, type_=0):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+async def test_probe_skips_direct_tcp_when_global_proxy_env_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _resolve_url_target(
+        _url: str,
+    ) -> tuple[bool, str, tuple[str, ...]]:
+        return True, "", ("93.184.216.34",)
 
     async def _open_connection(*args, **kwargs):
         raise AssertionError("global proxy env should skip direct TCP probe")
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    monkeypatch.setattr(mcp_mod, "async_resolve_url_target", _resolve_url_target)
     monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
 
-    with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
-        assert await _probe_http_url("https://mcp.example.com/mcp") is True
+    assert await _probe_http_url("https://mcp.example.com/mcp") is True
 
 
 @pytest.mark.asyncio
-async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypatch):
+async def test_probe_tries_next_validated_ip_when_first_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     attempts: list[tuple[str, int]] = []
 
     class FakeWriter:
@@ -107,11 +119,10 @@ async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypat
         async def wait_closed(self):
             return None
 
-    def _resolver(hostname, port, family=0, type_=0):
-        return [
-            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
-            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.35", 0)),
-        ]
+    async def _resolve_url_target(
+        _url: str,
+    ) -> tuple[bool, str, tuple[str, ...]]:
+        return True, "", ("93.184.216.34", "93.184.216.35")
 
     async def _open_connection(host: str, port: int):
         attempts.append((host, port))
@@ -119,7 +130,7 @@ async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypat
             raise OSError("first address unreachable")
         return object(), FakeWriter()
 
-    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _resolver)
+    monkeypatch.setattr(mcp_mod, "async_resolve_url_target", _resolve_url_target)
     monkeypatch.setattr("nanobot.agent.tools.mcp.asyncio.open_connection", _open_connection)
 
     assert await _probe_http_url("http://mcp.example:8765/mcp") is True
@@ -182,10 +193,13 @@ async def test_connect_isolates_streamable_http_status_failure(
     async def _reachable(_url: str) -> bool:
         return True
 
+    async def _validate_url_target(_url: str) -> tuple[bool, str]:
+        return True, ""
+
     def _return_http_530(request: httpx.Request) -> httpx.Response:
         return httpx.Response(530, text="cloudflare error 1033", request=request)
 
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _validate_url_target)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,

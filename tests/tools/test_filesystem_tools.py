@@ -1,7 +1,12 @@
 """Tests for enhanced filesystem tools: ReadFileTool, EditFileTool, ListDirTool."""
 
+import asyncio
+import threading
+
 import pytest
 
+from nanobot.agent.tools import file_state
+from nanobot.agent.tools import filesystem as filesystem_tools
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -478,3 +483,188 @@ class TestWorkspaceRestriction:
         )
         assert "Successfully edited" in result
         assert target.read_text(encoding="utf-8") == "after\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_matching_keeps_event_loop_responsive(tmp_path, monkeypatch):
+    target = tmp_path / "slow.py"
+    target.write_text("before\n", encoding="utf-8")
+    tool = EditFileTool(workspace=tmp_path)
+    original_find_matches = filesystem_tools._find_matches
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_find_matches(*args, **kwargs):
+        started.set()
+        if not release.wait(timeout=1):
+            raise TimeoutError("test did not release edit matching")
+        return original_find_matches(*args, **kwargs)
+
+    monkeypatch.setattr(filesystem_tools, "_find_matches", blocking_find_matches)
+    task = asyncio.create_task(
+        tool.execute(path=str(target), old_text="before", new_text="after")
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 0.5)
+        for _ in range(3):
+            await asyncio.sleep(0.01)
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert "Successfully edited" in await asyncio.wait_for(task, timeout=0.5)
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_cancellation_before_commit_prevents_delayed_write(tmp_path, monkeypatch):
+    target = tmp_path / "cancel.py"
+    target.write_text("before\n", encoding="utf-8")
+    tool = EditFileTool(workspace=tmp_path)
+    original_find_matches = filesystem_tools._find_matches
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_find_matches(*args, **kwargs):
+        started.set()
+        if not release.wait(timeout=1):
+            raise TimeoutError("test did not release edit matching")
+        return original_find_matches(*args, **kwargs)
+
+    monkeypatch.setattr(filesystem_tools, "_find_matches", blocking_find_matches)
+    task = asyncio.create_task(
+        tool.execute(path=str(target), old_text="before", new_text="after")
+    )
+    assert await asyncio.to_thread(started.wait, 0.5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.2)
+    release.set()
+    await asyncio.sleep(0.05)
+
+    assert target.read_text(encoding="utf-8") == "before\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_repeated_cancellation_during_commit_waits_for_settlement(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "commit.py"
+    target.write_text("before\n", encoding="utf-8")
+    tool = EditFileTool(workspace=tmp_path)
+    path_type = type(target)
+    original_write_bytes = path_type.write_bytes
+    original_wait_for_commit = EditFileTool._wait_for_commit
+    commit_started = threading.Event()
+    drain_started = threading.Event()
+    release = threading.Event()
+    writes: list[bytes] = []
+
+    def blocking_write_bytes(path, data):
+        if path == target:
+            commit_started.set()
+            if not release.wait(timeout=1):
+                raise TimeoutError("test did not release edit commit")
+            writes.append(data)
+        return original_write_bytes(path, data)
+
+    def observed_wait_for_commit(commit_lock):
+        drain_started.set()
+        original_wait_for_commit(commit_lock)
+
+    monkeypatch.setattr(path_type, "write_bytes", blocking_write_bytes)
+    monkeypatch.setattr(
+        EditFileTool,
+        "_wait_for_commit",
+        staticmethod(observed_wait_for_commit),
+    )
+    task = asyncio.create_task(
+        tool.execute(path=str(target), old_text="before", new_text="after")
+    )
+    try:
+        assert await asyncio.to_thread(commit_started.wait, 0.5)
+        assert task.cancel()
+        assert await asyncio.to_thread(drain_started.wait, 0.5)
+
+        # Later cancellation requests must not interrupt the in-flight commit drain.
+        assert task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert target.read_text(encoding="utf-8") == "before\n"
+    finally:
+        release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.5)
+
+    final_content = target.read_bytes()
+    final_state = tool._file_states.get(target)
+    assert target.read_text(encoding="utf-8") == "after\n"
+    assert writes == [final_content]
+    assert final_state is not None
+    assert tool._file_states.check_read(target) is None
+
+    await asyncio.sleep(0.05)
+    assert target.read_bytes() == final_content
+    assert tool._file_states.get(target) is final_state
+    assert writes == [final_content]
+
+
+def test_exact_match_line_accounting_is_linear_and_occurrence_can_stop_early():
+    class CountingText(str):
+        count_span = 0
+        find_calls = 0
+
+        def count(self, sub, start=None, end=None):
+            actual_start = 0 if start is None else start
+            actual_end = len(self) if end is None else end
+            self.count_span += max(0, actual_end - actual_start)
+            return super().count(sub, actual_start, actual_end)
+
+        def find(self, sub, start=None, end=None):
+            self.find_calls += 1
+            actual_start = 0 if start is None else start
+            actual_end = len(self) if end is None else end
+            return super().find(sub, actual_start, actual_end)
+
+    content = CountingText("match\n" * 10_000)
+    matches = filesystem_tools._find_exact_matches(content, "match")
+
+    assert len(matches) == 10_000
+    assert matches[-1].line == 10_000
+    assert content.count_span <= len(content)
+
+    first_only = CountingText(content)
+    matches = filesystem_tools._find_matches(
+        first_only,
+        "match",
+        max_exact_matches=1,
+    )
+    assert len(matches) == 1
+    assert first_only.find_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_edit_worker_preserves_bound_file_state_context(tmp_path):
+    target = tmp_path / "context.py"
+    target.write_text("before\n", encoding="utf-8")
+    states = file_state.FileStates()
+    states.record_read(target)
+    tool = EditFileTool(workspace=tmp_path)
+    token = file_state.bind_file_states(states)
+    try:
+        result = await tool.execute(
+            path=str(target),
+            old_text="before",
+            new_text="after",
+        )
+    finally:
+        file_state.reset_file_states(token)
+
+    assert result == f"Successfully edited {target}"
+    assert states.get(target) is not None
+    assert target.read_text(encoding="utf-8") == "after\n"

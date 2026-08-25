@@ -2,9 +2,11 @@
 
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
+import asyncio
 import difflib
 import mimetypes
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
@@ -664,22 +667,31 @@ def _match_covers_line(match: _MatchSpan, line: int) -> bool:
     return match.line <= line <= _match_end_line(match)
 
 
-def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
+def _find_exact_matches(
+    content: str,
+    old_text: str,
+    *,
+    max_matches: int | None = None,
+) -> list[_MatchSpan]:
     matches: list[_MatchSpan] = []
-    start = 0
-    while True:
-        idx = content.find(old_text, start)
+    search_start = 0
+    line_start = 0
+    line = 1
+    while max_matches is None or len(matches) < max_matches:
+        idx = content.find(old_text, search_start)
         if idx == -1:
             break
+        line += content.count("\n", line_start, idx)
         matches.append(
             _MatchSpan(
                 start=idx,
                 end=idx + len(old_text),
                 text=content[idx : idx + len(old_text)],
-                line=content.count("\n", 0, idx) + 1,
+                line=line,
             )
         )
-        start = idx + max(1, len(old_text))
+        line_start = idx
+        search_start = idx + max(1, len(old_text))
     return matches
 
 
@@ -735,27 +747,36 @@ def _find_quote_matches(content: str, old_text: str) -> list[_MatchSpan]:
     norm_content = _normalize_quotes(content)
     norm_old = _normalize_quotes(old_text)
     matches: list[_MatchSpan] = []
-    start = 0
+    search_start = 0
+    line_start = 0
+    line = 1
     while True:
-        idx = norm_content.find(norm_old, start)
+        idx = norm_content.find(norm_old, search_start)
         if idx == -1:
             break
+        line += content.count("\n", line_start, idx)
         matches.append(
             _MatchSpan(
                 start=idx,
                 end=idx + len(old_text),
                 text=content[idx : idx + len(old_text)],
-                line=content.count("\n", 0, idx) + 1,
+                line=line,
             )
         )
-        start = idx + max(1, len(norm_old))
+        line_start = idx
+        search_start = idx + max(1, len(norm_old))
     return matches
 
 
-def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    """Locate all matches using progressively looser strategies."""
+def _find_matches(
+    content: str,
+    old_text: str,
+    *,
+    max_exact_matches: int | None = None,
+) -> list[_MatchSpan]:
+    """Locate matches using progressively looser strategies."""
     for matcher in (
-        lambda: _find_exact_matches(content, old_text),
+        lambda: _find_exact_matches(content, old_text, max_matches=max_exact_matches),
         lambda: _find_trim_matches(content, old_text),
         lambda: _find_trim_matches(content, old_text, normalize_quotes=True),
         lambda: _find_quote_matches(content, old_text),
@@ -870,6 +891,43 @@ class EditFileTool(_FsTool):
         replace_all: bool = False, occurrence: int | None = None,
         line_hint: int | None = None, expected_replacements: int | None = None, **kwargs: Any,
     ) -> str:
+        cancelled = threading.Event()
+        commit_lock = threading.Lock()
+        try:
+            return await asyncio.to_thread(
+                self._execute_sync,
+                path=path,
+                old_text=old_text,
+                new_text=new_text,
+                replace_all=replace_all,
+                occurrence=occurrence,
+                line_hint=line_hint,
+                expected_replacements=expected_replacements,
+                cancelled=cancelled,
+                commit_lock=commit_lock,
+            )
+        except asyncio.CancelledError:
+            cancelled.set()
+            # If a commit already started, do not report cancellation until the
+            # file bytes and FileStates record are settled. Otherwise, taking
+            # the lock first guarantees the worker observes ``cancelled`` before
+            # it can mutate the target.
+            await shield_and_drain(
+                asyncio.to_thread(self._wait_for_commit, commit_lock)
+            )
+            raise
+
+    @staticmethod
+    def _wait_for_commit(commit_lock: threading.Lock) -> None:
+        with commit_lock:
+            pass
+
+    def _execute_sync(
+        self, *, path: str | None, old_text: str | None,
+        new_text: str | None, replace_all: bool, occurrence: int | None,
+        line_hint: int | None, expected_replacements: int | None,
+        cancelled: threading.Event, commit_lock: threading.Lock,
+    ) -> str:
         try:
             if not path:
                 raise ValueError("Unknown path")
@@ -892,9 +950,12 @@ class EditFileTool(_FsTool):
             # Create-file semantics: old_text='' + file doesn't exist → create
             if not file_exists:
                 if old_text == "":
-                    fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8")
-                    self._file_states.record_write(fp)
+                    with commit_lock:
+                        if cancelled.is_set():
+                            return ToolResult.error("Error: edit_file cancelled.")
+                        fp.parent.mkdir(parents=True, exist_ok=True)
+                        fp.write_text(new_text, encoding="utf-8")
+                        self._file_states.record_write(fp)
                     return f"Successfully created {fp}"
                 return self._file_not_found_msg(path, fp)
 
@@ -912,8 +973,11 @@ class EditFileTool(_FsTool):
                 content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8")
-                self._file_states.record_write(fp)
+                with commit_lock:
+                    if cancelled.is_set():
+                        return ToolResult.error("Error: edit_file cancelled.")
+                    fp.write_text(new_text, encoding="utf-8")
+                    self._file_states.record_write(fp)
                 return f"Successfully edited {fp}"
 
             # Read-before-edit check
@@ -923,7 +987,11 @@ class EditFileTool(_FsTool):
             uses_crlf = b"\r\n" in raw
             content = raw.decode("utf-8").replace("\r\n", "\n")
             norm_old = old_text.replace("\r\n", "\n")
-            matches = _find_matches(content, norm_old)
+            matches = _find_matches(
+                content,
+                norm_old,
+                max_exact_matches=occurrence,
+            )
 
             if not matches:
                 return self._not_found_msg(old_text, content, path)
@@ -1000,8 +1068,11 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
-            self._file_states.record_write(fp)
+            with commit_lock:
+                if cancelled.is_set():
+                    return ToolResult.error("Error: edit_file cancelled.")
+                fp.write_bytes(new_content.encode("utf-8"))
+                self._file_states.record_write(fp)
             msg = f"Successfully edited {fp}"
             if warning:
                 msg = f"{warning}\n{msg}"

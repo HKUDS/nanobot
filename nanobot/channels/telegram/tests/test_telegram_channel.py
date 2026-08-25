@@ -1488,7 +1488,14 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
         MessageBus(),
     )
     _install_ready_app(channel)
-    monkeypatch.setattr("nanobot.channels.telegram.runtime.validate_url_target", lambda url: (True, ""))
+
+    async def allow_url(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.async_validate_url_target",
+        allow_url,
+    )
 
     await channel.send(
         OutboundMessage(
@@ -1546,9 +1553,13 @@ async def test_send_blocks_unsafe_remote_media_url(monkeypatch) -> None:
         MessageBus(),
     )
     _install_ready_app(channel)
+
+    async def deny_url(_url: str) -> tuple[bool, str]:
+        return False, "Blocked: example.com resolves to private/internal address 127.0.0.1"
+
     monkeypatch.setattr(
-        "nanobot.channels.telegram.runtime.validate_url_target",
-        lambda url: (False, "Blocked: example.com resolves to private/internal address 127.0.0.1"),
+        "nanobot.channels.telegram.runtime.async_validate_url_target",
+        deny_url,
     )
 
     await channel.send(

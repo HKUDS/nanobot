@@ -29,6 +29,7 @@ from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, 
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.webui.settings_contracts import (
     QueryParams,
     SettingsRequest,
@@ -1651,6 +1652,30 @@ class ModelSettingsHandler:
         if self.settings.refresh_runtime_config is not None:
             self.settings.refresh_runtime_config()
 
+    async def _mutate_and_refresh(
+        self,
+        operation: SettingsOperation,
+        query: QueryParams,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        payload = await self.settings.mutate_async(operation, query, **kwargs)
+        self._refresh_runtime_config()
+        return payload
+
+    async def _update_provider_and_runtime(
+        self,
+        operation: SettingsOperation,
+        query: QueryParams,
+        apply_image_runtime_change: Callable[
+            [dict[str, Any]],
+            Awaitable[tuple[dict[str, Any], bool]],
+        ],
+    ) -> tuple[dict[str, Any], bool]:
+        payload = await self.settings.mutate_async(operation, query)
+        payload, image_restart_cleared = await apply_image_runtime_change(payload)
+        self._refresh_runtime_config()
+        return payload, image_restart_cleared
+
     async def handle(
         self,
         action: str,
@@ -1659,8 +1684,12 @@ class ModelSettingsHandler:
     ) -> SettingsRouteResult:
         try:
             if action == "agent-update":
-                payload = self.settings.mutate(operations.update_agent, request.query)
-                self._refresh_runtime_config()
+                payload = await shield_and_drain(
+                    self._mutate_and_refresh(
+                        operations.update_agent,
+                        request.query,
+                    )
+                )
                 return SettingsRouteResult.success(
                     payload,
                     decorate_restart=True,
@@ -1668,12 +1697,13 @@ class ModelSettingsHandler:
                 )
 
             if action == "model-update":
-                payload = self.settings.mutate(
-                    operations.update_model,
-                    request.query,
-                    rename_model_preset=self.settings.rename_model_preset,
+                payload = await shield_and_drain(
+                    self._mutate_and_refresh(
+                        operations.update_model,
+                        request.query,
+                        rename_model_preset=self.settings.rename_model_preset,
+                    )
                 )
-                self._refresh_runtime_config()
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
             mutation = {
@@ -1684,19 +1714,19 @@ class ModelSettingsHandler:
                 "provider-create": operations.create_provider,
             }.get(action)
             if mutation is not None:
-                payload = self.settings.mutate(mutation, request.query)
-                self._refresh_runtime_config()
+                payload = await shield_and_drain(
+                    self._mutate_and_refresh(mutation, request.query)
+                )
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
             if action == "provider-update":
-                payload = self.settings.mutate(
-                    operations.update_provider,
-                    request.query,
+                payload, image_restart_cleared = await shield_and_drain(
+                    self._update_provider_and_runtime(
+                        operations.update_provider,
+                        request.query,
+                        operations.apply_image_runtime_change,
+                    )
                 )
-                payload, image_restart_cleared = await operations.apply_image_runtime_change(
-                    payload
-                )
-                self._refresh_runtime_config()
                 return SettingsRouteResult.success(
                     payload,
                     decorate_restart=True,
@@ -1724,11 +1754,13 @@ class ModelSettingsHandler:
                 return SettingsRouteResult.success(payload)
 
             if action == "oauth-login":
-                payload = await asyncio.to_thread(
-                    self.settings.read,
-                    operations.oauth_login,
-                    request.query,
-                    oauth_flows=self.settings.oauth_flows,
+                payload = await shield_and_drain(
+                    asyncio.to_thread(
+                        self.settings.read,
+                        operations.oauth_login,
+                        request.query,
+                        oauth_flows=self.settings.oauth_flows,
+                    )
                 )
             elif action == "oauth-complete":
                 raw_response = (request.payload or {}).get("authorization_response")
@@ -1736,19 +1768,23 @@ class ModelSettingsHandler:
                     raise WebUISettingsError(
                         "OAuth authorization response must be a string"
                     )
-                payload = await asyncio.to_thread(
-                    self.settings.read,
-                    operations.oauth_complete,
-                    request.query,
-                    raw_response or None,
-                    oauth_flows=self.settings.oauth_flows,
+                payload = await shield_and_drain(
+                    asyncio.to_thread(
+                        self.settings.read,
+                        operations.oauth_complete,
+                        request.query,
+                        raw_response or None,
+                        oauth_flows=self.settings.oauth_flows,
+                    )
                 )
             elif action == "oauth-logout":
-                payload = await asyncio.to_thread(
-                    self.settings.read,
-                    operations.oauth_logout,
-                    request.query,
-                    oauth_flows=self.settings.oauth_flows,
+                payload = await shield_and_drain(
+                    asyncio.to_thread(
+                        self.settings.read,
+                        operations.oauth_logout,
+                        request.query,
+                        oauth_flows=self.settings.oauth_flows,
+                    )
                 )
             else:
                 return SettingsRouteResult.failure(404, "unknown settings action")

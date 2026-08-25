@@ -149,9 +149,13 @@ async def test_download_image_rejects_redirects(tmp_path, monkeypatch) -> None:
     channel = _channel()
     channel._media_root = tmp_path
     channel._http = _FakeHttp(_FakeResponse(status=302))
+
+    async def allow_url(_url: str) -> tuple[bool, str]:
+        return True, ""
+
     monkeypatch.setattr(
-        "nanobot.channels.napcat.runtime.validate_url_target",
-        lambda _url: (True, ""),
+        "nanobot.channels.napcat.runtime.async_validate_url_target",
+        allow_url,
     )
 
     result = await channel._download_image({"url": "https://example.com/a.png", "file": "a.png"})

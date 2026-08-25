@@ -40,7 +40,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
-from nanobot.security.network import validate_url_target
+from nanobot.security.network import async_validate_url_target
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
 try:
@@ -458,7 +458,7 @@ class QQChannel(BaseChannel):
                 return None, None
 
         # Remote URL
-        ok, err = validate_url_target(media_ref)
+        ok, err = await async_validate_url_target(media_ref)
         if not ok:
             self.logger.warning("outbound media URL validation failed url={} err={}", media_ref, err)
             return None, None

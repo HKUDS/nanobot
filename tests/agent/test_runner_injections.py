@@ -1234,6 +1234,32 @@ async def test_submitted_cron_turn_reports_pending_until_completed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_accepted_automation_turn_preserves_wait_for_timeout(tmp_path):
+    """Accepted-turn signalling must not leak through asyncio timeout semantics."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.cron.session_turns import CRON_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._running = True
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="cron",
+        chat_id="chat-1",
+        content="scheduled work",
+        metadata={CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-timeout"}},
+        session_key_override="websocket:chat-1",
+    )
+
+    submit_task = asyncio.create_task(
+        asyncio.wait_for(loop.submit_cron_turn(msg), timeout=0.01)
+    )
+    assert await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5) is msg
+
+    with pytest.raises(TimeoutError):
+        await submit_task
+
+
+@pytest.mark.asyncio
 async def test_submitted_local_trigger_turn_reports_pending_until_completed(tmp_path):
     """Local triggers remain marked pending while their session turn is in flight."""
     from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -1818,3 +1844,53 @@ async def test_injection_cycle_cap_on_error_path():
     assert result.had_injections is True
     # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks
     assert call_count["n"] == _MAX_INJECTION_CYCLES + 1
+
+
+@pytest.mark.asyncio
+async def test_accepted_direct_automation_turn_keeps_single_effect_owner():
+    """Cancelling a submitter after direct admission must not cancel or replay its work."""
+    from nanobot.agent.automation_turns import AutomationTurnAcceptedCancellation
+    from nanobot.agent.cron_turns import CronTurnCoordinator
+    from nanobot.bus.events import InboundMessage
+    from nanobot.cron.session_turns import CRON_TRIGGER_META
+
+    dispatch_started = asyncio.Event()
+    release_dispatch = asyncio.Event()
+    effect_completed = asyncio.Event()
+    effects: list[str] = []
+
+    async def dispatch(msg: InboundMessage) -> None:
+        dispatch_started.set()
+        await release_dispatch.wait()
+        effects.append(msg.content)
+        coordinator.complete(msg)
+        effect_completed.set()
+
+    coordinator = CronTurnCoordinator(
+        publish_inbound=lambda _msg: asyncio.sleep(0),
+        dispatch=dispatch,
+        is_running=lambda: False,
+    )
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="cron",
+        chat_id="chat-1",
+        content="scheduled work",
+        metadata={CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-direct"}},
+        session_key_override="websocket:chat-1",
+    )
+
+    submit_task = asyncio.create_task(coordinator.submit(msg))
+    try:
+        await asyncio.wait_for(dispatch_started.wait(), timeout=0.5)
+        submit_task.cancel()
+        with pytest.raises(AutomationTurnAcceptedCancellation):
+            await submit_task
+        assert effects == []
+
+        release_dispatch.set()
+        await asyncio.wait_for(effect_completed.wait(), timeout=0.5)
+        assert effects == ["scheduled work"]
+    finally:
+        release_dispatch.set()
+        await asyncio.gather(submit_task, return_exceptions=True)

@@ -4,9 +4,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import os
 import re
+import threading
+import time
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, TypeVar
@@ -125,6 +128,8 @@ class _SearchTool(_FsTool):
 class FindFilesTool(_SearchTool):
     """Find files by path fragment, glob, or type."""
     _scopes = {"core", "subagent"}
+    _MAX_SCAN_PATHS = 500_000
+    _MAX_SCAN_SECONDS = 30.0
 
     @property
     def name(self) -> str:
@@ -218,65 +223,110 @@ class FindFilesTool(_SearchTool):
         offset: int = 0,
         **kwargs: Any,
     ) -> str:
+        cancelled = threading.Event()
         try:
-            target = self._resolve(path or ".")
-            if not target.exists():
-                return ToolResult.error(f"Error: Path not found: {path}")
-            if not (target.is_dir() or target.is_file()):
-                return ToolResult.error(f"Error: Unsupported path: {path}")
-
-            if sort not in {"path", "modified"}:
-                return ToolResult.error("Error: sort must be 'path' or 'modified'")
-
-            limit = (
-                _DEFAULT_FILE_HEAD_LIMIT
-                if head_limit is None
-                else None if head_limit == 0 else head_limit
+            return await asyncio.to_thread(
+                self._execute_sync,
+                path=path,
+                query=query,
+                glob=glob,
+                file_type=type,
+                include_dirs=include_dirs,
+                sort=sort,
+                head_limit=head_limit,
+                offset=offset,
+                cancelled=cancelled,
             )
-            root = target if target.is_dir() else target.parent
-            matches: list[tuple[str, float]] = []
-
-            for candidate in self._iter_paths(target, include_dirs=include_dirs):
-                if candidate.is_dir() and not include_dirs:
-                    continue
-                rel_path = candidate.relative_to(root).as_posix()
-                display_path = self._display_path(candidate, root)
-                name = candidate.name
-
-                if glob and not _match_glob(rel_path, name, glob):
-                    continue
-                if candidate.is_file() and not _matches_type(name, type):
-                    continue
-                if candidate.is_dir() and type:
-                    continue
-                if not _matches_query(display_path, query):
-                    continue
-                try:
-                    mtime = candidate.stat().st_mtime
-                except OSError:
-                    mtime = 0.0
-                suffix = "/" if candidate.is_dir() else ""
-                matches.append((display_path + suffix, mtime))
-
-            if sort == "modified":
-                matches.sort(key=lambda item: (-item[1], item[0]))
-            else:
-                matches.sort(key=lambda item: item[0])
-
-            paths = [item[0] for item in matches]
-            paged, truncated = _paginate(paths, limit, offset)
-            if not paged:
-                return "No files found"
-
-            result = "\n".join(paged)
-            note = _pagination_note(limit, offset, truncated)
-            if note:
-                result += "\n\n" + note
-            return result
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
             return ToolResult.error(f"Error finding files: {e}")
+
+    def _execute_sync(
+        self,
+        *,
+        path: str,
+        query: str | None,
+        glob: str | None,
+        file_type: str | None,
+        include_dirs: bool,
+        sort: str,
+        head_limit: int | None,
+        offset: int,
+        cancelled: threading.Event,
+    ) -> str:
+        target = self._resolve(path or ".")
+        if not target.exists():
+            return ToolResult.error(f"Error: Path not found: {path}")
+        if not (target.is_dir() or target.is_file()):
+            return ToolResult.error(f"Error: Unsupported path: {path}")
+
+        if sort not in {"path", "modified"}:
+            return ToolResult.error("Error: sort must be 'path' or 'modified'")
+
+        limit = (
+            _DEFAULT_FILE_HEAD_LIMIT
+            if head_limit is None
+            else None if head_limit == 0 else head_limit
+        )
+        root = target if target.is_dir() else target.parent
+        matches: list[tuple[str, float]] = []
+        deadline = time.monotonic() + self._MAX_SCAN_SECONDS
+        scanned = 0
+
+        for candidate in self._iter_paths(target, include_dirs=include_dirs):
+            if cancelled.is_set():
+                raise RuntimeError("find_files scan cancelled")
+            scanned += 1
+            if scanned > self._MAX_SCAN_PATHS:
+                return ToolResult.error(
+                    f"Error: find_files scan exceeded {self._MAX_SCAN_PATHS} paths; "
+                    "narrow path, query, glob, or type and retry."
+                )
+            if time.monotonic() > deadline:
+                return ToolResult.error(
+                    f"Error: find_files scan exceeded {self._MAX_SCAN_SECONDS:g} seconds; "
+                    "narrow path, query, glob, or type and retry."
+                )
+            if candidate.is_dir() and not include_dirs:
+                continue
+            rel_path = candidate.relative_to(root).as_posix()
+            display_path = self._display_path(candidate, root)
+            name = candidate.name
+
+            if glob and not _match_glob(rel_path, name, glob):
+                continue
+            if candidate.is_file() and not _matches_type(name, file_type):
+                continue
+            if candidate.is_dir() and file_type:
+                continue
+            if not _matches_query(display_path, query):
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            suffix = "/" if candidate.is_dir() else ""
+            matches.append((display_path + suffix, mtime))
+
+        if sort == "modified":
+            matches.sort(key=lambda item: (-item[1], item[0]))
+        else:
+            matches.sort(key=lambda item: item[0])
+
+        paths = [item[0] for item in matches]
+        paged, truncated = _paginate(paths, limit, offset)
+        if not paged:
+            return "No files found"
+
+        result = "\n".join(paged)
+        note = _pagination_note(limit, offset, truncated)
+        if note:
+            result += "\n\n" + note
+        return result
 
 
 class GrepTool(_SearchTool):

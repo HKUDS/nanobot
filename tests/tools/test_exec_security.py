@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import sys
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -171,6 +173,37 @@ async def test_exec_blocks_chained_internal_url():
             command="echo start && curl http://169.254.169.254/latest/meta-data/ && echo done"
         )
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_restricted_exec_url_guard_keeps_event_loop_responsive(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver_started = threading.Event()
+    release_resolver = threading.Event()
+
+    def slow_private_resolver(hostname, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+        resolver_started.set()
+        assert release_resolver.wait(timeout=1)
+        return _fake_resolve_private(hostname, port, family, type)
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_private_resolver)
+    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=True)
+    task = asyncio.create_task(tool.execute(command="curl https://example.com/latest"))
+    safety_release = threading.Timer(0.2, release_resolver.set)
+    safety_release.start()
+    try:
+        assert await asyncio.to_thread(resolver_started.wait, 0.5)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        release_resolver.set()
+        safety_release.cancel()
+
+    result = await asyncio.wait_for(task, timeout=0.5)
+    assert "internal/private URL detected" in result
 
 
 # --- #2989: block writes to nanobot internal state files -----------------

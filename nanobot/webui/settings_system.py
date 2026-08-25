@@ -23,6 +23,7 @@ from nanobot.config.schema import Config
 from nanobot.llm_usage import llm_usage_payload
 from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.webui.settings_capabilities import network_safety_payload
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -446,11 +447,16 @@ class SystemSettingsHandler:
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
         try:
-            payload = await asyncio.to_thread(
+            pending = asyncio.to_thread(
                 operations.cli_apps_action,
                 action,
                 request.query,
                 config_path=self.settings.config.path,
+            )
+            payload = (
+                await shield_and_drain(pending)
+                if action in {"install", "update", "uninstall"}
+                else await pending
             )
         except WebUISettingsError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
@@ -505,17 +511,29 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
-        try:
+        allow_install = (
+            action != "enable"
+            or await self.allow_feature_package_install(request)
+        )
+
+        async def mutate_and_apply() -> dict[str, Any]:
             payload = await asyncio.to_thread(
                 self._nanobot_features_action,
                 action,
                 request.query,
                 operations,
-                allow_install=(
-                    action != "enable"
-                    or self.allow_feature_package_install(request)
-                ),
+                allow_install=allow_install,
             )
+            payload = await self._apply_feature_runtime_change(
+                action,
+                request.query,
+                payload,
+                operations,
+            )
+            return self._with_channel_runtime_status(payload, operations)
+
+        try:
+            payload = await shield_and_drain(mutate_and_apply())
         except OptionalFeatureError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
         except Exception as exc:
@@ -527,13 +545,6 @@ class SystemSettingsHandler:
                     action,
                 )
             return SettingsRouteResult.failure(status, message)
-        payload = await self._apply_feature_runtime_change(
-            action,
-            request.query,
-            payload,
-            operations,
-        )
-        payload = self._with_channel_runtime_status(payload, operations)
         return SettingsRouteResult.success(
             payload,
             decorate_restart=True,
@@ -629,6 +640,15 @@ class SystemSettingsHandler:
         request: SettingsRequest,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        return await shield_and_drain(
+            self._channel_configure_settled(request, operations)
+        )
+
+    async def _channel_configure_settled(
+        self,
+        request: SettingsRequest,
+        operations: SystemSettingsOperations,
+    ) -> SettingsRouteResult:
         name = (query_first(request.query, "name") or "").strip()
         instance_id = (
             query_first(request.query, "instance_id") or "default"
@@ -682,7 +702,7 @@ class SystemSettingsHandler:
                 "enable",
                 feature_query,
                 operations,
-                allow_install=self.allow_feature_package_install(request),
+                allow_install=await self.allow_feature_package_install(request),
             )
         except OptionalFeatureError as exc:
             return SettingsRouteResult.failure(
@@ -826,6 +846,22 @@ class SystemSettingsHandler:
         payload: dict[str, Any],
         operations: SystemSettingsOperations,
     ) -> dict[str, Any]:
+        return await shield_and_drain(
+            self._settle_channel_connect_success(
+                request,
+                channel_name,
+                payload,
+                operations,
+            )
+        )
+
+    async def _settle_channel_connect_success(
+        self,
+        request: SettingsRequest,
+        channel_name: str,
+        payload: dict[str, Any],
+        operations: SystemSettingsOperations,
+    ) -> dict[str, Any]:
         target = {"name": [channel_name]}
         if payload.get("instance_id"):
             target["instance_id"] = [str(payload["instance_id"])]
@@ -835,11 +871,11 @@ class SystemSettingsHandler:
                 "enable",
                 target,
                 operations,
-                allow_install=self.allow_feature_package_install(request),
+                allow_install=await self.allow_feature_package_install(request),
             )
         except OptionalFeatureError as exc:
             features = self.feature_runtime_fallback(
-                self._nanobot_features_payload(operations),
+                await asyncio.to_thread(self._nanobot_features_payload, operations),
                 message=(
                     f"{channel_name} connected, but enabling channel support failed: "
                     f"{exc.message}"
@@ -859,13 +895,12 @@ class SystemSettingsHandler:
         )
         return updated
 
-    def allow_feature_package_install(self, request: SettingsRequest) -> bool:
+    async def allow_feature_package_install(self, request: SettingsRequest) -> bool:
         if request.local_browser:
             return True
         try:
-            return bool(
-                self.settings.config.load().tools.webui_allow_remote_package_install
-            )
+            config = await self.settings.config.load_async()
+            return bool(config.tools.webui_allow_remote_package_install)
         except Exception:
             self.logger.exception("failed to load remote package install policy")
             return False
@@ -925,12 +960,17 @@ class SystemSettingsHandler:
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
         try:
-            payload = await operations.mcp_presets_action(
+            pending = operations.mcp_presets_action(
                 action,
                 request.query,
                 reload_mcp=operations.reload_mcp,
                 mcp_runtime_status=operations.mcp_runtime_status,
                 config=self.settings.config,
+            )
+            payload = (
+                await pending
+                if action is None
+                else await shield_and_drain(pending)
             )
         except Exception as exc:
             status = getattr(exc, "status", 500)

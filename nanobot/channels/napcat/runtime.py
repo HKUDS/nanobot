@@ -24,7 +24,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from nanobot.security.network import validate_url_target
+from nanobot.security.network import async_validate_url_target
 from nanobot.utils.helpers import safe_filename
 
 _DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=60)
@@ -473,7 +473,7 @@ class NapcatChannel(BaseChannel):
         if not ref:
             return None
         if ref.startswith(("http://", "https://")):
-            ok, err = validate_url_target(ref)
+            ok, err = await async_validate_url_target(ref)
             if not ok:
                 logger.warning("napcat: rejected remote image '{}': {}", ref, err)
                 return None
@@ -525,7 +525,7 @@ class NapcatChannel(BaseChannel):
         # logger.debug("napcat: downloading image from {}", url)
         if self._http is None:
             return None
-        ok, err = validate_url_target(url)
+        ok, err = await async_validate_url_target(url)
         if not ok:
             logger.warning("napcat: skip image '{}': {}", url, err)
             return None

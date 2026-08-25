@@ -30,11 +30,11 @@ def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-def _fake_resolve_private(hostname, port, family=0, type_=0):
+def _fake_resolve_private(hostname, port, family=0, type_=0, proto=0, flags=0):
     return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.169.254", 0))]
 
 
-def _fake_resolve_public(hostname, port, family=0, type_=0):
+def _fake_resolve_public(hostname, port, family=0, type_=0, proto=0, flags=0):
     return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
 
 
@@ -99,7 +99,7 @@ async def test_web_fetch_blocks_private_ip():
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_localhost():
     tool = WebFetchTool()
-    def _resolve_localhost(hostname, port, family=0, type_=0):
+    def _resolve_localhost(hostname, port, family=0, type_=0, proto=0, flags=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
     with patch("nanobot.security.network.socket.getaddrinfo", _resolve_localhost):
         result = await tool.execute(url="http://localhost/admin")
@@ -112,7 +112,7 @@ async def test_web_fetch_blocks_localhost_even_in_full_workspace_scope(tmp_path)
     tool = WebFetchTool()
     scope = build_workspace_scope(tmp_path, "full")
 
-    def _resolve_localhost(hostname, port, family=0, type_=0):
+    def _resolve_localhost(hostname, port, family=0, type_=0, proto=0, flags=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
 
     token = bind_workspace_scope(scope)
@@ -439,7 +439,7 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
     monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
-    def resolve_public_start_only(hostname, port, family=0, type_=0):
+    def resolve_public_start_only(hostname, port, family=0, type_=0, proto=0, flags=0):
         if hostname == "attacker.example":
             return _fake_resolve_public(hostname, port, family, type_)
         return _REAL_GETADDRINFO(hostname, port, family, type_)
@@ -485,7 +485,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
     monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
-    def resolve_public_start_only(hostname, port, family=0, type_=0):
+    def resolve_public_start_only(hostname, port, family=0, type_=0, proto=0, flags=0):
         if hostname == "example.com":
             return _fake_resolve_public(hostname, port, family, type_)
         return _REAL_GETADDRINFO(hostname, port, family, type_)
@@ -526,7 +526,7 @@ async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
     monkeypatch.setattr(web_module.httpx, "AsyncClient", TransportAsyncClient)
     monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
-    def resolve_public_start_only(hostname, port, family=0, type_=0):
+    def resolve_public_start_only(hostname, port, family=0, type_=0, proto=0, flags=0):
         if hostname == "attacker.example":
             return _fake_resolve_public(hostname, port, family, type_)
         return _REAL_GETADDRINFO(hostname, port, family, type_)

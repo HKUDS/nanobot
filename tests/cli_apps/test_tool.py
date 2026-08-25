@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
+import threading
 import time
 from pathlib import Path
 
+import pytest
+
+from nanobot.agent.tools import cli_apps as cli_apps_tool
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
@@ -52,16 +55,22 @@ def test_run_cli_app_uses_installed_registry_app(
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert "shell" not in kwargs or kwargs["shell"] is False
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout="tool:" + " ".join(argv[1:]),
-            stderr="",
-        )
+    class _Process:
+        returncode = 0
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"tool:--json project list", b""
+
+    async def fake_create_subprocess_exec(*argv: str, **kwargs: object) -> _Process:
+        assert argv == (resolved, "--json", "project", "list")
+        assert "shell" not in kwargs
+        return _Process()
+
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr("nanobot.apps.cli.service._WindowsJob.create", lambda: None)
     monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
 
     tool = CliAppsTool(
@@ -156,3 +165,90 @@ def test_cli_app_tool_provides_context_only_for_attachment(tmp_path: Path) -> No
     assert attached is not None
     assert attached.source == "cli_apps"
     assert "CLI App Attachment: @drawio" in attached.content
+
+
+@pytest.mark.asyncio
+async def test_run_cli_app_uses_threaded_sync_fallback_for_compatible_manager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_loop_thread = threading.get_ident()
+    seen: dict[str, object] = {}
+
+    class CompatibleManager:
+        def __init__(
+            self,
+            *,
+            workspace: Path,
+            runtime: CliAppsRuntimeConfig,
+        ) -> None:
+            seen["workspace"] = workspace
+            seen["runtime"] = runtime
+
+        def run_async(self, *_args: object, **_kwargs: object) -> str:
+            raise AssertionError("a synchronous compatibility method must not be awaited")
+
+        def run(self, name: str, **kwargs: object) -> str:
+            seen["thread"] = threading.get_ident()
+            seen["name"] = name
+            seen["kwargs"] = kwargs
+            return "compatible result"
+
+    monkeypatch.setattr(cli_apps_tool, "CliAppManager", CompatibleManager)
+    runtime = CliAppsRuntimeConfig(run_timeout=7)
+    tool = CliAppsTool(workspace=tmp_path, restrict_to_workspace=True, runtime=runtime)
+
+    result = await tool.execute(
+        name="demo",
+        args=["show"],
+        json=True,
+        working_dir=str(tmp_path),
+        timeout=3,
+    )
+
+    assert result == "compatible result"
+    assert seen["workspace"] == tmp_path
+    assert seen["runtime"] is runtime
+    assert seen["thread"] != event_loop_thread
+    assert seen["name"] == "demo"
+    assert seen["kwargs"] == {
+        "args": ["show"],
+        "json_output": True,
+        "working_dir": str(tmp_path),
+        "timeout": 3,
+        "restrict_to_workspace": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_cli_app_preserves_native_manager_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fake_run_async(self: CliAppManager, name: str, **_kwargs: object) -> str:
+        assert name == "demo"
+        started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        raise AssertionError("unreachable")
+
+    def fail_sync_run(self: CliAppManager, name: str, **_kwargs: object) -> str:
+        raise AssertionError(f"native async manager fell back to run({name!r})")
+
+    monkeypatch.setattr(CliAppManager, "run_async", fake_run_async)
+    monkeypatch.setattr(CliAppManager, "run", fail_sync_run)
+    tool = CliAppsTool(workspace=tmp_path)
+
+    task = asyncio.create_task(tool.execute(name="demo"))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancelled.is_set()

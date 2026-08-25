@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -651,6 +652,231 @@ async def test_manual_run_persists_completion_when_callback_lists_jobs(tmp_path)
     assert state["lastError"] is None
     assert len(state["runHistory"]) == 1
     assert state["runHistory"][0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_same_job_manual_runs_do_not_overlap(tmp_path) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def on_job(job: CronJob) -> None:
+        calls.append(job.id)
+        entered.set()
+        await release.wait()
+
+    service = CronService(tmp_path / "cron" / "jobs.json", on_job=on_job)
+    job = service.add_job(
+        name="single-flight",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+
+    first = asyncio.create_task(service.run_job(job.id))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert await service.run_job(job.id) is False
+        assert calls == [job.id]
+    finally:
+        release.set()
+        assert await first is True
+
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert len(loaded.state.run_history) == 1
+
+
+@pytest.mark.asyncio
+async def test_timer_and_manual_run_of_same_job_do_not_overlap(tmp_path) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def on_job(job: CronJob) -> None:
+        calls.append(job.id)
+        entered.set()
+        await release.wait()
+
+    service = CronService(tmp_path / "cron" / "jobs.json", on_job=on_job)
+    service._running = True
+    service._arm_timer = lambda: None
+    service._load_store()
+    job = service.add_job(
+        name="timer-single-flight",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    job.state.next_run_at_ms = max(1, int(time.time() * 1000) - 1_000)
+    service._save_store()
+
+    timer = asyncio.create_task(service._on_timer())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert await service.run_job(job.id, force=True) is False
+        assert calls == [job.id]
+    finally:
+        release.set()
+        await timer
+        service.stop()
+
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert len(loaded.state.run_history) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_cancellation_waits_for_load_and_fully_starts(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+    job = service.add_job(
+        name="load-settlement",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    original_load_store = service._load_store
+
+    def blocking_load_store():
+        entered.set()
+        if not release.wait(timeout=2):
+            raise TimeoutError("test did not release cron load worker")
+        return original_load_store()
+
+    monkeypatch.setattr(service, "_load_store", blocking_load_store)
+    start = asyncio.create_task(service.start())
+    assert await asyncio.to_thread(entered.wait, 1)
+
+    try:
+        assert start.cancel()
+        await asyncio.sleep(0)
+        assert not start.done()
+        assert not store_path.exists()
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(start, timeout=1)
+
+        assert service._running is True
+        timer = service._timer_task
+        assert timer is not None and not timer.done()
+        assert service._store_dirty is False
+        assert (tmp_path / "cron" / "action.jsonl").read_text(encoding="utf-8") == ""
+        persisted = store_path.read_bytes()
+        assert json.loads(persisted)["jobs"][0]["id"] == job.id
+
+        await asyncio.sleep(0.01)
+        assert store_path.read_bytes() == persisted
+        assert service._timer_task is timer
+    finally:
+        release.set()
+        await asyncio.gather(start, return_exceptions=True)
+        timer = service._timer_task
+        service.stop()
+        if timer is not None:
+            await asyncio.gather(timer, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_start_repeated_cancellation_waits_for_persistence_and_fully_starts(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+    entered = threading.Event()
+    release = threading.Event()
+    original_save_store = service._save_store
+
+    def blocking_save_store() -> None:
+        entered.set()
+        if not release.wait(timeout=2):
+            raise TimeoutError("test did not release cron persistence worker")
+        original_save_store()
+
+    monkeypatch.setattr(service, "_save_store", blocking_save_store)
+    start = asyncio.create_task(service.start())
+    assert await asyncio.to_thread(entered.wait, 1)
+
+    try:
+        assert start.cancel()
+        await asyncio.sleep(0)
+        assert not start.done()
+        assert start.cancel()
+        await asyncio.sleep(0)
+        assert not start.done()
+        assert not store_path.exists()
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(start, timeout=1)
+
+        assert service._running is True
+        timer = service._timer_task
+        assert timer is not None and not timer.done()
+        assert service._store_dirty is False
+        persisted = store_path.read_bytes()
+        assert json.loads(persisted) == {"version": 1, "jobs": []}
+
+        await asyncio.sleep(0.01)
+        assert store_path.read_bytes() == persisted
+        assert service._timer_task is timer
+    finally:
+        release.set()
+        await asyncio.gather(start, return_exceptions=True)
+        timer = service._timer_task
+        service.stop()
+        if timer is not None:
+            await asyncio.gather(timer, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_run_sync_cancellation_drains_worker_under_transaction_lock(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    entered = threading.Event()
+    release = threading.Event()
+    second_entered = threading.Event()
+    mutations: list[str] = []
+
+    def blocking_mutation() -> str:
+        entered.set()
+        if not release.wait(timeout=2):
+            raise TimeoutError("test did not release cron worker")
+        mutations.append("first")
+        return "first"
+
+    def later_mutation() -> str:
+        second_entered.set()
+        mutations.append("second")
+        return "second"
+
+    first = asyncio.create_task(service.run_sync(blocking_mutation))
+    assert await asyncio.to_thread(entered.wait, 1)
+    first.cancel()
+    second = asyncio.create_task(service.run_sync(later_mutation))
+    try:
+        await asyncio.sleep(0.05)
+        assert not first.done()
+        assert not second_entered.is_set()
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(first, timeout=1)
+        assert mutations == ["first"]
+
+        assert await asyncio.wait_for(second, timeout=1) == "second"
+        assert mutations == ["first", "second"]
+        await asyncio.sleep(0.01)
+        assert mutations == ["first", "second"]
+    finally:
+        release.set()
+        await asyncio.gather(first, second, return_exceptions=True)
 
 
 @pytest.mark.asyncio

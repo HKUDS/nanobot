@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
+import threading
+import time
 from unittest.mock import patch
 
 import pytest
 
 from nanobot.security.network import (
+    async_resolve_url_target,
+    async_validate_resolved_url,
     configure_ssrf_whitelist,
     contains_internal_url,
     env_proxy_applies_to_url,
@@ -362,3 +367,78 @@ def test_whitelist_allows_ipv6_mapped_cgnat():
             assert ok, f"Whitelisted IPv6-mapped CGNAT should be allowed, got: {err}"
     finally:
         configure_ssrf_whitelist([])
+
+
+@pytest.mark.asyncio
+async def test_async_dns_resolution_keeps_event_loop_responsive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+
+    def slow_resolver(hostname, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+        started.set()
+        time.sleep(0.08)
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_resolver)
+    task = asyncio.create_task(async_resolve_url_target("https://example.com/path"))
+    assert await asyncio.to_thread(started.wait, 0.5)
+    for _ in range(3):
+        await asyncio.sleep(0.01)
+    assert not task.done()
+
+    assert await asyncio.wait_for(task, timeout=0.5) == (
+        True,
+        "",
+        ("93.184.216.34",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_dns_validation_preserves_sync_security_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def resolver(hostname, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+        assert hostname == "evil.com"
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.169.254", 0)),
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+
+    sync_result = resolve_url_target("http://evil.com/latest")
+    async_result = await async_resolve_url_target("http://evil.com/latest")
+    redirect_result = await async_validate_resolved_url("http://evil.com/latest")
+
+    assert async_result == sync_result
+    assert async_result[0] is False
+    assert redirect_result[0] is False
+
+
+@pytest.mark.asyncio
+async def test_async_dns_resolution_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.get_running_loop()
+    never_resolves = asyncio.Event()
+
+    async def stalled_getaddrinfo(*args, **kwargs):
+        await never_resolves.wait()
+
+    monkeypatch.setattr(loop, "getaddrinfo", stalled_getaddrinfo)
+
+    result = await asyncio.wait_for(
+        async_resolve_url_target(
+            "https://example.com/path",
+            timeout_s=0.01,
+        ),
+        timeout=0.2,
+    )
+
+    assert result == (
+        False,
+        "Timed out resolving hostname: example.com",
+        (),
+    )

@@ -20,10 +20,10 @@ from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
+    async_resolve_url_target,
+    async_validate_url_target,
     env_proxy_applies_to_url,
     httpx_env_proxy_mounts,
-    resolve_url_target,
-    validate_url_target,
 )
 from nanobot.utils.cancellation import task_is_cancelling
 
@@ -249,7 +249,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     port = parsed.port
     if not port:
         port = 443 if parsed.scheme == "https" else 80
-    ok, _, resolved_ips = resolve_url_target(url)
+    ok, _, resolved_ips = await async_resolve_url_target(url)
     if not ok:
         return False
     if env_proxy_applies_to_url(url):
@@ -298,7 +298,7 @@ def _pinned_transport_kwargs() -> dict[str, Any]:
 
 async def _validate_mcp_request_url(request: httpx.Request) -> None:
     """Validate each outgoing MCP HTTP request, including redirect targets."""
-    ok, error = validate_url_target(str(request.url))
+    ok, error = await async_validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
@@ -1031,7 +1031,7 @@ async def connect_mcp_servers(
                     return False
 
             if transport_type in {"sse", "streamableHttp"}:
-                ok, error = validate_url_target(cfg.url)
+                ok, error = await async_validate_url_target(cfg.url)
                 if not ok:
                     logger.warning(
                         "MCP server '{}': blocked unsafe URL {} ({})",

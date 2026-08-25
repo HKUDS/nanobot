@@ -213,7 +213,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     oauth_mod.create_mcp_oauth_auth = create_auth  # type: ignore[attr-defined]
     oauth_mod.mcp_oauth_has_credentials = lambda _name, _url: True  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _allow_url)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", reachable)
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
@@ -1006,7 +1006,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     async def _reachable(_url: str) -> bool:
         return True
 
-    def _validate(_url: str) -> tuple[bool, str]:
+    async def _validate(_url: str) -> tuple[bool, str]:
         return True, ""
 
     class FakeAsyncClient:
@@ -1033,7 +1033,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
-    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
@@ -1105,7 +1105,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     sent_urls: list[str] = []
     used_transports: list[str] = []
 
-    def _validate(url: str, **_kwargs: object) -> tuple[bool, str]:
+    async def _validate(url: str, **_kwargs: object) -> tuple[bool, str]:
         checked_urls.append(url)
         if url == "http://127.0.0.1/private":
             return False, "loopback blocked"
@@ -1145,7 +1145,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
         await http_client.get("https://example.com/start")
         yield object(), object(), object()
 
-    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
@@ -1320,7 +1320,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     async def _reachable(_url: str) -> bool:
         return True
 
-    def _validate(_url: str) -> tuple[bool, str]:
+    async def _validate(_url: str) -> tuple[bool, str]:
         return True, ""
 
     @asynccontextmanager
@@ -1328,7 +1328,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
         captured["timeout"] = http_client.timeout
         yield object(), object(), object()
 
-    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
@@ -1371,7 +1371,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     async def _reachable(_url: str) -> bool:
         return True
 
-    def _validate(_url: str) -> tuple[bool, str]:
+    async def _validate(_url: str) -> tuple[bool, str]:
         return True, ""
 
     async def _create_auth(name: str, url: str, handlers: object) -> object:
@@ -1407,7 +1407,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
         assert http_client is not None
         yield object(), object(), object()
 
-    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
@@ -1461,7 +1461,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
     oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
     oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "async_validate_url_target", _allow_url)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _probe)
 
     stacks = await connect_mcp_servers(
@@ -1959,3 +1959,12 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     assert removed == 1
     assert wrapper.name not in registry.tool_names
     assert other_wrapper.name in registry.tool_names
+
+
+async def _allow_url(
+    _url: str,
+    *,
+    allow_loopback: bool = False,
+) -> tuple[bool, str]:
+    del allow_loopback
+    return True, ""

@@ -21,7 +21,10 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
-from nanobot.security.network import validate_resolved_url, validate_url_target
+from nanobot.security.network import (
+    async_validate_resolved_url,
+    async_validate_url_target,
+)
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
 DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
@@ -417,8 +420,8 @@ class DingTalkChannel(BaseChannel):
             return self._zip_bytes(filename, data)
         return data, filename, content_type
 
-    def _validate_remote_media_url(self, media_ref: str) -> bool:
-        ok, err = validate_url_target(media_ref)
+    async def _validate_remote_media_url(self, media_ref: str) -> bool:
+        ok, err = await async_validate_url_target(media_ref)
         if not ok:
             self.logger.warning("remote media URL blocked ref={} reason={}", media_ref, err)
             return False
@@ -434,7 +437,11 @@ class DingTalkChannel(BaseChannel):
         allowed_hosts = {host.lower() for host in self.config.remote_media_redirect_allowed_hosts}
         return next_host in allowed_hosts
 
-    def _next_remote_media_url(self, current_url: str, location: str | None) -> str | None:
+    async def _next_remote_media_url(
+        self,
+        current_url: str,
+        location: str | None,
+    ) -> str | None:
         if not self.config.allow_remote_media_redirects:
             self.logger.warning("media download redirect refused ref={}", current_url)
             return None
@@ -449,7 +456,7 @@ class DingTalkChannel(BaseChannel):
                 next_url,
             )
             return None
-        if not self._validate_remote_media_url(next_url):
+        if not await self._validate_remote_media_url(next_url):
             return None
         return next_url
 
@@ -461,7 +468,7 @@ class DingTalkChannel(BaseChannel):
         if not self._http:
             return None, None
 
-        if not self._validate_remote_media_url(media_ref):
+        if not await self._validate_remote_media_url(media_ref):
             return None, None
 
         try:
@@ -473,7 +480,7 @@ class DingTalkChannel(BaseChannel):
                 current_url = media_ref
                 for _ in range(DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS + 1):
                     async with stream("GET", current_url, follow_redirects=False) as resp:
-                        final_ok, final_err = validate_resolved_url(str(resp.url))
+                        final_ok, final_err = await async_validate_resolved_url(str(resp.url))
                         if not final_ok:
                             self.logger.warning(
                                 "remote media redirect blocked ref={} final={} reason={}",
@@ -483,7 +490,7 @@ class DingTalkChannel(BaseChannel):
                             )
                             return None, None
                         if 300 <= resp.status_code < 400:
-                            next_url = self._next_remote_media_url(
+                            next_url = await self._next_remote_media_url(
                                 str(resp.url), resp.headers.get("location")
                             )
                             if not next_url:
@@ -516,7 +523,9 @@ class DingTalkChannel(BaseChannel):
             current_url = media_ref
             for _ in range(DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS + 1):
                 resp = await self._http.get(current_url, follow_redirects=False)
-                final_ok, final_err = validate_resolved_url(str(getattr(resp, "url", current_url)))
+                final_ok, final_err = await async_validate_resolved_url(
+                    str(getattr(resp, "url", current_url))
+                )
                 if not final_ok:
                     self.logger.warning(
                         "remote media redirect blocked ref={} final={} reason={}",
@@ -526,7 +535,7 @@ class DingTalkChannel(BaseChannel):
                     )
                     return None, None
                 if 300 <= resp.status_code < 400:
-                    next_url = self._next_remote_media_url(
+                    next_url = await self._next_remote_media_url(
                         str(getattr(resp, "url", current_url)), resp.headers.get("location")
                     )
                     if not next_url:

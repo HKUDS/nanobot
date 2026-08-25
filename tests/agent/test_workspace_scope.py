@@ -3,7 +3,6 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -463,11 +462,21 @@ async def test_cli_app_scope_controls_working_dir(
 
     seen: dict[str, str] = {}
 
-    def fake_run(argv, **kwargs):
-        seen["cwd"] = kwargs["cwd"]
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+    class _Process:
+        returncode = 0
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"ok", b""
+
+    async def fake_create_subprocess_exec(*_argv: str, **kwargs: object) -> _Process:
+        seen["cwd"] = str(kwargs["cwd"])
+        return _Process()
+
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr("nanobot.apps.cli.service._WindowsJob.create", lambda: None)
     tool = CliAppsTool(
         workspace=tmp_path,
         restrict_to_workspace=True,

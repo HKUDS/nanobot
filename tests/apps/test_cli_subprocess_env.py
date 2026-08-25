@@ -42,17 +42,21 @@ def test_run_passes_filtered_env(monkeypatch, tmp_path) -> None:
     manager = CliAppManager(workspace=tmp_path, data_dir=tmp_path / "cli-apps")
     captured: dict[str, object] = {}
 
-    def fake_run(*args, **kwargs):
+    class _Process:
+        returncode = 0
+
+        def communicate(self, *, timeout: int) -> tuple[str, str]:
+            assert timeout == 60
+            return "ok", ""
+
+    def fake_popen(argv: list[str], **kwargs: object) -> _Process:
+        assert argv == ["/bin/echo", "hi"]
+        assert kwargs["text"] is True
         captured.update(kwargs)
+        return _Process()
 
-        class Result:
-            returncode = 0
-            stdout = "ok"
-            stderr = ""
-
-        return Result()
-
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("nanobot.apps.cli.service._WindowsJob.create", lambda: None)
     monkeypatch.setattr(manager, "get_app", lambda name: {"name": name, "entry_point": "echo"})
     monkeypatch.setattr(
         manager,

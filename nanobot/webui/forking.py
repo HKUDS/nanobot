@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from collections.abc import Mapping
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Any, TypeGuard
 
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.webui.transcript import (
     append_fork_marker,
     delete_webui_transcript,
@@ -93,24 +95,35 @@ async def handle_webui_fork_chat(
         await channel.send_webui_protocol_error(connection, "session_manager_unavailable")
         return
 
-    try:
-        forked = create_webui_chat_fork(
-            session_manager,
-            source_chat_id=source_chat_id,
-            before_user_index=raw_index,
-            title=envelope.get("title") if isinstance(envelope.get("title"), str) else None,
-        )
-        if forked is None:
-            await channel.send_webui_protocol_error(connection, "invalid fork source or index")
+    async def create_and_attach() -> None:
+        try:
+            forked = await asyncio.to_thread(
+                create_webui_chat_fork,
+                session_manager,
+                source_chat_id=source_chat_id,
+                before_user_index=raw_index,
+                title=(
+                    envelope.get("title")
+                    if isinstance(envelope.get("title"), str)
+                    else None
+                ),
+            )
+            if forked is None:
+                await channel.send_webui_protocol_error(
+                    connection,
+                    "invalid fork source or index",
+                )
+                return
+            fork_id, fork_key = forked
+        except Exception as exc:
+            channel.logger.warning("fork_chat failed: {}", exc)
+            await channel.send_webui_protocol_error(connection, "fork_chat_failed")
             return
-        fork_id, fork_key = forked
-    except Exception as exc:
-        channel.logger.warning("fork_chat failed: {}", exc)
-        await channel.send_webui_protocol_error(connection, "fork_chat_failed")
-        return
 
-    await channel.attach_webui_fork(
-        connection,
-        fork_id=fork_id,
-        fork_key=fork_key,
-    )
+        await channel.attach_webui_fork(
+            connection,
+            fork_id=fork_id,
+            fork_key=fork_key,
+        )
+
+    await shield_and_drain(create_and_attach())
