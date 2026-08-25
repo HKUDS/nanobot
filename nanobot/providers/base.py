@@ -252,10 +252,13 @@ class ProviderCallContext:
     The regular ``chat`` contract stays provider-agnostic. Responses-capable
     providers consume this context through the opt-in ``chat_with_context``
     hooks, while every other provider inherits the context-free delegation.
+    ``session_id`` gives providers a stable conversation-scoped routing key
+    without exposing that identity in the public message transcript.
     """
 
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
     context_window_tokens: int | None = None
+    session_id: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1640,6 +1643,7 @@ class LLMProvider(ABC):
                             context_window_tokens=(
                                 provider_context.context_window_tokens
                             ),
+                            session_id=provider_context.session_id,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(

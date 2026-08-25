@@ -495,6 +495,7 @@ class AgentRunner:
             model=spec.runtime.model,
             messages=messages,
             state=spec.provider_state,
+            session_id=spec.session_key,
         )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,

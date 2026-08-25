@@ -103,6 +103,7 @@ class OpenAICodexProvider(LLMProvider):
             provider=self._responses_state_provider(),
             model=_strip_model_prefix(model),
         )
+        session_id = provider_context.session_id if provider_context is not None else None
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -111,7 +112,7 @@ class OpenAICodexProvider(LLMProvider):
             "instructions": system_prompt,
             "input": input_items,
             "text": {"verbosity": "medium"},
-            "prompt_cache_key": _prompt_cache_key(messages[:2]),
+            "prompt_cache_key": _prompt_cache_key(messages[:2], session_id=session_id),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
@@ -496,8 +497,12 @@ async def _request_codex(
             return result
 
 
-def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
-    raw = json.dumps(messages, ensure_ascii=True, sort_keys=True)
+def _prompt_cache_key(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+) -> str:
+    raw = session_id or json.dumps(messages, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

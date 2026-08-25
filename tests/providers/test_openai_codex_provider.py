@@ -311,6 +311,37 @@ async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> None:
+    bodies: list[dict[str, Any]] = []
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return provider_base.LLMResponse(content="ok")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    provider = OpenAICodexProvider()
+
+    for session_id, first_request in (
+        ("session-a", "first request"),
+        ("session-a", "different visible prefix"),
+        ("session-b", "first request"),
+    ):
+        await provider.chat(
+            [
+                {"role": "system", "content": "You are nanobot."},
+                {"role": "user", "content": first_request},
+            ],
+            provider_context=provider_base.ProviderCallContext(
+                session_id=session_id,
+            ),
+        )
+
+    assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
+    assert bodies[0]["prompt_cache_key"] != bodies[2]["prompt_cache_key"]
+
+
+@pytest.mark.asyncio
 async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
     _mock_codex_token(monkeypatch)
