@@ -262,6 +262,12 @@ export interface MentionCandidate {
   session?: SessionMention
 }
 
+export interface SkillCandidate {
+  name: string
+  description: string
+  source: string
+}
+
 export interface MessageOptions {
   cliApps?: Array<{ name: string }>
   mcpPresets?: Array<{ name: string }>
@@ -298,6 +304,8 @@ export interface SessionSummary {
   pinned: boolean
   archived: boolean
 }
+
+const SKILL_REFERENCE_NAME = /^[A-Za-z0-9_-]+$/u
 
 const SLASH_COMMAND_LIFECYCLES = new Set([
   "side_channel",
@@ -679,6 +687,31 @@ export async function fetchSlashCommands(
       argHint: typeof value.arg_hint === "string" ? value.arg_hint : "",
       lifecycle: value.lifecycle as SlashCommandLifecycle,
       acceptsArgs: value.accepts_args === true,
+    }]
+  })
+}
+
+export async function fetchAvailableSkills(
+  apiUrl: string,
+  apiToken: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<SkillCandidate[]> {
+  if (!apiUrl || !apiToken) return []
+  const response = await fetchApi(apiUrl, apiToken, "/api/webui/skills", reauthenticate)
+  if (!response.ok) throw new Error(`skill request failed: HTTP ${response.status}`)
+  const payload = await response.json() as { skills?: unknown[] }
+  return (payload.skills || []).flatMap((value) => {
+    if (
+      !isRecord(value)
+      || typeof value.name !== "string"
+      || !SKILL_REFERENCE_NAME.test(value.name)
+      || value.enabled !== true
+      || value.available !== true
+    ) return []
+    return [{
+      name: value.name,
+      description: typeof value.description === "string" ? value.description : value.name,
+      source: typeof value.source === "string" ? value.source : "unknown",
     }]
   })
 }

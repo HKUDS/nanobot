@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   NanobotClient,
   GatewayConnectionError,
+  fetchAvailableSkills,
   fetchGatewayConnection,
   fetchHistory,
   fetchMentionCandidates,
@@ -798,6 +799,53 @@ describe("gateway protocol", () => {
         argHint: "[n]",
         lifecycle: "side_channel",
         acceptsArgs: true,
+      }])
+      expect(authorization).toBe("Bearer secret")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads only enabled and available skills", async () => {
+    const original = globalThis.fetch
+    let authorization = ""
+    globalThis.fetch = ((_: string | URL | Request, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("Authorization") || ""
+      return Promise.resolve(new Response(JSON.stringify({
+        skills: [
+          {
+            name: "verify",
+            description: "Verify public behavior",
+            source: "builtin",
+            enabled: true,
+            available: true,
+          },
+          {
+            name: "disabled",
+            description: "Disabled skill",
+            source: "workspace",
+            enabled: false,
+            available: true,
+          },
+          {
+            name: "unavailable",
+            description: "Missing dependency",
+            source: "builtin",
+            enabled: true,
+            available: false,
+          },
+          { name: "my skill", enabled: true, available: true },
+          { name: "技能", enabled: true, available: true },
+          { enabled: true, available: true },
+        ],
+      })))
+    }) as typeof fetch
+
+    try {
+      expect(await fetchAvailableSkills("http://nanobot.test", "secret")).toEqual([{
+        name: "verify",
+        description: "Verify public behavior",
+        source: "builtin",
       }])
       expect(authorization).toBe("Bearer secret")
     } finally {

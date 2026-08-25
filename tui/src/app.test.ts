@@ -10,6 +10,7 @@ import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
 import type {
   MessageOptions,
   RecoveryState,
+  SkillCandidate,
   SlashCommand,
   WorkspaceScopePayload,
 } from "./protocol"
@@ -511,6 +512,69 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.plainText).toBe("/history ")
     expect(ui.commandMenu.visible).toBe(false)
     expect(sent).toEqual([])
+  })
+
+  test("completes available skills with arrows, Enter, Tab, and Escape", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    const ui = app as unknown as {
+      ready: boolean
+      composer: TextareaRenderable
+      skillCandidates: SkillCandidate[]
+      skillMenu: { visible: boolean }
+    }
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => ui.ready)
+    ui.skillCandidates = [
+      { name: "simplify", description: "Simplify code", source: "workspace" },
+      { name: "verify", description: "Verify public behavior", source: "builtin" },
+    ]
+
+    await setup.mockInput.typeText("$")
+    expect(ui.skillMenu.visible).toBe(true)
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressEnter()
+    await waitUntil(() => ui.composer.plainText === "$verify ")
+    expect(ui.skillMenu.visible).toBe(false)
+    expect(sent).toEqual([])
+
+    ui.composer.setText("")
+    await setup.mockInput.typeText("please $sim")
+    expect(ui.skillMenu.visible).toBe(true)
+    setup.mockInput.pressTab()
+    expect(ui.composer.plainText).toBe("please $simplify ")
+    expect(ui.skillMenu.visible).toBe(false)
+
+    ui.composer.setText("")
+    await setup.mockInput.typeText("$")
+    expect(ui.skillMenu.visible).toBe(true)
+    setup.mockInput.pressEscape()
+    await waitUntil(() => !ui.skillMenu.visible)
+    expect(ui.skillMenu.visible).toBe(false)
+    expect(ui.composer.plainText).toBe("$")
+
+    ui.composer.setText("")
+    await setup.mockInput.typeText("请用 $ver")
+    expect(ui.skillMenu.visible).toBe(true)
+    setup.mockInput.pressTab()
+    expect(ui.composer.plainText).toBe("请用 $verify ")
+    await setup.mockInput.typeText("now")
+    expect(ui.composer.plainText).toBe("请用 $verify now")
+
+    ui.composer.setText("use $verify later")
+    ui.composer.cursorOffset = 8
+    await waitUntil(() => ui.skillMenu.visible)
+    ui.composer.cursorOffset = ui.composer.plainText.length
+    await waitUntil(() => !ui.skillMenu.visible)
+
+    ui.composer.setText("")
+    await setup.mockInput.typeText("$missing")
+    expect(ui.skillMenu.visible).toBe(true)
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+    expect(sent).toEqual(["$missing"])
+    expect(ui.skillMenu.visible).toBe(false)
   })
 
   test("runs bang commands through the gateway without steering the agent", async () => {

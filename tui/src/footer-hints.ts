@@ -17,6 +17,7 @@ export interface FooterHintTheme {
 
 export type FooterMode =
   | "mention"
+  | "skill"
   | "runtime"
   | "active"
   | "branch"
@@ -117,7 +118,7 @@ function hintsFor(
   if (mode === "runtime") return width >= 64
     ? [hint("↑↓/click", "choose"), hint("enter", "apply"), hint("esc", "close")]
     : [hint("enter", "apply"), hint("esc", "close")]
-  if (mode === "mention") return width >= 64
+  if (mode === "mention" || mode === "skill") return width >= 64
     ? [hint("↑↓", "choose"), hint("tab/enter", "insert"), hint("esc", "close")]
     : [hint("enter", "insert"), hint("esc", "close")]
   if (mode === "active") return []
