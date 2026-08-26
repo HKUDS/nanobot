@@ -20,6 +20,7 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
+from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -309,7 +310,7 @@ class WebUIWorkspaceController:
             raise WorkspaceScopeError("chat_running", status=409)
         return self.scope_from_envelope(
             envelope,
-            session_key=f"websocket:{chat_id}",
+            session_key=webui_session_key(chat_id),
             controls_available=controls_available,
         )
 
@@ -323,19 +324,19 @@ class WebUIWorkspaceController:
     ) -> WorkspaceScope:
         scope = self.scope_from_envelope(
             envelope,
-            session_key=f"websocket:{chat_id}",
+            session_key=webui_session_key(chat_id),
             controls_available=controls_available,
         )
         if (
             WORKSPACE_SCOPE_METADATA_KEY in envelope
             and chat_running
-            and scope.metadata() != self.scope_for_session_key(f"websocket:{chat_id}").metadata()
+            and scope.metadata() != self.scope_for_session_key(webui_session_key(chat_id)).metadata()
         ):
             raise WorkspaceScopeError("chat_running", status=409)
         return scope
 
     def persist_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
-        session_key = f"websocket:{chat_id}"
+        session_key = webui_session_key(chat_id)
         if self._sessions is not None:
             session = self._sessions.get_or_create(session_key)
             session.metadata["webui"] = True
@@ -345,7 +346,7 @@ class WebUIWorkspaceController:
 
     def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
         """Keep a new chat's scope transient until its first accepted message."""
-        session_key = f"websocket:{chat_id}"
+        session_key = webui_session_key(chat_id)
         if (
             self._sessions is not None
             and self._sessions.read_session_metadata(session_key) is not None

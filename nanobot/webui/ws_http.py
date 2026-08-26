@@ -103,6 +103,7 @@ from nanobot.webui.session_automations import (
     session_automations_payload,
 )
 from nanobot.webui.session_context import session_context_payload
+from nanobot.webui.session_identity import is_webui_session_key
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
@@ -774,7 +775,7 @@ class GatewayHTTPHandler:
         default_scope: WorkspaceScope | None = None
         for s in sessions:
             key = s.get("key")
-            if not (isinstance(key, str) and key.startswith("websocket:")):
+            if not (isinstance(key, str) and is_webui_session_key(key)):
                 continue
             row = {
                 k: v
@@ -1619,4 +1620,4 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:
-    return key.startswith("websocket:")
+    return is_webui_session_key(key)

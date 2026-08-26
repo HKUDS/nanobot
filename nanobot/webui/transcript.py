@@ -23,6 +23,7 @@ from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -828,7 +829,7 @@ class WebUITranscriptRecorder:
     def append(self, chat_id: str, event: dict[str, Any]) -> bool:
         try:
             dup = json.loads(json.dumps(event, ensure_ascii=False))
-            append_transcript_object(f"websocket:{chat_id}", dup)
+            append_transcript_object(webui_session_key(chat_id), dup)
         except (OSError, ValueError, TypeError) as e:
             self._log.warning("webui transcript append failed: {}", e)
             return False
@@ -860,10 +861,10 @@ class WebUITranscriptRecorder:
 
 
 def _chat_id_from_session_key(session_key: str) -> str | None:
-    if not session_key.startswith("websocket:"):
+    chat_id = webui_chat_id(session_key)
+    if chat_id is None:
         return None
-    chat_id = session_key.split(":", 1)[1].strip()
-    return chat_id or None
+    return chat_id.strip() or None
 
 
 def _is_user_transcript_row(row: dict[str, Any]) -> bool:

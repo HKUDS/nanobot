@@ -32,6 +32,12 @@ from nanobot.session.manager import (
 )
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
+from nanobot.webui.session_identity import (
+    WEBUI_SESSION_STORAGE_PREFIX,
+    is_webui_session_key,
+    webui_chat_id,
+    webui_session_key,
+)
 
 _INDEX_VERSION = 8
 _INDEX_FILENAME = ".webui_session_index.json"
@@ -50,7 +56,7 @@ _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _WEBUI_ACTIVITY_FILES = "webui_activity_files"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
-_WEBUI_SESSION_STEM_PREFIX = SessionManager.safe_key("websocket:")
+_WEBUI_SESSION_STEM_PREFIX = SessionManager.safe_key(WEBUI_SESSION_STORAGE_PREFIX)
 _WEBUI_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 _TRANSCRIPT_SEGMENTS_SUFFIX = ".segments"
 _TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint"}
@@ -90,7 +96,7 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
     session_keys_by_stem = {
         SessionManager.safe_key(key): key
         for key in session_paths
-        if key.startswith("websocket:")
+        if is_webui_session_key(key)
     }
     rows: list[dict[str, Any]] = []
     changed = existing_rows is None
@@ -375,9 +381,9 @@ def _transcript_record(line: str) -> dict[str, Any] | None:
 
 
 def _valid_transcript_session_key(key: str, stem: str) -> bool:
-    if not key.startswith("websocket:"):
+    chat_id = webui_chat_id(key)
+    if chat_id is None:
         return False
-    chat_id = key.split(":", 1)[1]
     return _WEBUI_CHAT_ID_RE.fullmatch(chat_id) is not None and SessionManager.safe_key(key) == stem
 
 
@@ -535,7 +541,9 @@ def _scan_transcript_row(
     paths: tuple[Path, ...],
     webui_dir: Path,
 ) -> dict[str, Any] | None:
-    path_key = session_key or f"websocket:{stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)}"
+    path_key = session_key or webui_session_key(
+        stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)
+    )
     signature = _webui_activity_signature(path_key, webui_dir)
     activity_updated_at = _webui_activity_updated_at(signature)
     if activity_updated_at is None:
@@ -560,7 +568,7 @@ def _scan_transcript_row(
                         saw_record = True
                         chat_id = record.get("chat_id")
                         if isinstance(chat_id, str) and chat_id.strip():
-                            candidate = f"websocket:{chat_id.strip()}"
+                            candidate = webui_session_key(chat_id.strip())
                             if _valid_transcript_session_key(candidate, stem):
                                 session_key = candidate
                         if created_at is None:
@@ -586,7 +594,7 @@ def _scan_transcript_row(
     if not saw_record:
         return None
     if session_key is None:
-        fallback = f"websocket:{stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX)}"
+        fallback = webui_session_key(stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX))
         if not _valid_transcript_session_key(fallback, stem):
             return None
         session_key = fallback

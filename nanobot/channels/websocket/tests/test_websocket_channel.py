@@ -1240,7 +1240,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     bus: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nanobot.channels.websocket.runtime as websocket_module
+    import nanobot.webui.inbound_commands as websocket_module
 
     channel = _ch(bus)
     now = 1_000.0
@@ -1263,7 +1263,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
     bus: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nanobot.channels.websocket.runtime as websocket_module
+    import nanobot.webui.inbound_commands as websocket_module
 
     channel = _ch(bus)
     now = 1_000.0
@@ -3450,7 +3450,7 @@ async def test_maybe_push_active_goal_state_noop_without_session_manager() -> No
 async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_file.return_value = None
+    sm.read_session_metadata.return_value = None
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -3466,7 +3466,7 @@ async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None
 async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_file.return_value = {
+    sm.read_session_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "active",
@@ -3497,7 +3497,7 @@ async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() 
 async def test_maybe_push_goal_state_restores_blocked_attention_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_file.return_value = {
+    sm.read_session_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "blocked",

@@ -27,6 +27,7 @@ from nanobot.cli.webui_support import (
 )
 from nanobot.config.paths import get_data_dir
 from nanobot.config.schema import Config
+from nanobot.webui.session_identity import is_webui_session_key, webui_chat_id
 
 if TYPE_CHECKING:
     from nanobot.gateway import GatewayClientLease
@@ -486,8 +487,8 @@ def _tui_gateway_connection(config: Config) -> tuple[str, str]:
 
 def _websocket_chat_id(session_id: str) -> str | None:
     """Map the CLI selector to the WebSocket namespace used by the native TUI."""
-    if session_id.startswith("websocket:"):
-        return session_id.split(":", 1)[1] or None
+    if is_webui_session_key(session_id):
+        return webui_chat_id(session_id)
     if ":" in session_id:
         raise TuiSessionError(
             "the native TUI can open only WebSocket sessions; use --classic to resume "

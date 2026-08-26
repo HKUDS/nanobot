@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger as default_logger
 
 from nanobot.config.loader import get_config_path
+from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
@@ -33,6 +34,7 @@ class GatewayServices:
     """Explicit dependencies shared by WebSocket transport and HTTP routes."""
 
     http: GatewayHTTPHandler
+    endpoint: WebUIGatewayEndpoint
     settings: WebUISettingsServices
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
@@ -138,8 +140,10 @@ def build_gateway_services(
         recovery_action=recovery_action,
         log=logger,
     )
+    endpoint = WebUIGatewayEndpoint(config=config, http=http, tokens=tokens)
     return GatewayServices(
         http=http,
+        endpoint=endpoint,
         settings=settings,
         tokens=tokens,
         media=media,

@@ -28,6 +28,7 @@ from nanobot.session import turn_continuation
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -877,7 +878,7 @@ class RecoveryCoordinator:
         return state
 
     def _session_key(self, chat_id: str) -> str:
-        return UNIFIED_SESSION_KEY if self.unified_session else f"websocket:{chat_id}"
+        return UNIFIED_SESSION_KEY if self.unified_session else webui_session_key(chat_id)
 
     @staticmethod
     def _has_unfinished_webui_transcript(session_key: str) -> bool:
@@ -929,9 +930,9 @@ class RecoveryCoordinator:
         session_key: str,
         metadata: Mapping[str, Any],
     ) -> tuple[str, str] | None:
-        if session_key.startswith("websocket:"):
-            chat_id = session_key.split(":", 1)[1]
-            return ("websocket", chat_id) if chat_id else None
+        chat_id = webui_chat_id(session_key)
+        if chat_id is not None:
+            return ("websocket", chat_id)
         if session_key == UNIFIED_SESSION_KEY:
             route = last_channel_from_metadata(metadata)
             if route and route[0] == "websocket":

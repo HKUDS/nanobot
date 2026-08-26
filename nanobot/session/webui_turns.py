@@ -56,6 +56,7 @@ from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+from nanobot.webui.session_identity import is_webui_session_key
 from nanobot.webui.transcript import append_session_message_input
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -628,7 +629,7 @@ class WebuiTurnCoordinator:
             event.context.channel != "system"
             or envelope is None
             or envelope["target_session_key"] != session_key
-            or not session_key.startswith("websocket:")
+            or not is_webui_session_key(session_key)
         ):
             return
         persisted = self.sessions.read_session_metadata(session_key)
