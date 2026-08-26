@@ -77,14 +77,19 @@ def had_goal_completion_attempt(messages: list[dict[str, Any]] | None) -> bool:
     for message in messages or []:
         if message.get("role") != "assistant":
             continue
-        for call in message.get("tool_calls") or []:
-            function = call.get("function") if isinstance(call, dict) else None
-            name = str((function or {}).get("name") or "").strip()
+        for call in cast(list[Any], message.get("tool_calls") or []):
+            if not isinstance(call, dict):
+                continue
+            function = cast(dict[str, Any], call).get("function")
+            if not isinstance(function, dict):
+                continue
+            name = str(cast(dict[str, Any], function).get("name") or "").strip()
             if name == "complete_goal":
                 return True
             if name != "update_goal":
                 continue
-            if _tool_call_action((function or {}).get("arguments")) == "complete":
+            arguments = cast(dict[str, Any], function).get("arguments")
+            if _tool_call_action(arguments) == "complete":
                 return True
     return False
 
@@ -98,7 +103,7 @@ def _tool_call_action(arguments: Any) -> str:
         except json.JSONDecodeError:
             return ""
     if isinstance(payload, dict):
-        action = payload.get("action")
+        action = cast(dict[str, Any], payload).get("action")
         if isinstance(action, str):
             return action.strip().lower()
     return ""
