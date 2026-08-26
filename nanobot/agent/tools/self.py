@@ -90,7 +90,6 @@ class MyTool(Tool):
         "tool_names",
         "current_iteration",
         "_current_iteration",  # updated by runner only
-        "_last_usage",
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
         "model_presets",  # config-derived catalog; changes require config reload
@@ -150,7 +149,7 @@ class MyTool(Tool):
             "Actions: check, set.\n"
             "- check (no key): full config overview — start here.\n"
             "- check (key): drill into a value. Dot-paths allowed "
-            "(e.g. '_last_usage.input_tokens', 'web_config.enable').\n"
+            "(e.g. 'web_config.enable').\n"
             "- set (key, value): change config or store notes in your scratchpad. "
             "Scratchpad keys persist across turns but not restarts.\n"
             "Key values: _current_iteration (current progress), "
@@ -162,7 +161,7 @@ class MyTool(Tool):
             "Note: web_config and exec_config are readable but read-only.\n"
             "\n"
             "When to use:\n"
-            "- User asks about your model, settings, or token usage → check that key.\n"
+            "- User asks about your model or settings → check that key.\n"
             "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
             "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
             "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
@@ -448,8 +447,6 @@ class MyTool(Tool):
             "subagents",
         ):
             parts.append(self._format_value(values[k], k))
-        if snapshot.last_usage:
-            parts.append(self._format_value(snapshot.last_usage, "_last_usage"))
         if snapshot.scratchpad:
             parts.append(self._format_value(snapshot.scratchpad, "scratchpad"))
         return "\n".join(parts)

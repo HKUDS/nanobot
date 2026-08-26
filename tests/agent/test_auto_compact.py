@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -235,7 +236,13 @@ class TestAgentLoopTTLParam:
         session = loop.sessions.get_or_create("cli:direct")
         session.get_history = MagicMock(return_value=[])
         loop.context.build_messages = MagicMock(return_value=[])
-        loop._run_agent_loop = AsyncMock(return_value=("ok", [], [], "stop", False))
+        loop._run_agent_loop = AsyncMock(
+            return_value=AgentRunResult(
+                final_content="ok",
+                messages=[],
+                stop_reason="stop",
+            )
+        )
         loop._save_turn = MagicMock()
 
         msg = InboundMessage(

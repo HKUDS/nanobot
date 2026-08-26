@@ -32,8 +32,6 @@ def _make_mock_loop(**overrides):
     loop._start_time = 1000.0
     loop.exec_config = ExecToolConfig()
     loop.channels_config = MagicMock()
-    loop._last_usage = LLMUsage.reported(input_tokens=100, output_tokens=50)
-    loop.last_usage = loop._last_usage
     loop._current_iteration = 0
     loop.current_iteration = loop._current_iteration
     loop.provider_retry_mode = "standard"
@@ -112,7 +110,6 @@ class TestInspectSummary:
         assert "workspace" in result
         assert "provider_retry_mode" in result
         assert "max_tool_result_chars" in result
-        assert "_last_usage" in result
         assert "_current_iteration" in result
 
 
@@ -160,14 +157,6 @@ class TestInspectPathNavigation:
         tool = _make_tool(loop=loop)
         result = await tool.execute(action="check", key="web_config.enable")
         assert "True" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_dict_key_via_dotpath(self):
-        loop = _make_mock_loop()
-        loop._last_usage = LLMUsage.reported(input_tokens=100, output_tokens=50)
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="_last_usage.input_tokens")
-        assert "100" in result
 
     @pytest.mark.asyncio
     async def test_inspect_blocked_in_path(self):
@@ -1115,29 +1104,6 @@ class TestCurrentIteration:
         tool = _make_tool()
         result = await tool.execute(action="set", key="_current_iteration", value=5)
         assert "read-only" in result
-
-
-# ---------------------------------------------------------------------------
-# _last_usage in check summary (Fix #5)
-# ---------------------------------------------------------------------------
-
-class TestLastUsageInSummary:
-
-    @pytest.mark.asyncio
-    async def test_last_usage_shown_in_summary(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "_last_usage" in result
-        assert "input_tokens" in result
-
-    @pytest.mark.asyncio
-    async def test_last_usage_not_shown_when_empty(self):
-        loop = _make_mock_loop()
-        loop._last_usage = None
-        loop.last_usage = loop._last_usage
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check")
-        assert "_last_usage" not in result
 
 
 # ---------------------------------------------------------------------------

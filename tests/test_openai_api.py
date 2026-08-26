@@ -36,7 +36,11 @@ def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value=response_text)
     agent.aclose = AsyncMock()
-    agent._last_usage = LLMUsage.reported(input_tokens=100, output_tokens=50)
+    session = MagicMock()
+    session.metadata = {
+        "_last_usage": LLMUsage.reported(input_tokens=100, output_tokens=50).to_dict()
+    }
+    agent.sessions.get_or_create.return_value = session
     return agent
 
 
@@ -308,6 +312,11 @@ async def test_successful_request_uses_fixed_api_session(aiohttp_client, mock_ag
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == "mock response"
     assert body["model"] == "test-model"
+    assert body["usage"] == {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+    }
     mock_agent.process_direct.assert_called_once_with(
         content="hello",
         media=None,
@@ -329,7 +338,6 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = fake_process
     agent.aclose = AsyncMock()
-    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -368,7 +376,6 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = slow_process
     agent.aclose = AsyncMock()
-    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -485,7 +492,6 @@ async def test_empty_response_falls_back_without_retry(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = always_empty
     agent.aclose = AsyncMock()
-    agent._last_usage = None
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)

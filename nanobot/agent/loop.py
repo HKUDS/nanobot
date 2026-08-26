@@ -28,7 +28,12 @@ from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
+from nanobot.agent.runner import (
+    _MAX_INJECTIONS_PER_TURN,
+    AgentRunner,
+    AgentRunResult,
+    AgentRunSpec,
+)
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -205,11 +210,6 @@ class AgentLoop:
         return self.tools.tool_names
 
     @property
-    def last_usage(self) -> LLMUsage | None:
-        """Latest aggregate usage exposed through the runtime-control snapshot."""
-        return self._last_usage
-
-    @property
     def provider(self) -> LLMProvider:
         """Provider selected for future turn admissions."""
         return self.runtime_resolver.runtime.provider
@@ -379,7 +379,6 @@ class AgentLoop:
             default_restrict_to_workspace=restrict_to_workspace,
         )
         self._start_time = time.time()
-        self._last_usage: LLMUsage | None = None
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
@@ -973,7 +972,7 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
-    ) -> tuple[str | None, list[str], list[dict[str, Any]], str, bool]:
+    ) -> AgentRunResult:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -981,7 +980,7 @@ class AgentLoop:
         ``resuming=True`` means the active turn continues. ``merge_next=True`` means
         the next text segment belongs to the same user-visible assistant message.
 
-        Returns (final_content, tools_used, messages, stop_reason, had_injections).
+        Returns the complete result produced by ``AgentRunner``.
         """
         self._sync_subagent_runtime_limits()
 
@@ -1227,7 +1226,6 @@ class AgentLoop:
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
             reset_file_states(file_state_token)
-        self._last_usage = result.usage
         if session is not None and not ephemeral:
             session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
@@ -1250,7 +1248,7 @@ class AgentLoop:
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-        return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
+        return result
 
     def _check_expired_sessions_if_due(self) -> None:
         """Scan idle sessions no more often than the configured interval."""
@@ -2045,12 +2043,11 @@ class AgentLoop:
             request_context=ctx.request_context,
             provider_state=ctx.provider_state,
         )
-        final_content, _, all_msgs, stop_reason, had_injections = result
-        ctx.final_content = final_content
-        ctx.all_messages = all_msgs
-        ctx.stop_reason = stop_reason
-        ctx.had_injections = had_injections
-        ctx.usage = self._last_usage
+        ctx.final_content = result.final_content
+        ctx.all_messages = result.messages
+        ctx.stop_reason = result.stop_reason
+        ctx.had_injections = result.had_injections
+        ctx.usage = result.usage
         ctx.delivery.record_usage(ctx.usage)
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)

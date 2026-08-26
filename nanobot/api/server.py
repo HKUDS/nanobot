@@ -399,6 +399,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return resp
 
     # -- non-streaming path (original logic) --
+    usage: LLMUsage | None = None
     try:
         async with session_lock:
             try:
@@ -415,6 +416,8 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                 if not response_text or not response_text.strip():
                     logger.warning("Empty response for session {}, using fallback", session_key)
                     response_text = EMPTY_FINAL_RESPONSE_MESSAGE
+                session = agent_loop.sessions.get_or_create(session_key)
+                usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
 
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")
@@ -426,7 +429,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(
-        _chat_completion_response(response_text, model_name, getattr(agent_loop, "_last_usage", None))
+        _chat_completion_response(response_text, model_name, usage)
     )
 
 

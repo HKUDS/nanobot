@@ -236,9 +236,11 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = [{"role": "user"}] * 3
+        session.metadata = {
+            "_last_usage": LLMUsage.reported(input_tokens=0, output_tokens=0).to_dict()
+        }
         loop.sessions.get_or_create.return_value = session
         loop._start_time = time.time() - 125
-        loop._last_usage = LLMUsage.reported(input_tokens=0, output_tokens=0)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
         )
@@ -309,19 +311,21 @@ class TestRestartCommand:
             LLMResponse(content="second", usage=None),
         ])
 
-        await loop._run_agent_loop([], runtime=loop.llm_runtime())
-        assert loop._last_usage == LLMUsage.reported(input_tokens=9, output_tokens=4)
+        first = await loop._run_agent_loop([], runtime=loop.llm_runtime())
+        assert first.usage == LLMUsage.reported(input_tokens=9, output_tokens=4)
 
-        await loop._run_agent_loop([], runtime=loop.llm_runtime())
-        assert loop._last_usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
+        second = await loop._run_agent_loop([], runtime=loop.llm_runtime())
+        assert second.usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
 
     @pytest.mark.asyncio
-    async def test_status_falls_back_to_last_usage_when_context_estimate_missing(self):
+    async def test_status_falls_back_to_session_usage_when_context_estimate_missing(self):
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = [{"role": "user"}]
+        session.metadata = {
+            "_last_usage": LLMUsage.reported(input_tokens=1200, output_tokens=34).to_dict()
+        }
         loop.sessions.get_or_create.return_value = session
-        loop._last_usage = LLMUsage.reported(input_tokens=1200, output_tokens=34)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )

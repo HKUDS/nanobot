@@ -9,6 +9,7 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
@@ -52,6 +53,23 @@ from nanobot.session.webui_turns import (
     maybe_generate_webui_title_after_turn,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+
+def _agent_run_result(
+    final_content: str,
+    messages: list[dict],
+    *,
+    stop_reason: str = "completed",
+    had_injections: bool = False,
+    usage: LLMUsage | None = None,
+) -> AgentRunResult:
+    return AgentRunResult(
+        final_content=final_content,
+        messages=messages,
+        stop_reason=stop_reason,
+        had_injections=had_injections,
+        usage=usage,
+    )
 
 
 def _mk_loop() -> AgentLoop:
@@ -1261,16 +1279,14 @@ async def test_process_message_persists_media_only_turn_without_text(tmp_path: P
 async def test_process_message_does_not_duplicate_early_persisted_user_message(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    loop._run_agent_loop = AsyncMock(return_value=(
+    loop._run_agent_loop = AsyncMock(return_value=_agent_run_result(
         "done",
-        None,
         [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "done"},
         ],
-        "stop",
-        False,
+        stop_reason="stop",
     ))  # type: ignore[method-assign]
 
     result = await loop._process_message(
@@ -1308,20 +1324,15 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
     async def fake_run_agent_loop(initial_messages, *, metadata=None, **_kwargs):
         calls.append({"initial_messages": initial_messages, "metadata": metadata})
         if len(calls) == 1:
-            return (
+            return _agent_run_result(
                 "paused",
-                [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
-                    "max_iterations",
-                    False,
-                )
-        return (
-            "done",
-            [],
-            [*initial_messages, {"role": "assistant", "content": "done"}],
-                "completed",
-                False,
+                stop_reason="max_iterations",
             )
+        return _agent_run_result(
+            "done",
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+        )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
     pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
@@ -1382,23 +1393,18 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return (
+            return _agent_run_result(
                 "paused",
-                [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
-                    "max_iterations",
-                    False,
-                )
+                stop_reason="max_iterations",
+            )
         assert on_stream is not None
         assert on_stream_end is not None
         await on_stream("done")
         await on_stream_end(resuming=False)
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "completed",
-            False,
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -1460,19 +1466,14 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return (
+            return _agent_run_result(
                 "paused",
-                [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
-                    "max_iterations",
-                    False,
-                )
-        return (
+                stop_reason="max_iterations",
+            )
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "completed",
-            False,
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -1521,16 +1522,14 @@ async def test_process_message_keeps_delivery_chat_for_thread_session(tmp_path: 
             {"role": "user", "content": "runtime + hello"},
         ]
     )
-    loop._run_agent_loop = AsyncMock(return_value=(  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=_agent_run_result(  # type: ignore[method-assign]
         "done",
-        [],
         [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "runtime + hello"},
             {"role": "assistant", "content": "done"},
         ],
-        "stop",
-        False,
+        stop_reason="stop",
     ))
 
     result = await loop._process_message(
@@ -1571,16 +1570,14 @@ async def test_process_message_uses_explicit_session_for_goal_context(
             {"role": "user", "content": "runtime + system"},
         ]
     )
-    loop._run_agent_loop = AsyncMock(return_value=(  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=_agent_run_result(  # type: ignore[method-assign]
         "ok",
-        [],
         [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "runtime + system"},
             {"role": "assistant", "content": "ok"},
         ],
-        "stop",
-        False,
+        stop_reason="stop",
     ))
 
     result = await loop._process_message(
@@ -1711,9 +1708,8 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
     ])
     loop.sessions.save(session)
 
-    loop._run_agent_loop = AsyncMock(return_value=(
+    loop._run_agent_loop = AsyncMock(return_value=_agent_run_result(
         "new answer",
-        None,
         [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "old question"},
@@ -1721,8 +1717,7 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
             {"role": "user", "content": "new question"},
             {"role": "assistant", "content": "new answer"},
         ],
-        "stop",
-        False,
+        stop_reason="stop",
     ))  # type: ignore[method-assign]
 
     result = await loop._process_message(
@@ -1816,12 +1811,10 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     assert interrupted.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is not None
 
     async def resumed_run_agent_loop(initial_messages, **_kwargs):
-        return (
+        return _agent_run_result(
             "next answer",
-            None,
             [*initial_messages, {"role": "assistant", "content": "next answer"}],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = resumed_run_agent_loop  # type: ignore[method-assign]
@@ -1872,12 +1865,10 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
         seen["initial_messages"] = initial_messages
         seen["runtime"] = kwargs["runtime"]
         seen["request_context"] = kwargs["request_context"]
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -1944,15 +1935,14 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
 async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    turn_usage = LLMUsage.reported(input_tokens=64, output_tokens=9)
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        loop._last_usage = LLMUsage.reported(input_tokens=64, output_tokens=9)
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "stop",
-            False,
+            stop_reason="stop",
+            usage=turn_usage,
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -1962,7 +1952,7 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
 
     loop.sessions.invalidate("cli:usage")
     assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == (
-        LLMUsage.reported(input_tokens=64, output_tokens=9).to_dict()
+        turn_usage.to_dict()
     )
 
 
@@ -1974,12 +1964,10 @@ async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> 
     )
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -2032,12 +2020,10 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
         setattr(loop, name, record)
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -2077,12 +2063,10 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        return (
+        return _agent_run_result(
             "ack",
-            [],
             [*initial_messages, {"role": "assistant", "content": "ack"}],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -2212,12 +2196,10 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
     async def fake_run_agent_loop(initial_messages, **kwargs):
         seen["initial_messages"] = initial_messages
         seen["request_context"] = kwargs["request_context"]
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
@@ -2269,9 +2251,8 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
         assert [m["role"] for m in initial_messages] == ["system", "user"]
-        return (
+        return _agent_run_result(
             "done",
-            [],
             [
                 *initial_messages,
                 {
@@ -2286,8 +2267,7 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
                 {"role": "tool", "tool_call_id": "call_ls", "name": "exec", "content": "file.txt"},
                 {"role": "assistant", "content": "done"},
             ],
-            "stop",
-            False,
+            stop_reason="stop",
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]

@@ -614,7 +614,7 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
         media=[str(image_path)],
     ))
 
-    final_content, _, _, _, had_injections = await loop._run_agent_loop(
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
         runtime=loop.llm_runtime(),
         channel="cli",
@@ -622,8 +622,8 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
         pending_queue=pending_queue,
     )
 
-    assert final_content == "second answer"
-    assert had_injections is True
+    assert result.final_content == "second answer"
+    assert result.had_injections is True
     assert call_count["n"] == 2
     injected_user_messages = [
         message for message in captured_messages[-1]
@@ -708,7 +708,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         },
     ))
 
-    _, _, all_messages, _, _ = await loop._run_agent_loop(
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "initial message from user A"}],
         runtime=loop.llm_runtime(),
         session=session,
@@ -741,7 +741,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         ),
     ]
 
-    injected = [message for message in all_messages if message.get("role") == "user"][-1]
+    injected = [message for message in result.messages if message.get("role") == "user"][-1]
     assert "follow-up from the second speaker" in str(injected["content"])
     model_messages = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
     assert "telegram | group-1 | user-b | message-2" in str(model_messages)
@@ -753,7 +753,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         "identity",
     ]
 
-    loop._save_turn(session, all_messages, skip=1)
+    loop._save_turn(session, result.messages, skip=1)
     persisted = [message for message in session.messages if message.get("role") == "user"][-1]
     assert "telegram | group-1 | user-b | message-2" in str(persisted["content"])
     assert "telegram | group-1 | user-c | message-3" in str(persisted["content"])
@@ -805,7 +805,7 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
         metadata={"injected_event": "subagent_result", "subagent_task_id": "sub-1"},
     ))
 
-    final_content, _, all_msgs, _, had_injections = await loop._run_agent_loop(
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
         runtime=loop.llm_runtime(),
         channel="cli",
@@ -813,10 +813,10 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
         pending_queue=pending_queue,
     )
 
-    assert final_content == "second answer"
-    assert had_injections is True
+    assert result.final_content == "second answer"
+    assert result.had_injections is True
     assert call_count["n"] == 2
-    injected_users = [message for message in all_msgs if message.get("role") == "user"][-2:]
+    injected_users = [message for message in result.messages if message.get("role") == "user"][-2:]
     assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
     assert injected_users[1][HIDDEN_HISTORY_META] == {
         "kind": "subagent_result",
@@ -1469,7 +1469,7 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
             content=f"follow-up-{idx}",
         ))
 
-    final_content, _, _, _, had_injections = await loop._run_agent_loop(
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
         runtime=loop.llm_runtime(),
         channel="cli",
@@ -1477,8 +1477,8 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
         pending_queue=pending_queue,
     )
 
-    assert final_content == "answer-3"
-    assert had_injections is True
+    assert result.final_content == "answer-3"
+    assert result.had_injections is True
     assert call_count["n"] == 3
     flattened_user_content = "\n".join(
         message["content"]
