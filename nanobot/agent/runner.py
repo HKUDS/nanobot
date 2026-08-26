@@ -83,6 +83,7 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_MAX_GOAL_IDLE_CONTINUES = 2
 
 
 def _restore_outer_whitespace(content: str, original: str | None) -> str:
@@ -488,6 +489,9 @@ class AgentRunner:
         length_recovery_parts: list[str] = []
         had_injections = False
         injection_cycles = 0
+        # Consecutive continuations without tool progress. A goal that only ever
+        # answers in prose is waiting for the user, not working toward its objective.
+        idle_continues = 0
         compacted_tool_call_ids: set[str] = set()
         pending_stream_content: str | None = None
         conversation_state = ProviderConversationStateController(
@@ -560,6 +564,7 @@ class AgentRunner:
                 context.streamed_reasoning = True
 
             if response.should_execute_tools:
+                idle_continues = 0
                 context.tool_calls = list(response.tool_calls)
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
@@ -772,6 +777,7 @@ class AgentRunner:
                 iteration=iteration,
                 allow_goal_continue=(
                     response.finish_reason not in {"refusal", "content_filter"}
+                    and idle_continues < _MAX_GOAL_IDLE_CONTINUES
                 ),
                 wait_at_terminal=(
                     assistant_message is not None
@@ -781,6 +787,7 @@ class AgentRunner:
             )
             if should_continue:
                 had_injections = True
+                idle_continues += 1
 
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=should_continue)

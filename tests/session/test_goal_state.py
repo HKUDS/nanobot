@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from nanobot.session.goal_state import (
+    GOAL_ADMISSION_PENDING_KEY,
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
+    clear_goal_admission_pending,
     discard_legacy_goal_state_key,
     explicit_goal_requested,
+    goal_admission_pending,
     goal_state_runtime_lines,
     goal_state_ws_blob,
     parse_goal_state,
     runner_wall_llm_timeout_s,
+    set_goal_admission_pending,
     sustained_goal_active,
+    sustained_goal_turn,
 )
 from nanobot.session.manager import SessionManager
 
@@ -166,3 +173,22 @@ def test_runner_wall_llm_timeout_reads_session_when_metadata_missing(tmp_path):
     assert runner_wall_llm_timeout_s(sm, "c:d") == 0.0
     sess.metadata = {}
     assert runner_wall_llm_timeout_s(sm, "c:d") is None
+
+
+def test_goal_admission_pending_roundtrip():
+    meta: dict[str, Any] = {}
+    assert goal_admission_pending(meta) is False
+    assert goal_admission_pending(None) is False
+    set_goal_admission_pending(meta)
+    assert goal_admission_pending(meta) is True
+    assert "since" in meta[GOAL_ADMISSION_PENDING_KEY]
+    clear_goal_admission_pending(meta)
+    assert goal_admission_pending(meta) is False
+    clear_goal_admission_pending(meta)  # idempotent on absent key
+
+
+def test_sustained_goal_turn_counts_pending_admission():
+    meta: dict[str, Any] = {}
+    assert sustained_goal_turn(meta, message_metadata=None) is False
+    set_goal_admission_pending(meta)
+    assert sustained_goal_turn(meta, message_metadata=None) is True

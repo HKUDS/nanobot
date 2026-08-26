@@ -12,6 +12,7 @@ import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -25,6 +26,7 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver
 from nanobot.agent.cron_turns import CronTurnCoordinator
+from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
@@ -69,8 +71,13 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
+    clear_goal_admission_pending,
+    explicit_goal_requested,
+    goal_admission_pending,
+    goal_state_raw,
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
+    set_goal_admission_pending,
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
@@ -165,6 +172,7 @@ class TurnContext:
     hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     turn_scopes: list[AbstractContextManager[Any]] = field(default_factory=list)
     tools: ToolRegistry | None = None
+    goal_state_before: Any = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
@@ -1822,6 +1830,7 @@ class AgentLoop:
         else:
             logger.info("Processing message from {}:{}: [content hidden]", msg.channel, msg.sender_id)
 
+        ctx.goal_state_before = deepcopy(goal_state_raw(session.metadata))
         self._remember_unified_session_route(
             session,
             msg,
@@ -1847,18 +1856,22 @@ class AgentLoop:
         )
         ctx.pending_summary = pending
 
-    async def _dispatch_command(self, ctx: TurnContext) -> bool:
-        if ctx.kind is TurnKind.SYSTEM or ctx.msg.channel == "system":
-            return False
-        session = ctx.require_session()
-        raw = ctx.msg.content.strip()
+    def _user_authored_turn(self, ctx: TurnContext) -> bool:
+        """True for a turn typed by the user: not automation, system, or subagent input."""
         _, automation_metadata = automation_history_overrides(ctx.msg.metadata)
-        is_user_turn = (
+        return (
             ctx.original_user_text is not None
             and not automation_metadata
             and ctx.msg.channel != "system"
             and ctx.msg.sender_id != "subagent"
         )
+
+    async def _dispatch_command(self, ctx: TurnContext) -> bool:
+        if ctx.kind is TurnKind.SYSTEM or ctx.msg.channel == "system":
+            return False
+        session = ctx.require_session()
+        raw = ctx.msg.content.strip()
+        is_user_turn = self._user_authored_turn(ctx)
         cmd_ctx = CommandContext(
             msg=ctx.msg,
             session=session,
@@ -1876,7 +1889,11 @@ class AgentLoop:
             # turn here so WebUI history hydration after _turn_end sees the
             # message.  Mark messages with _command so get_history can filter
             # them out of LLM context.  /new is excluded because it
-            # intentionally clears the session.
+            # intentionally clears the session.  SAVE is also where the
+            # single-shot goal-admission window is closed, so close it here too.
+            closed_admission = is_user_turn and goal_admission_pending(session.metadata)
+            if closed_admission:
+                clear_goal_admission_pending(session.metadata)
             if cmd_ctx.raw.lower() != "/new":
                 ctx.input_persisted_early = self._persist_user_message_early(
                     ctx.msg, session, _command=True
@@ -1893,11 +1910,23 @@ class AgentLoop:
                         turn_id=ctx.turn_id,
                         attributes=ctx.attributes,
                     )
+            elif closed_admission:
+                # /new saved before invalidating its cache entry; re-persist so
+                # the reloaded session does not resurrect the window.
+                self.sessions.save(session)
             return True
         return False
 
     async def _build_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
+        if (
+            not ctx.ephemeral
+            and self._user_authored_turn(ctx)
+            and goal_admission_pending(session.metadata)
+        ):
+            # Single-shot admission window from a prior /goal clarification;
+            # cleared in _persist_turn whether or not the model records a goal.
+            ctx.turn_scopes.append(goal_mutation_permission(True))
         runtime = ctx.runtime
         if runtime is None:
             runtime = self.runtime_for_session(session)
@@ -2091,6 +2120,15 @@ class AgentLoop:
                     runtime=runtime,
                 )
             )
+        if not ctx.ephemeral and self._user_authored_turn(ctx):
+            if (
+                explicit_goal_requested(ctx.msg.metadata)
+                and not sustained_goal_active(session.metadata)
+                and goal_state_raw(session.metadata) == ctx.goal_state_before
+            ):
+                set_goal_admission_pending(session.metadata)
+            else:
+                clear_goal_admission_pending(session.metadata)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)

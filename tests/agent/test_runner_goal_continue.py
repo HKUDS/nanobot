@@ -13,7 +13,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -73,10 +73,8 @@ async def test_runner_exits_normally_with_inactive_goal():
 async def test_runner_forces_continue_when_goal_active():
     """Predicate returns True on final text → runner injects continuation and loops.
 
-    We set max_iterations=3 and let the provider return final text every time.
-    Without the fix this would exit on the first iteration with stop_reason
-    "completed". With the fix the runner is forced to continue until
-    max_iterations is hit.
+    Without the goal predicate this would exit on the first iteration. How many
+    continuations are allowed is covered by the idle-budget tests below.
     """
     from nanobot.agent.runner import AgentRunner
 
@@ -97,9 +95,7 @@ async def test_runner_forces_continue_when_goal_active():
         goal_active_predicate=lambda: True,
     ))
 
-    # Because the predicate keeps returning True, the runner should never
-    # naturally complete. It loops until max_iterations is exhausted.
-    assert result.stop_reason == "max_iterations"
+    assert provider.chat_with_retry.await_count > 1
     # The injected continuation message should be present in the message list.
     user_msgs = [m for m in result.messages if m.get("role") == "user"]
     assert any("active sustained goal" in str(m.get("content", "")) for m in user_msgs)
@@ -131,9 +127,9 @@ async def test_runner_respects_max_iterations_even_with_active_goal():
 
 
 @pytest.mark.asyncio
-async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
-    """Synthetic goal continuation should be governed by max_iterations."""
-    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner
+async def test_runner_keeps_answering_user_after_goal_idle_budget_is_spent():
+    """A spent idle budget silences the goal nudge only, never real user input."""
+    from nanobot.agent.runner import _MAX_GOAL_IDLE_CONTINUES, AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -141,21 +137,97 @@ async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    max_iterations = _MAX_INJECTION_CYCLES + 3
+    drains = {"n": 0}
+
+    async def inject_once_after_budget():
+        drains["n"] += 1
+        if drains["n"] == _MAX_GOAL_IDLE_CONTINUES + 1:
+            return [{"role": "user", "content": "actually, one more thing"}]
+        return []
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
-        max_iterations=max_iterations,
+        max_iterations=20,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         goal_active_predicate=lambda: True,
-        finalize_on_max_iterations=False,
+        injection_callback=inject_once_after_budget,
     ))
 
-    assert result.stop_reason == "max_iterations"
-    assert provider.chat_with_retry.await_count == max_iterations
+    assert result.stop_reason == "completed"
+    user_msgs = [str(m.get("content", "")) for m in result.messages if m.get("role") == "user"]
+    assert any("actually, one more thing" in m for m in user_msgs)
+    # Idle budget, then the real injection, then the turn ends.
+    assert provider.chat_with_retry.await_count == _MAX_GOAL_IDLE_CONTINUES + 2
+
+
+@pytest.mark.asyncio
+async def test_runner_stops_goal_continue_after_consecutive_idle_responses():
+    """An idling goal must hand control back instead of nagging until the budget dies.
+
+    A goal that keeps answering in plain text is waiting for the user, not working.
+    The runner allows a bounded number of nudges, then finishes the turn normally.
+    """
+    from nanobot.agent.runner import _MAX_GOAL_IDLE_CONTINUES, AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="Still here whenever you're ready.", tool_calls=[], usage={},
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        goal_active_predicate=lambda: True,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "Still here whenever you're ready."
+    assert provider.chat_with_retry.await_count == _MAX_GOAL_IDLE_CONTINUES + 1
+
+
+@pytest.mark.asyncio
+async def test_runner_resets_goal_idle_streak_after_tool_use():
+    """Tool progress means the goal is working, so the nudge budget starts over."""
+    from nanobot.agent.runner import _MAX_GOAL_IDLE_CONTINUES, AgentRunner
+
+    idle = LLMResponse(content="Waiting on you.", tool_calls=[], usage={})
+    working = LLMResponse(
+        content="Checking.",
+        tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
+        usage={},
+    )
+    # Idle up to the cap, do real work, then idle again: the streak must restart.
+    responses = [idle] * _MAX_GOAL_IDLE_CONTINUES + [working] + [idle] * 10
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(side_effect=responses)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        goal_active_predicate=lambda: True,
+    ))
+
+    assert result.stop_reason == "completed"
+    # cap idle responses + 1 tool iteration + cap idle responses again + the one
+    # that finds the budget spent.
+    assert provider.chat_with_retry.await_count == 2 * _MAX_GOAL_IDLE_CONTINUES + 2
 
 
 @pytest.mark.asyncio

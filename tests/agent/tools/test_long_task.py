@@ -78,6 +78,7 @@ async def test_create_goal_records_goal_metadata(tmp_path):
         create,
         ctx,
         objective="Do the thing",
+        completion_evidence="the thing is done and verified",
         ui_summary="thing",
     )
     assert "Goal recorded" in out
@@ -125,7 +126,7 @@ async def test_update_goal_complete_closes_active_goal(tmp_path):
     create, update, ctx = _tools(sm)
 
     with request_context(ctx), goal_mutation_permission(True):
-        await create.execute(objective="X")
+        await create.execute(objective="X", completion_evidence="X is verified done")
         out = await update.execute(action="complete", recap="Done.")
         denied = await create.execute(objective="Another")
         assert goal_mutation_allowed() is False
@@ -144,7 +145,7 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     sm = SessionManager(tmp_path)
     create, update, ctx = _tools(sm)
 
-    await _execute(create, ctx, objective="Old")
+    await _execute(create, ctx, objective="Old", completion_evidence="old artifact exists")
     sess = sm.get_or_create("websocket:c1")
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
     sm.save(sess)
@@ -153,6 +154,7 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
         _request_context(),
         action="replace",
         objective="New",
+        completion_evidence="new artifact exists",
         ui_summary="new",
     )
 
@@ -187,7 +189,7 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
 
     monkeypatch.setattr(sm, "save", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
-        await _execute(create, create_context, objective="Old")
+        await _execute(create, create_context, objective="Old", completion_evidence="old artifact exists")
 
     assert sess.metadata == {
         "marker": {"keep": True},
@@ -196,14 +198,22 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     assert GOAL_STATE_KEY not in SessionManager(tmp_path).get_or_create("websocket:c1").metadata
 
     monkeypatch.setattr(sm, "save", original_save)
-    assert "Goal recorded" in await _execute(create, create_context, objective="Old")
+    assert "Goal recorded" in await _execute(
+        create, create_context, objective="Old", completion_evidence="old artifact exists"
+    )
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
     sm.save(sess)
     replace_context = _request_context()
 
     monkeypatch.setattr(sm, "save", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
-        await _execute(update, replace_context, action="replace", objective="New")
+        await _execute(
+            update,
+            replace_context,
+            action="replace",
+            objective="New",
+            completion_evidence="new artifact exists",
+        )
 
     assert sess.metadata[GOAL_STATE_KEY]["objective"] == "Old"
     assert sess.metadata["_sustained_goal_continuation_rounds"] == 12
@@ -217,6 +227,7 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
         replace_context,
         action="replace",
         objective="New",
+        completion_evidence="new artifact exists",
     )
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
     assert (
@@ -240,6 +251,7 @@ async def test_goal_tools_reject_oversized_objectives(tmp_path):
         create,
         create_context,
         objective="x" * MAX_GOAL_OBJECTIVE_CHARS,
+        completion_evidence="max-size objective is done",
     )
 
     update = UpdateGoalTool(sessions=sm)
@@ -256,13 +268,17 @@ async def test_goal_tools_reject_oversized_objectives(tmp_path):
 async def test_active_goal_create_failure_preserves_permission_for_replace(tmp_path):
     sm = SessionManager(tmp_path)
     create, update, initial_context = _tools(sm)
-    assert "Goal recorded" in await _execute(create, initial_context, objective="Old")
+    assert "Goal recorded" in await _execute(
+        create, initial_context, objective="Old", completion_evidence="old artifact exists"
+    )
 
     replacement_context = _request_context()
     with request_context(replacement_context), goal_mutation_permission(True):
         create_out = await create.execute(objective="New")
         assert goal_mutation_allowed() is True
-        replace_out = await update.execute(action="replace", objective="New")
+        replace_out = await update.execute(
+            action="replace", objective="New", completion_evidence="new artifact exists"
+        )
         assert goal_mutation_allowed() is True
 
     assert "already active" in str(create_out)
@@ -273,7 +289,9 @@ async def test_active_goal_create_failure_preserves_permission_for_replace(tmp_p
 async def test_update_goal_replace_requires_explicit_goal_permission(tmp_path):
     sm = SessionManager(tmp_path)
     create, update, initial_context = _tools(sm)
-    assert "Goal recorded" in await _execute(create, initial_context, objective="Old")
+    assert "Goal recorded" in await _execute(
+        create, initial_context, objective="Old", completion_evidence="old artifact exists"
+    )
     ordinary_context = _request_context(original_user_text="Continue the existing objective.")
 
     unauthorized = await _execute(
@@ -290,8 +308,12 @@ async def test_update_goal_replace_requires_explicit_goal_permission(tmp_path):
     replace_context = _request_context()
 
     with request_context(replace_context), goal_mutation_permission(True):
-        assert "Goal replaced" in await update.execute(action="replace", objective="New")
-        reused = await update.execute(action="replace", objective="Another")
+        assert "Goal replaced" in await update.execute(
+            action="replace", objective="New", completion_evidence="new artifact exists"
+        )
+        reused = await update.execute(
+            action="replace", objective="Another", completion_evidence="other artifact exists"
+        )
         assert goal_mutation_allowed() is True
 
     assert "Goal replaced" in reused
@@ -316,8 +338,12 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
         metadata=_goal_metadata(),
     )
 
-    task_a = asyncio.create_task(_execute(create, ctx_a, objective="Goal A"))
-    task_b = asyncio.create_task(_execute(create, ctx_b, objective="Goal B"))
+    task_a = asyncio.create_task(
+        _execute(create, ctx_a, objective="Goal A", completion_evidence="A done")
+    )
+    task_b = asyncio.create_task(
+        _execute(create, ctx_b, objective="Goal B", completion_evidence="B done")
+    )
     await asyncio.gather(task_a, task_b)
 
     assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["objective"] == "Goal A"
@@ -335,7 +361,9 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
         with request_context(ctx_b), goal_mutation_permission(True):
             await a_revoked.wait()
             assert goal_mutation_allowed() is True
-            await update.execute(action="replace", objective="Goal B2")
+            await update.execute(
+                action="replace", objective="Goal B2", completion_evidence="B2 done"
+            )
 
     await asyncio.gather(complete_a(), replace_b())
 
@@ -357,12 +385,16 @@ async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path
     ctx = _request_context()
 
     with request_context(ctx), goal_mutation_permission(True):
-        create_out = await registry.execute("create_goal", {"objective": "New"})
+        create_out = await registry.execute(
+            "create_goal", {"objective": "New", "completion_evidence": "new artifact exists"}
+        )
         complete_out = await registry.execute(
             "update_goal",
             {"action": "complete", "recap": "Old goal done."},
         )
-        denied_out = await registry.execute("create_goal", {"objective": "Denied"})
+        denied_out = await registry.execute(
+            "create_goal", {"objective": "Denied", "completion_evidence": "denied artifact"}
+        )
         assert goal_mutation_allowed() is False
 
     assert "already active" in str(create_out)
@@ -370,7 +402,9 @@ async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path
     assert "create_goal is unavailable for this turn" in str(denied_out)
     assert current_request_context() is None
 
-    leaked_out = await registry.execute("create_goal", {"objective": "Leaked"})
+    leaked_out = await registry.execute(
+        "create_goal", {"objective": "Leaked", "completion_evidence": "leaked artifact"}
+    )
 
     assert "missing routing context" in str(leaked_out)
     assert sess.metadata[GOAL_STATE_KEY]["status"] == "completed"
@@ -394,6 +428,7 @@ async def test_goal_state_events_publish_active_then_inactive(tmp_path):
         create,
         rc,
         objective="Objective alpha",
+        completion_evidence="alpha artifact exists",
         ui_summary="alpha",
     )
 
@@ -447,8 +482,12 @@ async def test_goal_tools_registered_in_base_registry(tmp_path):
     update = loop.tools.get("update_goal")
     assert create is not None and create.name == "create_goal"
     assert update is not None and update.name == "update_goal"
-    assert set(create.parameters["properties"]) == {"objective", "ui_summary"}
-    assert create.parameters["required"] == ["objective"]
+    assert set(create.parameters["properties"]) == {
+        "objective",
+        "completion_evidence",
+        "ui_summary",
+    }
+    assert create.parameters["required"] == ["objective", "completion_evidence"]
     assert (
         create.parameters["properties"]["objective"]["maxLength"]
         == MAX_GOAL_OBJECTIVE_CHARS
@@ -467,3 +506,87 @@ async def test_goal_tools_registered_in_base_registry(tmp_path):
     ).lower()
     assert "authoriz" not in model_visible_contract
     assert "/goal" not in model_visible_contract
+
+
+@pytest.mark.asyncio
+async def test_create_goal_requires_completion_evidence(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, _update, ctx = _tools(sm)
+
+    out = await _execute(create, ctx, objective="Do the thing")
+
+    assert "completion_evidence" in str(out)
+    assert GOAL_STATE_KEY not in sm.get_or_create("websocket:c1").metadata
+
+
+@pytest.mark.asyncio
+async def test_create_goal_stores_completion_evidence(tmp_path):
+    from nanobot.session.goal_state import goal_state_runtime_lines
+
+    sm = SessionManager(tmp_path)
+    create, _update, ctx = _tools(sm)
+
+    out = await _execute(
+        create,
+        ctx,
+        objective="Write the plan file",
+        completion_evidence="plan.md exists and covers 14 days",
+    )
+
+    assert "Goal recorded" in str(out)
+    meta = sm.get_or_create("websocket:c1").metadata
+    assert meta[GOAL_STATE_KEY]["completion_evidence"] == "plan.md exists and covers 14 days"
+    assert any("Done when: plan.md exists" in line for line in goal_state_runtime_lines(meta))
+
+
+@pytest.mark.asyncio
+async def test_replace_requires_completion_evidence(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, update, ctx = _tools(sm)
+    await _execute(create, ctx, objective="Old", completion_evidence="old artifact exists")
+
+    denied = await _execute(update, ctx, action="replace", objective="New")
+    assert "completion_evidence" in str(denied)
+
+    ok = await _execute(
+        update,
+        ctx,
+        action="replace",
+        objective="New",
+        completion_evidence="new artifact exists",
+    )
+    assert "Goal replaced" in str(ok)
+    meta = sm.get_or_create("websocket:c1").metadata
+    assert meta[GOAL_STATE_KEY]["completion_evidence"] == "new artifact exists"
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_renders_pending_admission_branch(tmp_path):
+    from nanobot.session.goal_state import set_goal_admission_pending
+
+    sm = SessionManager(tmp_path)
+    create = CreateGoalTool(sessions=sm)
+    session = sm.get_or_create("websocket:c1")
+    set_goal_admission_pending(session.metadata)
+    sm.save(session)
+    # Ordinary user turn: no /goal metadata.
+    rc = _request_context(metadata={}, original_user_text="repo X please")
+
+    block = await create._provide_runtime_context(rc)
+
+    assert block is not None
+    assert "Resolve the pending goal request" in block.content
+    assert "Record the sustained goal promptly" not in block.content
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_goal_turn_includes_routing_triage(tmp_path):
+    sm = SessionManager(tmp_path)
+    create = CreateGoalTool(sessions=sm)
+    rc = _request_context()
+
+    block = await create._provide_runtime_context(rc)
+
+    assert block is not None
+    assert "Route the request before recording a goal" in block.content
+    assert "cron" in block.content
