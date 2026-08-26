@@ -227,6 +227,7 @@ async def test_start_extends_http_open_timeout_for_slow_settings_routes(
         return Server()
 
     monkeypatch.setattr(websocket_module, "serve", fake_serve)
+    monkeypatch.setattr(channel, "_listener_is_serving", lambda _server: True)
 
     await channel.start()
 
