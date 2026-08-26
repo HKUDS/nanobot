@@ -2534,7 +2534,11 @@ def test_webui_yes_still_refuses_invalid_custom_model_setup(
 def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> None:
     opened: list[str] = []
     url = "http://127.0.0.1:8765/#/?bootstrapSecret=super-secret"
-    monkeypatch.setattr("webbrowser.open", lambda value: opened.append(value))
+    monkeypatch.setattr(
+        cli_webui_support,
+        "_launch_browser",
+        lambda value: opened.append(value) or True,
+    )
 
     cli_webui_support._open_webui_browser(url, wait=False)
 
@@ -2542,6 +2546,42 @@ def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> Non
     output = _strip_ansi(capsys.readouterr().out)
     assert "bootstrapSecret=<redacted>" in output
     assert "super-secret" not in output
+
+
+def test_open_webui_browser_reports_launch_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_webui_support, "_launch_browser", lambda _value: False)
+
+    cli_webui_support._open_webui_browser("http://127.0.0.1:8765/", wait=False)
+
+    assert "Could not open browser; visit http://127.0.0.1:8765/" in _strip_ansi(
+        capsys.readouterr().out
+    )
+
+
+def test_launch_browser_uses_macos_foreground_opener(monkeypatch) -> None:
+    seen: list[list[str]] = []
+    monkeypatch.setattr(cli_webui_support.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        cli_webui_support.subprocess,
+        "run",
+        lambda command, **_kwargs: seen.append(command) or SimpleNamespace(returncode=0),
+    )
+
+    assert cli_webui_support._launch_browser("http://127.0.0.1:8765/") is True
+    assert seen == [["open", "http://127.0.0.1:8765/"]]
+
+
+def test_launch_browser_uses_default_browser_off_macos(monkeypatch) -> None:
+    opened: list[tuple[str, int, bool]] = []
+    monkeypatch.setattr(cli_webui_support.sys, "platform", "linux")
+    monkeypatch.setattr(
+        cli_webui_support.webbrowser,
+        "open",
+        lambda url, *, new, autoraise: opened.append((url, new, autoraise)) or True,
+    )
+
+    assert cli_webui_support._launch_browser("http://127.0.0.1:8765/") is True
+    assert opened == [("http://127.0.0.1:8765/", 2, True)]
 
 
 def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_path: Path) -> None:

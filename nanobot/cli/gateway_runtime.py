@@ -23,6 +23,7 @@ from nanobot.cli.webui_support import (
     _gateway_health_bind_note,
     _gateway_health_url,
     _host_for_local_browser,
+    _launch_browser,
     _prepare_webui_bundle_for_gateway,
     _print_foreground_port_conflict,
     _tcp_endpoint_reachable,
@@ -864,7 +865,6 @@ def _run_gateway(
         """Wait for the gateway to bind, then point the user's browser at the webui."""
         if not open_browser_url:
             return
-        import webbrowser
         from urllib.parse import urlparse
 
         # Channels start asynchronously. When the caller supplies a backend
@@ -896,8 +896,10 @@ def _run_gateway(
                 await asyncio.sleep(0.1)
         display_url = _webui_display_url(open_browser_url)
         try:
-            webbrowser.open(open_browser_url)
-            console.print(f"[green]✓[/green] Opened browser at {display_url}")
+            if _launch_browser(open_browser_url):
+                console.print(f"[green]✓[/green] Opened browser at {display_url}")
+            else:
+                console.print(f"[yellow]Could not open browser; visit {display_url}[/yellow]")
         except Exception as e:
             console.print(f"[yellow]Could not open browser ({e}); visit {display_url}[/yellow]")
 
