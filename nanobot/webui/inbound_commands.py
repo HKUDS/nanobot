@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL
@@ -70,8 +71,6 @@ class WebUIRequestOperation:
 
 class WebUICommandTransport(Protocol):
     """Typed transport capabilities consumed by WebUI command orchestration."""
-
-    logger: Any
 
     def is_allowed(self, sender_id: str) -> bool: ...
 
@@ -150,10 +149,6 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
-
-    @property
-    def logger(self) -> Any:
-        return self._transport.logger
 
     def workspace_controls_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_controls_available(connection)
@@ -930,7 +925,7 @@ class WebUICommandRouter:
         except asyncio.CancelledError:
             raise
         except Exception:
-            self.logger.exception("WebUI mutation '{}' failed", action)
+            logger.exception("WebUI mutation '{}' failed", action)
             return WebUIRequestResult(
                 status=500,
                 message="WebUI mutation failed",

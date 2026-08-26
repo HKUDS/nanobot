@@ -6,6 +6,8 @@ import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
+from loguru import logger
+
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
@@ -19,11 +21,11 @@ from nanobot.webui.transcript import (
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
 
+    from nanobot.webui.gateway_services import GatewayServices
 
 
 class WebUIForkHost(Protocol):
-    gateway: Any
-    logger: Any
+    gateway: GatewayServices
 
     async def send_webui_protocol_error(
         self,
@@ -117,7 +119,7 @@ async def handle_webui_fork_chat(
             return
         fork_id, fork_key = forked
     except Exception as exc:
-        channel.logger.warning("fork_chat failed: {}", exc)
+        logger.warning("fork_chat failed: {}", exc)
         await channel.send_webui_protocol_error(connection, "fork_chat_failed")
         return
 

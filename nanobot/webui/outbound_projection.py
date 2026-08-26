@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -26,28 +28,31 @@ from nanobot.webui.metadata import (
 from nanobot.webui.session_identity import webui_session_key
 from nanobot.webui.session_projection import WebUISessionProjection
 
+if TYPE_CHECKING:
+    from websockets.asyncio.server import ServerConnection
+
+    from nanobot.providers.base import LLMUsage
+
 
 class WebUIOutboundTransport(Protocol):
     """Wire operations required by the outbound application projector."""
 
-    logger: Any
-
-    def webui_subscribers(self, chat_id: str) -> tuple[Any, ...]: ...
+    def webui_subscribers(self, chat_id: str) -> tuple[ServerConnection, ...]: ...
 
     async def send_runtime_model_updated(
         self,
         *,
-        model_name: Any,
-        model_preset: Any = None,
+        model_name: str | None,
+        model_preset: str | None = None,
     ) -> None: ...
 
     async def send_turn_model_updated(
         self,
         chat_id: str,
         *,
-        model_name: Any,
-        model_preset: Any = None,
-        context_window_tokens: Any = None,
+        model_name: str,
+        model_preset: str | None = None,
+        context_window_tokens: int | None = None,
         fallback: bool = False,
     ) -> None: ...
 
@@ -79,7 +84,7 @@ class WebUIOutboundTransport(Protocol):
         latency_ms: int | None = None,
         *,
         goal_state: dict[str, Any] | None = None,
-        usage: Any = None,
+        usage: LLMUsage | None = None,
         context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
@@ -149,9 +154,9 @@ class WebUIOutboundProjector:
                 GoalStateSyncEvent,
             )
             log = (
-                self._transport.logger.debug
+                logger.debug
                 if isinstance(event, quiet_events)
-                else self._transport.logger.warning
+                else logger.warning
             )
             log("no active subscribers for chat_id={}", msg.chat_id)
 

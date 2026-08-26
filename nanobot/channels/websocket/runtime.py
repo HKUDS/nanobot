@@ -45,7 +45,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
-from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
 
@@ -324,12 +324,8 @@ class WebSocketChannel(BaseChannel):
         self._server_task: asyncio.Task[None] | None = None
 
         self.gateway = gateway
-        self._http_router = gateway.http
-        self._tokens = gateway.tokens
         self._media = gateway.media
-        self._ingress = gateway.ingress
         self._transcripts = gateway.transcripts
-        self._workspaces = gateway.workspaces
         self._temporary_chats = gateway.temporary_chats
         self._session_projection = gateway.session_projection
         self._commands = WebUICommandRouter(self, gateway)
@@ -433,32 +429,6 @@ class WebSocketChannel(BaseChannel):
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
         await self._commands.cleanup_connection(connection)
-
-    async def _maybe_push_persisted_goal_state(self, chat_id: str) -> None:
-        """Replay actionable goal state after *chat_id* is subscribed.
-
-        Goal metadata lives on the session JSONL and survives gateway restarts, but
-        connected clients normally see it via ``goal_state`` / ``turn_end`` frames.
-        Pushing here makes refresh + reconnect restore the strip without a new model turn.
-        """
-        goal_state = self._session_projection.persisted_goal_state(
-            webui_session_key(chat_id)
-        )
-        if goal_state is not None:
-            await self.send_goal_state(chat_id, goal_state)
-
-    async def _maybe_push_turn_run_wall_clock(self, chat_id: str) -> None:
-        """Replay ``goal_status: running`` when a turn is still active (same-process refresh)."""
-        active_turn = self._session_projection.active_turn_status(chat_id)
-        if active_turn is None:
-            return
-        started_at, turn_id = active_turn
-        await self.send_goal_status(
-            chat_id,
-            "running",
-            started_at=started_at,
-            turn_id=turn_id,
-        )
 
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
         """Replay persisted or actively running per-chat state after subscribe."""
