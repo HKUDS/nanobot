@@ -60,14 +60,13 @@ from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_budget_exhausted_finalization_message,
     build_finalization_retry_message,
-    build_goal_continue_message,
     build_length_recovery_message,
     is_blank_text,
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
 
-GoalContinueMessage = str | Callable[[], str | None]
+ContinuationCallback = Callable[[], str | None]
 ProgressCallback = Callable[[str], Awaitable[None]]
 RetryWaitCallback = Callable[[str], Awaitable[None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
@@ -114,14 +113,12 @@ class AgentRunSpec:
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: ProgressCallback | None = None
-    stream_progress_deltas: bool = True
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
-    goal_active_predicate: Callable[[], bool] | None = None
-    goal_continue_message: GoalContinueMessage | None = None
+    continuation_callback: ContinuationCallback | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
@@ -274,7 +271,7 @@ class AgentRunner:
         conversation_state: ProviderConversationStateController | None = None,
         phase: str = "after error",
         iteration: int | None = None,
-        allow_goal_continue: bool = False,
+        allow_continuation: bool = False,
         wait_at_terminal: bool = False,
     ) -> tuple[bool, int]:
         """Drain pending injections. Returns (should_continue, updated_cycles).
@@ -289,10 +286,10 @@ class AgentRunner:
         if injection_cycles < _MAX_INJECTION_CYCLES:
             injections = await self._drain_injections(spec)
             real_injection = bool(injections)
-        if not injections and allow_goal_continue and assistant_message is not None:
-            predicate = spec.goal_active_predicate
-            if predicate is not None and predicate():
-                injections = [self._build_goal_continue_message(spec)]
+        if not injections and allow_continuation and assistant_message is not None:
+            continuation = self._build_continuation_message(spec)
+            if continuation is not None:
+                injections = [continuation]
         if (
             not injections
             and wait_at_terminal
@@ -330,18 +327,22 @@ class AgentRunner:
                 len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
             )
         else:
-            logger.info("Injected sustained-goal continuation {}", phase)
+            logger.info("Injected caller-requested continuation {}", phase)
         return True, injection_cycles
 
-    def _build_goal_continue_message(self, spec: AgentRunSpec) -> dict[str, str]:
-        custom = spec.goal_continue_message
-        if callable(custom):
-            try:
-                custom = custom()
-            except Exception:
-                logger.exception("goal_continue_message callback failed")
-                custom = None
-        return build_goal_continue_message(custom)
+    @staticmethod
+    def _build_continuation_message(spec: AgentRunSpec) -> dict[str, str] | None:
+        callback = spec.continuation_callback
+        if callback is None:
+            return None
+        try:
+            content = callback()
+        except Exception:
+            logger.exception("continuation_callback failed")
+            return None
+        if content is None or not content.strip():
+            return None
+        return {"role": "user", "content": content}
 
     async def _drain_injections(
         self,
@@ -770,7 +771,7 @@ class AgentRunner:
                 conversation_state=conversation_state,
                 phase="after final response",
                 iteration=iteration,
-                allow_goal_continue=(
+                allow_continuation=(
                     response.finish_reason not in {"refusal", "content_filter"}
                 ),
                 wait_at_terminal=(
@@ -953,7 +954,6 @@ class AgentRunner:
         progress_callback = spec.progress_callback
         wants_progress_streaming = (
             not wants_streaming
-            and spec.stream_progress_deltas
             and progress_callback is not None
             and getattr(spec.runtime.provider, "supports_progress_deltas", False) is True
         )

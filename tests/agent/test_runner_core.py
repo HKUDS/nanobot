@@ -843,7 +843,6 @@ async def test_runner_closes_progress_reasoning_on_streaming_wall_timeout():
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=ProgressReasoningHook(),
             progress_callback=AsyncMock(),
-            stream_progress_deltas=True,
             llm_timeout_s=1,
         ))
 
@@ -994,7 +993,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
+        continuation_callback=lambda: "Continue working.",
         terminal_injection_callback=terminal_injection_callback,
     ))
 

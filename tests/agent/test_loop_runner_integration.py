@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
+from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
@@ -359,10 +360,16 @@ async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
+    runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
         [],
-        runtime=loop.llm_runtime(),
-        metadata={"original_command": "/goal"},
+        runtime=runtime,
+        request_context=RequestContext(
+            channel="cli",
+            chat_id="direct",
+            runtime=runtime,
+            metadata={"original_command": "/goal"},
+        ),
     )
 
     assert result.stop_reason == "max_iterations"

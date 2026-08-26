@@ -76,7 +76,6 @@ from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
-    sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
@@ -952,12 +951,6 @@ class AgentLoop:
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
-        channel: str = "cli",
-        chat_id: str = "direct",
-        message_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        session_key: str | None = None,
-        original_user_text: str | None = None,
         pending_queue: asyncio.Queue[InboundMessage] | None = None,
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
@@ -1118,23 +1111,25 @@ class AgentLoop:
 
             return await _drain_pending(limit=limit, first_msg=msg)
 
-        active_session_key = session.key if session else session_key
+        request_ctx = request_context or RequestContext(
+            channel="cli",
+            chat_id="direct",
+            session_key=session.key if session is not None else None,
+            runtime=runtime,
+        )
+        active_session_key = session.key if session else request_ctx.session_key
+        request_metadata = request_ctx.metadata
         effective_scope = self.workspace_scopes.for_turn(
-            channel=channel,
-            message_metadata=metadata,
+            channel=request_ctx.channel,
+            message_metadata=request_metadata,
             session_metadata=session.metadata if session is not None else None,
         )
+        if request_context is None:
+            request_ctx = dataclasses.replace(
+                request_ctx,
+                workspace=effective_scope.project_path,
+            )
         effective_tools = tools or self.tools
-        request_ctx = request_context or RequestContext(
-            channel=channel,
-            chat_id=chat_id,
-            message_id=message_id,
-            session_key=active_session_key,
-            original_user_text=original_user_text,
-            runtime=runtime,
-            metadata=dict(metadata or {}),
-            workspace=effective_scope.project_path,
-        )
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
@@ -1159,10 +1154,10 @@ class AgentLoop:
                 on_progress=on_progress,
                 on_stream=on_stream,
                 on_stream_end=on_stream_end,
-                channel=channel,
-                chat_id=chat_id,
-                message_id=message_id,
-                metadata=metadata,
+                channel=request_ctx.channel,
+                chat_id=request_ctx.chat_id,
+                message_id=request_ctx.message_id,
+                metadata=request_metadata,
                 attributes=dict(request_ctx.attributes),
                 session_key=active_session_key,
                 workspace=effective_scope.project_path,
@@ -1181,14 +1176,11 @@ class AgentLoop:
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,
-                error_message="Sorry, I encountered an error calling the AI model.",
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
-                progress_callback=on_progress,
-                stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
@@ -1197,22 +1189,21 @@ class AgentLoop:
                 # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
                     self.sessions,
-                    session.key if session is not None else session_key,
+                    session.key if session is not None else request_ctx.session_key,
                     metadata=session_metadata,
-                    message_metadata=metadata,
+                    message_metadata=request_metadata,
                 ),
-                goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
-                goal_continue_message=_goal_continue,
+                continuation_callback=_goal_continue,
                 finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
                     pending_queue_available=pending_queue is not None and session is not None,
                     session_metadata=session_metadata,
-                    message_metadata=metadata,
+                    message_metadata=request_metadata,
                 ),
                 provider_state=provider_state,
                 llm_usage_source=source_from_request(
                     active_session_key,
-                    channel=channel,
-                    metadata=metadata,
+                    channel=request_ctx.channel,
+                    metadata=request_metadata,
                 ),
             ))
         finally:
@@ -1228,7 +1219,7 @@ class AgentLoop:
                 stop_reason=result.stop_reason,
                 pending_queue_available=pending_queue is not None and session is not None,
                 session_metadata=session_metadata,
-                message_metadata=metadata,
+                message_metadata=request_metadata,
             )
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
@@ -2021,12 +2012,6 @@ class AgentLoop:
             on_stream_end=ctx.on_stream_end,
             on_retry_wait=ctx.on_retry_wait,
             session=ctx.session,
-            channel=ctx.delivery.route.channel,
-            chat_id=ctx.delivery.route.chat_id,
-            message_id=ctx.msg.metadata.get("message_id"),
-            metadata=ctx.msg.metadata,
-            session_key=ctx.session_key,
-            original_user_text=ctx.original_user_text,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,

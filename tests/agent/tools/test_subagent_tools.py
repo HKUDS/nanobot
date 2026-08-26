@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -503,12 +504,12 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
         [{"role": "user", "content": "test"}],
-        runtime=loop.llm_runtime(),
+        runtime=runtime,
         session=None,
-        channel="test",
-        chat_id="c1",
+        request_context=RequestContext(channel="test", chat_id="c1", runtime=runtime),
         pending_queue=pending_queue,
     )
 
@@ -562,12 +563,17 @@ async def test_terminal_drain_timeout(tmp_path):
     loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-timeout-1")
     loop.subagents._running_tasks["sub-timeout-1"] = hang_task
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
         [{"role": "user", "content": "test"}],
-        runtime=loop.llm_runtime(),
+        runtime=runtime,
         session=session,
-        channel="test",
-        chat_id="c1",
+        request_context=RequestContext(
+            channel="test",
+            chat_id="c1",
+            session_key=session.key,
+            runtime=runtime,
+        ),
         pending_queue=pending_queue,
     )
 

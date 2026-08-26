@@ -232,7 +232,6 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=hook,
-        stream_progress_deltas=True,
         progress_callback=_progress,
     ))
 
@@ -276,7 +275,6 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=hook,
-        stream_progress_deltas=True,
         progress_callback=_progress,
     ))
 

@@ -1543,7 +1543,8 @@ async def test_process_message_keeps_delivery_chat_for_thread_session(tmp_path: 
 
     assert result is not None
     assert result.chat_id == "thread-777"
-    assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
+    request = loop._run_agent_loop.call_args.kwargs["request_context"]
+    assert request.chat_id == "thread-777"
 
 
 @pytest.mark.asyncio
@@ -1592,12 +1593,12 @@ async def test_process_message_uses_explicit_session_for_goal_context(
     assert result.content == "ok"
     kwargs = loop._run_agent_loop.call_args.kwargs
     assert kwargs["session"] is system_session
-    assert kwargs["session_key"] == "system"
+    assert kwargs["request_context"].session_key == "system"
     assert GOAL_STATE_KEY not in kwargs["session"].metadata
 
 
 @pytest.mark.asyncio
-async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
+async def test_run_agent_loop_continuation_reads_latest_goal_metadata(
     tmp_path: Path,
 ) -> None:
     from nanobot.agent.runner import AgentRunResult
@@ -1607,12 +1608,12 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
     seen: dict[str, str | None] = {}
 
     async def fake_run(spec):
-        assert callable(spec.goal_continue_message)
+        assert callable(spec.continuation_callback)
         session.metadata[GOAL_STATE_KEY] = {
             "status": "active",
             "objective": "Goal created during this runner call.",
         }
-        seen["goal_continue"] = spec.goal_continue_message()
+        seen["goal_continue"] = spec.continuation_callback()
         return AgentRunResult(
             final_content="ok",
             messages=[{"role": "assistant", "content": "ok"}],
@@ -1620,13 +1621,17 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
 
     loop.runner.run = fake_run  # type: ignore[method-assign]
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
         [],
-        runtime=loop.llm_runtime(),
+        runtime=runtime,
         session=session,
-        channel="websocket",
-        chat_id="late-goal",
-        session_key=session.key,
+        request_context=RequestContext(
+            channel="websocket",
+            chat_id="late-goal",
+            session_key=session.key,
+            runtime=runtime,
+        ),
     )
 
     assert "Goal created during this runner call." in (seen["goal_continue"] or "")

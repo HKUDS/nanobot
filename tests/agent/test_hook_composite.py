@@ -13,6 +13,7 @@ from nanobot.agent.hook import (
     AgentTurnHookContext,
     CompositeHook,
 )
+from nanobot.agent.tools.context import RequestContext
 
 
 def _ctx() -> AgentHookContext:
@@ -501,15 +502,19 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
     async def on_progress(*args, **kwargs):
         pass
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
         [{"role": "user", "content": "hi"}],
-        runtime=loop.llm_runtime(),
+        runtime=runtime,
         on_progress=on_progress,
-        channel="websocket",
-        chat_id="chat-1",
-        message_id="msg-1",
-        metadata={"source": "test"},
-        session_key="websocket:chat-1",
+        request_context=RequestContext(
+            channel="websocket",
+            chat_id="chat-1",
+            message_id="msg-1",
+            session_key="websocket:chat-1",
+            runtime=runtime,
+            metadata={"source": "test"},
+        ),
         hook_factories=[factory("turn")],
     )
 
