@@ -3618,7 +3618,12 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert health_writer.closed is True
     assert "HTTP/1.0 200 OK" in health_response
     health_body = json.loads(health_response.split("\r\n\r\n", 1)[1])
-    assert health_body == {"status": "ok"}
+    assert health_body == {
+        "status": "ok",
+        "process": "alive",
+        "ready": True,
+        "websocket": "disabled",
+    }
 
     missing_response, missing_writer = _call_handler("/missing")
     assert missing_writer.closed is True

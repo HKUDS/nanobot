@@ -684,6 +684,10 @@ def test_gateway_reuses_the_matching_managed_instance(
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
     monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: True)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._gateway_health_ready",
+        lambda *_args, **_kwargs: True,
+    )
 
     gateway = _ensure_gateway(
         config,
@@ -694,21 +698,34 @@ def test_gateway_reuses_the_matching_managed_instance(
     assert gateway.base_url == "http://127.0.0.1:8765"
 
 
-def test_gateway_reuse_can_return_before_the_webui_endpoint_is_ready(
+def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     config = Config()
+    endpoint_results = iter((False, False, True))
 
     class FakeRuntime:
         def __init__(self, *, paths: object) -> None:
             self.paths = paths
 
         def status(self) -> SimpleNamespace:
-            return SimpleNamespace(running=True, port=config.gateway.port)
+            return SimpleNamespace(
+                running=True,
+                port=config.gateway.port,
+                log_path=tmp_path / "gateway.log",
+            )
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
-    monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: False)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
+        lambda _url: next(endpoint_results),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._gateway_health_ready",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr("nanobot.cli.tui_launcher._GATEWAY_READY_POLL_S", 0)
 
     gateway = _ensure_gateway(
         config,
@@ -719,6 +736,39 @@ def test_gateway_reuse_can_return_before_the_webui_endpoint_is_ready(
 
     assert gateway.base_url == "http://127.0.0.1:8765"
     assert gateway.lease is not None
+
+
+def test_gateway_reuse_rejects_a_live_but_unready_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            self.paths = paths
+
+        def status(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                running=True,
+                port=config.gateway.port,
+                log_path=tmp_path / "gateway.log",
+            )
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
+        lambda _url: False,
+    )
+    monkeypatch.setattr("nanobot.cli.tui_launcher._GATEWAY_READY_TIMEOUT_S", 0)
+
+    with pytest.raises(TuiUnavailableError, match="process is running.*listener is unavailable"):
+        _ensure_gateway(
+            config,
+            config_path=tmp_path / "config.json",
+            workspace_override=None,
+            wait_until_ready=False,
+        )
 
 
 def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
@@ -766,6 +816,10 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._webui_endpoint_reachable",
         lambda _url: started,
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._gateway_health_ready",
+        lambda *_args, **_kwargs: started,
     )
 
     gateway = _ensure_gateway(

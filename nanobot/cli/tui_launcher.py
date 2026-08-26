@@ -64,6 +64,8 @@ _TUI_RELEASE_LIMITS = {
 }
 # Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
 _TUI_DETACH_EXIT_CODE = 90
+_GATEWAY_READY_TIMEOUT_S = 20.0
+_GATEWAY_READY_POLL_S = 0.1
 
 
 @dataclass(frozen=True)
@@ -417,6 +419,39 @@ def _ensure_gateway(
     lease = GatewayClientLease(runtime, kind="tui")
     lease.acquire()
     try:
+        def ready(status: object) -> bool:
+            management_ready = getattr(status, "ready", None)
+            if not isinstance(management_ready, bool):
+                management_ready = _gateway_health_ready(
+                    config.gateway.host,
+                    config.gateway.port,
+                )
+            return _webui_endpoint_reachable(base_url) and management_ready
+
+        def wait_for_ready(log_path: object) -> _GatewayHandle:
+            deadline = time.monotonic() + _GATEWAY_READY_TIMEOUT_S
+            while time.monotonic() < deadline:
+                current = runtime.status()
+                if not current.running:
+                    break
+                if current.port not in {None, config.gateway.port}:
+                    break
+                if ready(current):
+                    return _GatewayHandle(base_url=base_url, lease=lease)
+                time.sleep(_GATEWAY_READY_POLL_S)
+
+            current = runtime.status()
+            if current.running:
+                raise TuiUnavailableError(
+                    "local gateway process is running but its WebSocket/WebUI listener "
+                    "is unavailable; channel recovery did not restore it. "
+                    "Run `nanobot gateway status` and inspect logs at "
+                    f"{log_path}; if it remains degraded, run `nanobot gateway restart`."
+                )
+            raise TuiUnavailableError(
+                f"local gateway did not become ready; logs: {log_path}"
+            )
+
         status = runtime.status()
         endpoint_reachable = _webui_endpoint_reachable(base_url)
         if status.running:
@@ -425,8 +460,9 @@ def _ensure_gateway(
                     "the matching gateway instance is running on a different port; "
                     "restart it or use `nanobot agent --classic`"
                 )
-            if endpoint_reachable or not wait_until_ready:
+            if endpoint_reachable and ready(status):
                 return _GatewayHandle(base_url=base_url, lease=lease)
+            return wait_for_ready(status.log_path)
         elif endpoint_reachable:
             raise TuiUnavailableError(
                 "the configured gateway port belongs to a different nanobot instance; "
@@ -442,26 +478,9 @@ def _ensure_gateway(
                 f"logs: {result.status.log_path}"
             )
 
-        if not wait_until_ready:
+        if not wait_until_ready and result.message != "gateway_already_running":
             return _GatewayHandle(base_url=base_url, lease=lease)
-
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if _webui_endpoint_reachable(base_url):
-                current = runtime.status()
-                if current.running and current.port in {None, config.gateway.port}:
-                    return _GatewayHandle(base_url=base_url, lease=lease)
-                break
-            if not runtime.status().running and not _gateway_health_ready(
-                config.gateway.host,
-                config.gateway.port,
-            ):
-                break
-            time.sleep(0.1)
-
-        raise TuiUnavailableError(
-            f"local gateway did not become ready; logs: {result.status.log_path}"
-        )
+        return wait_for_ready(result.status.log_path)
     except BaseException:
         lease.release(timeout_s=5)
         raise

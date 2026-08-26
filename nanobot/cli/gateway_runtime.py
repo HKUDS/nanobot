@@ -246,6 +246,44 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
     )
 
 
+def _gateway_readiness_payload(channels: Any) -> tuple[bool, dict[str, object]]:
+    """Describe process liveness separately from required WebSocket readiness."""
+    channel_status: dict[str, Any] = {}
+    get_status = getattr(channels, "get_status", None)
+    if callable(get_status):
+        try:
+            raw_status = get_status()
+            if isinstance(raw_status, dict):
+                channel_status = cast(dict[str, Any], raw_status)
+        except Exception:
+            logger.exception("Gateway readiness could not read channel status")
+
+    websocket = channel_status.get("websocket")
+    websocket_required = websocket is not None or "websocket" in getattr(
+        channels,
+        "enabled_channels",
+        (),
+    )
+    if not websocket_required:
+        websocket_state = "disabled"
+        ready = True
+    elif isinstance(websocket, dict):
+        websocket_status = cast(dict[str, Any], websocket)
+        ready = websocket_status.get("running") is True
+        state = websocket_status.get("state")
+        websocket_state = str(state) if isinstance(state, str) else "unavailable"
+    else:
+        ready = False
+        websocket_state = "unavailable"
+
+    return ready, {
+        "status": "ok" if ready else "degraded",
+        "process": "alive",
+        "ready": ready,
+        "websocket": websocket_state,
+    }
+
+
 async def _close_gateway_runtime(
     agent: AgentLoop,
     mcp_provider: MCPProvider,
@@ -758,8 +796,9 @@ def _run_gateway(
                         method, path = parts[0], parts[1]
 
                     if method == "GET" and path == "/health":
-                        body = _json.dumps({"status": "ok"})
-                        status = "200 OK"
+                        ready, payload = _gateway_readiness_payload(channels)
+                        body = _json.dumps(payload)
+                        status = "200 OK" if ready else "503 Service Unavailable"
                         content_type = "application/json"
                     else:
                         body = "Not Found"
@@ -994,4 +1033,6 @@ def _run_gateway(
                 restore_shutdown_handlers()
 
     with gateway_runtime.foreground_instance(gateway_start_options):
+        if health_server_enabled:
+            gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

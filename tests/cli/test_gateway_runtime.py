@@ -14,7 +14,11 @@ from contextlib import suppress
 from nanobot.agent.hook import AgentRunHookContext
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.cli.gateway_runtime import _close_gateway_runtime, _MCPReadinessHook
+from nanobot.cli.gateway_runtime import (
+    _close_gateway_runtime,
+    _gateway_readiness_payload,
+    _MCPReadinessHook,
+)
 
 
 class _FakeAgent:
@@ -63,6 +67,33 @@ class _TrackingMCPProvider(MCPProvider):
 
     async def connect(self) -> None:
         self.connect_calls += 1
+
+
+def test_gateway_readiness_is_degraded_when_required_websocket_is_unavailable() -> None:
+    channels = type(
+        "Channels",
+        (),
+        {
+            "enabled_channels": ["websocket"],
+            "get_status": lambda self: {
+                "websocket": {
+                    "enabled": True,
+                    "running": False,
+                    "state": "starting",
+                }
+            },
+        },
+    )()
+
+    ready, payload = _gateway_readiness_payload(channels)
+
+    assert ready is False
+    assert payload == {
+        "status": "degraded",
+        "process": "alive",
+        "ready": False,
+        "websocket": "starting",
+    }
 
 
 async def test_mcp_readiness_hook_delegates_to_application_provider() -> None:
