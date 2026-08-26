@@ -338,6 +338,7 @@ interface ThreadShellProps {
     initialMessage?: string,
   ) => Promise<string | null>;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
+  onCreateSideChat?: (sourceChatId: string) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
@@ -354,6 +355,8 @@ interface ThreadShellProps {
   composerActive?: boolean;
   composerInputAriaLabel?: string;
   emptyComposerVariant?: "hero" | "thread";
+  emptyStateOverride?: ReactNode;
+  dockEmptyComposer?: boolean;
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
@@ -637,6 +640,7 @@ export function ThreadShell({
   onToggleSidebar,
   onCreateChat,
   onForkChat,
+  onCreateSideChat,
   onTurnEnd,
   theme = "light",
   onToggleTheme = () => {},
@@ -653,6 +657,8 @@ export function ThreadShell({
   composerActive = true,
   composerInputAriaLabel,
   emptyComposerVariant = "hero",
+  emptyStateOverride,
+  dockEmptyComposer = false,
   workspaceScope = null,
   workspaceDefaultScope = null,
   workspaceControls = null,
@@ -949,10 +955,11 @@ export function ThreadShell({
     [settings],
   );
   const availableSlashCommands = useMemo(
-    () => temporary
-      ? slashCommands.filter(({ command }) => command === "/model" || command === "/stop")
-      : slashCommands,
-    [slashCommands, temporary],
+    () => slashCommands.filter(({ command }) => {
+      if (temporary) return command === "/model" || command === "/stop";
+      return command !== "/side" || session !== null;
+    }),
+    [session, slashCommands, temporary],
   );
   const modelBadge = useMemo(
     () => toModelBadgeInfo(modelName, settings, activeModelPreset),
@@ -1366,6 +1373,14 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      if (
+        content.trim().toLowerCase() === "/side"
+        && options?.sideChannel
+        && !images?.length
+      ) {
+        if (!chatId || !onCreateSideChat || turnActive) return false;
+        return onCreateSideChat(chatId).then((sideChatId) => Boolean(sideChatId));
+      }
       setFallbackModelName(null);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
@@ -1378,7 +1393,7 @@ export function ThreadShell({
         setSubmittedViewportTurnId(submitted.turnId);
       }
     },
-    [chatId, send, withWorkspaceScope],
+    [chatId, onCreateSideChat, send, turnActive, withWorkspaceScope],
   );
 
   const handleOpenFilePreview = useCallback((path: string) => {
@@ -1597,9 +1612,11 @@ export function ThreadShell({
       {t("thread.loadingConversation")}
     </div>
   ) : (
-    <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
-      <HeroGreeting text={t(heroGreetingKey)} />
-    </div>
+    emptyStateOverride ?? (
+      <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
+        <HeroGreeting text={t(heroGreetingKey)} />
+      </div>
+    )
   );
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
@@ -1664,6 +1681,7 @@ export function ThreadShell({
             runStartedAt={currentRunStartedAt}
             emptyState={emptyState}
             composer={composerPortalTarget === undefined ? composer : null}
+            dockEmptyComposer={dockEmptyComposer}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}

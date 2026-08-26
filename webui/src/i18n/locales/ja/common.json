@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "一時チャット",
+    "sideTitle": "サイドチャット",
+    "sideTitleNumbered": "サイドチャット {{number}}",
+    "sideDescription": "サイドチャットは一時的なもので、アプリを閉じると消去されます。",
+    "closeSide": "サイドチャットを閉じる",
+    "closeSideNamed": "「{{title}}」を閉じる",
+    "sideTabs": "サイドチャットのタブ",
+    "newSide": "新しいサイドチャット",
+    "backToSource": "メインの会話に戻る",
+    "openSide": "サイドチャットを開く",
     "retention": "履歴やメモリには保存されません。",
     "expiration": "再読み込み、ページを閉じる操作、接続切断で一時チャットは終了します。",
     "externalEffects": "リクエストは引き続きモデルプロバイダーに送信され、ツール操作による変更は残る場合があります。",
@@ -1242,6 +1251,10 @@
           "new": {
             "title": "新しいチャット",
             "description": "このチャットをリセットして、新しい会話を開始します。"
+          },
+          "side": {
+            "title": "サイドチャット",
+            "description": "現在のチャットのコンテキストで一時的な会話を開始します。"
           },
           "stop": {
             "title": "現在のタスクを停止",

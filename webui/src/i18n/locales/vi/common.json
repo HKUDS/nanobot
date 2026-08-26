@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "Trò chuyện tạm thời",
+    "sideTitle": "Trò chuyện bên",
+    "sideTitleNumbered": "Trò chuyện bên {{number}}",
+    "sideDescription": "Trò chuyện bên chỉ là tạm thời và sẽ biến mất khi bạn đóng ứng dụng.",
+    "closeSide": "Đóng trò chuyện bên",
+    "closeSideNamed": "Đóng {{title}}",
+    "sideTabs": "Các thẻ trò chuyện bên",
+    "newSide": "Trò chuyện bên mới",
+    "backToSource": "Quay lại cuộc trò chuyện chính",
+    "openSide": "Mở trò chuyện bên",
     "retention": "Không được lưu vào lịch sử hoặc bộ nhớ.",
     "expiration": "Tải lại, đóng trang hoặc mất kết nối sẽ kết thúc các cuộc trò chuyện này.",
     "externalEffects": "Yêu cầu vẫn được gửi đến nhà cung cấp mô hình và thao tác công cụ có thể để lại thay đổi.",
@@ -1242,6 +1251,10 @@
           "new": {
             "title": "Cuộc trò chuyện mới",
             "description": "Đặt lại cuộc trò chuyện này và bắt đầu một cuộc trò chuyện mới."
+          },
+          "side": {
+            "title": "Trò chuyện bên",
+            "description": "Bắt đầu cuộc trò chuyện tạm thời với ngữ cảnh hiện tại."
           },
           "stop": {
             "title": "Dừng tác vụ hiện tại",

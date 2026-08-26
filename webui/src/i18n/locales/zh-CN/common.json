@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "临时聊天",
+    "sideTitle": "侧边聊天",
+    "sideTitleNumbered": "侧边聊天 {{number}}",
+    "sideDescription": "侧边聊天是临时聊天，关闭应用后会消失。",
+    "closeSide": "关闭侧边聊天",
+    "closeSideNamed": "关闭{{title}}",
+    "sideTabs": "侧边聊天标签",
+    "newSide": "新建侧边聊天",
+    "backToSource": "返回主会话",
+    "openSide": "打开侧边聊天",
     "retention": "不会保存到历史记录或记忆。",
     "expiration": "刷新、关闭页面或连接中断后，临时聊天会结束。",
     "externalEffects": "请求仍会发送给模型提供商，工具操作也可能留下更改。",
@@ -1265,6 +1274,10 @@
           "new": {
             "title": "新建话题",
             "description": "重置当前话题，并开始一个新的话题。"
+          },
+          "side": {
+            "title": "侧边聊天",
+            "description": "使用当前聊天上下文开始一个临时对话。"
           },
           "stop": {
             "title": "停止当前任务",

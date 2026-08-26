@@ -52,6 +52,15 @@
   },
   "temporaryChat": {
     "title": "Discussion temporaire",
+    "sideTitle": "Discussion latérale",
+    "sideTitleNumbered": "Discussion latérale {{number}}",
+    "sideDescription": "Les discussions latérales sont temporaires et disparaissent à la fermeture de l’application.",
+    "closeSide": "Fermer la discussion latérale",
+    "closeSideNamed": "Fermer {{title}}",
+    "sideTabs": "Onglets des discussions latérales",
+    "newSide": "Nouvelle discussion latérale",
+    "backToSource": "Retour à la discussion principale",
+    "openSide": "Ouvrir les discussions latérales",
     "retention": "Elle n’est enregistrée ni dans l’historique ni dans la mémoire.",
     "expiration": "Recharger, fermer ou perdre la connexion met fin à ces discussions.",
     "externalEffects": "Les requêtes sont tout de même envoyées au fournisseur du modèle et les outils peuvent laisser des modifications.",
@@ -1242,6 +1251,10 @@
           "new": {
             "title": "Nouvelle discussion",
             "description": "Réinitialiser cette discussion et démarrer une nouvelle conversation."
+          },
+          "side": {
+            "title": "Discussion latérale",
+            "description": "Démarrer une discussion temporaire avec le contexte actuel."
           },
           "stop": {
             "title": "Arrêter la tâche en cours",
