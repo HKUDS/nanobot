@@ -3199,6 +3199,19 @@ describe("useNanobotStream", () => {
 
     act(() => {
       fake.emit("chat-retry", {
+        event: "retry_status",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        state: "cleared",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+      });
+    });
+    expect(result.current.retryStatus).toBeNull();
+
+    act(() => {
+      fake.emit("chat-retry", {
         event: "turn_end",
         chat_id: "chat-retry",
         turn_id: "turn-1",

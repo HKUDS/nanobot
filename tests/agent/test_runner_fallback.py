@@ -14,6 +14,7 @@ from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ModelRetryStatus,
     ProviderCallContext,
     ProviderConversationState,
 )
@@ -1076,17 +1077,34 @@ class TestRetryBeforeFailover:
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
         retry_events = AsyncMock()
+        retry_statuses: list[ModelRetryStatus] = []
         provider = FallbackProvider(primary, [_fallback("fallback-a")], factory)
+
+        async def _record_status(status: ModelRetryStatus) -> None:
+            retry_statuses.append(status)
 
         with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
             result = await provider.chat_with_retry(
                 [{"role": "user", "content": "hi"}],
                 on_retry_wait=retry_events,
+                on_retry_status=_record_status,
             )
 
         assert result.content == "fallback ok"
         assert len(primary.chat_calls) == 4
         assert not any("giving up" in call.args[0] for call in retry_events.await_args_list)
+        assert [status.state for status in retry_statuses] == [
+            "waiting",
+            "waiting",
+            "waiting",
+            "cleared",
+        ]
+        assert retry_statuses[-1] == ModelRetryStatus(
+            state="cleared",
+            attempt=4,
+            max_attempts=4,
+            error_kind="server",
+        )
         factory.assert_called_once_with(_fallback("fallback-a"))
 
     @pytest.mark.asyncio
@@ -1095,17 +1113,22 @@ class TestRetryBeforeFailover:
         fallback = _FakeProvider("fallback", _retryable_error("fallback unavailable"))
         retry_events = AsyncMock()
         terminal_event = AsyncMock()
+        retry_statuses: list[ModelRetryStatus] = []
         provider = FallbackProvider(
             primary,
             [_fallback("fallback-a")],
             MagicMock(return_value=fallback),
         )
 
+        async def _record_status(status: ModelRetryStatus) -> None:
+            retry_statuses.append(status)
+
         with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
             result = await provider.chat_with_retry(
                 [{"role": "user", "content": "hi"}],
                 on_retry_wait=retry_events,
                 on_retry_exhausted=terminal_event,
+                on_retry_status=_record_status,
             )
 
         assert result.finish_reason == "error"
@@ -1114,6 +1137,8 @@ class TestRetryBeforeFailover:
         terminal_event.assert_awaited_once_with(
             "Model request failed after 4 attempts, giving up."
         )
+        assert "cleared" in [status.state for status in retry_statuses]
+        assert retry_statuses[-1].state == "exhausted"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("factory_fails", [False, True])

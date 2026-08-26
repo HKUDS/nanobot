@@ -415,6 +415,7 @@ export function retryStatusLine(status: RetryStatus, nowMs = Date.now()): string
   const label = retryFailureLabel(status.error_kind)
   if (status.state === "exhausted") return `${label} · ending turn`
   if (status.state === "recovered") return "Connection restored"
+  if (status.state === "cleared") return "Retry status cleared"
   const remaining = Math.max(
     0,
     Math.ceil(((status.next_retry_at ?? nowMs / 1000) * 1000 - nowMs) / 1000),
@@ -1158,7 +1159,7 @@ export class NanobotTui {
         return
       case "retry_status":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
-        if (event.state === "recovered") {
+        if (event.state === "recovered" || event.state === "cleared") {
           this.retryStatus = null
           if (this.activeTurn) this.renderActiveStatus()
           return

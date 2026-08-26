@@ -87,7 +87,7 @@ export interface RecoveryState {
 }
 
 export interface RetryStatus {
-  state: "waiting" | "recovered" | "exhausted"
+  state: "waiting" | "recovered" | "cleared" | "exhausted"
   attempt: number
   max_attempts?: number
   error_kind: string
@@ -463,7 +463,7 @@ function isRecoveryState(value: unknown): value is RecoveryState {
 
 function isRetryStatus(value: unknown): value is RetryStatus {
   return isRecord(value)
-    && ["waiting", "recovered", "exhausted"].includes(String(value.state))
+    && ["waiting", "recovered", "cleared", "exhausted"].includes(String(value.state))
     && typeof value.attempt === "number"
     && Number.isInteger(value.attempt)
     && value.attempt >= 1

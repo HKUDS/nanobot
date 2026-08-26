@@ -354,6 +354,16 @@ class FallbackProvider(LLMProvider):
                 elif on_retry_status:
                     await on_retry_status(status)
 
+            async def _clear_status_for_fallback() -> None:
+                if last_exhausted_status is not None and on_retry_status is not None:
+                    await on_retry_status(
+                        replace(
+                            last_exhausted_status,
+                            state="cleared",
+                            next_retry_at=None,
+                        )
+                    )
+
             async def _call_candidate(
                 provider: LLMProvider,
                 candidate_kwargs: dict[str, Any],
@@ -374,6 +384,7 @@ class FallbackProvider(LLMProvider):
                 chain_kwargs,
                 has_streamed=has_streamed,
                 on_stream_recover=on_stream_recover,
+                on_fallback_attempt=_clear_status_for_fallback,
             )
             if (
                 retry_mode != "persistent"
@@ -443,6 +454,7 @@ class FallbackProvider(LLMProvider):
         kwargs: dict[str, Any],
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        on_fallback_attempt: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
@@ -540,6 +552,8 @@ class FallbackProvider(LLMProvider):
                     "Fallback '{}' also failed, trying next fallback '{}'",
                     self._fallback_presets[idx - 1].model, fallback_model,
                 )
+            if on_fallback_attempt is not None:
+                await on_fallback_attempt()
             try:
                 fallback_provider = self._provider_factory(fallback)
                 fallback_provider.set_llm_call_observer(self._llm_call_observer)

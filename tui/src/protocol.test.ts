@@ -791,6 +791,15 @@ describe("gateway protocol", () => {
         next_retry_at: 123.5,
       }) })
       socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        state: "cleared",
+        attempt: 4,
+        max_attempts: 4,
+        error_kind: "connection",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
         event: "turn_end",
         chat_id: "chat",
         turn_id: "turn-1",
@@ -806,9 +815,10 @@ describe("gateway protocol", () => {
         error_kind: "connection",
       }) })
 
-      expect(events).toHaveLength(2)
+      expect(events).toHaveLength(3)
       expect(events[0]?.event).toBe("retry_status")
-      expect(events[1]?.event).toBe("turn_end")
+      expect(events[1]?.event).toBe("retry_status")
+      expect(events[2]?.event).toBe("turn_end")
       expect(statuses).toContain("error:gateway sent an invalid event")
       client.close()
     } finally {

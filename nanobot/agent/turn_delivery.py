@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
-    RetryWaitEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
@@ -22,7 +21,6 @@ from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventPublisher
 from nanobot.providers.base import (
     LLMUsage,
     ModelRetryStatus,
-    RetryEventCallback,
     RetryStatusCallback,
 )
 
@@ -44,7 +42,6 @@ TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
 ProgressCallback = Callable[..., Awaitable[None]]
 StreamCallback = Callable[[str], Awaitable[None]]
 StreamEndCallback = Callable[..., Awaitable[None]]
-RetryWaitCallback = RetryEventCallback
 ModelRetryStatusCallback = RetryStatusCallback
 
 
@@ -173,22 +170,6 @@ class TurnDelivery:
             return None
         return build_bus_progress_callback(self.bus, self.delivery_message)
 
-    def retry_wait_callback(self) -> RetryWaitCallback | None:
-        if not self.route.publish_lifecycle:
-            return None
-
-        async def _on_retry_wait(content: str) -> None:
-            await self.bus.publish_outbound(
-                outbound_message_for_event(
-                    channel=self.delivery_message.channel,
-                    chat_id=self.delivery_message.chat_id,
-                    event=RetryWaitEvent(content=content),
-                    metadata=self.delivery_message.metadata,
-                )
-            )
-
-        return _on_retry_wait
-
     def retry_status_callback(self) -> ModelRetryStatusCallback | None:
         if not self.route.publish_lifecycle:
             return None
@@ -276,9 +257,10 @@ class TurnDelivery:
         completed_channel = self.lifecycle_message.channel
         completed_chat_id = self.lifecycle_message.chat_id
         if response is not None:
-            await self.bus.publish_outbound(response)
             completed_channel = response.channel
             completed_chat_id = response.chat_id
+            if response.channel != "websocket" or self._stop_reason != "error":
+                await self.bus.publish_outbound(response)
         elif self.lifecycle_message.channel == "cli":
             await self.bus.publish_outbound(
                 OutboundMessage(

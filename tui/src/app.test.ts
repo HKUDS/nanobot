@@ -2577,6 +2577,17 @@ describe("NanobotTui layout", () => {
     expect(ui.status.plainText).toContain("attempt 2/4")
 
     app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "cleared",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+    })
+    expect(ui.status.plainText).not.toContain("retrying")
+
+    app.accept({
       event: "turn_end",
       chat_id: "chat",
       turn_id: "turn-1",

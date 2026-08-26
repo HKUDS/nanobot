@@ -67,7 +67,7 @@ export interface RecoveryState {
 }
 
 export interface RetryStatus {
-  state: "waiting" | "recovered" | "exhausted";
+  state: "waiting" | "recovered" | "cleared" | "exhausted";
   attempt: number;
   max_attempts?: number;
   error_kind: string;
@@ -1423,7 +1423,7 @@ export type InboundEvent =
   | ({
       event: "retry_status";
       chat_id: string;
-      state: "waiting" | "recovered" | "exhausted";
+      state: "waiting" | "recovered" | "cleared" | "exhausted";
       attempt: number;
       max_attempts?: number;
       error_kind: string;

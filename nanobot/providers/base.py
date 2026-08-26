@@ -29,7 +29,7 @@ DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
 
-RetryStatusState = Literal["waiting", "recovered", "exhausted"]
+RetryStatusState = Literal["waiting", "recovered", "cleared", "exhausted"]
 
 
 @dataclass(frozen=True)

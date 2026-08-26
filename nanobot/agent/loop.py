@@ -60,7 +60,6 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMUsage,
     ProviderConversationState,
-    RetryEventCallback,
     RetryStatusCallback,
 )
 from nanobot.providers.factory import ProviderSnapshot
@@ -168,7 +167,6 @@ class TurnContext:
     on_stream: Callable[[str], Awaitable[None]] | None = None
     on_stream_end: Callable[..., Awaitable[None]] | None = None
     on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
-    on_retry_wait: RetryEventCallback | None = None
     on_retry_status: RetryStatusCallback | None = None
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
@@ -943,7 +941,6 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
-        on_retry_wait: RetryEventCallback | None = None,
         on_retry_status: RetryStatusCallback | None = None,
         *,
         runtime: LLMRuntime,
@@ -1186,7 +1183,6 @@ class AgentLoop:
                 session_key=session.key if session else None,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
-                retry_wait_callback=on_retry_wait,
                 retry_status_callback=on_retry_status,
                 checkpoint_callback=_checkpoint,
                 consolidate_history=(
@@ -2004,8 +2000,6 @@ class AgentLoop:
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()
-        if ctx.on_retry_wait is None:
-            ctx.on_retry_wait = ctx.delivery.retry_wait_callback()
         if ctx.on_retry_status is None:
             ctx.on_retry_status = ctx.delivery.retry_status_callback()
 
@@ -2022,7 +2016,6 @@ class AgentLoop:
                 on_progress=ctx.on_progress,
                 on_stream=ctx.on_stream,
                 on_stream_end=ctx.on_stream_end,
-                on_retry_wait=ctx.on_retry_wait,
                 on_retry_status=ctx.on_retry_status,
                 session=ctx.session,
                 pending_queue=ctx.pending_queue,
