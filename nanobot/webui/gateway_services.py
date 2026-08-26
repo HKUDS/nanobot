@@ -13,6 +13,7 @@ from nanobot.config.loader import get_config_path
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.session_projection import WebUISessionProjection
 from nanobot.webui.settings_services import WebUISettingsServices
 from nanobot.webui.temporary_chats import WebUITemporaryChats
 from nanobot.webui.transcript import WebUITranscriptRecorder
@@ -39,6 +40,7 @@ class GatewayServices:
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
     temporary_chats: WebUITemporaryChats
+    session_projection: WebUISessionProjection
     session_manager: SessionManager | None
     cron_service: CronService | None
     local_trigger_store: LocalTriggerStore | None
@@ -108,6 +110,7 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
+    session_projection = WebUISessionProjection(session_manager, log=logger)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -144,6 +147,7 @@ def build_gateway_services(
         transcripts=transcripts,
         workspaces=workspaces,
         temporary_chats=temporary_chats,
+        session_projection=session_projection,
         session_manager=session_manager,
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,

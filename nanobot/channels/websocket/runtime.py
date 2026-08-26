@@ -56,8 +56,6 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.goal_state import goal_state_ws_blob
-from nanobot.session.model_selection import model_preset_from_metadata
-from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -422,6 +420,7 @@ class WebSocketChannel(BaseChannel):
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
         self._temporary_chats = gateway.temporary_chats
+        self._session_projection = gateway.session_projection
         self._session_access = (
             WebuiSessionAccess(gateway.session_manager)
             if gateway.session_manager is not None
@@ -440,29 +439,6 @@ class WebSocketChannel(BaseChannel):
         """Idempotently subscribe *connection* to *chat_id*."""
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
-
-    def _attached_model_fields(self, chat_id: str) -> dict[str, Any]:
-        """Expose small session runtime facts on the attach handshake."""
-        sessions = self.gateway.session_manager
-        if sessions is None:
-            return {}
-        snapshot = sessions.read_session_metadata(f"websocket:{chat_id}")
-        raw_metadata = snapshot.get("metadata") if snapshot is not None else None
-        metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
-        fields: dict[str, Any] = {}
-        try:
-            fields["model_preset"] = model_preset_from_metadata(metadata)
-        except ValueError:
-            self.logger.warning("ignoring invalid model preset metadata for chat_id={}", chat_id)
-            fields["model_preset"] = None
-        if isinstance(metadata, dict):
-            recovery_state = recovery_state_from_metadata(metadata)
-            if recovery_state is not None:
-                fields["recovery_state"] = recovery_state
-            usage = LLMUsage.from_dict(metadata.get("_last_usage"))
-            if usage is not None:
-                fields["usage"] = usage.to_turn_dict()
-        return fields
 
     def _detach(self, connection: ServerConnection, chat_id: str) -> None:
         chats = self._conn_chats.get(connection)
@@ -516,7 +492,7 @@ class WebSocketChannel(BaseChannel):
             connection,
             "attached",
             chat_id=fork_id,
-            **self._attached_model_fields(fork_id),
+            **self._session_projection.attach_fields(f"{self.name}:{fork_id}"),
         )
         await self._send_event(
             connection,
@@ -904,7 +880,7 @@ class WebSocketChannel(BaseChannel):
                 connection,
                 "attached",
                 chat_id=new_id,
-                **self._attached_model_fields(new_id),
+                **self._session_projection.attach_fields(f"{self.name}:{new_id}"),
             )
             await self._send_event(
                 connection,
@@ -960,7 +936,7 @@ class WebSocketChannel(BaseChannel):
                 connection,
                 "attached",
                 chat_id=cid,
-                **self._attached_model_fields(cid),
+                **self._session_projection.attach_fields(f"{self.name}:{cid}"),
             )
             await self._hydrate_after_subscribe(cid)
             return

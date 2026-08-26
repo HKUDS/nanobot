@@ -2190,28 +2190,6 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
     chat_two.send.assert_not_awaited()
 
 
-def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
-    usage = LLMUsage.reported(input_tokens=120, output_tokens=8, total_tokens=175)
-    manager = MagicMock()
-    manager.read_session_metadata.return_value = {
-        "metadata": {
-            SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
-            "_last_usage": usage.to_dict(),
-        }
-    }
-    bus = MagicMock()
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"]},
-        bus,
-        gateway=_basic_handler(bus, session_manager=manager),
-    )
-
-    assert channel._attached_model_fields("chat-1") == {
-        "model_preset": "Deep Research",
-        "usage": usage.to_turn_dict(),
-    }
-
-
 @pytest.mark.asyncio
 async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -> None:
     bus = MagicMock()
