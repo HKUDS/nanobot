@@ -378,28 +378,13 @@ function formatElapsed(milliseconds: number): string {
 
 function connectionStatusText(
   status: ConnectionStatus,
-  detail?: string,
-  info?: ConnectionStatusInfo,
 ): string {
-  const endpoint = info?.endpoint ? ` at ${info.endpoint}` : ""
-  const reason = detail ? ` · ${detail}` : ""
-  if (status === "starting") return "Starting local gateway…"
-  if (status === "connecting") return "Connecting to chat…"
-  if (status === "connected") return "Connected · preparing chat…"
-  if (status === "reconnecting") {
-    const attempt = info ? ` · retry ${info.attempt}` : ""
-    return `Reconnecting to chat${endpoint}${reason}${attempt}…`
-  }
-  if (status === "unavailable") {
-    const wait = info
-      ? ` · retrying (attempt ${info.attempt} after ${formatElapsed(info.elapsedMs)})`
-      : " · retrying"
-    return `Chat service unavailable${endpoint}${reason}${wait}…`
-  }
-  if (status === "error" && info) {
-    return `Chat service unavailable${endpoint}${reason} · restart nanobot`
-  }
-  if (status === "error") return detail || "Connection error"
+  if (status === "starting") return "Starting nanobot…"
+  if (status === "connecting") return "Connecting…"
+  if (status === "connected") return "Opening chat…"
+  if (status === "reconnecting") return "Connection interrupted · reconnecting…"
+  if (status === "unavailable") return "Unable to connect · retrying…"
+  if (status === "error") return "Unable to connect · restart nanobot"
   return "Disconnected"
 }
 
@@ -479,7 +464,7 @@ export class NanobotTui {
   private submitPending = false
   private submitGeneration = 0
   private unsentSubmit = false
-  private connectionMessage = "Connecting to chat…"
+  private connectionMessage = "Connecting…"
   private readonly promptHistory: string[] = []
   private historyCursor = 0
   private historyDraft = ""
@@ -1435,10 +1420,10 @@ export class NanobotTui {
 
   private handleStatus(
     status: ConnectionStatus,
-    detail?: string,
+    _detail?: string,
     info?: ConnectionStatusInfo,
   ): void {
-    this.connectionMessage = connectionStatusText(status, detail, info)
+    this.connectionMessage = connectionStatusText(status)
     if (status === "connected") {
       this.ready = false
       this.host.reportState("unknown", "Connecting")

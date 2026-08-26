@@ -2384,13 +2384,13 @@ describe("NanobotTui layout", () => {
     expect(state()).toBe(false)
   })
 
-  test("keeps startup quiet before showing actionable sustained failure details", async () => {
+  test("shows actionable connection states without implementation details", async () => {
     setup = await createRenderer({ width: 100, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)
     const ui = app as unknown as {
       status: TextRenderable
       handleStatus(
-        status: "starting" | "unavailable" | "error",
+        status: "starting" | "connecting" | "connected" | "reconnecting" | "unavailable" | "error",
         detail?: string,
         info?: { endpoint: string; attempt: number; elapsedMs: number },
       ): void
@@ -2401,27 +2401,38 @@ describe("NanobotTui layout", () => {
       attempt: 1,
       elapsedMs: 0,
     })
-    expect(ui.status.plainText).toBe("Starting local gateway…")
+    expect(ui.status.plainText).toBe("Starting nanobot…")
+
+    ui.handleStatus("connecting")
+    expect(ui.status.plainText).toBe("Connecting…")
+
+    ui.handleStatus("connected")
+    expect(ui.status.plainText).toBe("Opening chat…")
+
+    ui.handleStatus("reconnecting", "connection closed", {
+      endpoint: "127.0.0.1:8769",
+      attempt: 2,
+      elapsedMs: 800,
+    })
+    expect(ui.status.plainText).toBe("Connection interrupted · reconnecting…")
 
     ui.handleStatus("unavailable", "connection refused", {
       endpoint: "127.0.0.1:8769",
       attempt: 7,
       elapsedMs: 3_200,
     })
-    expect(ui.status.plainText).toBe(
-      "Chat service unavailable at 127.0.0.1:8769 · connection refused"
-      + " · retrying (attempt 7 after 3s)…",
-    )
+    expect(ui.status.plainText).toBe("Unable to connect · retrying…")
 
     ui.handleStatus("error", "gateway bootstrap failed: HTTP 401", {
       endpoint: "127.0.0.1:8769",
       attempt: 8,
       elapsedMs: 3_500,
     })
-    expect(ui.status.plainText).toBe(
-      "Chat service unavailable at 127.0.0.1:8769"
-      + " · gateway bootstrap failed: HTTP 401 · restart nanobot",
-    )
+    expect(ui.status.plainText).toBe("Unable to connect · restart nanobot")
+    expect(ui.status.plainText).not.toContain("gateway")
+    expect(ui.status.plainText).not.toContain("127.0.0.1")
+    expect(ui.status.plainText).not.toContain("HTTP")
+    expect(ui.status.plainText).not.toContain("attempt")
   })
 
   test("replays events after asynchronous history hydration", async () => {
