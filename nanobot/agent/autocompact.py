@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, cast
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
+from nanobot.session.summary import SessionSummary, session_summary_from_metadata
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
@@ -25,7 +26,7 @@ class AutoCompact:
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
-        self._summaries: dict[str, tuple[str, datetime]] = {}
+        self._summaries: dict[str, SessionSummary] = {}
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -48,10 +49,6 @@ class AutoCompact:
     def _has_unarchived_messages(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
         return session.last_consolidated < len(session.messages)
-
-    @staticmethod
-    def _format_summary(text: str, last_active: datetime) -> str:
-        return f"Previous conversation summary (last active {last_active.isoformat()}):\n{text}"
 
     @classmethod
     def _is_internal_session(cls, key: str) -> bool:
@@ -94,18 +91,18 @@ class AutoCompact:
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)
-                meta = session.metadata.get("_last_summary")
-                if isinstance(meta, dict):
-                    self._summaries[key] = (
-                        cast(str, meta["text"]),
-                        datetime.fromisoformat(cast(str, meta["last_active"])),
-                    )
+                stored = session_summary_from_metadata(
+                    session.metadata,
+                    fallback_last_active=session.updated_at,
+                )
+                if stored is not None:
+                    self._summaries[key] = stored
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
             self._archiving.discard(key)
 
-    def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
+    def prepare_session(self, session: Session, key: str) -> tuple[Session, SessionSummary | None]:
         if self._is_internal_session(key):
             self._archiving.discard(key)
             self._summaries.pop(key, None)
@@ -116,23 +113,11 @@ class AutoCompact:
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:
-            return session, self._format_summary(entry[0], entry[1])
+            return session, entry
         # Cold path: summary persisted in session metadata (process restarted).
         # Persisted metadata may outlive schema changes; a malformed summary must
         # not abort turn preparation.
-        meta = session.metadata.get("_last_summary")
-        if isinstance(meta, dict):
-            summary_meta = cast(dict[str, object], meta)
-            text = summary_meta.get("text")
-            if isinstance(text, str) and text:
-                raw_last_active = summary_meta.get("last_active")
-                try:
-                    last_active = (
-                        datetime.fromisoformat(raw_last_active)
-                        if isinstance(raw_last_active, str)
-                        else session.updated_at
-                    )
-                except ValueError:
-                    last_active = session.updated_at
-                return session, self._format_summary(text, last_active)
-        return session, None
+        return session, session_summary_from_metadata(
+            session.metadata,
+            fallback_last_active=session.updated_at,
+        )

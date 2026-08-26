@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "預設存取權",
       "currentModel": "目前設定",
       "brandLogos": "品牌 Logo",
+      "browserNotifications": "任務通知",
       "cliAppsCatalog": "目錄",
       "cliAppsFilter": "篩選",
       "engine": "引擎",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "由選取的模型決定。",
       "selectedModelValue": "由選取的模型決定。",
       "brandLogos": "在設定中顯示第三方供應商與 CLI 圖示。",
+      "browserNotifications": "僅在頁面位於背景時通知，預設關閉。",
       "cliAppsCatalog": "只安裝 nanobot 可在本機執行的應用程式專用 CLI 轉接器；不會改動原生應用程式。",
       "cliAppsFilter": "依應用程式、類別或功能搜尋。",
       "logs": "開啟原生引擎日誌資料夾。",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "智能體正在執行",
       "complete": "智能體已完成",
-      "updated": "有新內容"
+      "updated": "有新內容",
+      "recovery": "此對話需要你的處理"
     },
     "pin": "置頂",
     "unpin": "取消置頂",
@@ -1178,6 +1181,11 @@
       "removeQuotedContext": "移除引用內容",
       "modelNotConfigured": "尚未設定模型",
       "configureModel": "設定模型",
+      "switchModel": "切換此對話使用的模型",
+      "context": {
+        "tooltip": "上下文 · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}。已使用 {{percent}}%。"
+      },
       "queued": {
         "label": "佇列中的引導訊息",
         "guide": "引導",
@@ -1393,6 +1401,11 @@
     "fileEditShowFewerLines": "收起部分行",
     "fileEditOpenFile": "開啟檔案",
     "fileEditDiffTruncated": "差異內容已截斷。請開啟檔案以檢視完整變更。",
+    "usage": {
+      "context": "最近一次上下文：{{tokens}}{{capacity}} tokens",
+      "requests": "{{count}} 次模型請求",
+      "estimated": "包含估算用量"
+    },
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",
@@ -1411,6 +1424,18 @@
     "automationSourceFallback": "自動化",
     "automationTriggered": "已自動觸發",
     "askAboutSelection": "繼續提問"
+  },
+  "recovery": {
+    "actionFailed": "復原操作失敗，請再試一次。",
+    "interrupted": "任務已中斷",
+    "completed": "任務已完成",
+    "failed": "任務復原失敗",
+    "failedHelp": "無法安全復原已儲存的任務，繼續前請先檢查。",
+    "resuming": "正在復原中斷的任務…",
+    "review": "繼續前請檢查任務。工具不會自動重播。",
+    "safeResume": "正在從已儲存的對話上下文繼續。",
+    "dismiss": "略過",
+    "continue": "繼續"
   },
   "lightbox": {
     "title": "圖片預覽",

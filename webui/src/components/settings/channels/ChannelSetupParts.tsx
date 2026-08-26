@@ -112,7 +112,7 @@ export function ChannelSetupLinks({
   );
 }
 
-export function ChannelOfficialLink({
+function ChannelOfficialLink({
   feature,
   setup,
 }: {

@@ -186,6 +186,35 @@ class TestBuildDreamPrompt:
         assert "Always strip these bracketed tags from saved memory content" in prompt
 
 
+class TestDreamRunCompletion:
+    """The runner's terminal state gates Dream cursor advancement."""
+
+    class _Resp:
+        def __init__(self, stop_reason: str = "completed") -> None:
+            self.metadata = {"_stop_reason": stop_reason}
+
+    def test_completed_stop_reason_completes(self):
+        assert MemoryStore.dream_run_completed(self._Resp())
+
+    @pytest.mark.parametrize(
+        "stop_reason",
+        ["error", "tool_error", "max_iterations", "cancelled"],
+    )
+    def test_non_completed_stop_reason_blocks(self, stop_reason: str):
+        assert not MemoryStore.dream_run_completed(self._Resp(stop_reason))
+
+    def test_missing_response_metadata_blocks(self):
+        assert not MemoryStore.dream_run_completed(None)
+
+    def test_incompletion_reason_names_the_cause(self):
+        assert MemoryStore.dream_incompletion_reason(
+            self._Resp("max_iterations")
+        ) == "stop_reason: max_iterations"
+        assert MemoryStore.dream_incompletion_reason(None) == (
+            "stop_reason: missing response metadata"
+        )
+
+
 class TestDreamTools:
     def test_dream_tools_are_restricted_to_file_edits(self, store):
         tools = store.build_dream_tools()
@@ -383,7 +412,7 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage={})
+            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage=None)
         )
 
         with (
@@ -507,6 +536,45 @@ class TestEphemeralDirect:
         assert resp.metadata["_stop_reason"] == "error"
         assert MemoryStore.dream_run_completed(resp) is False
 
+    async def test_completed_response_after_tool_error_is_success(self, _make_loop):
+        """A soft tool error is model input, not a second run-level failure state."""
+        from unittest.mock import AsyncMock
+
+        from nanobot.providers.base import ToolCallRequest
+
+        loop, store = _make_loop
+        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+            LLMResponse(
+                content="trying an edit",
+                finish_reason="tool_calls",
+                tool_calls=[ToolCallRequest(
+                    id="call_edit",
+                    name="edit_file",
+                    arguments={
+                        "path": "SOUL.md",
+                        "old_text": "text that is not present",
+                        "new_text": "replacement",
+                    },
+                )],
+                usage=None,
+            ),
+            LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage=None),
+        ])
+
+        resp = await loop.process_direct(
+            "test",
+            session_key="dream:handled-tool-error",
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        assert resp is not None
+        assert resp.metadata["_stop_reason"] == "completed"
+        assert MemoryStore.dream_run_completed(resp) is True
+        second_request = loop.provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        tool_result = next(message for message in second_request if message["role"] == "tool")
+        assert "Error" in tool_result["content"]
+
     async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
         """Dream must only see the batch selected by build_dream_prompt."""
         from unittest.mock import MagicMock
@@ -578,7 +646,7 @@ class TestEphemeralHooks:
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(
-                content="done", finish_reason="stop", tool_calls=[], usage={},
+                content="done", finish_reason="stop", tool_calls=[], usage=None,
             )
         )
 

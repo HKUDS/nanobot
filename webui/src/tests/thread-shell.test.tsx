@@ -613,6 +613,31 @@ describe("ThreadShell", () => {
     expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
   });
 
+  it("falls back to the current preset while a renamed session reference is stale", async () => {
+    const client = makeClient();
+    const settings = settingsWithFastPreset();
+    settings.agent.model_preset = "fast";
+    settings.model_presets = settings.model_presets.map((preset) => ({
+      ...preset,
+      active: preset.name === "fast",
+    }));
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("renamed-preset", "old-fast")}
+          title="Renamed preset"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+        />,
+        "openai-codex/gpt-5.5",
+      ),
+    );
+
+    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
+  });
+
   it("switches through every named preset while preserving call-order priority", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
@@ -637,19 +662,18 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view("default"));
 
-    const badge = await screen.findByRole("spinbutton", { name: "Default" });
+    const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
-    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    fireEvent.click(badge);
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
 
     expect(client.sendSystemCommand).toHaveBeenCalledWith(
       "preset-order",
       "/model fast",
     );
     expect(await screen.findByText("fast")).toBeInTheDocument();
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "fast" }),
-      { key: "End" },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "fast" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
@@ -696,7 +720,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
-  it("highlights the configured model badge without replacing the preset label", async () => {
+  it("shows the effective fallback model in the composer badge", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -710,7 +734,8 @@ describe("ThreadShell", () => {
     ));
 
     expect(await screen.findByText("Default")).toBeInTheDocument();
-    const configuredBadge = screen.getByTestId("composer-model-logo-openai_codex").parentElement;
+    const configuredLogo = await screen.findByTestId("composer-model-logo-openai_codex");
+    const configuredBadge = configuredLogo.parentElement;
     expect(configuredBadge).not.toBeNull();
     expect(configuredBadge).toHaveClass("composer-model-badge");
     expect(configuredBadge).not.toHaveAttribute("data-fallback");
@@ -719,22 +744,35 @@ describe("ThreadShell", () => {
       client._emitChat("fallback-model", {
         event: "turn_model_updated",
         chat_id: "fallback-model",
-        model_name: "deepseek/deepseek-chat",
+        model_name: "openai-codex/gpt-5.5",
+        model_preset: "Default",
       });
     });
 
-    const logo = screen.getByTestId("composer-model-logo-openai_codex");
+    expect(configuredBadge).not.toHaveAttribute("data-fallback");
+    expect(screen.getByText("Default")).toBeInTheDocument();
+
+    act(() => {
+      client._emitChat("fallback-model", {
+        event: "turn_model_updated",
+        chat_id: "fallback-model",
+        model_name: "deepseek/deepseek-chat",
+        fallback: true,
+      });
+    });
+
+    const logo = await screen.findByTestId("composer-model-logo-deepseek");
     const badge = logo.parentElement;
     expect(badge).not.toBeNull();
     expect(badge).toBe(configuredBadge);
-    expect(screen.getByText("Default")).toBeInTheDocument();
-    expect(screen.queryByText("deepseek-chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
+    expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
     expect(badge).toHaveAttribute(
       "title",
-      "deepseek/deepseek-chat",
+      "Default · using deepseek/deepseek-chat",
     );
-    expect(logo).not.toHaveAttribute("data-fallback");
+    expect(logo).toBeInTheDocument();
 
     act(() => {
       client._emitChat("fallback-model", {
@@ -748,12 +786,7 @@ describe("ThreadShell", () => {
         screen.getByTestId("composer-model-logo-openai_codex").parentElement,
       ).not.toHaveAttribute("data-fallback");
     });
-    expect(
-      screen.getByTestId("composer-model-logo-openai_codex").parentElement,
-    ).toHaveAttribute("title", "Default · gpt-5.5 · OpenAI Codex");
-    expect(
-      screen.getByTestId("composer-model-logo-openai_codex").parentElement,
-    ).toBe(badge);
+    expect(screen.getByText("Default")).toBeInTheDocument();
   });
 
   it("opens model settings from the unconfigured model badge", async () => {
@@ -1066,10 +1099,8 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view(null));
 
-    fireEvent.keyDown(
-      await screen.findByRole("spinbutton", { name: "Default" }),
-      { key: "ArrowDown" },
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
     expect(await screen.findByText("fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
@@ -3930,7 +3961,7 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("offers only same-project sessions in restricted mode", async () => {
+  it("offers sessions across projects in restricted mode", async () => {
     const client = makeClient();
     const currentScope = {
       project_path: "/projects/current",
@@ -3940,6 +3971,10 @@ describe("ThreadShell", () => {
       ...session("same-project"),
       title: "Same project",
       workspaceScope: currentScope,
+      handle: {
+        id: "handle_11111111111111111111111111111111",
+        name: "same-1111111111",
+      },
     };
     const otherProject = {
       ...session("other-project"),
@@ -3947,6 +3982,10 @@ describe("ThreadShell", () => {
       workspaceScope: {
         project_path: "/projects/other",
         access_mode: "restricted" as const,
+      },
+      handle: {
+        id: "handle_22222222222222222222222222222222",
+        name: "other-2222222222",
       },
     };
 
@@ -3965,6 +4004,35 @@ describe("ThreadShell", () => {
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
     expect(screen.getByRole("option", { name: /Same project/i })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Other project/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
+
+  it("allows a new turn after a completed recovery state", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("recovered-chat")}
+        title="Recovered chat"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    act(() => {
+      client._emitChat("recovered-chat", {
+        event: "recovery_state",
+        chat_id: "recovered-chat",
+        recovery_id: "recovery-1",
+        status: "recovered",
+      });
+    });
+
+    fireEvent.change(input, { target: { value: "start the next task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(client.sendMessage).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+  });
+
 });

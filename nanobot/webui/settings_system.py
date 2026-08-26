@@ -20,6 +20,7 @@ from nanobot.channels.contracts import (
     channel_update_instance_config,
 )
 from nanobot.config.schema import Config
+from nanobot.llm_usage import llm_usage_payload
 from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
 from nanobot.security.workspace_access import workspace_sandbox_status
 from nanobot.webui.settings_capabilities import network_safety_payload
@@ -31,7 +32,6 @@ from nanobot.webui.settings_contracts import (
     query_first,
     query_first_alias,
 )
-from nanobot.webui.token_usage import token_usage_payload
 
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsServices
@@ -121,7 +121,7 @@ def system_settings_payload(
             },
             "unified_session": defaults.unified_session,
         },
-        "usage": token_usage_payload(timezone_name=defaults.timezone),
+        "usage": llm_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
@@ -139,7 +139,7 @@ def system_settings_payload(
 
 def settings_usage_payload(config: Config) -> dict[str, Any]:
     """Return the lightweight token usage slice for Overview refreshes."""
-    return token_usage_payload(timezone_name=config.agents.defaults.timezone)
+    return llm_usage_payload(timezone_name=config.agents.defaults.timezone)
 
 
 def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bool, bool]:

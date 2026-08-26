@@ -11,6 +11,7 @@ import {
 } from "@opentui/core"
 
 import type { FileEditEvent, HistoryMessage, ToolProgressEvent } from "./protocol"
+import { renderLatexAsUnicode } from "./latex"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
@@ -44,7 +45,13 @@ interface Activity {
   events: Map<string, ToolProgressEvent>
 }
 
-const ACTIVITY_PREVIEW_LINES = 6
+interface ActivityPreviewItem {
+  text: string
+  steps: number
+  group?: string
+}
+
+const ACTIVITY_PREVIEW_LINES = 4
 // OpenTUI renders at 30 FPS. Re-parsing the entire Markdown buffer for every
 // provider token turns long answers into quadratic work without producing any
 // additional visible frames. Paint the first token immediately, then coalesce
@@ -78,12 +85,13 @@ export class Transcript {
     private readonly treeSitterClient: TreeSitterClient,
     private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
     private readonly showHeader = true,
+    private readonly workspace = "",
   ) {
     this.root = new ScrollBoxRenderable(renderer, {
       id: "nanobot-tui-transcript",
       width: "100%",
       minHeight: 0,
-      flexGrow: 1,
+      flexGrow: 0,
       scrollX: false,
       scrollY: true,
       stickyScroll: true,
@@ -91,6 +99,7 @@ export class Transcript {
       viewportCulling: true,
       contentOptions: {
         flexDirection: "column",
+        minHeight: 0,
         paddingTop: 1,
         paddingBottom: 1,
         paddingLeft: 1,
@@ -248,7 +257,7 @@ export class Transcript {
     }
     if (!this.live.content && !this.pendingStream) {
       this.live.content = delta
-      this.live.markdown.content = delta
+      this.live.markdown.content = renderLatexAsUnicode(delta)
       return
     }
     this.pendingStream += delta
@@ -262,7 +271,7 @@ export class Transcript {
       const content = fallback || this.live.content
       // Finalize the retained Markdown node in place. This preserves scroll
       // anchors and avoids the one-frame jump caused by replacing the row.
-      this.live.markdown.content = content
+      this.live.markdown.content = renderLatexAsUnicode(content)
       this.live.markdown.streaming = false
       this.live = null
     } else if (fallback.trim()) {
@@ -275,7 +284,7 @@ export class Transcript {
     this.clearStreamTimer()
     this.pendingStream = ""
     this.live.content = content
-    this.live.markdown.content = content
+    this.live.markdown.content = renderLatexAsUnicode(content)
   }
 
   progress(content: string, events: ToolProgressEvent[] = []): string {
@@ -335,7 +344,7 @@ export class Transcript {
     if (!this.live || !this.pendingStream) return
     this.live.content += this.pendingStream
     this.pendingStream = ""
-    this.live.markdown.content = this.live.content
+    this.live.markdown.content = renderLatexAsUnicode(this.live.content)
   }
 
   private clearStreamTimer(): void {
@@ -424,7 +433,7 @@ export class Transcript {
       const key = event.call_id ? `tool:${event.call_id}` : ""
       const merged = key ? mergeToolEvent(activity.events.get(key), event) : event
       if (key) activity.events.set(key, merged)
-      return { key, line: renderToolEvent(merged) }
+      return { key, line: renderToolEvent(merged, { workspace: this.workspace }) }
     })
     const lines = events.length > 0
       ? projected.map(({ line }) => line).filter(Boolean)
@@ -448,9 +457,14 @@ export class Transcript {
       activity.text.content = activity.lines.join("\n")
       return
     }
-    const visible = activity.lines.slice(-(ACTIVITY_PREVIEW_LINES - 1))
-    const hidden = activity.lines.length - visible.length
-    activity.text.content = [`  … ${hidden} earlier steps · Ctrl+O expand`, ...visible].join("\n")
+    const visible = activityPreview(activity.lines).slice(-(ACTIVITY_PREVIEW_LINES - 1))
+    const visibleSteps = visible.reduce((total, item) => total + item.steps, 0)
+    const hidden = activity.lines.length - visibleSteps
+    const disclosure = hidden > 0 ? `${hidden} earlier steps` : `${activity.lines.length} steps`
+    activity.text.content = [
+      `  … ${disclosure} · Ctrl+O expand`,
+      ...visible.map((item) => item.text),
+    ].join("\n")
   }
 
   private createText(
@@ -500,7 +514,7 @@ export class Transcript {
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
-      content,
+      content: renderLatexAsUnicode(content),
       width: "auto",
       minWidth: 0,
       flexGrow: 1,
@@ -540,6 +554,22 @@ export class Transcript {
 function cleanProgress(value: string): string {
   const text = value.trim().replace(/^\*\*(.*?)\*\*$/u, "$1").replace(/\s+/gu, " ")
   return text ? `  · ${text}` : ""
+}
+
+function activityPreview(lines: readonly string[]): ActivityPreviewItem[] {
+  const preview: ActivityPreviewItem[] = []
+  for (const line of lines) {
+    const match = line.match(/^  ([›✓]) (Read|Edited|Editing)  /u)
+    const group = match ? `${match[1]}:${match[2]}` : undefined
+    const previous = preview.at(-1)
+    if (match && group && previous?.group === group) {
+      previous.steps += 1
+      previous.text = `  ${match[1]} ${match[2]} ${previous.steps} files`
+      continue
+    }
+    preview.push({ text: line, steps: 1, ...(group ? { group } : {}) })
+  }
+  return preview
 }
 
 function formatDiffStat(edit: FileEditEvent): string {

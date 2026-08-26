@@ -1,7 +1,9 @@
 """Test session management with cache-friendly message handling."""
 
 import asyncio
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -488,12 +490,13 @@ class TestNewCommandArchival:
     def _make_loop(tmp_path: Path):
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        from nanobot.providers.base import GenerationSettings, LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.estimate_prompt_tokens.return_value = (10_000, "test")
+        provider.generation = GenerationSettings(max_tokens=100)
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -520,14 +523,14 @@ class TestNewCommandArchival:
         call_count = 0
         expected_runtime = loop.llm_runtime()
 
-        async def _failing_summarize(_messages, *, runtime, session_key=None) -> bool:
+        async def _failing_summarize(session, *, archive_end, runtime) -> None:
             nonlocal call_count
             assert runtime is expected_runtime
-            assert session_key == "cli:test"
+            assert session.key == "cli:test"
+            assert archive_end == len(session.messages)
             call_count += 1
-            return False
 
-        loop.consolidator.archive = _failing_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _failing_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg, runtime=expected_runtime)
@@ -542,29 +545,35 @@ class TestNewCommandArchival:
         assert call_count == 1
 
     @pytest.mark.asyncio
-    async def test_new_archives_only_unconsolidated_messages(self, tmp_path: Path) -> None:
+    async def test_new_reuses_replay_prefix_and_archives_only_unconsolidated_messages(
+        self,
+        tmp_path: Path,
+    ) -> None:
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
+        loop.set_runtime_context_window(128_000)
         session = loop.sessions.get_or_create("cli:test")
-        for i in range(15):
+        for i in range(5):
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
-        session.last_consolidated = len(session.messages) - 3
+        session.last_consolidated = len(session.messages) - 2
+        ordinary_history = session.get_history()
+        assert [message["content"] for message in ordinary_history] == [
+            "msg1",
+            "resp1",
+            "msg2",
+            "resp2",
+            "msg3",
+            "resp3",
+            "msg4",
+            "resp4",
+        ]
         loop.sessions.save(session)
 
-        archived_count = -1
-        archived_session_key = None
         expected_runtime = loop.llm_runtime()
-
-        async def _fake_summarize(messages, *, runtime, session_key=None) -> bool:
-            nonlocal archived_count, archived_session_key
-            assert runtime is expected_runtime
-            archived_count = len(messages)
-            archived_session_key = session_key
-            return True
-
-        loop.consolidator.archive = _fake_summarize  # type: ignore[method-assign]
+        scheduled: list[Coroutine[Any, Any, object]] = []
+        loop.schedule_background = scheduled.append  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg, runtime=expected_runtime)
@@ -572,9 +581,12 @@ class TestNewCommandArchival:
         assert response is not None
         assert "new session started" in response.content.lower()
 
+        assert len(scheduled) == 1
+        await scheduled[0]
         await loop.aclose()
-        assert archived_count == 3
-        assert archived_session_key == "cli:test"
+        sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
+        assert sent[1:-1] == ordinary_history
+        assert "final 2 conversation messages" in sent[-1]["content"]
 
     @pytest.mark.asyncio
     async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:
@@ -588,12 +600,13 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
         expected_runtime = loop.llm_runtime()
 
-        async def _ok_summarize(_messages, *, runtime, session_key=None) -> bool:
+        async def _ok_summarize(session, *, archive_end, runtime) -> str:
             assert runtime is expected_runtime
-            assert session_key == "cli:test"
-            return True
+            assert session.key == "cli:test"
+            assert archive_end == len(session.messages)
+            return "Summary."
 
-        loop.consolidator.archive = _ok_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _ok_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg, runtime=expected_runtime)
@@ -618,14 +631,15 @@ class TestNewCommandArchival:
         release_archive = asyncio.Event()
         expected_runtime = loop.llm_runtime()
 
-        async def _slow_summarize(_messages, *, runtime, session_key=None) -> bool:
+        async def _slow_summarize(session, *, archive_end, runtime) -> str:
             assert runtime is expected_runtime
-            assert session_key == "cli:test"
+            assert session.key == "cli:test"
+            assert archive_end == len(session.messages)
             await release_archive.wait()
             archived.set()
-            return True
+            return "Summary."
 
-        loop.consolidator.archive = _slow_summarize  # type: ignore[method-assign]
+        loop.consolidator.archive_session = _slow_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         await loop._process_message(new_msg, runtime=expected_runtime)

@@ -101,6 +101,7 @@ import type {
 import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
+import { sessionHandleColor } from "@/lib/session-handle";
 import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
@@ -111,6 +112,7 @@ import {
   readDraggedSession,
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
+import { formatCompactTokenCount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -177,6 +179,107 @@ function getVoiceShortcutLabel(): string {
   }
 }
 
+export interface ComposerContextUsage {
+  contextTokens: number;
+  contextWindowTokens?: number;
+}
+
+function ComposerContextBadge({ usage }: { usage: ComposerContextUsage | null }) {
+  const { t } = useTranslation();
+  if (!usage || !Number.isFinite(usage.contextTokens) || usage.contextTokens < 0) return null;
+
+  const context = formatCompactTokenCount(usage.contextTokens);
+  const contextWindow = typeof usage.contextWindowTokens === "number"
+    && Number.isFinite(usage.contextWindowTokens)
+    && usage.contextWindowTokens > 0
+    ? usage.contextWindowTokens
+    : null;
+  const capacity = contextWindow !== null
+    ? ` / ${formatCompactTokenCount(contextWindow)}`
+    : "";
+  // The meter is meaningful only with a known capacity.  Do not turn an
+  // otherwise unknown total into a second, text-heavy control beside the
+  // model picker.
+  if (contextWindow === null) return null;
+  const percentage = Math.min(100, Math.round(usage.contextTokens / contextWindow * 100));
+  const status = percentage >= 90
+      ? "critical"
+      : percentage >= 75
+        ? "caution"
+        : "normal";
+  const contextDescription = t("thread.composer.context.tooltip", {
+    defaultValue: "Context · {{tokens}}{{capacity}}",
+    tokens: context,
+    capacity,
+  });
+  const meterDescription = t("thread.composer.context.meterDescription", {
+    defaultValue: "{{context}}. {{percent}}% used.",
+    context: contextDescription,
+    percent: percentage,
+  });
+  const ringCircumference = 2 * Math.PI * 6;
+  const ringLength = ringCircumference * percentage / 100;
+
+  return (
+    <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            data-testid="composer-context-usage"
+            aria-label={meterDescription}
+            className={cn(
+              "inline-flex size-5 shrink-0 items-center justify-center rounded-full",
+              "text-muted-foreground/75 transition-colors hover:text-foreground/85",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              className={cn(
+                "size-[15px] shrink-0 -rotate-90",
+                status === "critical" && "text-destructive",
+                status === "caution" && "text-amber-600 dark:text-amber-400",
+                status === "normal" && "text-muted-foreground/75",
+              )}
+            >
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="opacity-20"
+              />
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeDasharray={`${ringLength} ${ringCircumference}`}
+                data-testid="composer-context-meter"
+              />
+            </svg>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={8}
+          className="w-fit max-w-[calc(100vw-2rem)] rounded-full border-border/70 px-2.5 py-1 text-xs font-medium shadow-[0_8px_24px_rgba(15,23,42,0.13)]"
+        >
+          <span className="whitespace-nowrap tabular-nums">{contextDescription}</span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface ThreadComposerProps {
   onSend: (
     content: string,
@@ -197,6 +300,7 @@ interface ThreadComposerProps {
   modelNeedsSetup?: boolean;
   fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
+  contextUsage?: ComposerContextUsage | null;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
@@ -357,40 +461,16 @@ function mentionInsertion(
   };
 }
 
-function sessionMentionBase(session: ChatSummary): string {
-  const label = session.title?.trim() || session.preview.trim() || "session";
-  const slug = label
-    .normalize("NFKC")
-    .replace(/\s+/g, "-")
-    .replace(/[^\p{L}\p{N}_-]+/gu, "")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return Array.from(slug || "session").slice(0, 40).join("");
-}
-
-function sessionMentionOptions(
-  sessions: ChatSummary[],
-  reservedNames: string[],
-): SessionMention[] {
-  const used = new Set(reservedNames.map((name) => name.toLowerCase()));
-  const namesByKey = new Map<string, string>();
-  for (const session of [...sessions].sort((a, b) => a.key.localeCompare(b.key))) {
-    const base = sessionMentionBase(session);
-    let name = base;
-    let suffix = 2;
-    if (used.has(name.toLowerCase())) name = `${base}-chat`;
-    while (used.has(name.toLowerCase())) {
-      name = `${base}-chat-${suffix}`;
-      suffix += 1;
-    }
-    used.add(name.toLowerCase());
-    namesByKey.set(session.key, name);
-  }
-  return sessions.map((session) => ({
-    name: namesByKey.get(session.key) ?? sessionMentionBase(session),
-    session_key: session.key,
-    title: session.title?.trim() || session.preview.trim(),
-  }));
+function sessionMentionOptions(sessions: ChatSummary[]): SessionMention[] {
+  return sessions.flatMap((session) => {
+    if (!session.handle) return [];
+    return [{
+      id: session.handle.id,
+      name: session.handle.name,
+      session_key: session.key,
+      title: session.title?.trim() || session.preview.trim(),
+    }];
+  });
 }
 
 interface SlashPaletteCommand {
@@ -462,6 +542,9 @@ function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
       || !/^[\p{L}\p{N}_-]+$/u.test(name)
     ) return [];
     return [{
+      ...(typeof candidate.id === "string" && /^handle_[a-f0-9]{32}$/i.test(candidate.id)
+        ? { id: candidate.id }
+        : {}),
       name,
       session_key: sessionKey,
       title: candidate.title?.trim().slice(0, 160) ?? "",
@@ -915,6 +998,7 @@ export function ThreadComposer({
   modelNeedsSetup = false,
   fallbackModelName = null,
   onModelBadgeClick,
+  contextUsage = null,
   variant = "thread",
   slashCommands = [],
   cliApps = [],
@@ -1267,16 +1351,8 @@ export function ThreadComposer({
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
 
   const availableSessionMentions = useMemo(
-    () => sessionMentionOptions(
-      sessions,
-      [
-        ...cliApps.filter((app) => app.installed).map((app) => app.name),
-        ...mcpPresets
-          .filter((preset) => preset.installed && preset.configured)
-          .map((preset) => preset.name),
-      ],
-    ),
-    [cliApps, mcpPresets, sessions],
+    () => sessionMentionOptions(sessions),
+    [sessions],
   );
   const mentionSegments = useMemo(
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
@@ -1325,8 +1401,12 @@ export function ThreadComposer({
         displayName: mention.title || mention.name,
         mention,
       }));
+    const sessionNames = new Set(
+      availableSessionMentions.map((mention) => mention.name.toLowerCase()),
+    );
     const cliCandidates: MentionCandidate[] = cliApps
       .filter((app) => app.installed)
+      .filter((app) => !sessionNames.has(app.name.toLowerCase()))
       .filter((app) => {
         const haystack = [
           app.name,
@@ -1347,6 +1427,7 @@ export function ThreadComposer({
       }));
     const mcpCandidates: MentionCandidate[] = mcpPresets
       .filter((preset) => preset.installed && preset.configured)
+      .filter((preset) => !sessionNames.has(preset.name.toLowerCase()))
       .filter((preset) => {
         const haystack = [
           preset.name,
@@ -1366,9 +1447,9 @@ export function ThreadComposer({
         initials: mcpPresetInitials(preset),
       }));
     const groups = [
+      { candidates: sessionCandidates, reserved: 4 },
       { candidates: cliCandidates, reserved: 2 },
       { candidates: mcpCandidates, reserved: 2 },
-      { candidates: sessionCandidates, reserved: 4 },
     ];
     let remaining = 8;
     const counts = groups.map(({ candidates, reserved }) => {
@@ -1376,7 +1457,7 @@ export function ThreadComposer({
       remaining -= count;
       return count;
     });
-    for (const index of [2, 0, 1]) {
+    for (const index of [0, 1, 2]) {
       const extra = Math.min(remaining, groups[index].candidates.length - counts[index]);
       counts[index] += extra;
       remaining -= extra;
@@ -2458,6 +2539,7 @@ export function ThreadComposer({
                 modelPreset={modelPreset}
                 modelPresets={modelPresets}
                 onPresetChange={onModelPresetChange}
+                onRequestComposerFocus={() => textareaRef.current?.focus()}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
@@ -2466,6 +2548,7 @@ export function ThreadComposer({
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
             ) : null}
+            {!voiceRecorder.isRecording ? <ComposerContextBadge usage={contextUsage} /> : null}
             {showVoiceButton ? (
               <TooltipProvider delayDuration={220} skipDelayDuration={80}>
                 <Tooltip>
@@ -2852,7 +2935,7 @@ function CliAppMentionPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
-  const groupedCandidates = (["cli", "mcp", "session"] as const)
+  const groupedCandidates = (["session", "cli", "mcp"] as const)
     .map((kind) => ({
       kind,
       label: kind === "session"
@@ -2956,7 +3039,9 @@ function MentionCandidateLogo({
   selected: boolean;
 }) {
   const color = candidate.kind === "session"
-    ? INLINE_TOKEN_HIGHLIGHT_COLOR
+    ? candidate.mention.id
+      ? sessionHandleColor(candidate.mention.id)
+      : INLINE_TOKEN_HIGHLIGHT_COLOR
     : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
@@ -2964,7 +3049,10 @@ function MentionCandidateLogo({
 
   if (candidate.kind === "session") {
     return (
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground">
+      <span
+        className="flex h-5 w-5 shrink-0 items-center justify-center"
+        style={{ color }}
+      >
         <MessageCircle className="h-4 w-4" aria-hidden />
       </span>
     );

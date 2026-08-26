@@ -26,6 +26,7 @@ from pydantic.alias_generators import to_snake
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
@@ -113,6 +114,9 @@ _KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
 _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
+})
+_DEEPSEEK_MULTIMODAL_MODELS: frozenset[str] = frozenset({
+    "deepseek-v4-flash-vision-exp",
 })
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
@@ -514,8 +518,9 @@ class OpenAICompatProvider(LLMProvider):
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
+        provider_name: str = "openai",
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
@@ -678,12 +683,20 @@ class OpenAICompatProvider(LLMProvider):
             dumped = str(content)
         return dumped or "(empty)"
 
-    def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sanitize_messages(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
-        force_string_content = bool(self._spec and self._spec.name == "deepseek")
+        is_deepseek = bool(self._spec and self._spec.name == "deepseek")
+        model_name = model or self.default_model
+        force_string_content = (
+            is_deepseek and _model_slug(model_name) not in _DEEPSEEK_MULTIMODAL_MODELS
+        )
         normalize_tool_ids = self._should_normalize_tool_call_ids()
         strip_reasoning = bool(
             self._spec
@@ -910,7 +923,10 @@ class OpenAICompatProvider(LLMProvider):
 
         kwargs: dict[str, Any] = {
             "model": model_name,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(messages),
+                model_name,
+            ),
         }
 
         # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
@@ -1225,7 +1241,10 @@ class OpenAICompatProvider(LLMProvider):
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         model_name = self._request_model_name(model_name)
-        sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
+        sanitized_messages = self._sanitize_messages(
+            self._sanitize_empty_content(messages),
+            model_name,
+        )
         sanitized_state = (
             provider_context.conversation_state
             if provider_context is not None
@@ -1234,7 +1253,8 @@ class OpenAICompatProvider(LLMProvider):
         if sanitized_state is not None:
             sanitized_state = sanitized_state.with_pending_messages(
                 self._sanitize_messages(
-                    self._sanitize_empty_content(sanitized_state.pending_messages)
+                    self._sanitize_empty_content(sanitized_state.pending_messages),
+                    model_name,
                 )
             )
         is_deepseek = bool(self._spec and self._spec.name == "deepseek")
@@ -1410,12 +1430,12 @@ class OpenAICompatProvider(LLMProvider):
         return "".join(parts) or None
 
     @classmethod
-    def _extract_usage(cls, response: Any) -> dict[str, int]:
+    def _extract_usage(cls, response: Any) -> LLMUsage | None:
         """Extract token usage from an OpenAI-compatible response.
 
         Handles both dict-based (raw JSON) and object-based (SDK Pydantic)
-        responses.  Provider-specific ``cached_tokens`` fields are normalised
-        under a single key; see the priority chain inside for details.
+        responses. Provider-specific cache fields are normalized once at
+        this Chat Completions wire boundary.
         """
         # --- resolve usage object ---
         usage_obj = None
@@ -1427,21 +1447,18 @@ class OpenAICompatProvider(LLMProvider):
 
         usage_map = cls._maybe_mapping(usage_obj)
         if usage_map is not None:
-            result = {
-                "prompt_tokens": int(usage_map.get("prompt_tokens") or 0),
-                "completion_tokens": int(usage_map.get("completion_tokens") or 0),
-                "total_tokens": int(usage_map.get("total_tokens") or 0),
-            }
+            input_tokens = int(usage_map.get("prompt_tokens") or 0)
+            output_tokens = int(usage_map.get("completion_tokens") or 0)
         elif usage_obj:
-            result = {
-                "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(usage_obj, "total_tokens", 0) or 0,
-            }
+            input_tokens = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
+            output_tokens = int(getattr(usage_obj, "completion_tokens", 0) or 0)
         else:
-            return {}
+            return None
 
-        # --- cached_tokens (normalised across providers) ---
+        wire_total = cls._get_nested_int(usage_obj, ("total_tokens",))
+
+        cache_read: int | None = None
+        # --- cached_tokens (normalised across Chat-compatible providers) ---
         # Try nested paths first (dict), fall back to attribute (SDK object).
         # Priority order ensures the most specific field wins.
         for path in (
@@ -1450,17 +1467,28 @@ class OpenAICompatProvider(LLMProvider):
             ("prompt_cache_hit_tokens",),                # DeepSeek/SiliconFlow
         ):
             cached = cls._get_nested_int(usage_map, path)
-            if not cached and usage_obj:
+            if cached is None and usage_obj:
                 cached = cls._get_nested_int(usage_obj, path)
-            if cached:
-                result["cached_tokens"] = cached
+            if cached is not None:
+                cache_read = cached
                 break
 
-        return result
+        cache_write = cls._get_nested_int(
+            usage_obj,
+            ("prompt_tokens_details", "cache_write_tokens"),
+        )
+
+        return LLMUsage.reported(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=wire_total,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+        )
 
     @staticmethod
-    def _get_nested_int(obj: object, path: tuple[str, ...]) -> int:
-        """Drill into *obj* by *path* segments and return an ``int`` value.
+    def _get_nested_int(obj: object, path: tuple[str, ...]) -> int | None:
+        """Return a present usage count while preserving explicit zero.
 
         Supports both dict-key access and attribute access so it works
         uniformly with raw JSON dicts **and** SDK Pydantic models.
@@ -1468,12 +1496,17 @@ class OpenAICompatProvider(LLMProvider):
         current: object = obj
         for segment in path:
             if current is None:
-                return 0
+                return None
             if isinstance(current, dict):
                 current = cast(dict[str, Any], current).get(segment)
             else:
                 current = getattr(current, segment, None)
-        return int(cast(Any, current) or 0) if current is not None else 0
+        if current is None or isinstance(current, bool):
+            return None
+        try:
+            return int(cast(Any, current))
+        except (TypeError, ValueError):
+            return None
 
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
@@ -1627,7 +1660,7 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
-        usage: dict[str, int] = {}
+        usage: LLMUsage | None = None
 
         def _accum_tc(tc: Any, idx_hint: int) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""

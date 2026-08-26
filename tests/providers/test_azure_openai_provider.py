@@ -380,7 +380,8 @@ async def test_chat_success():
     assert isinstance(result, LLMResponse)
     assert result.content == "Hello!"
     assert result.finish_reason == "stop"
-    assert result.usage["prompt_tokens"] == 10
+    assert result.usage is not None
+    assert result.usage.input_tokens == 10
 
 
 @pytest.mark.asyncio

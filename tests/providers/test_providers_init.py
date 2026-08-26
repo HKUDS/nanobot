@@ -32,6 +32,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
         assert providers.__all__ == [
             "LLMProvider",
             "LLMResponse",
+            "LLMUsage",
             "AnthropicProvider",
             "OpenAICompatProvider",
             "OpenAICodexProvider",

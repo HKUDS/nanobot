@@ -1,5 +1,16 @@
 import i18n, { currentLocale } from "@/i18n";
 
+/** Compact token counts for dense runtime metadata (for example, 74.9K). */
+export function formatCompactTokenCount(value: number): string {
+  if (value < 1_000) return Math.round(value).toLocaleString();
+  if (value < 1_000_000) {
+    const digits = value < 100_000 ? 1 : 0;
+    return `${Number((value / 1_000).toFixed(digits))}K`;
+  }
+  const digits = value < 100_000_000 ? 1 : 0;
+  return `${Number((value / 1_000_000).toFixed(digits))}M`;
+}
+
 const LOW_INFORMATION_TITLE_PREVIEWS = new Set([
   "hi",
   "hello",

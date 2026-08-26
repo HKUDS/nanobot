@@ -29,14 +29,14 @@ export interface FileEditEvent {
   diff?: FileDiff
 }
 
-export interface FileDiff {
+interface FileDiff {
   format: "unified" | string
   context?: number
   truncated?: boolean
   text?: string
 }
 
-export interface MediaAttachment {
+interface MediaAttachment {
   kind: "image" | "video" | "file"
   url: string
   name?: string
@@ -54,6 +54,16 @@ export interface RuntimeControls {
   canUseFullAccess: boolean
 }
 
+export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed"
+
+export interface RecoveryState {
+  status: RecoveryStatus
+  recovery_id: string
+  reason?: string
+  attempts?: number
+  can_continue?: boolean
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -61,6 +71,7 @@ export type InboundEvent =
       chat_id: string
       model_preset?: string | null
       usage?: TokenUsage
+      recovery_state?: RecoveryState
     }
   | {
       event: "message_accepted"
@@ -118,6 +129,7 @@ export type InboundEvent =
       turn_id?: string
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
+  | ({ event: "recovery_state"; chat_id: string } & RecoveryState)
   | {
       event: "session_updated"
       chat_id: string
@@ -140,11 +152,18 @@ type OutboundEvent =
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | {
+      type: "webui_request"
+      request_id: string
+      action: string
+      payload: Record<string, unknown>
+    }
+  | {
       type: "message"
       chat_id: string
       content: string
       turn_id: string
       webui: true
+      workspace_scope?: WorkspaceScopePayload
       cli_apps?: Array<{ name: string }>
       mcp_presets?: Array<{ name: string }>
       session_mentions?: SessionMention[]
@@ -157,6 +176,7 @@ export interface ClientOptions {
   connectionRetryLabel?: string
   startupRetryMaxDelayMs?: number
   chatId?: string
+  initialWorkspaceScope?: WorkspaceScopePayload
   reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
   onStatus: (status: ConnectionStatus, detail?: string) => void
@@ -202,7 +222,10 @@ export interface TokenUsage {
   prompt_tokens?: number
   completion_tokens?: number
   cached_tokens?: number
+  cache_write_tokens?: number
   total_tokens?: number
+  context_tokens?: number
+  request_count?: number
   provider_tokens?: number
   estimated_tokens?: number
   cost_usd?: number
@@ -224,7 +247,7 @@ export interface SessionContextSnapshot {
   lastUsage: TokenUsage | null
 }
 
-export interface SessionMention {
+interface SessionMention {
   name: string
   session_key: string
   title?: string
@@ -237,6 +260,12 @@ export interface MentionCandidate {
   displayName: string
   description: string
   session?: SessionMention
+}
+
+export interface SkillCandidate {
+  name: string
+  description: string
+  source: string
 }
 
 export interface MessageOptions {
@@ -270,10 +299,13 @@ export interface SessionSummary {
   updatedAt: string | null
   runStartedAt: number | null
   modelPreset: string | null
+  recoveryState?: RecoveryState | null
   workspaceScope?: WorkspaceScopePayload | null
   pinned: boolean
   archived: boolean
 }
+
+const SKILL_REFERENCE_NAME = /^[A-Za-z0-9_-]+$/u
 
 const SLASH_COMMAND_LIFECYCLES = new Set([
   "side_channel",
@@ -296,6 +328,7 @@ const CHAT_EVENTS = new Set([
   "turn_end",
   "goal_status",
   "goal_state",
+  "recovery_state",
   "session_updated",
   "turn_model_updated",
   "error",
@@ -350,7 +383,10 @@ function isTokenUsage(value: unknown): value is TokenUsage {
     "prompt_tokens",
     "completion_tokens",
     "cached_tokens",
+    "cache_write_tokens",
     "total_tokens",
+    "context_tokens",
+    "request_count",
     "provider_tokens",
     "estimated_tokens",
     "cost_usd",
@@ -374,6 +410,34 @@ function isWorkspaceScope(value: unknown): value is WorkspaceScopePayload {
     && (value.access_mode === "restricted" || value.access_mode === "full")
     && optional(value.project_name, "string")
     && optional(value.restrict_to_workspace, "boolean")
+}
+
+function isRecoveryState(value: unknown): value is RecoveryState {
+  return isRecord(value)
+    && ["resuming", "awaiting_user", "recovered", "failed"].includes(String(value.status))
+    && typeof value.recovery_id === "string"
+    && optional(value.reason, "string")
+    && optional(value.attempts, "number")
+    && optional(value.can_continue, "boolean")
+}
+
+interface WebUIResponseEvent {
+  event: "webui_response"
+  request_id: string
+  ok: boolean
+  result?: unknown
+  error?: { status: number; message: string }
+}
+
+function decodeWebUIResponse(value: unknown): WebUIResponseEvent | null | undefined {
+  if (!isRecord(value) || value.event !== "webui_response") return undefined
+  if (typeof value.request_id !== "string" || typeof value.ok !== "boolean") return null
+  if (value.ok) return value as unknown as WebUIResponseEvent
+  return isRecord(value.error)
+    && typeof value.error.status === "number"
+    && typeof value.error.message === "string"
+    ? value as unknown as WebUIResponseEvent
+    : null
 }
 
 function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
@@ -406,7 +470,8 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
     && ((record.model_preset !== undefined
       && record.model_preset !== null
       && typeof record.model_preset !== "string")
-      || (record.usage !== undefined && !isTokenUsage(record.usage)))
+      || (record.usage !== undefined && !isTokenUsage(record.usage))
+      || (record.recovery_state !== undefined && !isRecoveryState(record.recovery_state)))
   ) return null
   if (
     ["user_message", "message", "delta", "reasoning_delta"].includes(name)
@@ -451,6 +516,7 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && !isRecord(record.goal_state)) return null
+  if (name === "recovery_state" && !isRecoveryState(record)) return null
   if (
     name === "session_updated"
     && (!optional(record.scope, "string")
@@ -625,6 +691,31 @@ export async function fetchSlashCommands(
   })
 }
 
+export async function fetchAvailableSkills(
+  apiUrl: string,
+  apiToken: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<SkillCandidate[]> {
+  if (!apiUrl || !apiToken) return []
+  const response = await fetchApi(apiUrl, apiToken, "/api/webui/skills", reauthenticate)
+  if (!response.ok) throw new Error(`skill request failed: HTTP ${response.status}`)
+  const payload = await response.json() as { skills?: unknown[] }
+  return (payload.skills || []).flatMap((value) => {
+    if (
+      !isRecord(value)
+      || typeof value.name !== "string"
+      || !SKILL_REFERENCE_NAME.test(value.name)
+      || value.enabled !== true
+      || value.available !== true
+    ) return []
+    return [{
+      name: value.name,
+      description: typeof value.description === "string" ? value.description : value.name,
+      source: typeof value.source === "string" ? value.source : "unknown",
+    }]
+  })
+}
+
 export async function fetchRuntimeControls(
   apiUrl: string,
   apiToken: string,
@@ -699,6 +790,9 @@ export async function fetchSessions(
       modelPreset: typeof value.model_preset === "string" && value.model_preset.trim()
         ? value.model_preset.trim()
         : null,
+      ...(isRecoveryState(value.recovery_state)
+        ? { recoveryState: value.recovery_state }
+        : {}),
       ...(isWorkspaceScope(value.workspace_scope) ? { workspaceScope: value.workspace_scope } : {}),
       pinned: pinned.has(value.key),
       archived: archived.has(value.key),
@@ -849,11 +943,17 @@ export async function fetchGatewayConnection(
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
+  private workspaceScope?: WorkspaceScopePayload
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private closedByClient = false
   private opening = false
   private connectedOnce = false
+  private readonly pendingMutations = new Map<string, {
+    resolve: (value: unknown) => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
 
   constructor(private readonly options: ClientOptions) {}
 
@@ -915,6 +1015,7 @@ export class NanobotClient {
     socket.addEventListener("close", () => {
       if (this.socket !== socket) return
       this.socket = null
+      this.rejectPendingMutations("gateway connection closed")
       if (this.closedByClient) {
         this.options.onStatus("closed")
         return
@@ -930,6 +1031,7 @@ export class NanobotClient {
     const socket = this.socket
     this.socket = null
     socket?.close()
+    this.rejectPendingMutations("gateway connection closed")
   }
 
   send(content: string, options: MessageOptions = {}): string {
@@ -941,6 +1043,7 @@ export class NanobotClient {
       content,
       turn_id: turnId,
       webui: true,
+      ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
@@ -953,10 +1056,12 @@ export class NanobotClient {
 
   attach(chatId: string): void {
     if (!chatId) throw new Error("chat id is required")
+    this.workspaceScope = undefined
     this.write({ type: "attach", chat_id: chatId })
   }
 
   newChat(scope?: WorkspaceScopePayload): void {
+    this.workspaceScope = scope
     this.write({ type: "new_chat", ...(scope ? { workspace_scope: scope } : {}) })
   }
 
@@ -971,7 +1076,65 @@ export class NanobotClient {
 
   setWorkspaceScope(scope: WorkspaceScopePayload): void {
     if (!this.chatId) throw new Error("chat is not ready")
+    this.workspaceScope = scope
     this.write({ type: "set_workspace_scope", chat_id: this.chatId, workspace_scope: scope })
+  }
+
+  updateRecovery(
+    action: "continue" | "dismiss",
+    chatId: string,
+    recoveryId: string,
+  ): Promise<RecoveryState> {
+    return this.requestMutation<unknown>(`recovery.${action}`, {
+      chat_id: chatId,
+      recovery_id: recoveryId,
+    }).then((result) => {
+      if (!isRecoveryState(result)) throw new Error("gateway returned an invalid recovery state")
+      return result
+    })
+  }
+
+  private requestMutation<T>(
+    action: string,
+    payload: Record<string, unknown> = {},
+    timeoutMs = 20_000,
+  ): Promise<T> {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("gateway connection is not open"))
+    }
+    const requestId = crypto.randomUUID()
+    const frame = JSON.stringify({
+      type: "webui_request",
+      request_id: requestId,
+      action,
+      payload,
+    } satisfies OutboundEvent)
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingMutations.delete(requestId)
+        reject(new Error(`gateway request timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
+      this.pendingMutations.set(requestId, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timer,
+      })
+      try {
+        this.socket?.send(frame)
+      } catch {
+        clearTimeout(timer)
+        this.pendingMutations.delete(requestId)
+        reject(new Error("could not send gateway request"))
+      }
+    })
+  }
+
+  private rejectPendingMutations(message: string): void {
+    for (const pending of this.pendingMutations.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error(message))
+    }
+    this.pendingMutations.clear()
   }
 
   private handleMessage(raw: string): void {
@@ -980,6 +1143,20 @@ export class NanobotClient {
       value = JSON.parse(raw) as unknown
     } catch {
       this.options.onStatus("error", "gateway sent invalid JSON")
+      return
+    }
+    const response = decodeWebUIResponse(value)
+    if (response === null) {
+      this.options.onStatus("error", "gateway sent an invalid event")
+      return
+    }
+    if (response) {
+      const pending = this.pendingMutations.get(response.request_id)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      this.pendingMutations.delete(response.request_id)
+      if (response.ok) pending.resolve(response.result)
+      else pending.reject(new Error(response.error?.message || "gateway request failed"))
       return
     }
     const event = decodeInboundEvent(value)
@@ -995,10 +1172,12 @@ export class NanobotClient {
         this.chatId = requestedChatId
         this.write({ type: "attach", chat_id: this.chatId })
       } else {
-        this.write({ type: "new_chat" })
+        this.newChat(this.options.initialWorkspaceScope)
       }
     } else if (event.event === "attached") {
       this.chatId = event.chat_id
+    } else if (event.event === "session_updated" && event.workspace_scope) {
+      this.workspaceScope = event.workspace_scope
     }
     this.options.onEvent(event)
   }

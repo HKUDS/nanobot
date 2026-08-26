@@ -634,7 +634,7 @@ Do not expose exported snapshots directly to chat users.
 | `workspace` | Current runtime workspace path. |
 | `add_context_provider(provider)` | Register an async per-turn context provider and return an unsubscribe callback. |
 | `on_session_turn_persisted(handler)` | Register a best-effort sync or async callback for locally persisted turns and return an unsubscribe callback. |
-| `await compact_session(session_key)` | Run token/replay-window consolidation for a session. |
+| `await compact_session(session_key)` | Run token-based consolidation for a session. |
 | `await compact_idle_session(session_key, max_suffix=8)` | Run idle-session compaction and return its summary. |
 
 ### Host integration context and persisted-turn callbacks

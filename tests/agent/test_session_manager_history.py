@@ -1,5 +1,3 @@
-import pytest
-
 from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -832,9 +830,6 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
     _assert_no_orphans(history)
 
 
-# --- enforce_file_cap archive correctness (issue #4128) ---
-
-
 def test_retain_recent_legal_suffix_returns_dropped_messages():
     """retain_recent_legal_suffix returns the actually-dropped messages."""
     session = Session(
@@ -892,125 +887,6 @@ def test_retain_recent_legal_suffix_returns_all_on_zero():
     assert len(result.dropped) == 5
     assert result.already_consolidated_count == 3
     assert session.messages == []
-
-
-def test_enforce_file_cap_no_duplicate_archive_in_else_branch():
-    """When the tail is assistant-only, enforce_file_cap must not archive
-    messages that are also retained (the bug from issue #4128)."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-archive")
-    # Build: 15 user messages, then 10 assistant messages (no user in tail)
-    for i in range(15):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=6)
-
-    assert len(session.messages) <= 6
-
-    # Verify archived messages have NO overlap with retained
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        archived_ids = set(id(m) for m in archived)
-        retained_ids = set(id(m) for m in session.messages)
-        assert not archived_ids & retained_ids, (
-            f"Duplicate messages in archive and retained: "
-            f"overlap contents = {[m['content'] for m in archived if id(m) in retained_ids]}"
-        )
-
-
-def test_enforce_file_cap_no_message_loss_in_else_branch():
-    """In the else branch, no messages should silently disappear — every
-    message must be either retained or archived."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-no-loss")
-    all_messages = []
-    for i in range(15):
-        msg = {"role": "user", "content": f"u{i}"}
-        session.messages.append(msg)
-        all_messages.append(msg)
-    for i in range(10):
-        msg = {"role": "assistant", "content": f"a{i}"}
-        session.messages.append(msg)
-        all_messages.append(msg)
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=6)
-
-    # Collect all messages accounted for (retained + archived)
-    accounted = set(id(m) for m in session.messages)
-    if archive_fn.called:
-        for m in archive_fn.call_args.args[0]:
-            accounted.add(id(m))
-
-    all_ids = set(id(m) for m in all_messages)
-    missing = all_ids - accounted
-    assert not missing, (
-        f"Lost {len(missing)} message(s) — neither retained nor archived"
-    )
-
-
-def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch():
-    """When last_consolidated > 0 and the else branch fires, only the
-    unconsolidated dropped messages should be raw-archived.  Messages in the
-    consolidated prefix that are dropped do NOT need raw archiving."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-lc-archive")
-    # 20 messages total: u0..u9 (user), a0..a9 (assistant)
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-    # First 8 messages already consolidated
-    session.last_consolidated = 8
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=4)
-
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        # Archived messages should NOT include any from the consolidated prefix
-        # (u0..u7). They should only be unconsolidated dropped messages.
-        archived_contents = [m["content"] for m in archived]
-        for c in archived_contents:
-            assert c not in [f"u{i}" for i in range(8)], (
-                f"Consolidated message {c!r} should not be raw-archived"
-            )
-
-
-def test_enforce_file_cap_restores_session_when_archive_fails():
-    state = ProviderConversationState(
-        kind="openai_responses",
-        provider="openai:test",
-        model="test-model",
-        version=1,
-        payload={"items": []},
-    )
-    session = Session(key="test:archive-failure", provider_state=state)
-    for i in range(8):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    original_messages = session.messages
-    original_updated_at = session.updated_at
-    session.last_consolidated = 2
-
-    def fail_archive(_messages):
-        raise RuntimeError("history unavailable")
-
-    with pytest.raises(RuntimeError, match="history unavailable"):
-        session.enforce_file_cap(on_archive=fail_archive, limit=4)
-
-    assert session.messages is original_messages
-    assert [message["content"] for message in session.messages] == [
-        f"msg{i}" for i in range(8)
-    ]
-    assert session.last_consolidated == 2
-    assert session.provider_state is state
-    assert session.updated_at == original_updated_at
 
 
 def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():

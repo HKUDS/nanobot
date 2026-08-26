@@ -176,33 +176,6 @@ class TestIsExpired:
 
 
 # ---------------------------------------------------------------------------
-# _format_summary
-# ---------------------------------------------------------------------------
-
-
-class TestFormatSummary:
-    """Test AutoCompact._format_summary static method."""
-
-    def test_contains_isoformat_timestamp(self):
-        """Output should contain last_active as isoformat."""
-        last_active = datetime(2026, 5, 13, 14, 30, 0)
-        result = AutoCompact._format_summary("Some text", last_active)
-        assert "2026-05-13T14:30:00" in result
-
-    def test_contains_summary_text(self):
-        """Output should contain the provided text verbatim."""
-        last_active = datetime(2026, 1, 1)
-        result = AutoCompact._format_summary("User discussed Python.", last_active)
-        assert "User discussed Python." in result
-
-    def test_output_starts_with_label(self):
-        """Output should start with the standard prefix."""
-        last_active = datetime(2026, 1, 1)
-        result = AutoCompact._format_summary("text", last_active)
-        assert result.startswith("Previous conversation summary (last active ")
-
-
-# ---------------------------------------------------------------------------
 # check_expired
 # ---------------------------------------------------------------------------
 
@@ -498,7 +471,7 @@ class TestArchiveDelegates:
 
         entry = ac._summaries.get("cli:test")
         assert entry is not None
-        assert entry[0] == "Hello."
+        assert entry["text"] == "Hello."
 
     @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
@@ -577,21 +550,29 @@ class TestPrepareSession:
         ac = _make_autocompact()
         session = _make_session()
         last_active = datetime(2026, 5, 13, 14, 0, 0)
-        ac._summaries["cli:test"] = ("Hot summary.", last_active)
+        ac._summaries["cli:test"] = {
+            "text": "Hot summary.",
+            "last_active": last_active.isoformat(),
+        }
 
         result_session, summary = ac.prepare_session(session, "cli:test")
 
         assert result_session is session
         assert summary is not None
-        assert "Hot summary." in summary
-        assert "Previous conversation summary" in summary
+        assert summary == {
+            "text": "Hot summary.",
+            "last_active": last_active.isoformat(),
+        }
 
     def test_hot_path_pops_summary_one_shot(self):
         """Hot path should pop the summary (one-shot; second call returns None)."""
         ac = _make_autocompact()
         session = _make_session()
         last_active = datetime(2026, 1, 1)
-        ac._summaries["cli:test"] = ("One-shot.", last_active)
+        ac._summaries["cli:test"] = {
+            "text": "One-shot.",
+            "last_active": last_active.isoformat(),
+        }
 
         _, summary1 = ac.prepare_session(session, "cli:test")
         assert summary1 is not None
@@ -614,7 +595,7 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is not None
-        assert "Cold summary." in summary
+        assert summary["text"] == "Cold summary."
 
     def test_cold_path_tolerates_malformed_last_active(self):
         """A malformed persisted last_active must not raise on the turn path.
@@ -637,8 +618,10 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is not None
-        assert "Cold summary." in summary
-        assert fallback.isoformat() in summary
+        assert summary == {
+            "text": "Cold summary.",
+            "last_active": fallback.isoformat(),
+        }
 
     def test_cold_path_tolerates_missing_last_active(self):
         """A _last_summary dict without last_active must not raise."""
@@ -653,8 +636,10 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is not None
-        assert "Cold summary." in summary
-        assert fallback.isoformat() in summary
+        assert summary == {
+            "text": "Cold summary.",
+            "last_active": fallback.isoformat(),
+        }
 
     def test_cold_path_missing_text_returns_none(self):
         """A _last_summary without a non-empty string text yields no summary."""
@@ -685,7 +670,10 @@ class TestPrepareSession:
         ac.sessions = mock_sm
         key = "dream:20260602-155256"
         ac._archiving.add(key)
-        ac._summaries[key] = ("Hot summary.", datetime(2026, 6, 2, 15, 52, 56))
+        ac._summaries[key] = {
+            "text": "Hot summary.",
+            "last_active": "2026-06-02T15:52:56",
+        }
         session = _make_session(
             key=key,
             updated_at=datetime.now() - timedelta(minutes=20),
@@ -725,8 +713,12 @@ class TestPrepareSession:
             },
         })
         last_active = datetime(2026, 5, 13, 14, 0, 0)
-        ac._summaries["cli:test"] = ("Hot summary.", last_active)
+        ac._summaries["cli:test"] = {
+            "text": "Hot summary.",
+            "last_active": last_active.isoformat(),
+        }
 
         _, summary = ac.prepare_session(session, "cli:test")
-        assert "Hot summary." in summary
+        assert summary is not None
+        assert summary["text"] == "Hot summary."
         # After hot path pops, cold path would kick in on next call

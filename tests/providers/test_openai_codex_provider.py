@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import io
+import ssl
 from types import SimpleNamespace
 from typing import Any
 
@@ -40,6 +42,46 @@ def test_codex_default_model_matches_curated_flagship() -> None:
     assert spec is not None
     assert spec.builtin_models
     assert OpenAICodexProvider().get_default_model() == spec.builtin_models[0].id
+
+
+@pytest.mark.asyncio
+async def test_codex_provider_reuses_tls_context_for_concurrent_requests(monkeypatch) -> None:
+    _mock_codex_token(monkeypatch)
+    proxy = "http://127.0.0.1:23458"
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context_calls: list[tuple[bool, bool]] = []
+    request_contexts: list[object] = []
+
+    def fake_create_ssl_context(
+        *,
+        verify: bool,
+        cert: object = None,
+        trust_env: bool = True,
+    ) -> ssl.SSLContext:
+        _ = cert
+        context_calls.append((verify, trust_env))
+        return context
+
+    async def fake_request(_url, _headers, _body, *, verify, **_kwargs):
+        request_contexts.append(verify)
+        await asyncio.sleep(0)
+        return provider_base.LLMResponse(content="ok")
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.httpx.create_ssl_context",
+        fake_create_ssl_context,
+    )
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider(proxy=proxy)
+    responses = await asyncio.gather(*(
+        provider.chat([{"role": "user", "content": f"request {index}"}])
+        for index in range(3)
+    ))
+
+    assert [response.content for response in responses] == ["ok", "ok", "ok"]
+    assert context_calls == [(True, False)]
+    assert request_contexts == [context, context, context]
 
 
 class _WarningCaptureLogger:
@@ -218,8 +260,8 @@ async def test_codex_request_uses_configured_proxy(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatch) -> None:
-    bodies: list[dict] = []
+async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> None:
+    bodies: list[dict[str, Any]] = []
 
     _mock_codex_token(monkeypatch)
 
@@ -247,25 +289,40 @@ async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatc
             {"role": "assistant", "content": "first answer"},
         ],
     )
-    await provider.chat(
-        [
-            {"role": "system", "content": "You are nanobot."},
-            {"role": "user", "content": "first request"},
-            {"role": "assistant", "content": "first answer"},
-            {"role": "user", "content": "follow up"},
-        ],
-    )
-    await provider.chat(
-        [
-            {"role": "system", "content": "You are nanobot."},
-            {"role": "user", "content": "different request"},
-            {"role": "assistant", "content": "first answer"},
-        ],
-    )
+
+    assert "prompt_cache_key" not in bodies[0]
+    assert "service_tier" not in bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> None:
+    bodies: list[dict[str, Any]] = []
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return provider_base.LLMResponse(content="ok")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    provider = OpenAICodexProvider()
+
+    for session_id, first_request in (
+        ("session-a", "first request"),
+        ("session-a", "different visible prefix"),
+        ("session-b", "first request"),
+    ):
+        await provider.chat(
+            [
+                {"role": "system", "content": "You are nanobot."},
+                {"role": "user", "content": first_request},
+            ],
+            provider_context=provider_base.ProviderCallContext(
+                session_id=session_id,
+            ),
+        )
 
     assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
     assert bodies[0]["prompt_cache_key"] != bodies[2]["prompt_cache_key"]
-    assert all("service_tier" not in body for body in bodies)
 
 
 @pytest.mark.asyncio
@@ -317,6 +374,25 @@ async def test_codex_timeout_error_is_typed_and_retryable(monkeypatch) -> None:
     )
     assert response.error_kind == "timeout"
     assert response.error_should_retry is True
+
+
+@pytest.mark.asyncio
+async def test_codex_mid_stream_server_error_is_treated_as_transient(monkeypatch) -> None:
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(*args, **kwargs):
+        raise RuntimeError(
+            "Response failed: {'type': 'server_error', 'code': 'server_error', "
+            "'message': 'An error occurred while processing your request.'}"
+        )
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider()
+    response = await provider.chat([{"role": "user", "content": "hello"}])
+
+    assert response.finish_reason == "error"
+    assert provider_base.LLMProvider.is_transient_response(response) is True
 
 
 @pytest.mark.asyncio
@@ -671,11 +747,7 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
                 "content": [{"type": "output_text", "text": "old answer"}],
             },
         ],
-        usage={
-            "prompt_tokens": 90,
-            "completion_tokens": 5,
-            "total_tokens": 95,
-        },
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
     )
     bodies: list[dict[str, Any]] = []
 
@@ -711,11 +783,10 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
                     model="gpt-5.6-sol",
                     input_items=body["input"],
                     output_items=[compact_item],
-                    usage={
-                        "prompt_tokens": 95,
-                        "completion_tokens": 2,
-                        "total_tokens": 97,
-                    },
+                    usage=provider_base.LLMUsage.reported(
+                        input_tokens=95,
+                        output_tokens=2,
+                    ),
                 ),
             )
         return provider_base.LLMResponse(content="done")
@@ -769,7 +840,7 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
         model="gpt-5.6-sol",
         input_items=[{"type": "message", "role": "user", "content": "old"}],
         output_items=[{"type": "reasoning", "encrypted_content": "opaque"}],
-        usage={"prompt_tokens": 90, "completion_tokens": 5, "total_tokens": 95},
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
     )
     bodies: list[dict[str, Any]] = []
 
@@ -853,7 +924,7 @@ async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
         return provider_base.LLMResponse(
             content="answer",
             finish_reason="stop",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
+            usage=provider_base.LLMUsage.reported(input_tokens=10, output_tokens=5),
             reasoning_content="summary",
         )
 
@@ -873,7 +944,7 @@ async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
     assert content_deltas == ["answer"]
     assert thinking_deltas == ["summary"]
     assert response.content == "answer"
-    assert response.usage == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert response.usage == provider_base.LLMUsage.reported(input_tokens=10, output_tokens=5)
     assert response.reasoning_content == "summary"
 
 

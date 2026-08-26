@@ -53,7 +53,6 @@ class MattermostConfig(Base):
     include_thread_context: bool = True
     thread_context_limit: int = 20
     streaming: bool = True
-    streaming_max_chars: int = 16000
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
     send_progress: bool = True
@@ -106,7 +105,6 @@ class MattermostChannel(BaseChannel):
         self._ws_task: asyncio.Task[None] | None = None
         self._self_id: str | None = None
         self._self_username: str | None = None
-        self._self_email: str | None = None
         self._usernames: dict[str, str] = {}
         self._user_emails: dict[str, str] = {}
         self._channel_types: dict[str, str] = {}
@@ -138,7 +136,6 @@ class MattermostChannel(BaseChannel):
             me = cast(dict[str, Any], resp.json())
             self._self_id = me.get("id")
             self._self_username = me.get("username")
-            self._self_email = me.get("email", "")
             self.logger.info("bot @{} connected", self._self_username)
         except Exception as e:
             self.logger.error("Failed to identify bot user: {}", e)
@@ -219,6 +216,10 @@ class MattermostChannel(BaseChannel):
             )
         except json.JSONDecodeError:
             self.logger.warning("failed to parse post json")
+            return
+
+        post_type = post.get("type")
+        if isinstance(post_type, str) and post_type.startswith("system_"):
             return
 
         sender_id = post.get("user_id", "")

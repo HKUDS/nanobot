@@ -234,7 +234,7 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    const disclosure = screen.getByRole("button", { name: "Thought" });
+    const disclosure = screen.getByRole("button", { name: "Worked" });
     fireEvent.pointerDown(disclosure, { button: 0 });
     expect(takeUserControl).toHaveBeenCalledTimes(1);
 

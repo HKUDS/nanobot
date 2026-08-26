@@ -161,6 +161,7 @@
       "webuiDefaultAccess": "既定の権限",
       "currentModel": "現在の設定",
       "brandLogos": "ブランドロゴ",
+      "browserNotifications": "タスク通知",
       "cliAppsCatalog": "カタログ",
       "cliAppsFilter": "フィルター",
       "engine": "エンジン",
@@ -204,6 +205,7 @@
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
       "brandLogos": "設定で第三者プロバイダーと CLI のロゴを表示します。",
+      "browserNotifications": "このページがバックグラウンドにある場合のみ通知します。既定ではオフです。",
       "cliAppsCatalog": "nanobot がローカルで実行できるアプリ CLI アダプターだけをインストールします。ネイティブアプリは変更しません。",
       "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
       "logs": "ネイティブエンジンのログフォルダーを開きます。",
@@ -999,7 +1001,8 @@
     "activity": {
       "running": "エージェント実行中",
       "complete": "エージェント完了",
-      "updated": "新しいアクティビティ"
+      "updated": "新しいアクティビティ",
+      "recovery": "この会話には対応が必要です"
     },
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",
@@ -1178,6 +1181,11 @@
       "removeQuotedContext": "引用したコンテキストを削除",
       "modelNotConfigured": "モデルが未設定です",
       "configureModel": "モデルを設定",
+      "switchModel": "この会話で使うモデルを切り替える",
+      "context": {
+        "tooltip": "コンテキスト · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}。{{percent}}% 使用中"
+      },
       "queued": {
         "label": "保留中のガイド",
         "guide": "ガイド",
@@ -1394,6 +1402,11 @@
     "fileEditShowFewerLines": "表示行数を減らす",
     "fileEditOpenFile": "ファイルを開く",
     "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
+    "usage": {
+      "context": "最新のコンテキスト: {{tokens}}{{capacity}} トークン",
+      "requests": "モデルリクエスト {{count}} 回",
+      "estimated": "推定使用量を含みます"
+    },
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",
     "activityThoughtFor": "{{duration}}考えました",
@@ -1411,6 +1424,18 @@
     "cliRunFailed": "失敗",
     "automationSourceFallback": "自動化",
     "automationTriggered": "自動実行"
+  },
+  "recovery": {
+    "actionFailed": "復元操作に失敗しました。もう一度お試しください。",
+    "interrupted": "タスクが中断されました",
+    "completed": "タスクが完了しました",
+    "failed": "タスクの復元に失敗しました",
+    "failedHelp": "保存されたタスクを安全に復元できませんでした。続行前に確認してください。",
+    "resuming": "中断されたタスクを復元しています…",
+    "review": "続行する前にタスクを確認してください。ツールは自動的に再実行されません。",
+    "safeResume": "保存された会話コンテキストから続行しています。",
+    "dismiss": "閉じる",
+    "continue": "続行"
   },
   "lightbox": {
     "title": "画像プレビュー",

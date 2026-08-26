@@ -56,6 +56,7 @@ from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
+from nanobot.cli.process_identity import set_cli_process_identity  # noqa: E402
 from nanobot.cli.provider import provider_app  # noqa: E402
 from nanobot.cli.runtime_config import (  # noqa: E402
     _load_inspection_config,
@@ -99,12 +100,17 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """nanobot - Personal AI Assistant."""
-    pass
+    # Editable/source installs can retain an older generated console script that
+    # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
+    # role identity correct until that launcher is regenerated.
+    command = ctx.invoked_subcommand
+    set_cli_process_identity([command] if command else sys.argv[1:])
 
 
 # ============================================================================

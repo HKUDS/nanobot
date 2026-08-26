@@ -79,6 +79,36 @@ def test_websocket_lifecycle_reuses_registered_ingress_owner(tmp_path: Path) -> 
         wth.clear_websocket_turn_if_current("chat-queued", owner)
 
 
+def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
+    from nanobot.session import webui_turns as wth
+
+    sessions = SessionManager(tmp_path / "sessions")
+    target = sessions.get_or_create("websocket:target")
+    target.metadata["webui"] = True
+    sessions.save(target)
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        RuntimeEventBus(),
+        route_policy=WebuiTurnRoutePolicy(sessions),
+    )
+    msg = InboundMessage(
+        channel="system",
+        sender_id="session",
+        chat_id="websocket:target",
+        content="Review this",
+        session_key_override="websocket:target",
+        input_role="user",
+    )
+
+    delivery = factory.create(msg, msg.session_key)
+
+    assert (delivery.route.channel, delivery.route.chat_id) == ("websocket", "target")
+    assert delivery.route.publish_lifecycle
+    assert delivery.route.metadata["_wants_stream"] is True
+    owner = delivery.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    wth.clear_websocket_turn_if_current("target", owner)
+
+
 @pytest.mark.asyncio
 async def test_same_chat_different_sessions_restore_previous_active_projection(
     tmp_path: Path,

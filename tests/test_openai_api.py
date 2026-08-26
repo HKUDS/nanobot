@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
+from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.api.server import (
     API_CHAT_ID,
     API_SESSION_KEY,
@@ -17,6 +18,7 @@ from nanobot.api.server import (
     create_app,
     handle_chat_completions,
 )
+from nanobot.providers.base import LLMUsage
 
 try:
     from aiohttp.test_utils import TestClient, TestServer
@@ -35,7 +37,6 @@ def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value=response_text)
     agent.aclose = AsyncMock()
-    agent._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
     return agent
 
 
@@ -87,19 +88,19 @@ def test_chat_completion_response() -> None:
 
 
 def test_chat_completion_response_with_usage() -> None:
-    usage = {"prompt_tokens": 150, "completion_tokens": 42}
+    usage = LLMUsage.reported(input_tokens=150, output_tokens=42)
     result = _chat_completion_response("hello world", "test-model", usage)
     assert result["usage"]["prompt_tokens"] == 150
     assert result["usage"]["completion_tokens"] == 42
     assert result["usage"]["total_tokens"] == 192
 
 
-def test_chat_completion_response_preserves_provider_total_usage() -> None:
-    usage = {"total_tokens": 77}
+def test_chat_completion_response_preserves_explicit_total_usage() -> None:
+    usage = LLMUsage.reported(input_tokens=70, output_tokens=7, total_tokens=175)
     result = _chat_completion_response("hello world", "test-model", usage)
-    assert result["usage"]["prompt_tokens"] == 0
-    assert result["usage"]["completion_tokens"] == 0
-    assert result["usage"]["total_tokens"] == 77
+    assert result["usage"]["prompt_tokens"] == 70
+    assert result["usage"]["completion_tokens"] == 7
+    assert result["usage"]["total_tokens"] == 175
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -295,7 +296,18 @@ async def test_single_user_message_must_have_user_role() -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_successful_request_uses_fixed_api_session(aiohttp_client, mock_agent) -> None:
+async def test_successful_request_uses_fixed_api_session_and_run_usage(
+    aiohttp_client,
+    mock_agent,
+) -> None:
+    usage = LLMUsage.reported(input_tokens=100, output_tokens=50)
+
+    async def process_direct(*, hooks: list[AgentHook], **_kwargs: object) -> str:
+        for hook in hooks:
+            await hook.after_run(AgentRunHookContext(messages=[], usage=usage))
+        return "mock response"
+
+    mock_agent.process_direct = AsyncMock(side_effect=process_direct)
     app = create_app(mock_agent, model_name="test-model", api_key=API_KEY)
     client = await aiohttp_client(app)
     resp = await client.post(
@@ -307,13 +319,18 @@ async def test_successful_request_uses_fixed_api_session(aiohttp_client, mock_ag
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == "mock response"
     assert body["model"] == "test-model"
-    mock_agent.process_direct.assert_called_once_with(
-        content="hello",
-        media=None,
-        session_key=API_SESSION_KEY,
-        channel="api",
-        chat_id=API_CHAT_ID,
-    )
+    assert body["usage"] == {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+    }
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["content"] == "hello"
+    assert call_kwargs["media"] is None
+    assert call_kwargs["session_key"] == API_SESSION_KEY
+    assert call_kwargs["channel"] == "api"
+    assert call_kwargs["chat_id"] == API_CHAT_ID
+    assert len(call_kwargs["hooks"]) == 1
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -328,7 +345,6 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = fake_process
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -367,7 +383,6 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = slow_process
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -484,7 +499,6 @@ async def test_empty_response_falls_back_without_retry(aiohttp_client) -> None:
     agent = MagicMock()
     agent.process_direct = always_empty
     agent.aclose = AsyncMock()
-    agent._last_usage = {}
 
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)

@@ -18,11 +18,9 @@
 
 ## Discovery and Reading
 
-- Use `find_files` or `list_dir` to locate workspace paths before `read_file` when a path is uncertain.
-- Use `grep` for content search inside the workspace; prefer it over shell grep for ordinary searches.
-- `grep` defaults to `output_mode="files_with_matches"`; use `output_mode="content"` for matching lines with context.
+- Use `find_files` or `list_dir` for uncertain paths, `grep` for content, and `read_file` for a known path.
+- `grep` returns matches with five context lines by default; use `files_with_matches` for paths or `count` for totals.
 - Use `fixed_strings=true` for literal keywords containing regex characters.
-- Use `output_mode="count"` to size a broad search before reading full matches.
 - Use `head_limit` and `offset` to page across large result sets.
 - Search tools enforce binary and file-size limits and report skipped files in the result.
 
@@ -48,13 +46,9 @@
 
 ## Process Execution
 
-- Use `exec` for tests, builds, package commands, git commands, and other process execution.
-- Prefer dedicated file/search tools over `cat`, shell `find`, shell `grep`, `sed`, or `echo` for ordinary workspace inspection and edits.
-- Use non-interactive flags such as `-y` or `--yes` when available.
-- Commands have a configurable timeout (default 60s), dangerous commands are blocked, and output is truncated.
-- For long-running or interactive commands, pass `yield_time_ms`; if the process keeps running, continue with `write_stdin`.
-- Use `write_stdin` to poll, provide stdin, close stdin, wait for expected output with `wait_for`, or terminate an existing exec session.
-- Use `list_exec_sessions` to recover active session IDs after context shifts.
+- Use `exec` for processes, not file inspection or editing.
+- For interaction or early output, set `yield_time_ms` and continue with `exec_session` (`until_exit=true` when no further input is needed).
+- Use `list_exec_sessions` to recover session IDs.
 
 ## CLI App Attachments
 

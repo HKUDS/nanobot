@@ -7,10 +7,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import {
   Archive,
   ArchiveRestore,
+  AlertTriangle,
   ChevronDown,
   Folder,
   FolderTree,
@@ -50,7 +51,7 @@ import {
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
-import { deriveTitle, relativeTime, visibleSessionPreview } from "@/lib/format";
+import { relativeTime, visibleSessionPreview } from "@/lib/format";
 import {
   COLLAPSED_CHATS_VISIBLE_COUNT,
   displayTitle,
@@ -63,6 +64,7 @@ import {
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
 import { deriveTemporaryChatTitle } from "@/lib/temporary-chat";
+import { sessionHandleColor } from "@/lib/session-handle";
 import {
   clearDraggedSession,
   hasDraggedSession,
@@ -103,8 +105,10 @@ function SidebarItemTooltip({
 
 function SidebarSelectionTrack({
   active,
+  handle,
 }: {
   active: boolean;
+  handle: ChatSummary["handle"];
 }) {
   return (
     <span
@@ -112,11 +116,35 @@ function SidebarSelectionTrack({
       data-active={active ? "true" : "false"}
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left rounded-full bg-current",
+        "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left rounded-full",
         "transition-transform duration-200 ease-out motion-reduce:transition-none",
         active ? "scale-x-100" : "scale-x-0",
       )}
+      style={{
+        backgroundColor: handle ? sessionHandleColor(handle.id) : "currentColor",
+      }}
     />
+  );
+}
+
+function SidebarSessionHandle({ handle }: { handle: ChatSummary["handle"] }) {
+  if (!handle) return null;
+  return (
+    <span
+      data-sidebar-session-handle
+      className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] font-medium leading-5"
+    >
+      <span
+        data-sidebar-session-handle-underline
+        className="inline border-b-2 text-foreground"
+        style={{
+          "--sidebar-session-handle-color": sessionHandleColor(handle.id),
+          borderBottomColor: "var(--sidebar-session-handle-color)",
+        } as CSSProperties}
+      >
+        @{handle.name}
+      </span>
+    </span>
   );
 }
 
@@ -160,6 +188,7 @@ export interface SidebarPaneGroup {
     key: string;
     chatId: string;
     title: string;
+    handle?: ChatSummary["handle"];
   }>;
 }
 
@@ -232,6 +261,7 @@ interface ChatListProps {
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
   updatedChatIds?: string[];
+  recoveryChatIds?: string[];
   density?: SidebarDensity;
   showPreviews?: boolean;
   showTimestamps?: boolean;
@@ -274,6 +304,7 @@ export const ChatList = memo(function ChatList({
   collapsedGroups = {},
   runningChatIds = [],
   updatedChatIds = [],
+  recoveryChatIds = [],
   density = "comfortable",
   showPreviews = false,
   showTimestamps = false,
@@ -530,6 +561,7 @@ export const ChatList = memo(function ChatList({
 
   const running = new Set(runningChatIds);
   const updated = new Set(updatedChatIds);
+  const recovery = new Set(recoveryChatIds);
   const compact = density === "compact";
   const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
   const selectableDeleteKeys = Array.from(new Set(limitedGroups.flatMap((group) => (
@@ -853,6 +885,7 @@ export const ChatList = memo(function ChatList({
                                   compact={compact}
                                   running={running}
                                   updated={updated}
+                                  recovery={recovery}
                                   onSelectPane={onSelectPane}
                                   onRequestDelete={onRequestDelete}
                                   onRequestRename={onRequestRename}
@@ -878,14 +911,6 @@ export const ChatList = memo(function ChatList({
                       );
                     }
 
-                    const fallbackTitle = t("chat.fallbackTitle", {
-                      id: s.chatId.slice(0, 6),
-                    });
-                    const generatedTitle = s.title?.trim() || "";
-                    const tooltipTitle =
-                      titleOverrides[s.key]?.trim() ||
-                      generatedTitle ||
-                      deriveTitle(s.preview, fallbackTitle);
                     const isPinned = pinned.has(s.key);
                     const isArchived = archived.has(s.key);
                     const preview = visibleSessionPreview(s.preview);
@@ -895,9 +920,11 @@ export const ChatList = memo(function ChatList({
                       : "";
                     const activityState = running.has(s.chatId)
                       ? "running"
-                      : updated.has(s.chatId) && !topicActive
-                        ? "updated"
-                        : null;
+                      : recovery.has(s.chatId)
+                        ? "recovery"
+                        : updated.has(s.chatId) && !topicActive
+                          ? "updated"
+                          : null;
                     const hasPaneMoveTarget = Boolean(onAttachPane)
                       && paneGroupTargets.some((target) => (
                         target.key !== paneGroup?.tabKey && !target.atCapacity
@@ -931,8 +958,7 @@ export const ChatList = memo(function ChatList({
                               && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
                         >
-                          <SidebarItemTooltip label={tooltipTitle}>
-                            <button
+                          <button
                               type="button"
                               onClick={(event) => {
                                 if (deleteSelectionMode) {
@@ -965,27 +991,29 @@ export const ChatList = memo(function ChatList({
                                   partial={tabPartiallySelected}
                                 />
                               ) : null}
-                              <span className="min-w-0 flex-1 overflow-hidden">
-                                {projectMode ? (
-                                  <span className="relative flex w-full min-w-0 items-baseline gap-2">
-                                    <span className="min-w-0 flex-1 truncate font-medium leading-5">
-                                      {title}
-                                    </span>
-                                    {isPinned ? <PinnedChatIndicator /> : null}
+                                <span className="min-w-0 flex-1 overflow-hidden">
+                                  {projectMode ? (
+                                    <span className="relative flex w-full min-w-0 items-baseline gap-2">
+                                      <SidebarSessionHandle handle={s.handle} />
+                                      <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                                        {title}
+                                      </span>
+                                      {isPinned ? <PinnedChatIndicator /> : null}
                                     {timestamp ? (
                                       <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground/58">
                                         {timestamp}
                                       </span>
                                     ) : null}
-                                    <SidebarSelectionTrack active={topicActive} />
+                                    <SidebarSelectionTrack active={topicActive} handle={s.handle} />
                                   </span>
                                 ) : (
                                   <span className="relative flex w-full min-w-0 items-center gap-1.5">
+                                    <SidebarSessionHandle handle={s.handle} />
                                     <span className="min-w-0 flex-1 truncate font-medium leading-5">
                                       {title}
                                     </span>
                                     {isPinned ? <PinnedChatIndicator /> : null}
-                                    <SidebarSelectionTrack active={topicActive} />
+                                    <SidebarSelectionTrack active={topicActive} handle={s.handle} />
                                   </span>
                                 )}
                                 {showPreview ? (
@@ -999,8 +1027,7 @@ export const ChatList = memo(function ChatList({
                                   </span>
                                 ) : null}
                               </span>
-                            </button>
-                          </SidebarItemTooltip>
+                          </button>
                           <SessionActivityIndicator state={activityState} />
                           {!deleteSelectionMode ? (
                             <DropdownMenu
@@ -1310,6 +1337,7 @@ function ActivePaneRows({
   compact,
   running,
   updated,
+  recovery,
   onSelectPane,
   onRequestDelete,
   onRequestRename,
@@ -1334,6 +1362,7 @@ function ActivePaneRows({
   compact: boolean;
   running: ReadonlySet<string>;
   updated: ReadonlySet<string>;
+  recovery: ReadonlySet<string>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onRequestRename: (key: string, label: string) => void;
@@ -1370,9 +1399,11 @@ function ActivePaneRows({
         const active = tabActive && pane.key === group.activePaneKey;
         const activityState = running.has(pane.chatId)
           ? "running"
-          : updated.has(pane.chatId) && !active
-            ? "updated"
-            : null;
+          : recovery.has(pane.chatId)
+            ? "recovery"
+            : updated.has(pane.chatId) && !active
+              ? "updated"
+              : null;
         const paneActionsLabel = t("workbench.paneActions", { title: pane.title });
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
@@ -1405,8 +1436,7 @@ function ActivePaneRows({
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
             >
-              <SidebarItemTooltip label={pane.title}>
-                <button
+              <button
                   type="button"
                   onClick={(event) => {
                     if (deleteSelectionMode) {
@@ -1437,12 +1467,12 @@ function ActivePaneRows({
                     <SelectionIndicator checked={selected} partial={false} />
                   ) : null}
                   <span className="relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                    <SidebarSessionHandle handle={pane.handle} />
                     <span className="min-w-0 flex-1 truncate">{pane.title}</span>
                     {isPinned ? <PinnedChatIndicator /> : null}
-                    <SidebarSelectionTrack active={active} />
+                    <SidebarSelectionTrack active={active} handle={pane.handle} />
                   </span>
-                </button>
-              </SidebarItemTooltip>
+              </button>
               <SessionActivityIndicator state={activityState} />
               {!deleteSelectionMode ? <DropdownMenu
                 modal={false}
@@ -1619,8 +1649,7 @@ function TemporaryChatSection({
                     : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
                 )}
               >
-                <SidebarItemTooltip label={title}>
-                  <button
+                <button
                     type="button"
                     onClick={() => onSelect(session.key)}
                     aria-current={active ? "page" : undefined}
@@ -1633,8 +1662,7 @@ function TemporaryChatSection({
                     <span className="min-w-0 flex-1 truncate font-medium leading-5">
                       {title}
                     </span>
-                  </button>
-                </SidebarItemTooltip>
+                </button>
                 <SessionActivityIndicator state={running.has(session.chatId) ? "running" : null} />
                 {onClose ? (
                   <button
@@ -1835,9 +1863,26 @@ function ChatsFoldFooter({
 function SessionActivityIndicator({
   state,
 }: {
-  state: "running" | "updated" | null;
+  state: "running" | "updated" | "recovery" | null;
 }) {
   const { t } = useTranslation();
+
+  if (state === "recovery") {
+    const label = t("chat.activity.recovery", {
+      defaultValue: "This conversation needs your attention",
+    });
+    return (
+      <SidebarItemTooltip label={label}>
+        <span
+          role="img"
+          aria-label={label}
+          className="grid h-4 w-4 shrink-0 place-items-center text-[#ff8a3d]"
+        >
+          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+        </span>
+      </SidebarItemTooltip>
+    );
+  }
 
   if (state === "running") {
     const label = t("chat.activity.running");

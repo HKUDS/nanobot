@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
@@ -139,6 +140,34 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "model-activity",
+            role: "assistant",
+            content: "**partial answer**",
+            activityKind: "model",
+            isStreaming: true,
+            createdAt: 1,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    const block = screen.getByTestId("activity-model-message");
+    await waitFor(() => expect(block.querySelector("strong")).not.toBeNull());
+    expect(block.querySelector("strong")).toHaveTextContent("partial answer");
+    expect(screen.queryByTestId("activity-step")).not.toBeInTheDocument();
+  });
+
   it("jumps to the latest activity when opened", () => {
     const raf = installAnimationFrameQueue();
     try {
@@ -398,7 +427,7 @@ describe("AgentActivityCluster", () => {
         vi.advanceTimersByTime(301);
       });
       expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Thought" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Worked" })).toHaveAttribute(
         "aria-expanded",
         "false",
       );
@@ -422,7 +451,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "Thought" });
+    const button = screen.getByRole("button", { name: "Worked" });
     expect(button).toHaveAttribute("data-thread-disclosure");
     const chevron = button.querySelector("svg");
     expect(chevron).toBeInTheDocument();
@@ -449,7 +478,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
   });
 
   it("labels mixed tool activity as work instead of thought", () => {
@@ -481,8 +510,8 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
+    expect(screen.getByText("Worked")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
   it("renders file edits as one-line activity rows", async () => {

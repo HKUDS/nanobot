@@ -106,7 +106,7 @@ diff** to expand the change; large diffs may hide unchanged lines or truncate th
 inline preview. Use **Open file** from a file edit to open the read-only file
 preview panel.
 
-File previews follow the active session access mode. Restricted workspace access
+File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
 
@@ -135,7 +135,7 @@ or a result you must retain.
 ## Workspace and Access
 
 Use the workspace picker before starting project-specific work. This gives the
-agent the right project context for file paths, shell commands, and session
+agent the right project context for file paths, shell commands, and topic
 metadata. A locally hosted WebUI opens the operating system's folder chooser
 when one is available; remote deployments keep the manual absolute path entry.
 
@@ -173,14 +173,17 @@ clients.
 ## Composer
 
 The composer supports plain messages, image attachments, voice input when
-transcription is configured, slash commands, and `@` mentions for installed Apps
-or MCP presets. Select another topic from the `@` menu to attach a stable
-reference, or drag that topic from the sidebar into the composer. Plain text
-that happens to start with `@` does not attach history.
-Restricted chats offer topics from the same project, while Full Access chats can
-reference any WebUI topic. Nanobot reads a referenced topic only when its history
-is relevant and can link it in the response. The model badge shows the current
-model or preset and links back to model settings when setup is incomplete.
+transcription is configured, slash commands, and `@` mentions for installed Apps,
+MCP presets, or persisted topics. Topics have short, pronounceable handles such as
+`@luma`; titles are display text rather than addresses. Select a topic
+from the menu, or drag it from the sidebar, to attach its structured reference.
+Typing the same text without selecting it remains plain text.
+
+The agent can inspect an attached topic with `read_session`. It can discover other
+persisted topics with `list_sessions` and send asynchronous messages with
+`send_session_message`; topic messaging is not limited by workspace scope.
+The model badge shows the current model or preset and links to model settings when
+setup is incomplete.
 
 For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)
@@ -306,7 +309,7 @@ with the content that should be delivered.
 
 ## Settings
 
-Settings is the control surface for the browser session and gateway-backed
+Settings is the control surface for browser-local and gateway-backed
 runtime configuration. Use it to review or adjust model presets, providers,
 image generation, voice transcription, web tools, chat channels, Apps,
 Automations, Skills, runtime identity, and advanced safety controls.

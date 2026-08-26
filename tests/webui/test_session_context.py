@@ -1,3 +1,4 @@
+from nanobot.providers.base import LLMUsage
 from nanobot.session import Session
 from nanobot.utils.helpers import estimate_message_tokens
 from nanobot.webui.session_context import session_context_payload
@@ -58,19 +59,29 @@ def test_session_context_tolerates_untrusted_summary_metadata() -> None:
 
 
 def test_session_context_sanitizes_usage_metadata() -> None:
+    usage = LLMUsage.reported(
+        input_tokens=120,
+        output_tokens=8,
+        total_tokens=175,
+        cache_read_tokens=48,
+    ).with_timing(generation_ms=400, ttft_ms=75)
     session = Session(
         key="websocket:context",
-        metadata={
-            "_last_usage": {
-                "prompt_tokens": 120,
-                "completion_tokens": 8,
-                "negative": -1,
-                "boolean": True,
-                "text": "invalid",
-            }
-        },
+        metadata={"_last_usage": usage.to_dict()},
     )
 
     payload = session_context_payload(session)
 
-    assert payload["last_usage"] == {"prompt_tokens": 120, "completion_tokens": 8}
+    assert payload["last_usage"] == {
+        "prompt_tokens": 120,
+        "completion_tokens": 8,
+        "total_tokens": 175,
+        "context_tokens": 120,
+        "cached_tokens": 48,
+        "request_count": 1,
+        "estimated_tokens": 0,
+        "generation_ms": 400,
+        "measured_completion_tokens": 8,
+        "ttft_ms": 75,
+        "timed_requests": 1,
+    }

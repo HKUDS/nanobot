@@ -10,6 +10,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.automation_turns import publish_next_deferred_turn
+from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -26,7 +27,7 @@ def _make_injection_callback(queue: asyncio.Queue):
     return inject_cb
 
 
-def _make_loop(tmp_path):
+def _make_loop(tmp_path, *, recovery_admission=None):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -39,7 +40,12 @@ def _make_loop(tmp_path):
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            recovery_admission=recovery_admission,
+        )
     return loop
 
 @pytest.mark.asyncio
@@ -258,9 +264,9 @@ async def test_checkpoint1_injects_after_tool_execution():
             return LLMResponse(
                 content="using tool",
                 tool_calls=[ToolCallRequest(id="c1", name="read_file", arguments={"path": "x"})],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="final answer", tool_calls=[], usage={})
+        return LLMResponse(content="final answer", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -295,6 +301,130 @@ async def test_checkpoint1_injects_after_tool_execution():
 
 
 @pytest.mark.asyncio
+async def test_terminal_wait_does_not_block_next_iteration_after_tools():
+    """Background waits begin only after a no-tool response is ready to finish."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    second_request_started = asyncio.Event()
+    allow_final_response = asyncio.Event()
+    terminal_wait_started = asyncio.Event()
+    release_terminal_result = asyncio.Event()
+    call_count = 0
+    terminal_result_delivered = False
+
+    async def chat_with_retry(*, messages, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="c1", name="read_file", arguments={"path": "x"})],
+            )
+        if call_count == 2:
+            second_request_started.set()
+            await allow_final_response.wait()
+            return LLMResponse(content="main work finished", tool_calls=[])
+        return LLMResponse(content="combined final answer", tool_calls=[])
+
+    async def drain_available():
+        return []
+
+    async def wait_at_terminal():
+        nonlocal terminal_result_delivered
+        if terminal_result_delivered:
+            return []
+        terminal_wait_started.set()
+        await release_terminal_result.wait()
+        terminal_result_delivered = True
+        return [
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="c",
+                content="background result",
+            )
+        ]
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner()
+    run_task = asyncio.create_task(runner.run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=drain_available,
+        terminal_injection_callback=wait_at_terminal,
+    )))
+
+    await asyncio.wait_for(second_request_started.wait(), timeout=1.0)
+    assert not terminal_wait_started.is_set()
+
+    allow_final_response.set()
+    await asyncio.wait_for(terminal_wait_started.wait(), timeout=1.0)
+    assert not run_task.done()
+
+    release_terminal_result.set()
+    result = await asyncio.wait_for(run_task, timeout=1.0)
+
+    assert call_count == 3
+    assert result.had_injections is True
+    assert result.final_content == "combined final answer"
+
+
+@pytest.mark.asyncio
+async def test_goal_continuation_precedes_terminal_wait():
+    """An active sustained goal keeps running without joining background work."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="goal checkpoint", tool_calls=[]),
+        LLMResponse(content="goal complete", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    continuation_checks = 0
+    terminal_waits = 0
+
+    def continue_goal() -> str | None:
+        nonlocal continuation_checks
+        continuation_checks += 1
+        return "Continue the active goal." if continuation_checks == 1 else None
+
+    async def drain_available():
+        return []
+
+    async def wait_at_terminal():
+        nonlocal terminal_waits
+        terminal_waits += 1
+        return []
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "complete the goal"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=drain_available,
+        terminal_injection_callback=wait_at_terminal,
+        continuation_callback=continue_goal,
+    ))
+
+    assert provider.chat_with_retry.await_count == 2
+    assert terminal_waits == 1
+    assert result.final_content == "goal complete"
+
+
+@pytest.mark.asyncio
 async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     """After final response, if injections exist, stream_end should get resuming=True."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
@@ -318,8 +448,8 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     async def chat_stream_with_retry(*, messages, on_content_delta=None, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            return LLMResponse(content="first answer", tool_calls=[], usage={})
-        return LLMResponse(content="second answer", tool_calls=[], usage={})
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
@@ -406,8 +536,8 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
         call_count["n"] += 1
         captured_messages.append([dict(message) for message in messages])
         if call_count["n"] == 1:
-            return LLMResponse(content="first answer", tool_calls=[], usage={})
-        return LLMResponse(content="second answer", tool_calls=[], usage={})
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -469,8 +599,8 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
         call_count["n"] += 1
         captured_messages.append(list(messages))
         if call_count["n"] == 1:
-            return LLMResponse(content="first answer", tool_calls=[], usage={})
-        return LLMResponse(content="second answer", tool_calls=[], usage={})
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
@@ -485,16 +615,16 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
         media=[str(image_path)],
     ))
 
-    final_content, _, _, _, had_injections = await loop._run_agent_loop(
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
-        runtime=loop.llm_runtime(),
-        channel="cli",
-        chat_id="c",
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
     )
 
-    assert final_content == "second answer"
-    assert had_injections is True
+    assert result.final_content == "second answer"
+    assert result.had_injections is True
     assert call_count["n"] == 2
     injected_user_messages = [
         message for message in captured_messages[-1]
@@ -523,8 +653,8 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="first answer", tool_calls=[], usage={}),
-        LLMResponse(content="second answer", tool_calls=[], usage={}),
+        LLMResponse(content="first answer", tool_calls=[], usage=None),
+        LLMResponse(content="second answer", tool_calls=[], usage=None),
     ])
     loop = AgentLoop(
         bus=MessageBus(),
@@ -579,13 +709,17 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         },
     ))
 
-    _, _, all_messages, _, _ = await loop._run_agent_loop(
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "initial message from user A"}],
-        runtime=loop.llm_runtime(),
+        runtime=runtime,
         session=session,
-        channel="telegram",
-        chat_id="group-1",
-        session_key=session.key,
+        request_context=RequestContext(
+            channel="telegram",
+            chat_id="group-1",
+            session_key=session.key,
+            runtime=runtime,
+        ),
         pending_queue=pending_queue,
     )
 
@@ -612,7 +746,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         ),
     ]
 
-    injected = [message for message in all_messages if message.get("role") == "user"][-1]
+    injected = [message for message in result.messages if message.get("role") == "user"][-1]
     assert "follow-up from the second speaker" in str(injected["content"])
     model_messages = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
     assert "telegram | group-1 | user-b | message-2" in str(model_messages)
@@ -624,7 +758,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         "identity",
     ]
 
-    loop._save_turn(session, all_messages, skip=1)
+    loop._save_turn(session, result.messages, skip=1)
     persisted = [message for message in session.messages if message.get("role") == "user"][-1]
     assert "telegram | group-1 | user-b | message-2" in str(persisted["content"])
     assert "telegram | group-1 | user-c | message-3" in str(persisted["content"])
@@ -648,8 +782,8 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
     async def chat_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            return LLMResponse(content="first answer", tool_calls=[], usage={})
-        return LLMResponse(content="second answer", tool_calls=[], usage={})
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
@@ -676,18 +810,18 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
         metadata={"injected_event": "subagent_result", "subagent_task_id": "sub-1"},
     ))
 
-    final_content, _, all_msgs, _, had_injections = await loop._run_agent_loop(
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
-        runtime=loop.llm_runtime(),
-        channel="cli",
-        chat_id="c",
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
     )
 
-    assert final_content == "second answer"
-    assert had_injections is True
+    assert result.final_content == "second answer"
+    assert result.had_injections is True
     assert call_count["n"] == 2
-    injected_users = [message for message in all_msgs if message.get("role") == "user"][-2:]
+    injected_users = [message for message in result.messages if message.get("role") == "user"][-2:]
     assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
     assert injected_users[1][HIDDEN_HISTORY_META] == {
         "kind": "subagent_result",
@@ -709,8 +843,8 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
         call_count["n"] += 1
         captured_messages.append([dict(message) for message in messages])
         if call_count["n"] == 1:
-            return LLMResponse(content="first answer", tool_calls=[], usage={})
-        return LLMResponse(content="second answer", tool_calls=[], usage={})
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -757,6 +891,20 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
         for block in injected["content"]
         if isinstance(block, dict)
     )
+
+
+def test_runner_merge_keeps_all_recovery_followup_ids() -> None:
+    """Merged follow-ups stay acknowledged together after a later save."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
+
+    messages = [{"role": "user", "content": "first", PENDING_FOLLOWUP_ID_KEY: "one"}]
+    AgentRunner._append_injected_messages(
+        messages,
+        [{"role": "user", "content": "second", PENDING_FOLLOWUP_ID_KEY: "two"}],
+    )
+
+    assert messages[-1][PENDING_FOLLOWUP_ID_KEY] == ["one", "two"]
 
 
 def test_runner_merge_preserves_runtime_markers_with_media() -> None:
@@ -822,7 +970,7 @@ async def test_injection_cycles_capped_at_max():
 
     async def chat_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
-        return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage={})
+        return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -860,7 +1008,7 @@ async def test_no_injections_flag_is_false_by_default():
     provider = MagicMock()
 
     async def chat_with_retry(**kwargs):
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -884,7 +1032,7 @@ async def test_pending_queue_cleanup_on_dispatch(tmp_path):
     loop = _make_loop(tmp_path)
 
     async def chat_with_retry(**kwargs):
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     loop.provider.chat_with_retry = chat_with_retry
 
@@ -965,6 +1113,71 @@ async def test_followup_routed_to_pending_queue(tmp_path):
     assert loop._dispatch.await_count == 0
     assert queued_msg.content == "follow-up"
     assert queued_msg.session_key == UNIFIED_SESSION_KEY
+
+
+@pytest.mark.asyncio
+async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
+    """Recovery admission runs before a newer WebUI message is injected."""
+    from nanobot.bus.events import InboundMessage
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(return_value=True)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    session_key = "websocket:chat"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat",
+        content="new request",
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+    admission.admit.assert_awaited_once_with(msg)
+    assert queued_msg.content == msg.content
+    assert queued_msg.metadata["_recovery_followup_id"]
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_unified_websocket_followup_admits_effective_session(tmp_path):
+    """Recovery admission and the pending queue must use the same session key."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(return_value=True)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._unified_session = True
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat",
+        content="new request",
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+    admitted_msg = admission.admit.await_args.args[0]
+    assert admitted_msg.session_key == UNIFIED_SESSION_KEY
+    assert queued_msg.session_key == UNIFIED_SESSION_KEY
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
 
 
 @pytest.mark.asyncio
@@ -1245,7 +1458,7 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
     async def chat_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         captured_messages.append([dict(message) for message in messages])
-        return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage={})
+        return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
@@ -1261,16 +1474,16 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
             content=f"follow-up-{idx}",
         ))
 
-    final_content, _, _, _, had_injections = await loop._run_agent_loop(
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
-        runtime=loop.llm_runtime(),
-        channel="cli",
-        chat_id="c",
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
     )
 
-    assert final_content == "answer-3"
-    assert had_injections is True
+    assert result.final_content == "answer-3"
+    assert result.had_injections is True
     assert call_count["n"] == 3
     flattened_user_content = "\n".join(
         message["content"]
@@ -1315,11 +1528,56 @@ async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pending_queue_overflow_keeps_websocket_followup_durable(tmp_path):
+    """Fallback dispatch must not acknowledge a WebUI message before it commits."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.manager import Session
+    from nanobot.session.recovery import pending_followups
+
+    loop = _make_loop(tmp_path)
+    dispatched = asyncio.Event()
+    release_dispatch = asyncio.Event()
+
+    async def _dispatch(_msg):
+        dispatched.set()
+        await release_dispatch.wait()
+
+    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
+    session = Session(key="websocket:c")
+    loop.sessions.get_or_create.return_value = session
+    pending = asyncio.Queue(maxsize=1)
+    pending.put_nowait(
+        InboundMessage(channel="websocket", sender_id="u", chat_id="c", content="already queued")
+    )
+    loop._pending_queues["websocket:c"] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    await loop.bus.publish_inbound(
+        InboundMessage(
+            channel="websocket",
+            sender_id="u",
+            chat_id="c",
+            content="durable follow-up",
+            metadata={"webui": True},
+        )
+    )
+    await asyncio.wait_for(dispatched.wait(), timeout=2)
+
+    assert [message.content for message in pending_followups(session)] == ["durable follow-up"]
+    dispatched_msg = loop._dispatch.await_args.args[0]
+    assert dispatched_msg.metadata["_recovery_followup_id"]
+
+    release_dispatch.set()
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+
+@pytest.mark.asyncio
 async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
     """Messages left in the pending queue after _dispatch are re-published to the bus.
 
     This tests the finally-block cleanup that prevents message loss when
-    the runner exits early (e.g., max_iterations, tool_error) with messages
+    the runner exits early (e.g., max_iterations) with messages
     still in the queue.
     """
     from nanobot.bus.events import InboundMessage
@@ -1359,8 +1617,8 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_drain_injections_on_fatal_tool_error():
-    """A fatal tool error must not leak recovered content into an injected follow-up."""
+async def test_drain_injections_after_recoverable_tool_error():
+    """A tool error and injected follow-up continue in the same runner conversation."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1373,16 +1631,16 @@ async def test_drain_injections_on_fatal_tool_error():
             return LLMResponse(
                 content="stale prefix ",
                 finish_reason="length",
-                usage={},
+                usage=None,
             )
         if call_count["n"] == 2:
             return LLMResponse(
                 content="",
                 tool_calls=[ToolCallRequest(id="c1", name="exec", arguments={"cmd": "bad"})],
-                usage={},
+                usage=None,
             )
         # Third call: respond normally to the injected follow-up.
-        return LLMResponse(content="reply to follow-up", tool_calls=[], usage={})
+        return LLMResponse(content="reply to follow-up", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -1403,7 +1661,6 @@ async def test_drain_injections_on_fatal_tool_error():
         model="test-model",
         max_iterations=5,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
         injection_callback=inject_cb,
     ))
 
@@ -1434,10 +1691,10 @@ async def test_drain_injections_on_llm_error():
                 content=None,
                 tool_calls=[],
                 finish_reason="error",
-                usage={},
+                usage=None,
             )
         # Second call: respond normally to the injected follow-up
-        return LLMResponse(content="recovered answer", tool_calls=[], usage={})
+        return LLMResponse(content="recovered answer", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -1485,9 +1742,9 @@ async def test_drain_injections_on_empty_final_response():
     async def chat_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] <= _MAX_EMPTY_RETRIES + 1:
-            return LLMResponse(content="", tool_calls=[], usage={})
+            return LLMResponse(content="", tool_calls=[], usage=None)
         # After retries exhausted + injection drain, respond normally
-        return LLMResponse(content="answer after empty", tool_calls=[], usage={})
+        return LLMResponse(content="answer after empty", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -1542,7 +1799,7 @@ async def test_drain_injections_on_max_iterations():
         return LLMResponse(
             content="",
             tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
-            usage={},
+            usage=None,
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -1594,7 +1851,7 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
         return LLMResponse(
             content="",
             tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
-            usage={},
+            usage=None,
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -1657,7 +1914,7 @@ async def test_injection_cycle_cap_on_error_path():
             content=None,
             tool_calls=[],
             finish_reason="error",
-            usage={},
+            usage=None,
         )
 
     provider.chat_with_retry = chat_with_retry

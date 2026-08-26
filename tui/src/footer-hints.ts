@@ -17,6 +17,7 @@ export interface FooterHintTheme {
 
 export type FooterMode =
   | "mention"
+  | "skill"
   | "runtime"
   | "active"
   | "branch"
@@ -52,23 +53,25 @@ export function footerTelemetry(
     const estimated = (usage.estimated_tokens || 0) > 0 ? "~" : ""
     parts.push(`${estimated}${value} tok/s`)
   }
+  const cacheHitRate = (
+    typeof usage.cached_tokens === "number"
+    && typeof usage.prompt_tokens === "number"
+    && usage.prompt_tokens > 0
+  )
+    ? Math.min(100, Math.max(0, Math.round(
+        usage.cached_tokens * 100 / usage.prompt_tokens,
+      )))
+    : null
   if (width >= 72) {
     const prompt = usage.prompt_tokens
     const completion = usage.completion_tokens
     if (typeof prompt === "number" || typeof completion === "number") {
-      parts.push(`${formatTelemetryTokens(prompt || 0)} in`)
+      const cache = cacheHitRate === null ? "" : ` (${cacheHitRate}% cached)`
+      parts.push(`${formatTelemetryTokens(prompt || 0)} in${cache}`)
       parts.push(`${formatTelemetryTokens(completion || 0)} out`)
     }
-  }
-  if (
-    typeof usage.cached_tokens === "number"
-    && typeof usage.prompt_tokens === "number"
-    && usage.prompt_tokens > 0
-  ) {
-    const hitRate = Math.min(100, Math.max(0, Math.round(
-      usage.cached_tokens * 100 / usage.prompt_tokens,
-    )))
-    parts.push(`${hitRate}% cached`)
+  } else if (cacheHitRate !== null) {
+    parts.push(`${cacheHitRate}% cached`)
   }
   if (width >= 128 && typeof usage.cost_usd === "number" && usage.cost_usd > 0) {
     parts.push(`$${usage.cost_usd < 0.01 ? usage.cost_usd.toFixed(4) : usage.cost_usd.toFixed(2)}`)
@@ -115,7 +118,7 @@ function hintsFor(
   if (mode === "runtime") return width >= 64
     ? [hint("↑↓/click", "choose"), hint("enter", "apply"), hint("esc", "close")]
     : [hint("enter", "apply"), hint("esc", "close")]
-  if (mode === "mention") return width >= 64
+  if (mode === "mention" || mode === "skill") return width >= 64
     ? [hint("↑↓", "choose"), hint("tab/enter", "insert"), hint("esc", "close")]
     : [hint("enter", "insert"), hint("esc", "close")]
   if (mode === "active") return []

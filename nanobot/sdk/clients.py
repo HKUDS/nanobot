@@ -15,7 +15,6 @@ from nanobot.sdk.types import (
     snapshot_from_payload,
     snapshot_from_session,
 )
-from nanobot.session.manager import replay_max_messages_for_context
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -210,15 +209,12 @@ class RuntimeClient:
         return self._loop.runtime_events.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
-        """Run token/replay-window consolidation for one session."""
+        """Run token consolidation for one session."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
         await self._loop.consolidator.maybe_consolidate_by_tokens(
             session,
             runtime=runtime,
-            replay_max_messages=replay_max_messages_for_context(
-                runtime.context_window_tokens
-            ),
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 

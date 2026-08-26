@@ -92,7 +92,7 @@ def test_discover_finds_concrete_tools():
     assert "CliAppsTool" in class_names
     assert "MessageTool" in class_names
     assert "SpawnTool" in class_names
-    assert "WriteStdinTool" in class_names
+    assert "ExecSessionTool" in class_names
 
 
 def test_discover_excludes_abstract_and_mcp():
@@ -160,8 +160,15 @@ def test_loader_wires_shared_exec_session_manager(tmp_path):
     ToolLoader().load(ctx, registry)
 
     assert registry.get("exec")._session_manager is manager
-    assert registry.get("write_stdin")._manager is manager
+    assert registry.get("exec_session")._manager is manager
+    assert registry.get("write_stdin") is None
     assert registry.get("list_exec_sessions")._manager is manager
+    definition_names = {
+        definition["function"]["name"]
+        for definition in registry.get_definitions()
+    }
+    assert "exec_session" in definition_names
+    assert "write_stdin" not in definition_names
 
 
 # --- Task 4: _FsTool.create() ---
@@ -419,7 +426,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
 
     expected = {
         "read_file", "write_file", "edit_file", "list_dir",
-        "find_files", "grep", "exec", "write_stdin", "list_exec_sessions",
+        "find_files", "grep", "exec", "exec_session", "list_exec_sessions",
         "web_search", "web_fetch",
         "message", "spawn", "cron",
     }

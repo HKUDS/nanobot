@@ -9,6 +9,7 @@ import pytest
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
 )
@@ -289,3 +290,23 @@ def test_independent_request_exposes_context_without_capability_check() -> None:
     assert provider_context.conversation_state is None
     assert provider_context.context_window_tokens == 200_000
     provider.supports_native_compaction.assert_not_called()
+
+
+def test_independent_request_exposes_session_id_without_token_budget() -> None:
+    provider = _provider(compact=False)
+    messages = [{"role": "user", "content": "hello"}]
+    controller = ProviderConversationStateController(
+        provider=provider,
+        model="gpt-5.6",
+        messages=messages,
+        session_id="webui:cache-test",
+    )
+
+    provider_context = controller.prepare_request(
+        messages,
+        context_window_tokens=None,
+    )
+
+    assert provider_context == ProviderCallContext(
+        session_id="webui:cache-test",
+    )

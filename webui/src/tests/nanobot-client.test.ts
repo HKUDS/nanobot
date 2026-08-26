@@ -1724,6 +1724,7 @@ describe("NanobotClient", () => {
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
       model_preset: "Deep Research",
+      fallback: true,
     });
 
     expect(chatHandler).toHaveBeenCalledWith({
@@ -1731,6 +1732,7 @@ describe("NanobotClient", () => {
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
       model_preset: "Deep Research",
+      fallback: true,
     });
   });
 

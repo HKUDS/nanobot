@@ -49,6 +49,29 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
+def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
+    """Project paths must not invalidate the stable identity and tool contract prefix."""
+    agent_home = tmp_path / "agent-home"
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+    agent_home.mkdir()
+    project_a.mkdir()
+    project_b.mkdir()
+    builder = ContextBuilder(agent_home)
+
+    prompt_a = builder.build_system_prompt(workspace=project_a)
+    prompt_b = builder.build_system_prompt(workspace=project_b)
+    marker = "# Current Project"
+    prefix_a = prompt_a[: prompt_a.index(marker)]
+    prefix_b = prompt_b[: prompt_b.index(marker)]
+
+    assert prefix_a == prefix_b
+    assert "# Tool Usage Notes" in prefix_a
+    assert str(project_a.resolve()) not in prefix_a
+    assert str(project_b.resolve()) not in prefix_b
+    assert prompt_a == builder.build_system_prompt(workspace=project_a)
+
+
 def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -110,6 +133,42 @@ def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
     assert "telegram history" in prompt
     assert "slack history" not in prompt
     assert "legacy entry without session" not in prompt
+
+
+def test_session_summary_replaces_interleaved_recent_history_entry(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    session_key = "unified:default"
+    overview = "CURRENT_SESSION_OVERVIEW_MARKER"
+
+    builder.memory.append_history("another session event", session_key=session_key)
+    builder.memory.append_history(overview, session_key=session_key)
+    latest_cursor = builder.memory.append_history(
+        "later telegram event",
+        session_key="telegram:chat-1",
+    )
+    summary = {"text": overview, "last_active": "2026-08-19T10:00:00"}
+
+    prompt = builder.build_system_prompt(
+        session_key=session_key,
+        session_summary=summary,
+        unified_session=True,
+    )
+
+    assert "# Recent History" in prompt
+    assert "another session event" in prompt
+    assert "later telegram event" in prompt
+    assert "[Archived Context Summary]" in prompt
+    assert prompt.count(overview) == 1
+
+    builder.memory.set_last_dream_cursor(latest_cursor)
+    processed_prompt = builder.build_system_prompt(
+        session_key=session_key,
+        session_summary=summary,
+        unified_session=True,
+    )
+    assert "# Recent History" not in processed_prompt
+    assert processed_prompt.count(overview) == 1
 
 
 def test_recent_history_injection_unified_excludes_cron_internals(tmp_path) -> None:

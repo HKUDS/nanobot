@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -50,12 +51,26 @@ class OpenAICodexProvider(LLMProvider):
         default_model: str = "openai-codex/gpt-5.6-sol",
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        *,
+        provider_name: str = "openai_codex",
     ):
-        super().__init__(api_key=None, api_base=None)
+        super().__init__(api_key=None, api_base=None, provider_name=provider_name)
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
         self._native_compaction_available = True
+        self._ssl_contexts: dict[bool, ssl.SSLContext] = {}
+
+    def _ssl_context(self, *, verify: bool) -> ssl.SSLContext:
+        """Reuse synchronous TLS setup across requests on the shared event loop."""
+        context = self._ssl_contexts.get(verify)
+        if context is None:
+            context = httpx.create_ssl_context(
+                verify=verify,
+                trust_env=self.proxy is None,
+            )
+            self._ssl_contexts[verify] = context
+        return context
 
     async def _call_codex(
         self,
@@ -88,6 +103,7 @@ class OpenAICodexProvider(LLMProvider):
             provider=self._responses_state_provider(),
             model=_strip_model_prefix(model),
         )
+        session_id = provider_context.session_id if provider_context is not None else None
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -96,10 +112,11 @@ class OpenAICodexProvider(LLMProvider):
             "instructions": system_prompt,
             "input": input_items,
             "text": {"verbosity": "medium"},
-            "prompt_cache_key": _prompt_cache_key(messages[:2]),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
+        if session_id:
+            body["prompt_cache_key"] = _prompt_cache_key(session_id)
         body["include"] = ["reasoning.encrypted_content"]
         reasoning_options = _build_reasoning_options(reasoning_effort)
         if replayed and "gpt-5.6" in _strip_model_prefix(model).lower():
@@ -129,7 +146,7 @@ class OpenAICodexProvider(LLMProvider):
                         DEFAULT_CODEX_URL,
                         headers,
                         wire_body,
-                        verify=True,
+                        verify=self._ssl_context(verify=True),
                         proxy=self.proxy,
                         on_content_delta=on_content_delta if emit_deltas else None,
                         on_thinking_delta=on_thinking_delta if emit_deltas else None,
@@ -145,7 +162,7 @@ class OpenAICodexProvider(LLMProvider):
                         DEFAULT_CODEX_URL,
                         headers,
                         wire_body,
-                        verify=False,
+                        verify=self._ssl_context(verify=False),
                         proxy=self.proxy,
                         on_content_delta=on_content_delta if emit_deltas else None,
                         on_thinking_delta=on_thinking_delta if emit_deltas else None,
@@ -411,7 +428,7 @@ async def _request_codex(
     url: str,
     headers: dict[str, str],
     body: dict[str, Any],
-    verify: bool,
+    verify: ssl.SSLContext | bool,
     proxy: str | None = None,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
@@ -481,9 +498,8 @@ async def _request_codex(
             return result
 
 
-def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
-    raw = json.dumps(messages, ensure_ascii=True, sort_keys=True)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def _prompt_cache_key(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
 def _friendly_error(status_code: int, raw: str) -> str:

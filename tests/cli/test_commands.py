@@ -102,6 +102,19 @@ class _GatewayAgentContractStub:
     ) -> OutboundMessage | None:
         return None
 
+    def preserve_inflight_turns_on_shutdown(self) -> None:
+        return None
+
+
+class _EmptyGatewaySessionManager:
+    """Minimal session-manager contract for gateway assembly tests."""
+
+    def list_sessions(self) -> list[dict[str, object]]:
+        return []
+
+    def flush_all(self) -> int:
+        return 0
+
 
 def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
     class _FakeLoop:
@@ -1949,6 +1962,28 @@ def _patch_gateway_ports_free(monkeypatch) -> None:
     )
 
 
+def _record_gateway_lease_release(monkeypatch, captured: dict[str, object]) -> None:
+    from nanobot.gateway import GatewayClientLease
+
+    original_release = GatewayClientLease.release
+
+    def record_release(
+        lease: GatewayClientLease,
+        *,
+        timeout_s: int = 20,
+        wait_for_stop: bool = True,
+    ) -> bool:
+        captured["lease_release_wait_for_stop"] = wait_for_stop
+        captured["dev_running_at_release"] = captured.get("dev_running")
+        return original_release(
+            lease,
+            timeout_s=timeout_s,
+            wait_for_stop=wait_for_stop,
+        )
+
+    monkeypatch.setattr(GatewayClientLease, "release", record_release)
+
+
 def _patch_webui_managed_gateway(
     monkeypatch,
     seen: dict[str, object] | None = None,
@@ -1957,6 +1992,7 @@ def _patch_webui_managed_gateway(
     from nanobot.gateway import GatewayStatus, RuntimeResult
 
     captured = seen if seen is not None else {}
+    _record_gateway_lease_release(monkeypatch, captured)
 
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
@@ -2219,7 +2255,8 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "bootstrap secret was generated" in compact_output
     assert "channels.websocket.tokenIssueSecret" in compact_output
     assert "rerun without --no-open" in compact_output
-    assert "Last local client exited; the on-demand gateway was stopped" in compact_output
+    assert seen["lease_release_wait_for_stop"] is False
+    assert "stop_timeout" not in seen
 
 
 def test_webui_background_points_to_the_single_persistent_gateway_command(
@@ -2312,6 +2349,8 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     assert seen["attach_kwargs"] == {"poll_hook": seen["dev_server"].ensure_running}
     assert seen["opened_url"] == browser_url
     assert seen["dev_running"] is False
+    assert seen["dev_running_at_release"] is False
+    assert seen["lease_release_wait_for_stop"] is False
     assert "WebUI dev: http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in re.sub(
         r"\s+", " ", _strip_ansi(result.stdout)
     )
@@ -2509,6 +2548,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     config_file = tmp_path / "config.json"
     config_file.write_text("{}")
     seen: dict[str, object] = {}
+    _record_gateway_lease_release(monkeypatch, seen)
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.webui.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.webui._gateway_health_ready", lambda *_args, **_kwargs: True)
@@ -2571,6 +2611,7 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     fragment = parsed.fragment.removeprefix("/?")
     assert parse_qs(fragment).get("bootstrapSecret")
     assert seen["open_kwargs"] == {"wait": False}
+    assert seen["lease_release_wait_for_stop"] is False
 
 
 def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys) -> None:
@@ -2728,7 +2769,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
@@ -2795,7 +2836,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
         cron_service=_StopCron,
     )
 
@@ -3188,10 +3229,15 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
             return None
 
         def status(self) -> dict[str, int]:
+            seen.setdefault("cron_reconciliation", []).append("status")
             return {"jobs": 0}
 
         def register_system_job(self, _job) -> None:
             return None
+
+        def remove_system_job(self, job_id: str) -> bool:
+            seen.setdefault("cron_reconciliation", []).append(f"remove:{job_id}")
+            return False
 
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
@@ -3269,6 +3315,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     turn_delivery_factory = agent_kwargs["turn_delivery_factory"]
     assert isinstance(turn_delivery_factory, TurnDeliveryFactory)
     assert turn_delivery_factory.bus is bus
+    assert seen["cron_reconciliation"] == ["remove:dream", "remove:heartbeat", "status"]
     assert isinstance(turn_delivery_factory.route_policy, WebuiTurnRoutePolicy)
     assert turn_delivery_factory.route_policy.sessions is agent.sessions
 
@@ -3295,7 +3342,7 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
         cron_service=_StopCron,
         get_cron_dir=lambda: legacy_dir,
     )
@@ -3334,7 +3381,7 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
         cron_service=_StopCron,
         get_cron_dir=lambda: legacy_dir,
     )
@@ -3535,7 +3582,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
@@ -3650,6 +3697,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             return cls(**extra)
 
         def __init__(self, **_kwargs) -> None:
+            seen["hooks"] = _kwargs.get("hooks")
             self.model = "test-model"
             self.provider = object()
             self.sessions = _FakeSessionManager()
@@ -3667,6 +3715,9 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
 
         async def aclose(self) -> None:
             seen["agent_closed"] = True
+
+        def preserve_inflight_turns_on_shutdown(self) -> None:
+            seen["inflight_turns_preserved"] = True
 
         def stop(self) -> None:
             seen["agent_stopped"] = True
@@ -3737,7 +3788,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.gateway_runtime.MCPProvider", _FakeMCPProvider)
@@ -3749,6 +3800,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
 
     assert result.exit_code == 0
     assert seen["agent_stopped"] is True
+    assert seen["inflight_turns_preserved"] is True
     assert seen["agent_closed"] is True
     assert seen["agent_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True
@@ -3758,6 +3810,11 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     assert mcp_provider.connect_task is seen["agent_task"]
     assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
     assert len(mcp_provider.close_tasks) == 2
+    hooks = seen["hooks"]
+    assert isinstance(hooks, list)
+    assert len(hooks) == 1
+    hook = hooks[0]
+    assert isinstance(hook, cli_gateway_runtime._MCPReadinessHook)
 
 
 def test_gateway_shutdown_event_exits_forever_runtime_tasks(
@@ -3860,7 +3917,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         monkeypatch,
         config,
         message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
+        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)

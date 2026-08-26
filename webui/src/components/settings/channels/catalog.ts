@@ -27,7 +27,7 @@ export type ChannelSetupPresentation = {
   presets?: ChannelProviderPreset[];
 };
 
-export type ChannelCatalogSetupPresentation = {
+type ChannelCatalogSetupPresentation = {
   mode?: "webui" | "credentials" | "connect";
   command?: string;
   docsUrl?: string;
@@ -38,15 +38,15 @@ export type ChannelCatalogSetupPresentation = {
   presets?: ChannelProviderPresetDefinition[];
 };
 
-export type ChannelFieldPresentation = {
+type ChannelFieldPresentation = {
   key: string;
 };
 
-export type ChannelSetupActionDefinition = Omit<ChannelSetupAction, "label">;
+type ChannelSetupActionDefinition = Omit<ChannelSetupAction, "label">;
 
 export type ChannelProviderPresetDefinition = Omit<ChannelProviderPreset, "label">;
 
-export type ChannelSetupAction = {
+type ChannelSetupAction = {
   id: string;
   label: string;
   url?: string;
@@ -72,7 +72,7 @@ export type ChannelConfigField = {
   options?: ChannelConfigOption[];
 };
 
-export type ChannelConfigOption = {
+type ChannelConfigOption = {
   value: string;
   label: string;
 };

@@ -104,6 +104,9 @@ class ChannelManager:
         webui_mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         webui_mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
+        webui_recovery_action: (
+            Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -126,6 +129,7 @@ class ChannelManager:
         self._webui_mcp_runtime_status = webui_mcp_runtime_status
         self._webui_mcp_reload = webui_mcp_reload
         self._webui_skill_state_action = webui_skill_state_action
+        self._webui_recovery_action = webui_recovery_action
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -197,6 +201,7 @@ class ChannelManager:
                 mcp_runtime_status=self._webui_mcp_runtime_status,
                 mcp_reload=self._webui_mcp_reload,
                 skill_state_action=self._webui_skill_state_action,
+                recovery_action=self._webui_recovery_action,
                 logger=logger,
             )
             kwargs["gateway"] = gateway
@@ -614,6 +619,12 @@ class ChannelManager:
         target = self.channels.get(notice.channel)
         if target is None:
             logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
+            return
+        if notice.channel == "websocket":
+            # Reconnect and recovery are already represented by WebSocket
+            # protocol state. A generic restart-complete notice must not
+            # masquerade as a recovery transition and overwrite a real
+            # awaiting-user checkpoint in connected clients.
             return
 
         while not target.is_running:

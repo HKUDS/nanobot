@@ -326,10 +326,7 @@ def webui(
                 raise typer.Exit(1) from exc
             return
         finally:
-            if lease.release():
-                console.print(
-                    "[dim]Last local client exited; the on-demand gateway was stopped.[/dim]"
-                )
+            lease.release(wait_for_stop=False)
 
     gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
         _host_for_local_browser(runtime_config.gateway.host),
@@ -372,5 +369,4 @@ def webui(
             _open_webui_browser(webui_url)
         _attach_to_background_gateway(runtime)
     finally:
-        if lease.release():
-            console.print("[dim]Last local client exited; the on-demand gateway was stopped.[/dim]")
+        lease.release(wait_for_stop=False)

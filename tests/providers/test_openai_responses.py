@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from loguru import logger
 
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
@@ -484,7 +485,7 @@ class TestParseResponseOutput:
         result = parse_response_output(resp)
         assert result.content == "Hello!"
         assert result.finish_reason == "stop"
-        assert result.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert result.tool_calls == []
 
     def test_refusal_response_surfaces_text_without_advancing_state(self):
@@ -652,7 +653,8 @@ class TestParseResponseOutput:
         }
         result = parse_response_output(mock)
         assert result.content == "sdk"
-        assert result.usage["prompt_tokens"] == 1
+        assert result.usage is not None
+        assert result.usage.input_tokens == 1
 
     def test_usage_maps_responses_api_keys(self):
         """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
@@ -662,9 +664,20 @@ class TestParseResponseOutput:
             "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
         }
         result = parse_response_output(resp)
-        assert result.usage["prompt_tokens"] == 100
-        assert result.usage["completion_tokens"] == 50
-        assert result.usage["total_tokens"] == 150
+        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
+
+    def test_non_stream_preserves_provider_reported_total(self):
+        result = parse_response_output({
+            "output": [],
+            "status": "completed",
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 999},
+        })
+
+        assert result.usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=999,
+        )
 
     def test_preserves_every_output_item_as_opaque_state(self):
         input_items = [{"role": "user", "content": "inspect the repo"}]
@@ -713,18 +726,18 @@ class TestResponsesConversationState:
                 {"type": "compaction", "encrypted_content": "compact"},
                 {"type": "message", "role": "assistant", "content": "new"},
             ],
-            usage={
-                "prompt_tokens": 90,
-                "completion_tokens": 10,
-                "total_tokens": 100,
-            },
+            usage=LLMUsage.reported(
+                input_tokens=90,
+                output_tokens=10,
+                total_tokens=175,
+            ),
         )
 
         assert responses_state_items(state) == [
             {"type": "compaction", "encrypted_content": "compact"},
             {"type": "message", "role": "assistant", "content": "new"},
         ]
-        assert responses_state_context_tokens(state) == 100
+        assert responses_state_context_tokens(state) == 175
 
     def test_existing_compaction_keeps_canonical_retained_prefix(self):
         canonical_input = [
@@ -1056,8 +1069,24 @@ class TestConsumeSse:
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
         response = _SseResponse([
-            {"type": "response.reasoning_summary_text.delta", "delta": "thinking "},
-            {"type": "response.reasoning_summary_text.delta", "delta": "briefly"},
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "thinking ",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "briefly",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 1,
+                "delta": "Checking result",
+            },
             {"type": "response.output_text.delta", "delta": "answer"},
             {"type": "response.completed", "response": {"status": "completed"}},
         ])
@@ -1074,9 +1103,9 @@ class TestConsumeSse:
         assert content == "answer"
         assert tool_calls == []
         assert finish_reason == "stop"
-        assert usage == {}
-        assert reasoning == "thinking briefly"
-        assert deltas == ["thinking ", "briefly"]
+        assert usage is None
+        assert reasoning == "thinking briefly\nChecking result"
+        assert deltas == ["thinking ", "briefly", "\nChecking result"]
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_completed_response(self):
@@ -1087,7 +1116,7 @@ class TestConsumeSse:
                     "status": "completed",
                     "output": [
                         {"type": "reasoning", "summary": [
-                            {"type": "summary_text", "text": "cached "},
+                            {"type": "summary_text", "text": "cached"},
                             {"type": "summary_text", "text": "summary"},
                         ]},
                     ],
@@ -1097,7 +1126,7 @@ class TestConsumeSse:
 
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
-        assert reasoning == "cached summary"
+        assert reasoning == "cached\nsummary"
 
     @pytest.mark.asyncio
     async def test_capture_commits_exact_items_only_after_completed_event(self):
@@ -1208,7 +1237,7 @@ class TestConsumeSse:
 
         assert content == "partial"
         assert finish_reason == expected_finish_reason
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert capture.completed is True
         assert capture.response == terminal_response
         assert capture.output_items == output
@@ -1278,14 +1307,83 @@ class TestConsumeSse:
                 "type": "response.completed",
                 "response": {
                     "status": "completed",
-                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {
+                            "cached_tokens": 8,
+                            "cache_write_tokens": 0,
+                        },
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
                 },
             },
         ])
 
         _, _, _, usage, _ = await consume_sse_with_reasoning(response)
 
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=8,
+            cache_write_tokens=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_and_non_stream_share_usage_normalization(self):
+        terminal = {
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 15,
+                "input_tokens_details": {
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 7,
+                },
+                "output_tokens": 18,
+                "total_tokens": 175,
+            },
+        }
+        non_stream = parse_response_output(terminal).usage
+        sse = _SseResponse([
+            {"type": "response.completed", "response": terminal},
+        ])
+        _, _, _, streamed, _ = await consume_sse_with_reasoning(sse)
+
+        sdk_response = SimpleNamespace(**terminal)
+        sdk_response.usage = SimpleNamespace(
+            input_tokens=15,
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=0,
+                cache_write_tokens=7,
+            ),
+            output_tokens=18,
+            total_tokens=175,
+        )
+
+        async def sdk_stream():
+            yield SimpleNamespace(type="response.completed", response=sdk_response)
+
+        _, _, _, sdk_streamed, _ = await consume_sdk_stream(sdk_stream())
+        expected = LLMUsage.reported(
+            input_tokens=15,
+            output_tokens=18,
+            total_tokens=175,
+            cache_read_tokens=0,
+            cache_write_tokens=7,
+        )
+        assert non_stream == streamed == sdk_streamed == expected
+
+    def test_missing_usage_is_not_explicit_zero_usage(self):
+        missing = parse_response_output({"status": "completed", "output": []})
+        explicit_zero = parse_response_output({
+            "status": "completed",
+            "output": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        })
+
+        assert missing.usage is None
+        assert explicit_zero.usage == LLMUsage.reported(input_tokens=0, output_tokens=0)
 
     @pytest.mark.asyncio
     async def test_tool_call_done_arguments_callback(self):
@@ -1752,15 +1850,24 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_usage_extracted(self):
-        usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
-        resp_obj = MagicMock(status="completed", usage=usage_obj, output=[])
-        ev = MagicMock(type="response.completed", response=resp_obj)
+        usage_obj = SimpleNamespace(
+            input_tokens=10,
+            input_tokens_details=SimpleNamespace(cached_tokens=8),
+            output_tokens=5,
+            total_tokens=15,
+        )
+        resp_obj = SimpleNamespace(status="completed", usage=usage_obj, output=[])
+        ev = SimpleNamespace(type="response.completed", response=resp_obj)
 
         async def stream():
             yield ev
 
         _, _, _, usage, _ = await consume_sdk_stream(stream())
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=8,
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1815,7 +1922,7 @@ class TestConsumeSdkStream:
 
         assert content == "partial"
         assert finish_reason == expected_finish_reason
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert capture.completed is True
         assert capture.response == terminal_response
         assert capture.output_items == output

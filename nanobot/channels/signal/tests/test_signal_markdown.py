@@ -363,13 +363,6 @@ def test_reported_daily_brief_pattern():
 # ---------------------------------------------------------------------------
 
 
-def _resolve_chunk_styles(text: str, max_len: int) -> tuple[list[str], list[list[str]]]:
-    """Helper: full markdown → signal pipeline, including chunking."""
-    plain, styles = _markdown_to_signal(text)
-    chunks = split_message(plain, max_len) if plain else [""]
-    return chunks, _partition_styles(plain, chunks, styles)
-
-
 def test_partition_styles_single_chunk_passthrough():
     plain, styles = _markdown_to_signal("**bold** plain *it*")
     parts = _partition_styles(plain, [plain], styles)

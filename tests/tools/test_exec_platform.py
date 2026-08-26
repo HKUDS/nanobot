@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.tools.exec_session import ExecSessionManager, WriteStdinTool
+from nanobot.agent.tools.exec_session import ExecSessionManager, ExecSessionTool
 from nanobot.agent.tools.shell import ExecTool
 
 _WINDOWS_ENV_KEYS = {
@@ -905,18 +905,18 @@ class TestWindowsRealExec:
 
             if "session_id:" in result:
                 session_id = result.split("session_id:", 1)[1].splitlines()[0].strip()
-                poll_result = await WriteStdinTool(manager=manager).execute(
+                poll_result = await ExecSessionTool(manager=manager).execute(
                     session_id=session_id,
-                    chars="",
+                    input="",
                     wait_for="café λ 你好",
-                    wait_timeout_ms=120_000,
+                    timeout_ms=120_000,
                 )
                 result += "\n" + poll_result
                 if "Process running." in poll_result:
-                    final_result = await WriteStdinTool(manager=manager).execute(
+                    final_result = await ExecSessionTool(manager=manager).execute(
                         session_id=session_id,
-                        chars="",
-                        yield_time_ms=30_000,
+                        input="",
+                        timeout_ms=30_000,
                     )
                     result += "\n" + final_result
                     assert "Process running." not in final_result

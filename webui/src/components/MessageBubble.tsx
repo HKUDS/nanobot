@@ -20,6 +20,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
+import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
@@ -33,9 +34,14 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
+import {
+  fmtDateTime,
+  formatCompactTokenCount,
+  formatMessageEndTime,
+} from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
+import { sessionHandleColor } from "@/lib/session-handle";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   CliAppInfo,
@@ -48,6 +54,7 @@ import type {
   UIMessage,
   MessageDeliveryErrorKind,
   MessageDeliveryStatus,
+  TurnUsage,
 } from "@/lib/types";
 
 interface MessageBubbleProps {
@@ -174,6 +181,71 @@ function MessageCopyButton({ content }: { content: string }) {
   );
 }
 
+function compactDuration(milliseconds: number): string {
+  const seconds = milliseconds / 1_000;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds % 60)}s`;
+}
+
+function TurnUsageMeta({
+  usage,
+  latencyMs,
+}: {
+  usage: TurnUsage;
+  latencyMs?: number;
+}) {
+  const { t } = useTranslation();
+  const prompt = usage.prompt_tokens;
+  const completion = usage.completion_tokens;
+  const approximate = (usage.estimated_tokens ?? 0) > 0 ? "~" : "";
+  const parts: string[] = [];
+  if (typeof prompt === "number") parts.push(`${approximate}${formatCompactTokenCount(prompt)} in`);
+  if (typeof completion === "number") parts.push(`${approximate}${formatCompactTokenCount(completion)} out`);
+  if (
+    typeof usage.cached_tokens === "number"
+    && typeof prompt === "number"
+    && prompt > 0
+  ) {
+    parts.push(`${Math.round(Math.min(1, usage.cached_tokens / prompt) * 100)}% cached`);
+  }
+  if (typeof latencyMs === "number" && latencyMs >= 0) parts.push(compactDuration(latencyMs));
+  if (parts.length === 0) return null;
+
+  const details: string[] = [];
+  if (approximate) {
+    details.push(t("message.usage.estimated", { defaultValue: "Includes estimated usage" }));
+  }
+  const usageMeta = (
+    <span
+      data-turn-usage
+      tabIndex={details.length ? 0 : undefined}
+      className={cn(
+        "text-[11px] leading-none text-muted-foreground/70 tabular-nums",
+        details.length && "cursor-help",
+      )}
+    >
+      {parts.join(" · ")}
+    </span>
+  );
+
+  if (details.length === 0) return usageMeta;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{usageMeta}</TooltipTrigger>
+      <TooltipContent
+        side="top"
+        align="start"
+        className="max-w-96 whitespace-nowrap"
+      >
+        {details.join(" · ")}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function deliveryErrorCopy(
   kind: MessageDeliveryErrorKind | undefined,
   t: (key: string) => string,
@@ -259,6 +331,63 @@ function UserDeliveryStatus({
   );
 }
 
+function IncomingSessionMessage({
+  message,
+  showCopyAction,
+  onOpenFilePreview,
+}: {
+  message: UIMessage;
+  showCopyAction: boolean;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  const handle = message.sessionMessage!.session;
+  const color = sessionHandleColor(handle.id);
+  const createdAtLabel = formatMessageEndTime(message.createdAt);
+  const handleName = `@${handle.name}`;
+
+  return (
+    <div
+      data-session-message
+      className="group w-full text-[15px]"
+      style={{ lineHeight: "var(--cjk-line-height)" }}
+    >
+      <div
+        className="min-w-0 rounded-es-[16px] border-s-2 bg-background pb-1 ps-2.5"
+        style={{ borderInlineStartColor: color }}
+      >
+        <div className="mb-1.5 flex items-center text-[12px] text-muted-foreground">
+          <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
+        </div>
+        <div data-assistant-selectable="true" className="min-w-0">
+          <MarkdownText
+            preserveStreamingLayout
+            onOpenFilePreview={onOpenFilePreview}
+          >
+            {message.content}
+          </MarkdownText>
+        </div>
+      </div>
+      {createdAtLabel || showCopyAction ? (
+        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <div
+            className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
+          >
+            {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
+            {createdAtLabel ? (
+              <MessageTimestamp
+                timestamp={message.createdAt}
+                tooltipLabel={fmtDateTime(message.createdAt)}
+              >
+                {createdAtLabel}
+              </MessageTimestamp>
+            ) : null}
+          </div>
+        </TooltipProvider>
+      ) : null}
+    </div>
+  );
+}
+
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
@@ -283,6 +412,16 @@ export function MessageBubble({
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} />;
+  }
+
+  if (message.role === "user" && message.sessionMessage) {
+    return (
+      <IncomingSessionMessage
+        message={message}
+        showCopyAction={showCopyAction}
+        onOpenFilePreview={onOpenFilePreview}
+      />
+    );
   }
 
   if (message.role === "user") {
@@ -410,7 +549,9 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
-  const showAssistantFooterRow = showCopyButton || showForkButton || showAssistantTimestamp;
+  const showUsage = message.role === "assistant" && !!message.usage && !message.isStreaming;
+  const showAssistantFooterRow =
+    showCopyButton || showForkButton || showAssistantTimestamp || showUsage;
   const showAssistantFooterSlot =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
@@ -476,6 +617,12 @@ export function MessageBubble({
                 <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
               </Tooltip>
             ) : null}
+            {showUsage ? (
+              <TurnUsageMeta
+                usage={message.usage!}
+                latencyMs={message.latencyMs}
+              />
+            ) : null}
             {showAssistantTimestamp ? (
               <MessageTimestamp
                 {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}
@@ -507,7 +654,6 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
         "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
       )}
       aria-label={label}
-      title={text}
     >
       <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
       <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
@@ -821,7 +967,7 @@ interface ReasoningBubbleProps {
   hasBodyBelow: boolean;
 }
 
-export function ReasoningBubble({
+function ReasoningBubble({
   text,
   streaming,
   hasBodyBelow,
@@ -847,7 +993,7 @@ interface TraceGroupProps {
  * collapsed because tool traces are supporting evidence, not the answer.
  * A single click expands the exact calls when the user wants details.
  */
-export function TraceGroup({ message }: TraceGroupProps) {
+function TraceGroup({ message }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];
   const count = lines.length;

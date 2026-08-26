@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
@@ -21,6 +22,7 @@ from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, Too
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
+    WorkspaceScopeResolver,
     bind_workspace_scope,
     default_workspace_scope,
     reset_workspace_scope,
@@ -99,6 +101,34 @@ def test_workspace_scope_accepts_home_relative_project_path(
 
     assert scope.project_path == project.resolve()
     assert scope.metadata()["project_path"] == str(project.resolve())
+
+
+@pytest.mark.parametrize("access_mode", ["restricted", "full"])
+def test_selected_websocket_project_is_visible_to_the_model(
+    tmp_path: Path,
+    access_mode: str,
+) -> None:
+    agent_home = tmp_path / "agent-home"
+    project = tmp_path / "project"
+    agent_home.mkdir()
+    project.mkdir()
+    resolver = WorkspaceScopeResolver(agent_home, default_restrict_to_workspace=False)
+
+    scope = resolver.for_turn(
+        channel="websocket",
+        message_metadata={
+            WORKSPACE_SCOPE_METADATA_KEY: {
+                "project_path": str(project),
+                "access_mode": access_mode,
+            }
+        },
+        session_metadata=None,
+    )
+    prompt = ContextBuilder(agent_home).build_system_prompt(workspace=scope.project_path)
+
+    assert prompt.index("# Tool Usage Notes") < prompt.index("# Current Project")
+    assert f"Working directory: {project.resolve()}" in prompt
+    assert "Use it as the default root for project files" in prompt
 
 
 def test_workspace_scope_metadata_falls_back_for_stale_session(tmp_path: Path) -> None:

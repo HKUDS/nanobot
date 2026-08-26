@@ -23,6 +23,7 @@ from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -70,6 +71,7 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
 })
 MAX_SESSION_MENTIONS = 8
 _SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
+_SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
 
 
 def rewrite_local_markdown_images(
@@ -682,6 +684,25 @@ def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
         _rotate_active_transcript_if_needed(session_key)
 
 
+def append_session_message_input(
+    session_key: str,
+    *,
+    content: str,
+    created_at_ms: int,
+    session_message: Mapping[str, Any],
+) -> None:
+    """Append one admitted cross-session user input to its WebUI transcript."""
+    chat_id = _chat_id_from_session_key(session_key)
+    if chat_id is None:
+        return
+    event = build_user_transcript_event(chat_id, content)
+    if event is None:
+        return
+    event["created_at_ms"] = created_at_ms
+    event["session_message"] = dict(session_message)
+    append_transcript_object(session_key, event)
+
+
 def normalize_webui_turn_id(value: Any) -> str:
     if isinstance(value, str):
         candidate = value.strip()
@@ -750,6 +771,36 @@ class WebUITranscriptRecorder:
             record.update(transcript_overrides)
         return self.append(chat_id, record)
 
+    def prepare_and_append_stream_event(
+        self,
+        chat_id: str,
+        event: dict[str, Any],
+        *,
+        completed_text: str | None,
+        metadata: dict[str, Any] | None = None,
+        phase: str | None = None,
+        include_source: bool = False,
+    ) -> bool:
+        """Annotate every live stream event, but persist only completed segments.
+
+        Delta frames are a transport concern: retaining each token-sized chunk
+        would turn rendering cadence into disk-write cadence. The matching end
+        event carries the canonical segment text used by history replay.
+        """
+        self.prepare_event(
+            chat_id,
+            event,
+            metadata=metadata,
+            phase=phase,
+            include_source=include_source,
+        )
+        if event.get("event") in {"delta", "reasoning_delta"}:
+            return True
+        record = dict(event)
+        if completed_text is not None:
+            record["text"] = completed_text
+        return self.append(chat_id, record)
+
     def append_user_message(
         self,
         chat_id: str,
@@ -778,7 +829,7 @@ class WebUITranscriptRecorder:
     def append(self, chat_id: str, event: dict[str, Any]) -> bool:
         try:
             dup = json.loads(json.dumps(event, ensure_ascii=False))
-            append_transcript_object(f"websocket:{chat_id}", dup)
+            append_transcript_object(webui_session_key(chat_id), dup)
         except (OSError, ValueError, TypeError) as e:
             self._log.warning("webui transcript append failed: {}", e)
             return False
@@ -810,10 +861,10 @@ class WebUITranscriptRecorder:
 
 
 def _chat_id_from_session_key(session_key: str) -> str | None:
-    if not session_key.startswith("websocket:"):
+    chat_id = webui_chat_id(session_key)
+    if chat_id is None:
         return None
-    chat_id = session_key.split(":", 1)[1].strip()
-    return chat_id or None
+    return chat_id.strip() or None
 
 
 def _is_user_transcript_row(row: dict[str, Any]) -> bool:
@@ -943,18 +994,55 @@ def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
         name = item.get("name")
         session_key = item.get("session_key")
         title = item.get("title")
+        handle_id = item.get("id")
         if not isinstance(name, str) or not isinstance(session_key, str):
             continue
         name = name.strip()[:80]
         session_key = session_key.strip()[:512]
         if not name or not session_key or _SESSION_MENTION_NAME_RE.fullmatch(name) is None:
             continue
-        normalized.append({
+        mention = {
             "name": name,
             "session_key": session_key,
             "title": title.strip()[:160] if isinstance(title, str) else "",
-        })
+        }
+        if isinstance(handle_id, str) and _SESSION_HANDLE_ID_RE.fullmatch(handle_id):
+            mention["id"] = handle_id
+        normalized.append(mention)
     return normalized
+
+
+def normalize_session_message_ui_metadata(raw: object) -> dict[str, Any] | None:
+    """Validate session-message provenance at the transcript-to-WebUI boundary."""
+    if not isinstance(raw, Mapping):
+        return None
+    raw_data = cast(Mapping[str, object], raw)
+    session = raw_data.get("session")
+    message_id = raw_data.get("message_id")
+    if (
+        not isinstance(message_id, str)
+        or not message_id.strip()
+        or not isinstance(session, Mapping)
+    ):
+        return None
+    session_data = cast(Mapping[str, object], session)
+    handle_id = session_data.get("id")
+    name = session_data.get("name")
+    if (
+        not isinstance(handle_id, str)
+        or _SESSION_HANDLE_ID_RE.fullmatch(handle_id) is None
+        or not isinstance(name, str)
+        or not name.strip()
+    ):
+        return None
+    handle: dict[str, Any] = {
+        "id": handle_id.strip()[:128],
+        "name": name.strip()[:80],
+    }
+    return {
+        "message_id": message_id.strip()[:128],
+        "session": handle,
+    }
 
 
 def build_user_transcript_event(
@@ -1726,24 +1814,20 @@ def replay_transcript_to_ui_messages(
                 break
             content = str(candidate.get("content") or "")
             has_answer = len(content) > 0
+            if has_answer:
+                break
+            # A completed reasoning field is closed even while its assistant
+            # placeholder remains streaming for the rest of the turn.
             if (
                 candidate.get("reasoningStreaming")
-                or candidate.get("reasoning") is not None
-                or has_answer
-                or candidate.get("isStreaming")
+                or (
+                    candidate.get("isStreaming")
+                    and candidate.get("reasoning") is None
+                )
             ):
                 prev[i] = {
                     **candidate,
                     "reasoning": (str(candidate.get("reasoning") or "")) + chunk,
-                    "reasoningStreaming": True,
-                    "activitySegmentId": candidate.get("activitySegmentId") or _ensure_activity_segment(),
-                    **turn_fields,
-                }
-                return
-            if not has_answer and candidate.get("isStreaming"):
-                prev[i] = {
-                    **candidate,
-                    "reasoning": chunk,
                     "reasoningStreaming": True,
                     "activitySegmentId": candidate.get("activitySegmentId") or _ensure_activity_segment(),
                     **turn_fields,
@@ -1783,7 +1867,14 @@ def replay_transcript_to_ui_messages(
             return None
         return str(last.get("id"))
 
-    def demote_interrupted_assistant(segment: str) -> None:
+    def close_interrupted_assistant() -> None:
+        """Close an answer segment before tool activity without changing its semantics.
+
+        The wire protocol already marks answer, reasoning, and activity phases.
+        A later tool event does not turn previously emitted answer text into
+        reasoning; preserving ``content`` also keeps live and replay projections
+        equivalent.
+        """
         nonlocal buffer_message_id, buffer_parts
         for i in range(len(messages) - 1, -1, -1):
             candidate = messages[i]
@@ -1799,19 +1890,7 @@ def replay_transcript_to_ui_messages(
                 or candidate.get("media")
             ):
                 continue
-            reasoning_parts = [
-                part
-                for part in (candidate.get("reasoning"), content)
-                if isinstance(part, str) and part.strip()
-            ]
-            messages[i] = {
-                **candidate,
-                "content": "",
-                "reasoning": "\n\n".join(reasoning_parts),
-                "reasoningStreaming": False,
-                "isStreaming": False,
-                "activitySegmentId": candidate.get("activitySegmentId") or segment,
-            }
+            messages[i] = {**candidate, "isStreaming": False}
             if buffer_message_id == candidate.get("id"):
                 buffer_message_id = None
                 buffer_parts = []
@@ -1833,26 +1912,24 @@ def replay_transcript_to_ui_messages(
             and not m.get("media")
         )
 
-    def is_tool_trace_at(index: int) -> bool:
-        m = messages[index] if 0 <= index < len(messages) else None
-        return bool(m and m.get("kind") == "trace")
-
-    def prune_reasoning_only() -> None:
-        nonlocal messages
-        kept: list[dict[str, Any]] = []
-        for i, m in enumerate(messages):
-            if is_reasoning_only_placeholder(m) and not is_tool_trace_at(i + 1):
-                continue
-            kept.append(m)
-        messages = kept
-
-    def stamp_latency(latency_ms: int) -> None:
+    def stamp_completion(
+        *,
+        latency_ms: int | None = None,
+        usage: dict[str, int] | None = None,
+        context_window_tokens: int | None = None,
+    ) -> None:
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == "assistant" and messages[i].get("kind") != "trace":
+                completion: dict[str, Any] = {"isStreaming": False}
+                if latency_ms is not None:
+                    completion["latencyMs"] = latency_ms
+                if usage:
+                    completion["usage"] = usage
+                if context_window_tokens is not None:
+                    completion["contextWindowTokens"] = context_window_tokens
                 messages[i] = {
                     **messages[i],
-                    "latencyMs": latency_ms,
-                    "isStreaming": False,
+                    **completion,
                 }
                 return
 
@@ -1971,7 +2048,7 @@ def replay_transcript_to_ui_messages(
         if not segment:
             segment = _new_activity_segment(activate=False)
             active_file_edit_segment_id = segment
-        demote_interrupted_assistant(segment)
+        close_interrupted_assistant()
         strip_covered_file_edit_tool_hints_from_recent_messages(edits, turn_fields)
         target_index = find_file_edit_trace_index(segment, edits)
         if target_index is not None:
@@ -2040,6 +2117,17 @@ def replay_transcript_to_ui_messages(
     for idx, rec in enumerate(lines):
         ev = rec.get("event")
         if ev == "user":
+            if buffer_message_id is not None:
+                for message_index, message in enumerate(messages):
+                    if message.get("id") == buffer_message_id:
+                        messages[message_index] = {
+                            **message,
+                            "isStreaming": False,
+                        }
+                        break
+                buffer_message_id = None
+                buffer_parts = []
+            close_reasoning(messages)
             active_activity_segment_id = None
             active_file_edit_segment_id = None
             text = rec.get("text")
@@ -2079,6 +2167,10 @@ def replay_transcript_to_ui_messages(
             )
             if session_mentions:
                 row["sessionMentions"] = session_mentions
+            if session_message := normalize_session_message_ui_metadata(
+                rec.get("session_message")
+            ):
+                row["sessionMessage"] = session_message
             messages.append(row)
             continue
 
@@ -2144,29 +2236,26 @@ def replay_transcript_to_ui_messages(
             source_fields = _source_fields(rec)
             if isinstance(final_text, str):
                 if buffer_message_id is None:
+                    buffer_message_id = find_active_placeholder(messages, turn_fields)
+                if buffer_message_id is None:
                     buffer_message_id = _new_id("buf", idx)
-                    messages.append(
-                        {
-                            "id": buffer_message_id,
-                            "role": "assistant",
+                    messages.append({
+                        "id": buffer_message_id,
+                        "role": "assistant",
+                        "content": "",
+                        "isStreaming": True,
+                        "createdAt": _created_at_ms(rec, idx),
+                    })
+                for i, m in enumerate(messages):
+                    if m.get("id") == buffer_message_id:
+                        messages[i] = {
+                            **m,
                             "content": final_text,
                             "isStreaming": True,
                             **turn_fields,
                             **source_fields,
-                            "createdAt": _created_at_ms(rec, idx),
-                        },
-                    )
-                else:
-                    for i, m in enumerate(messages):
-                        if m.get("id") == buffer_message_id:
-                            messages[i] = {
-                                **m,
-                                "content": final_text,
-                                "isStreaming": True,
-                                **turn_fields,
-                                **source_fields,
-                            }
-                            break
+                        }
+                        break
                 if merge_next:
                     buffer_parts = [final_text]
             elif source_fields and buffer_message_id is not None:
@@ -2202,6 +2291,16 @@ def replay_transcript_to_ui_messages(
         if ev == "reasoning_end":
             if suppress_until_turn_end:
                 continue
+            text = rec.get("text")
+            if isinstance(text, str) and text:
+                close_file_edit_phase_before_activity()
+                attach_reasoning_chunk(
+                    messages,
+                    text,
+                    idx,
+                    _turn_fields(rec, "reasoning"),
+                    _created_at_ms(rec, idx),
+                )
             close_reasoning(messages)
             continue
 
@@ -2243,7 +2342,7 @@ def replay_transcript_to_ui_messages(
                 if not trace_lines:
                     continue
                 segment = _ensure_activity_segment()
-                demote_interrupted_assistant(segment)
+                close_interrupted_assistant()
                 last = messages[-1] if messages else None
                 if (
                     last
@@ -2327,10 +2426,27 @@ def replay_transcript_to_ui_messages(
             for i, m in enumerate(messages):
                 if m.get("isStreaming"):
                     messages[i] = {**m, "isStreaming": False}
-            prune_reasoning_only()
             lat = rec.get("latency_ms")
-            if isinstance(lat, (int, float)) and lat >= 0:
-                stamp_latency(int(lat))
+            usage = rec.get("usage")
+            sanitized_usage = (
+                {
+                    key: value
+                    for key, value in cast(dict[object, object], usage).items()
+                    if isinstance(key, str) and type(value) is int and value >= 0
+                }
+                if isinstance(usage, dict)
+                else None
+            )
+            context_window = rec.get("context_window_tokens")
+            stamp_completion(
+                latency_ms=int(lat) if isinstance(lat, (int, float)) and lat >= 0 else None,
+                usage=sanitized_usage,
+                context_window_tokens=(
+                    int(context_window)
+                    if isinstance(context_window, (int, float)) and context_window >= 0
+                    else None
+                ),
+            )
             buffer_message_id = None
             buffer_parts = []
             continue
@@ -2406,6 +2522,19 @@ def has_pending_tool_calls(
         if ev in {WEBUI_FORK_MARKER_EVENT}:
             continue
     return False
+
+
+def has_unfinished_transcript_tail(session_key: str) -> bool:
+    """Return whether the active transcript ends in an unfinished turn.
+
+    Recovery runs at gateway startup and only needs the newest, still-active
+    turn. Completed turns are rotated into immutable segment files, so reading
+    every historical segment here would make restart cost grow with the full
+    conversation history.
+    """
+    return has_pending_tool_calls(
+        _read_transcript_file(webui_transcript_path(session_key))
+    )
 
 
 def completed_turn_ids(lines: list[dict[str, Any]]) -> list[str]:

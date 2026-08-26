@@ -22,6 +22,7 @@ from nanobot.channels.websocket.runtime import (
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -257,8 +258,10 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
 
     channel._handle_message.assert_awaited_once()
     metadata = channel._handle_message.call_args.kwargs["metadata"]
+    handle = SessionHandleResolver(manager).handle_for_session("websocket:pricing")
+    assert handle is not None
     assert metadata["session_mentions"] == [{
-        "name": "pricing",
+        **handle.public_payload(),
         "session_key": "websocket:pricing",
         "title": "Pricing",
     }]

@@ -33,6 +33,8 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ef8e30;
+    --session-handle-lightness: 0.5;
+    --session-handle-chroma: 0.12;
     --temporary-control-active: #ef8e30;
     --temporary-accent: 24 95% 53%;
     --temporary-foreground: 17 88% 32%;
@@ -81,6 +83,8 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --session-handle-lightness: 0.75;
+    --session-handle-chroma: 0.11;
     --temporary-control-active: #ef8e30;
     --temporary-accent: 24 95% 53%;
     --temporary-foreground: 32 98% 73%;
@@ -161,11 +165,19 @@
     pointer-events: none;
     background-color: rgb(236 141 49);
     opacity: 0;
-    transition: opacity 220ms ease-out;
+    transition: opacity 180ms ease-out;
+  }
+
+  .composer-model-badge[data-fallback="true"] {
+    border-color: rgb(236 141 49 / 0.38);
   }
 
   .composer-model-badge[data-fallback="true"]::before {
-    opacity: 1;
+    opacity: 0.1;
+  }
+
+  .dark .composer-model-badge[data-fallback="true"]::before {
+    opacity: 0.15;
   }
 
   .composer-model-badge > * {
@@ -670,7 +682,7 @@
 /*
  * Composer controls compress against their actual container, not the viewport.
  * Permission state has priority over the model label; both retain their full
- * accessible names and title text when their visible labels are shortened.
+ * accessible names and tooltip text when their visible labels are shortened.
  */
 .thread-composer-surface {
   container-name: thread-composer;
@@ -691,9 +703,36 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
-.thread-composer-model-badge:not([data-switching="true"]):active
-  > .composer-model-pill {
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
   transform: scale(0.98);
+}
+
+@keyframes composer-model-pill-viewport-enter {
+  from {
+    transform: scale(0.9074);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.composer-model-pill-viewport {
+  transform-origin: right center;
+  animation: composer-model-pill-viewport-enter 210ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+}
+
+.composer-model-pill-dock {
+  transform-origin: right center;
+  transition-property: none;
+  will-change: transform;
+}
+
+.composer-model-pill-track[data-settling="true"],
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes preset-name-shake {
@@ -711,37 +750,8 @@
   }
 }
 
-@keyframes composer-model-pill-viewport-enter {
-  from {
-    transform: scale(0.9074);
-  }
-
-  to {
-    transform: scale(1);
-  }
-}
-
-.composer-model-pill-viewport {
-  transform-origin: right center;
-  animation: composer-model-pill-viewport-enter 210ms
-    cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
-}
-
-.composer-model-pill-dock {
-  transform-origin: right center;
-  transition-property: none;
-  will-change: transform;
-}
-
-.composer-model-pill-track[data-settling="true"],
-.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .thread-composer-model-badge:active > .composer-model-pill {
+  .thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
     transform: none !important;
   }
 

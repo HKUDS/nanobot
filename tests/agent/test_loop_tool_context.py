@@ -135,10 +135,13 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     await loop._run_agent_loop(
         [],
         runtime=runtime,
-        channel="slack",
-        chat_id="C123",
-        metadata=metadata,
-        session_key="slack:C123:111.222",
+        request_context=RequestContext(
+            channel="slack",
+            chat_id="C123",
+            session_key="slack:C123:111.222",
+            runtime=runtime,
+            metadata=metadata,
+        ),
     )
 
     assert cron.contexts[-1] == {
@@ -233,10 +236,13 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
             await loop._run_agent_loop(
                 [],
                 runtime=runtime,
-                channel="slack",
-                chat_id="C123",
-                session_key="slack:C123:111.222",
-                original_user_text="  unchanged user text  ",
+                request_context=RequestContext(
+                    channel="slack",
+                    chat_id="C123",
+                    session_key="slack:C123:111.222",
+                    original_user_text="  unchanged user text  ",
+                    runtime=runtime,
+                ),
             )
         assert current_request_context() is outer
     finally:

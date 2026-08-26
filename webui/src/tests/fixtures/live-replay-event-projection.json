@@ -595,6 +595,168 @@
           "turnSeq": 4
         }
       ]
+    },
+    {
+      "name": "answer_tool_answer_preserves_answer_semantics",
+      "chat_id": "fixture-interleaved-answer",
+      "initial_messages": [
+        {
+          "id": "fixture-user-interleaved-answer",
+          "role": "user",
+          "content": "Inspect and summarize.",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "createdAt": 1700000004000
+        }
+      ],
+      "live_events": [
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 2
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 3
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-interleaved-answer",
+          "kind": "tool_hint",
+          "text": "read_file()",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "activity",
+          "turn_seq": 4
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-interleaved-answer",
+          "latency_ms": 12,
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "complete",
+          "turn_seq": 7
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Inspect and summarize.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "user",
+          "turn_seq": 1,
+          "created_at_ms": 1700000004000
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 2
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 3
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-interleaved-answer",
+          "kind": "tool_hint",
+          "text": "read_file()",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "activity",
+          "turn_seq": 4
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-interleaved-answer",
+          "latency_ms": 12,
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "complete",
+          "turn_seq": 7
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Inspect and summarize.",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "assistant",
+          "content": "First answer segment.",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "answer",
+          "turnSeq": 3
+        },
+        {
+          "role": "tool",
+          "content": "read_file()",
+          "kind": "trace",
+          "traces": [
+            "read_file()"
+          ],
+          "activitySegmentId": "segment-1",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "activity",
+          "turnSeq": 4
+        },
+        {
+          "role": "assistant",
+          "content": "Final answer segment.",
+          "latencyMs": 12,
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "answer",
+          "turnSeq": 6
+        }
+      ]
     }
   ]
 }
