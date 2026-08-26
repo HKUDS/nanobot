@@ -2384,6 +2384,46 @@ describe("NanobotTui layout", () => {
     expect(state()).toBe(false)
   })
 
+  test("keeps startup quiet before showing actionable sustained failure details", async () => {
+    setup = await createRenderer({ width: 100, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const ui = app as unknown as {
+      status: TextRenderable
+      handleStatus(
+        status: "starting" | "unavailable" | "error",
+        detail?: string,
+        info?: { endpoint: string; attempt: number; elapsedMs: number },
+      ): void
+    }
+
+    ui.handleStatus("starting", undefined, {
+      endpoint: "127.0.0.1:8769",
+      attempt: 1,
+      elapsedMs: 0,
+    })
+    expect(ui.status.plainText).toBe("Starting local gateway…")
+
+    ui.handleStatus("unavailable", "connection refused", {
+      endpoint: "127.0.0.1:8769",
+      attempt: 7,
+      elapsedMs: 3_200,
+    })
+    expect(ui.status.plainText).toBe(
+      "Chat service unavailable at 127.0.0.1:8769 · connection refused"
+      + " · retrying (attempt 7 after 3s)…",
+    )
+
+    ui.handleStatus("error", "gateway bootstrap failed: HTTP 401", {
+      endpoint: "127.0.0.1:8769",
+      attempt: 8,
+      elapsedMs: 3_500,
+    })
+    expect(ui.status.plainText).toBe(
+      "Chat service unavailable at 127.0.0.1:8769"
+      + " · gateway bootstrap failed: HTTP 401 · restart nanobot",
+    )
+  })
+
   test("replays events after asynchronous history hydration", async () => {
     setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
     const original = globalThis.fetch
@@ -2444,7 +2484,12 @@ describe("NanobotTui layout", () => {
       client(sent),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
-    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      ready: boolean
+      status: TextRenderable
+    }
+    const composer = ui.composer
 
     try {
       app.accept({ event: "attached", chat_id: "chat" })
@@ -2452,16 +2497,18 @@ describe("NanobotTui layout", () => {
       app.accept({ event: "attached", chat_id: "chat" })
       composer.setText("sent during reconnect")
       composer.submit()
-      await Bun.sleep(5)
+      await waitUntil(() => ui.status.plainText.includes("Not sent"))
 
       expect(sent).toEqual([])
       expect(composer.plainText).toBe("sent during reconnect")
+      expect(ui.status.plainText).toContain("Not sent · press Enter to retry when ready")
 
       resolveReconnect(new Response(JSON.stringify({
         messages: [{ role: "assistant", content: "restored history" }],
         page: { has_more_before: false },
       })))
-      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await waitUntil(() => ui.ready)
+      expect(ui.status.plainText).toBe("Not sent · press Enter to retry")
       composer.submit()
       await waitUntil(() => sent.length === 1)
       await setup.flush()
@@ -2480,14 +2527,24 @@ describe("NanobotTui layout", () => {
     const app = mount(setup, sent)
     const composer = (app as unknown as { composer: TextareaRenderable }).composer
     const connection = app as unknown as {
-      handleStatus(status: "connecting" | "connected", detail?: string): void
+      handleStatus(
+        status: "reconnecting" | "connected",
+        detail?: string,
+        info?: { endpoint: string; attempt: number; elapsedMs: number },
+      ): void
     }
 
     app.accept({ event: "attached", chat_id: "chat" })
     await Bun.sleep(1)
-    connection.handleStatus("connecting", "reconnecting")
+    connection.handleStatus("reconnecting", "connection closed", {
+      endpoint: "127.0.0.1:8769",
+      attempt: 1,
+      elapsedMs: 0,
+    })
     connection.handleStatus("connected")
     composer.setText("draft before attach")
+    composer.submit()
+    await Bun.sleep(5)
     composer.submit()
     await Bun.sleep(5)
 
@@ -2495,9 +2552,13 @@ describe("NanobotTui layout", () => {
     expect(composer.plainText).toBe("draft before attach")
 
     app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    expect(sent).toEqual([])
     composer.submit()
     await waitUntil(() => sent.length === 1)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(5)
 
     expect(sent).toEqual(["draft before attach"])
   })

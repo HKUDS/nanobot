@@ -1,4 +1,18 @@
-export type ConnectionStatus = "connecting" | "connected" | "closed" | "error"
+export type ConnectionStatus =
+  | "starting"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "unavailable"
+  | "closed"
+  | "error"
+
+export interface ConnectionStatusInfo {
+  endpoint: string
+  attempt: number
+  elapsedMs: number
+  retryInMs?: number
+}
 
 export interface ToolProgressEvent {
   version?: number
@@ -173,13 +187,14 @@ export interface ClientOptions {
   url?: string
   resolveConnection?: () => Promise<GatewayConnection>
   onConnection?: (connection: GatewayConnection) => void
-  connectionRetryLabel?: string
+  targetEndpoint?: string
+  startupFailureDelayMs?: number
   startupRetryMaxDelayMs?: number
   chatId?: string
   initialWorkspaceScope?: WorkspaceScopePayload
   reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
-  onStatus: (status: ConnectionStatus, detail?: string) => void
+  onStatus: (status: ConnectionStatus, detail?: string, info?: ConnectionStatusInfo) => void
 }
 
 export interface GatewayApiConnection {
@@ -940,6 +955,63 @@ export async function fetchGatewayConnection(
   }
 }
 
+/** Return only the authority users can act on, never credentials or an authenticated path. */
+export function connectionEndpoint(value: string | undefined): string {
+  if (!value) return "local gateway"
+  try {
+    return new URL(value).host || "local gateway"
+  } catch {
+    return "local gateway"
+  }
+}
+
+/** Reduce arbitrary fetch/WebSocket errors to a small set of credential-safe reasons. */
+export function sanitizeConnectionFailure(error: unknown): string {
+  const signals: string[] = []
+  const seen = new Set<unknown>()
+  const collect = (value: unknown): void => {
+    if (value === null || value === undefined || seen.has(value)) return
+    if (typeof value === "object") seen.add(value)
+    if (typeof value === "string") {
+      signals.push(value)
+      return
+    }
+    if (value instanceof Error) {
+      signals.push(value.name, value.message)
+      collect(value.cause)
+      if (value instanceof AggregateError) {
+        for (const nested of value.errors) collect(nested)
+      }
+      return
+    }
+    if (!isRecord(value)) return
+    if (typeof value.code === "string") signals.push(value.code)
+    collect(value.cause)
+    if (Array.isArray(value.errors)) {
+      for (const nested of value.errors) collect(nested)
+    }
+  }
+  collect(error)
+  const signal = signals.join(" ")
+  if (/ECONNREFUSED|connection refused/iu.test(signal)) return "connection refused"
+  if (/ETIMEDOUT|timed? out|timeout/iu.test(signal)) return "connection timed out"
+  if (/ENOTFOUND|EAI_AGAIN|name not resolved|host not found/iu.test(signal)) {
+    return "host not found"
+  }
+  if (/certificate|TLS|SSL/iu.test(signal)) return "secure connection failed"
+  const bootstrapStatus = signal.match(/gateway bootstrap failed:\s*HTTP\s*(\d{3})/iu)
+  if (bootstrapStatus?.[1]) return `gateway bootstrap failed: HTTP ${bootstrapStatus[1]}`
+  if (/bootstrap response is missing ws_url/iu.test(signal)) {
+    return "gateway bootstrap response is missing ws_url"
+  }
+  if (/bootstrap response (?:has an invalid ws_url|is invalid)/iu.test(signal)) {
+    return "gateway bootstrap response is invalid"
+  }
+  if (/gateway is still starting/iu.test(signal)) return "gateway is still starting"
+  if (/fetch failed|failed to fetch|network error/iu.test(signal)) return "network request failed"
+  return "connection failed"
+}
+
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
@@ -949,13 +1021,21 @@ export class NanobotClient {
   private closedByClient = false
   private opening = false
   private connectedOnce = false
+  private connectionAttempt = 0
+  private retryStartedAt = 0
+  private nextRetryAt = 0
+  private lastFailure = ""
+  private failureEscalationTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly endpoint: string
   private readonly pendingMutations = new Map<string, {
     resolve: (value: unknown) => void
     reject: (error: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
 
-  constructor(private readonly options: ClientOptions) {}
+  constructor(private readonly options: ClientOptions) {
+    this.endpoint = options.targetEndpoint || connectionEndpoint(options.url)
+  }
 
   get activeChatId(): string {
     return this.chatId
@@ -963,13 +1043,20 @@ export class NanobotClient {
 
   connect(): void {
     this.closedByClient = false
+    this.connectionAttempt = 0
+    this.reconnectAttempt = 0
+    this.retryStartedAt = Date.now()
+    this.nextRetryAt = 0
+    this.lastFailure = ""
     void this.open()
   }
 
   private async open(): Promise<void> {
     if (this.socket || this.opening || this.closedByClient) return
     this.opening = true
-    this.options.onStatus("connecting")
+    this.nextRetryAt = 0
+    this.connectionAttempt += 1
+    this.reportConnectionProgress()
     let url = this.options.url
     try {
       if (this.options.resolveConnection) {
@@ -980,15 +1067,13 @@ export class NanobotClient {
       }
     } catch (error) {
       if (!this.closedByClient) {
+        this.lastFailure = sanitizeConnectionFailure(error)
         if (error instanceof GatewayConnectionError && !error.retryable) {
-          this.options.onStatus("error", error.message)
+          this.clearFailureEscalation()
+          this.options.onStatus("error", this.lastFailure, this.connectionInfo())
           return
         }
-        this.options.onStatus(
-          "connecting",
-          this.options.connectionRetryLabel || "gateway unavailable",
-        )
-        this.scheduleReconnect(false)
+        this.scheduleReconnect()
       }
       return
     } finally {
@@ -998,19 +1083,35 @@ export class NanobotClient {
       this.options.onStatus("error", "gateway URL is not configured")
       return
     }
-    const socket = new WebSocket(url)
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(url)
+    } catch (error) {
+      this.lastFailure = sanitizeConnectionFailure(error)
+      this.scheduleReconnect()
+      return
+    }
+    let opened = false
     this.socket = socket
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return
+      opened = true
       this.connectedOnce = true
+      this.connectionAttempt = 0
       this.reconnectAttempt = 0
-      this.options.onStatus("connected")
+      this.retryStartedAt = 0
+      this.nextRetryAt = 0
+      this.lastFailure = ""
+      this.clearFailureEscalation()
+      this.options.onStatus("connected", undefined, this.connectionInfo())
     })
     socket.addEventListener("message", (message) => {
       if (this.socket === socket) this.handleMessage(String(message.data))
     })
     socket.addEventListener("error", () => {
-      if (this.socket === socket) this.options.onStatus("error", "connection failed")
+      if (this.socket !== socket) return
+      this.lastFailure = "connection failed"
+      this.reportRetryState()
     })
     socket.addEventListener("close", () => {
       if (this.socket !== socket) return
@@ -1020,6 +1121,12 @@ export class NanobotClient {
         this.options.onStatus("closed")
         return
       }
+      if (opened) {
+        this.connectionAttempt = 0
+        this.reconnectAttempt = 0
+        this.retryStartedAt = Date.now()
+      }
+      if (!this.lastFailure) this.lastFailure = "connection closed"
       this.scheduleReconnect()
     })
   }
@@ -1028,6 +1135,7 @@ export class NanobotClient {
     this.closedByClient = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
+    this.clearFailureEscalation()
     const socket = this.socket
     this.socket = null
     socket?.close()
@@ -1182,18 +1290,66 @@ export class NanobotClient {
     this.options.onEvent(event)
   }
 
-  private scheduleReconnect(announce = true): void {
+  private scheduleReconnect(): void {
     if (this.reconnectTimer || this.closedByClient) return
+    if (!this.retryStartedAt) this.retryStartedAt = Date.now()
     const base = this.options.reconnectDelayMs ?? 500
     const maxDelay = this.connectedOnce
       ? 8_000
       : this.options.startupRetryMaxDelayMs ?? 8_000
     const delay = Math.min(maxDelay, base * 2 ** Math.min(this.reconnectAttempt++, 4))
-    if (announce) this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
+    this.nextRetryAt = Date.now() + delay
+    this.reportRetryState()
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       void this.open()
     }, delay)
+  }
+
+  private connectionInfo(): ConnectionStatusInfo {
+    return {
+      endpoint: this.endpoint,
+      attempt: Math.max(1, this.connectionAttempt),
+      elapsedMs: this.retryStartedAt ? Math.max(0, Date.now() - this.retryStartedAt) : 0,
+      ...(this.nextRetryAt
+        ? { retryInMs: Math.max(0, this.nextRetryAt - Date.now()) }
+        : {}),
+    }
+  }
+
+  private reportConnectionProgress(): void {
+    if (this.connectedOnce) {
+      this.options.onStatus("reconnecting", this.lastFailure || undefined, this.connectionInfo())
+      return
+    }
+    const phase = this.options.resolveConnection ? "starting" : "connecting"
+    this.options.onStatus(phase, undefined, this.connectionInfo())
+  }
+
+  private reportRetryState(): void {
+    const info = this.connectionInfo()
+    if (this.connectedOnce) {
+      this.options.onStatus("reconnecting", this.lastFailure, info)
+      return
+    }
+    const failureDelay = this.options.startupFailureDelayMs ?? 3_000
+    if (info.elapsedMs >= failureDelay) {
+      this.clearFailureEscalation()
+      this.options.onStatus("unavailable", this.lastFailure, info)
+      return
+    }
+    this.reportConnectionProgress()
+    if (this.failureEscalationTimer) return
+    this.failureEscalationTimer = setTimeout(() => {
+      this.failureEscalationTimer = null
+      if (this.closedByClient || this.connectedOnce || !this.lastFailure) return
+      this.options.onStatus("unavailable", this.lastFailure, this.connectionInfo())
+    }, Math.max(0, failureDelay - info.elapsedMs))
+  }
+
+  private clearFailureEscalation(): void {
+    if (this.failureEscalationTimer) clearTimeout(this.failureEscalationTimer)
+    this.failureEscalationTimer = null
   }
 
   private write(event: OutboundEvent): void {

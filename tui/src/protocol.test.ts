@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   NanobotClient,
   GatewayConnectionError,
+  connectionEndpoint,
   fetchAvailableSkills,
   fetchGatewayConnection,
   fetchHistory,
@@ -11,6 +12,9 @@ import {
   fetchSessionContext,
   fetchSessions,
   fetchSlashCommands,
+  sanitizeConnectionFailure,
+  type ConnectionStatus,
+  type ConnectionStatusInfo,
   type InboundEvent,
 } from "./protocol"
 
@@ -37,6 +41,12 @@ class FakeSocket {
   emit(name: string, event: { data?: string } = {}): void {
     for (const listener of this.listeners.get(name) || []) listener(event)
   }
+}
+
+async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<void> {
+  const deadline = Date.now() + timeout
+  while (!predicate() && Date.now() < deadline) await Bun.sleep(2)
+  if (!predicate()) throw new Error(`condition was not met within ${timeout}ms`)
 }
 
 describe("gateway protocol", () => {
@@ -198,6 +208,127 @@ describe("gateway protocol", () => {
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
     }
+  })
+
+  test("escalates a refused bootstrap with safe endpoint and retry diagnostics", async () => {
+    const original = globalThis.fetch
+    const bootstrapUrl = "http://bootstrap-user:bootstrap-pass@127.0.0.1:8769"
+      + "/webui/bootstrap?token=socket-secret"
+    const bootstrapSecret = "bootstrap-secret"
+    const statuses: Array<{
+      status: ConnectionStatus
+      detail?: string
+      info?: ConnectionStatusInfo
+    }> = []
+    const refused = new TypeError(
+      `fetch failed for ${bootstrapUrl}&api_token=api-secret`,
+      {
+        cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8769"), {
+          code: "ECONNREFUSED",
+        }),
+      },
+    )
+    globalThis.fetch = (() => Promise.reject(refused)) as unknown as typeof fetch
+    const client = new NanobotClient({
+      resolveConnection: () => fetchGatewayConnection(
+        bootstrapUrl,
+        bootstrapSecret,
+        "http://127.0.0.1:8769",
+        "tui-42",
+      ),
+      targetEndpoint: connectionEndpoint(bootstrapUrl),
+      startupFailureDelayMs: 8,
+      reconnectDelayMs: 100,
+      onEvent: () => undefined,
+      onStatus: (status, detail, info) => statuses.push({ status, detail, info }),
+    })
+
+    try {
+      client.connect()
+      await waitUntil(() => statuses.some(({ status }) => status === "unavailable"))
+      const failure = [...statuses].reverse().find(({ status }) => status === "unavailable")
+
+      expect(statuses[0]?.status).toBe("starting")
+      expect(failure?.detail).toBe("connection refused")
+      expect(failure?.info).toMatchObject({ endpoint: "127.0.0.1:8769", attempt: 1 })
+      expect(failure?.info?.elapsedMs).toBeGreaterThanOrEqual(8)
+      const visible = JSON.stringify(statuses)
+      expect(visible).not.toContain("bootstrap-user")
+      expect(visible).not.toContain("bootstrap-pass")
+      expect(visible).not.toContain(bootstrapSecret)
+      expect(visible).not.toContain("socket-secret")
+      expect(visible).not.toContain("api-secret")
+      expect(visible).not.toContain("/webui/bootstrap")
+    } finally {
+      client.close()
+      globalThis.fetch = original
+    }
+  })
+
+  test("recovers after sustained bootstrap failures without hiding the outage", async () => {
+    const original = globalThis.WebSocket
+    const sockets: FakeSocket[] = []
+    let available = false
+    let attempts = 0
+    const statuses: ConnectionStatus[] = []
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          sockets.push(this)
+        }
+      },
+    })
+    const client = new NanobotClient({
+      resolveConnection: async () => {
+        attempts += 1
+        if (!available) {
+          throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" })
+        }
+        return {
+          wsUrl: "ws://127.0.0.1:8769/ws?token=fresh",
+          apiUrl: "http://127.0.0.1:8769",
+          apiToken: "fresh-api-token",
+        }
+      },
+      targetEndpoint: "127.0.0.1:8769",
+      startupFailureDelayMs: 8,
+      reconnectDelayMs: 2,
+      startupRetryMaxDelayMs: 2,
+      onEvent: () => undefined,
+      onStatus: (status) => statuses.push(status),
+    })
+
+    try {
+      client.connect()
+      await waitUntil(() => statuses.includes("unavailable"))
+      available = true
+      await waitUntil(() => sockets.length === 1)
+      sockets[0]?.emit("open")
+      await waitUntil(() => statuses.at(-1) === "connected")
+
+      expect(attempts).toBeGreaterThan(1)
+      expect(statuses.indexOf("starting")).toBeLessThan(statuses.indexOf("unavailable"))
+      expect(statuses.indexOf("unavailable")).toBeLessThan(statuses.lastIndexOf("connected"))
+    } finally {
+      client.close()
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("sanitizes arbitrary connection errors and authenticated URLs", () => {
+    const authenticated = "wss://user:password@127.0.0.1:8769/ws"
+      + "?token=socket-secret&api_token=api-secret"
+    const unknown = new Error(`could not reach ${authenticated}`)
+    const refused = Object.assign(new Error(`ECONNREFUSED ${authenticated}`), {
+      code: "ECONNREFUSED",
+    })
+
+    expect(connectionEndpoint(authenticated)).toBe("127.0.0.1:8769")
+    expect(sanitizeConnectionFailure(unknown)).toBe("connection failed")
+    expect(sanitizeConnectionFailure(refused)).toBe("connection refused")
+    expect(sanitizeConnectionFailure(unknown)).not.toContain("socket-secret")
   })
 
   test("reports a permanent bootstrap rejection without retrying", async () => {
@@ -588,13 +719,19 @@ describe("gateway protocol", () => {
     })
 
     try {
+      const statuses: Array<{
+        status: ConnectionStatus
+        detail?: string
+        info?: ConnectionStatusInfo
+      }> = []
       const client = new NanobotClient({
         url: "ws://nanobot.test/ws",
         reconnectDelayMs: 1,
         onEvent: () => undefined,
-        onStatus: () => undefined,
+        onStatus: (status, detail, info) => statuses.push({ status, detail, info }),
       })
       client.connect()
+      sockets[0]?.emit("open")
       sockets[0]?.emit("message", {
         data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client" }),
       })
@@ -605,11 +742,21 @@ describe("gateway protocol", () => {
       await Bun.sleep(5)
 
       expect(sockets).toHaveLength(2)
+      const reconnecting = [...statuses].reverse().find(
+        ({ status }) => status === "reconnecting",
+      )
+      expect(reconnecting).toMatchObject({
+        status: "reconnecting",
+        detail: "connection closed",
+        info: { endpoint: "nanobot.test", attempt: 1 },
+      })
+      sockets[1]?.emit("open")
       sockets[1]?.emit("message", {
         data: JSON.stringify({ event: "ready", chat_id: "", client_id: "client-2" }),
       })
       const outbound = sockets[1]?.sent.map((value) => JSON.parse(value)) || []
       expect(outbound).toEqual([{ type: "attach", chat_id: "generated-chat" }])
+      expect(statuses.at(-1)?.status).toBe("connected")
       client.close()
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
