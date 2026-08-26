@@ -12,6 +12,7 @@ from loguru import logger
 from rich.console import Console
 
 from nanobot import __logo__, __version__
+from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.mcp import MCPProvider
@@ -44,6 +45,17 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state
 __all__ = ["_run_gateway"]
 
 console = Console()
+
+
+class _MCPReadinessHook(AgentHook):
+    """Retry application-owned MCP connections before the runner reads tools."""
+
+    def __init__(self, provider: MCPProvider) -> None:
+        super().__init__()
+        self._provider = provider
+
+    async def before_run(self, context: AgentRunHookContext) -> None:
+        await self._provider.connect()
 
 
 def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
@@ -445,9 +457,9 @@ def _run_gateway(
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
+        hooks=[_MCPReadinessHook(mcp_provider)],
         hook_factories=[create_file_edit_activity_hook],
         tool_registry=tools,
-        prepare_turn=mcp_provider.connect,
         recovery_admission=recovery,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:

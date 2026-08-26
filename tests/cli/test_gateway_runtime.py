@@ -11,7 +11,10 @@ import asyncio
 import time
 from contextlib import suppress
 
-from nanobot.cli.gateway_runtime import _close_gateway_runtime
+from nanobot.agent.hook import AgentRunHookContext
+from nanobot.agent.tools.mcp import MCPProvider
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.cli.gateway_runtime import _close_gateway_runtime, _MCPReadinessHook
 
 
 class _FakeAgent:
@@ -51,6 +54,24 @@ class _FakeMCPProvider:
     async def aclose(self) -> None:
         self.close_calls += 1
         self.events.append("mcp_closed")
+
+
+class _TrackingMCPProvider(MCPProvider):
+    def __init__(self) -> None:
+        super().__init__({}, ToolRegistry())
+        self.connect_calls = 0
+
+    async def connect(self) -> None:
+        self.connect_calls += 1
+
+
+async def test_mcp_readiness_hook_delegates_to_application_provider() -> None:
+    provider = _TrackingMCPProvider()
+    hook = _MCPReadinessHook(provider)
+
+    await hook.before_run(AgentRunHookContext(messages=[]))
+
+    assert provider.connect_calls == 1
 
 
 async def _cancellable_task(events: list[str]) -> None:
