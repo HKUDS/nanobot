@@ -32,8 +32,6 @@ def _make_mock_loop(**overrides):
     loop._start_time = 1000.0
     loop.exec_config = ExecToolConfig()
     loop.channels_config = MagicMock()
-    loop._current_iteration = 0
-    loop.current_iteration = loop._current_iteration
     loop.provider_retry_mode = "standard"
     loop.max_tool_result_chars = 16000
     loop.model_preset = None
@@ -110,7 +108,6 @@ class TestInspectSummary:
         assert "workspace" in result
         assert "provider_retry_mode" in result
         assert "max_tool_result_chars" in result
-        assert "_current_iteration" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1078,32 +1075,6 @@ class TestSecurityAttributeProtection:
         result = await tool.execute(action="check", key="model_presets.fast.model")
 
         assert result == "model_presets.fast.model: 'fast-model'"
-
-
-# ---------------------------------------------------------------------------
-# current iteration count (Fix #2)
-# ---------------------------------------------------------------------------
-
-class TestCurrentIteration:
-
-    @pytest.mark.asyncio
-    async def test_inspect_current_iteration(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="_current_iteration")
-        assert "0" in result
-
-    @pytest.mark.asyncio
-    async def test_current_iteration_in_summary(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "_current_iteration" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_current_iteration_blocked(self):
-        """_current_iteration is READ_ONLY — cannot be set manually."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_current_iteration", value=5)
-        assert "read-only" in result
 
 
 # ---------------------------------------------------------------------------

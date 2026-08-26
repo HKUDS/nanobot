@@ -88,8 +88,6 @@ class MyTool(Tool):
     READ_ONLY = frozenset({
         "subagents",  # observable but replacing it would break the system
         "tool_names",
-        "current_iteration",
-        "_current_iteration",  # updated by runner only
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
         "model_presets",  # config-derived catalog; changes require config reload
@@ -152,8 +150,6 @@ class MyTool(Tool):
             "(e.g. 'web_config.enable').\n"
             "- set (key, value): change config or store notes in your scratchpad. "
             "Scratchpad keys persist across turns but not restarts.\n"
-            "Key values: _current_iteration (current progress), "
-            "max_iterations - _current_iteration = remaining iterations.\n"
             "Current routing metadata is available read-only via request.channel, "
             "request.chat_id, and request.sender_id.\n"
             "Use model_preset for session-scoped model or context changes; direct "
@@ -441,7 +437,6 @@ class MyTool(Tool):
             "workspace",
             "provider_retry_mode",
             "max_tool_result_chars",
-            "_current_iteration",
             "web_config",
             "exec_config",
             "subagents",

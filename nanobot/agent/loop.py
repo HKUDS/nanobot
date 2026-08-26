@@ -202,10 +202,6 @@ class AgentLoop:
     """
 
     @property
-    def current_iteration(self) -> int:
-        return self._current_iteration
-
-    @property
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
 
@@ -464,7 +460,6 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
-        self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -1172,7 +1167,6 @@ class AgentLoop:
                 session_key=active_session_key,
                 workspace=effective_scope.project_path,
                 tool_hint_max_length=self.tool_hint_max_length,
-                on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
                 registered_hook_factories=self._hook_factories,
                 turn_hook_factories=list(hook_factories or []),
                 registered_hooks=self._extra_hooks,
