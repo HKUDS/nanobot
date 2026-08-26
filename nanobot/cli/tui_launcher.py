@@ -453,17 +453,18 @@ def _ensure_gateway(
             )
 
         status = runtime.status()
-        endpoint_reachable = _webui_endpoint_reachable(base_url)
         if status.running:
             if status.port not in {None, config.gateway.port}:
                 raise TuiUnavailableError(
                     "the matching gateway instance is running on a different port; "
                     "restart it or use `nanobot agent --classic`"
                 )
-            if endpoint_reachable and ready(status):
+            if not wait_until_ready:
+                return _GatewayHandle(base_url=base_url, lease=lease)
+            if ready(status):
                 return _GatewayHandle(base_url=base_url, lease=lease)
             return wait_for_ready(status.log_path)
-        elif endpoint_reachable:
+        elif _webui_endpoint_reachable(base_url):
             raise TuiUnavailableError(
                 "the configured gateway port belongs to a different nanobot instance; "
                 "stop that instance or use `nanobot agent --classic`"
@@ -478,7 +479,15 @@ def _ensure_gateway(
                 f"logs: {result.status.log_path}"
             )
 
-        if not wait_until_ready and result.message != "gateway_already_running":
+        if result.message == "gateway_already_running" and result.status.port not in {
+            None,
+            config.gateway.port,
+        }:
+            raise TuiUnavailableError(
+                "the matching gateway instance is running on a different port; "
+                "restart it or use `nanobot agent --classic`"
+            )
+        if not wait_until_ready:
             return _GatewayHandle(base_url=base_url, lease=lease)
         return wait_for_ready(result.status.log_path)
     except BaseException:

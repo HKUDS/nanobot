@@ -191,6 +191,78 @@ def test_launcher_terminates_the_tui_when_gateway_start_fails(
     assert terminated == [True]
 
 
+def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    events: list[str] = []
+    status_calls = 0
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            self.paths = paths
+
+        def status(self) -> SimpleNamespace:
+            nonlocal status_calls
+            status_calls += 1
+            return SimpleNamespace(
+                running=True,
+                port=config.gateway.port,
+                ready=False,
+                log_path=tmp_path / "gateway.log",
+            )
+
+    class FakeProcess:
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            events.append("terminated")
+
+        def wait(self, timeout: float | None = None) -> int:
+            assert timeout is None
+            events.append("waited")
+            return 0
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher.subprocess.Popen",
+        lambda *args, **kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
+        lambda _url: pytest.fail(
+            "launcher must not probe readiness for a live recovering gateway"
+        ),
+    )
+    monkeypatch.setattr(
+        tui_launcher,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: pytest.fail(
+                "launcher must not wait for a live gateway to recover"
+            ),
+            sleep=lambda _seconds: pytest.fail(
+                "launcher must not sleep for gateway recovery"
+            ),
+        ),
+    )
+
+    result = launch_tui(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=None,
+        session_id=None,
+        theme="auto",
+    )
+
+    assert result == 0
+    assert status_calls == 1
+    assert events == ["waited"]
+
+
 def test_launcher_promotes_the_gateway_when_the_tui_detaches(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -698,6 +770,56 @@ def test_gateway_reuses_the_matching_managed_instance(
     assert gateway.base_url == "http://127.0.0.1:8765"
 
 
+def test_gateway_reuse_returns_a_degraded_live_gateway_without_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    status_calls = 0
+
+    class FakeRuntime:
+        def __init__(self, *, paths: object) -> None:
+            self.paths = paths
+
+        def status(self) -> SimpleNamespace:
+            nonlocal status_calls
+            status_calls += 1
+            return SimpleNamespace(
+                running=True,
+                port=config.gateway.port,
+                ready=False,
+                log_path=tmp_path / "gateway.log",
+            )
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
+        lambda _url: pytest.fail("non-blocking reuse must not probe readiness"),
+    )
+    monkeypatch.setattr(
+        tui_launcher,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: pytest.fail(
+                "non-blocking reuse must not enter the readiness wait"
+            ),
+            sleep=lambda _seconds: pytest.fail("non-blocking reuse must not sleep"),
+        ),
+    )
+
+    gateway = _ensure_gateway(
+        config,
+        config_path=tmp_path / "config.json",
+        workspace_override=None,
+        wait_until_ready=False,
+    )
+
+    assert gateway.base_url == "http://127.0.0.1:8765"
+    assert gateway.lease is not None
+    assert status_calls == 1
+    gateway.lease.release(wait_for_stop=False)
+
+
 def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -725,20 +847,27 @@ def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
         "nanobot.cli.tui_launcher._gateway_health_ready",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr("nanobot.cli.tui_launcher._GATEWAY_READY_POLL_S", 0)
+    clock = iter((0.0, 0.0, 0.1))
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        tui_launcher,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock), sleep=sleeps.append),
+    )
 
     gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
         workspace_override=None,
-        wait_until_ready=False,
     )
 
     assert gateway.base_url == "http://127.0.0.1:8765"
     assert gateway.lease is not None
+    assert sleeps == [tui_launcher._GATEWAY_READY_POLL_S]
+    gateway.lease.release(wait_for_stop=False)
 
 
-def test_gateway_reuse_rejects_a_live_but_unready_gateway(
+def test_gateway_reuse_with_explicit_wait_rejects_a_live_but_unready_gateway(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -760,14 +889,21 @@ def test_gateway_reuse_rejects_a_live_but_unready_gateway(
         "nanobot.cli.tui_launcher._webui_endpoint_reachable",
         lambda _url: False,
     )
-    monkeypatch.setattr("nanobot.cli.tui_launcher._GATEWAY_READY_TIMEOUT_S", 0)
+    clock = iter((0.0, tui_launcher._GATEWAY_READY_TIMEOUT_S))
+    monkeypatch.setattr(
+        tui_launcher,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: next(clock),
+            sleep=lambda _seconds: pytest.fail("expired readiness wait must not sleep"),
+        ),
+    )
 
     with pytest.raises(TuiUnavailableError, match="process is running.*listener is unavailable"):
         _ensure_gateway(
             config,
             config_path=tmp_path / "config.json",
             workspace_override=None,
-            wait_until_ready=False,
         )
 
 
