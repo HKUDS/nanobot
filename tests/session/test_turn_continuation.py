@@ -91,6 +91,88 @@ async def test_maybe_continue_turn_queues_internal_message():
 
 
 @pytest.mark.asyncio
+async def test_maybe_continue_turn_stops_after_failed_goal_completion_attempt():
+    # Goal remains active while the run already contains a completion attempt
+    # (e.g. a malformed update_goal action=complete call from #4864). Continuing
+    # would only re-prompt the model to retry the same failing completion, so an
+    # internal continuation must NOT be scheduled.
+    meta = {
+        GOAL_STATE_KEY: {"status": "active", "objective": "Finish the migration."},
+    }
+    assistant_msg = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "update_goal",
+                    "arguments": '{"action": "complete", "recap": "done"}',
+                },
+            }
+        ],
+    }
+    tool_msg = {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "name": "update_goal",
+        "content": "Error: action is required",
+    }
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "start"},
+        assistant_msg,
+        tool_msg,
+        {"role": "assistant", "content": "paused"},
+    ]
+    pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+    ctx = SimpleNamespace(
+        session=SimpleNamespace(metadata=meta),
+        msg=InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="start"),
+        session_key="feishu:c1",
+        pending_queue=pending,
+        stop_reason="max_iterations",
+        final_content="paused",
+        all_messages=messages,
+        suppress_response=False,
+        visible_run_started_at=100.0,
+    )
+
+    assert await maybe_continue_turn(ctx) is False
+    assert pending.empty()
+
+
+@pytest.mark.asyncio
+async def test_maybe_continue_turn_allows_other_goal_work_to_continue():
+    # A run whose tool work did not end on a failed completion attempt still
+    # qualifies for an internal continuation.
+    meta = {
+        GOAL_STATE_KEY: {"status": "active", "objective": "Finish the migration."},
+    }
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "start"},
+        {"role": "assistant", "content": "working, ran out of budget"},
+    ]
+    pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+    ctx = SimpleNamespace(
+        session=SimpleNamespace(metadata=meta),
+        msg=InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="start"),
+        session_key="feishu:c1",
+        pending_queue=pending,
+        stop_reason="max_iterations",
+        final_content="working, ran out of budget",
+        all_messages=messages,
+        suppress_response=False,
+        visible_run_started_at=100.0,
+    )
+
+    assert await maybe_continue_turn(ctx) is True
+    assert not pending.empty()
+
+
+@pytest.mark.asyncio
 async def test_internal_continuation_respects_round_limit():
     meta = {
         GOAL_STATE_KEY: {"status": "active", "objective": "x"},

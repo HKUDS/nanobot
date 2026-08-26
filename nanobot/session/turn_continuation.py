@@ -14,6 +14,7 @@ from loguru import logger
 
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
+    had_goal_completion_attempt,
     sustained_goal_active,
     sustained_goal_turn,
 )
@@ -114,6 +115,15 @@ async def maybe_continue_turn(ctx: TurnContext) -> bool:
         session_metadata=ctx.session.metadata,
         message_metadata=ctx.msg.metadata,
     ):
+        return False
+
+    # A run that already tried to complete the goal without the goal changing
+    # to inactive means that completion attempt failed to take effect (its tool
+    # result was an error). Re-prompting the model to "call update_goal with
+    # action='complete'" would only reproduce the exact same failure on every
+    # continuation round, amplifying a single message into a disruptive loop.
+    # Hold the continuation instead and let the current turn finalize normally.
+    if had_goal_completion_attempt(ctx.all_messages):
         return False
 
     metadata = _internal_continuation_metadata(

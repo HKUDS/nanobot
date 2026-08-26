@@ -43,6 +43,7 @@ from nanobot.runtime_context import (
     detach_runtime_context,
     reattach_runtime_context,
 )
+from nanobot.session.goal_state import had_goal_completion_attempt
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
 from nanobot.utils.helpers import (
@@ -291,7 +292,18 @@ class AgentRunner:
             real_injection = bool(injections)
         if not injections and allow_goal_continue and assistant_message is not None:
             predicate = spec.goal_active_predicate
-            if predicate is not None and predicate():
+            # A run that already attempted to complete the goal without the goal
+            # becoming inactive means the completion failed to take effect (its
+            # tool result was an error). Re-injecting the goal continuation
+            # would re-prompt the model to repeat the same failing call on every
+            # iteration, so hold the continuation instead and let the final
+            # response stand (HKUDS/nanobot#4864).
+            guard_messages = [*messages, assistant_message]
+            if (
+                predicate is not None
+                and predicate()
+                and not had_goal_completion_attempt(guard_messages)
+            ):
                 injections = [self._build_goal_continue_message(spec)]
         if (
             not injections

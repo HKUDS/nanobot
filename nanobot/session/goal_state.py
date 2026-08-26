@@ -62,6 +62,53 @@ def sustained_goal_turn(
     return sustained_goal_active(metadata) or explicit_goal_requested(message_metadata)
 
 
+def had_goal_completion_attempt(messages: list[dict[str, Any]] | None) -> bool:
+    """True when the conversation already attempted to complete the goal.
+
+    Detects an assistant tool call to the goal-completion tool (``update_goal``
+    with ``action="complete"``) or to the ``complete_goal`` alias that some
+    third-party models emit even though no such tool is registered. When such an
+    attempt is present while the goal is still active, the completion did not
+    take effect (its tool result was an error); re-prompting the model to
+    complete the goal would only reproduce the same failing call. Continuation
+    policy should therefore hold instead of amplifying a single malformed
+    completion into a disruptive loop (see HKUDS/nanobot#4864).
+    """
+    for message in messages or []:
+        if message.get("role") != "assistant":
+            continue
+        for call in cast(list[Any], message.get("tool_calls") or []):
+            if not isinstance(call, dict):
+                continue
+            function = cast(dict[str, Any], call).get("function")
+            if not isinstance(function, dict):
+                continue
+            name = str(cast(dict[str, Any], function).get("name") or "").strip()
+            if name == "complete_goal":
+                return True
+            if name != "update_goal":
+                continue
+            arguments = cast(dict[str, Any], function).get("arguments")
+            if _tool_call_action(arguments) == "complete":
+                return True
+    return False
+
+
+def _tool_call_action(arguments: Any) -> str:
+    """Return the lowercased ``action`` argument of a tool call, if any."""
+    payload = arguments
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return ""
+    if isinstance(payload, dict):
+        action = cast(dict[str, Any], payload).get("action")
+        if isinstance(action, str):
+            return action.strip().lower()
+    return ""
+
+
 def parse_goal_state(blob: Any) -> dict[str, Any] | None:
     if blob is None:
         return None

@@ -245,3 +245,98 @@ async def test_runner_resolves_goal_continue_message_lazily():
     user_msgs = [m for m in result.messages if m.get("role") == "user"]
     assert calls["n"] == 1
     assert any("Write the article draft." in str(m.get("content", "")) for m in user_msgs)
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_continue_after_failed_goal_completion_attempt():
+    """A failed completion attempt must stop goal-continue re-injection.
+
+    Reproduces HKUDS/nanobot#4864: the goal stays active while the run already
+    contains a malformed update_goal(action='complete') call. Re-injecting the
+    goal continuation would re-prompt the model to repeat the same failing call
+    on every iteration, so the runner should exit normally with the final
+    message instead of looping until max_iterations.
+    """
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="all done", tool_calls=[], usage=None,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    initial_messages = [
+        {"role": "user", "content": "do task"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "update_goal",
+                    "arguments": '{"action": "complete", "recap": "done"}',
+                },
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "name": "update_goal",
+         "content": "Error: action is required"},
+    ]
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=initial_messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        goal_active_predicate=lambda: True,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "all done"
+    user_msgs = [m for m in result.messages if m.get("role") == "user"]
+    assert not any("active sustained goal" in str(m.get("content", "")) for m in user_msgs)
+
+
+@pytest.mark.asyncio
+async def test_runner_still_continues_for_goal_work_after_other_tool_call():
+    """A non-completion tool call in history must not suppress the continuation."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage=None,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    initial_messages = [
+        {"role": "user", "content": "do task"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path": "a.py"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "name": "read_file",
+         "content": "def foo(): pass"},
+    ]
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=initial_messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        goal_active_predicate=lambda: True,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    user_msgs = [m for m in result.messages if m.get("role") == "user"]
+    assert any("active sustained goal" in str(m.get("content", "")) for m in user_msgs)

@@ -9,6 +9,7 @@ from nanobot.session.goal_state import (
     explicit_goal_requested,
     goal_state_runtime_lines,
     goal_state_ws_blob,
+    had_goal_completion_attempt,
     parse_goal_state,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
@@ -138,6 +139,64 @@ def test_sustained_goal_active_true_when_active():
 def test_sustained_goal_active_respects_legacy_thread_goal_key():
     meta = {"thread_goal": {"status": "active", "objective": "Legacy."}}
     assert sustained_goal_active(meta) is True
+
+
+def _assistant_call(name: str, arguments: object) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {"name": name, "arguments": arguments}}
+        ],
+    }
+
+
+def test_goal_completion_attempt_detects_update_goal_complete():
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "start"},
+        _assistant_call("update_goal", '{"action": "complete", "recap": "done"}'),
+        {"role": "tool", "tool_call_id": "call_1", "name": "update_goal",
+         "content": "Error: action is required"},
+    ]
+    assert had_goal_completion_attempt(messages) is True
+
+
+def test_goal_completion_attempt_accepts_dict_arguments():
+    messages = [
+        _assistant_call("update_goal", {"action": "complete", "recap": "done"}),
+    ]
+    assert had_goal_completion_attempt(messages) is True
+
+
+def test_goal_completion_attempt_detects_complete_goal_alias():
+    # Third-party models emit complete_goal even though it is not registered.
+    messages = [_assistant_call("complete_goal", '{"recap": "done"}')]
+    assert had_goal_completion_attempt(messages) is True
+
+
+def test_goal_completion_attempt_ignores_non_complete_update_goal():
+    messages = [_assistant_call("update_goal", '{"action": "cancel", "recap": "stop"}')]
+    assert had_goal_completion_attempt(messages) is False
+
+
+def test_goal_completion_attempt_ignores_other_tools():
+    messages = [
+        _assistant_call("read_file", '{"path": "a.py"}'),
+        {"role": "assistant", "content": "working"},
+    ]
+    assert had_goal_completion_attempt(messages) is False
+
+
+def test_goal_completion_attempt_malformed_arguments_is_safe():
+    assert had_goal_completion_attempt([_assistant_call("update_goal", "{not json")]) is False
+    assert had_goal_completion_attempt([_assistant_call("update_goal", None)]) is False
+
+
+def test_goal_completion_attempt_empty_or_none_inputs():
+    assert had_goal_completion_attempt(None) is False
+    assert had_goal_completion_attempt([]) is False
+    assert had_goal_completion_attempt([{"role": "assistant", "content": "no tools"}]) is False
 
 
 def test_explicit_goal_requested_only_reads_command_metadata():
