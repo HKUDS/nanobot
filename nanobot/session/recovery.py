@@ -1,8 +1,8 @@
 """Durable, side-effect-safe recovery for interrupted WebUI turns.
 
-The coordinator owns restart policy.  AgentLoop only exposes checkpoint
-materialization and an admission hook, so transport code never has to guess
-whether an interrupted tool call is safe to replay.
+The coordinator owns restart policy.  Checkpoint materialization is a session
+operation shared with AgentLoop lifecycle boundaries, so transport code never
+has to guess whether an interrupted tool call is safe to replay.
 """
 
 from __future__ import annotations

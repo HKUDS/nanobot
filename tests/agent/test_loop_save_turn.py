@@ -37,7 +37,14 @@ from nanobot.session.keys import (
     UNIFIED_SESSION_KEY,
 )
 from nanobot.session.manager import Session
-from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY, PENDING_FOLLOWUPS_KEY
+from nanobot.session.recovery import (
+    PENDING_FOLLOWUP_ID_KEY,
+    PENDING_FOLLOWUPS_KEY,
+    PROVIDER_STATE_CHECKPOINT_VERSION,
+    PROVIDER_STATE_CHECKPOINT_VERSION_KEY,
+    RUNTIME_CHECKPOINT_KEY,
+    restore_runtime_checkpoint,
+)
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
@@ -682,12 +689,11 @@ def test_save_turn_stamps_latency_on_last_assistant() -> None:
 
 
 def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> None:
-    loop = _mk_loop()
     session = Session(
         key="test:checkpoint",
         provider_state=_provider_state(),
         metadata={
-            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+            RUNTIME_CHECKPOINT_KEY: {
                 "assistant_message": {
                     "role": "assistant",
                     "content": "working",
@@ -723,10 +729,10 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
         },
     )
 
-    restored = loop._restore_runtime_checkpoint(session)
+    restored = restore_runtime_checkpoint(session)
 
     assert restored is True
-    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+    assert session.metadata.get(RUNTIME_CHECKPOINT_KEY) is None
     assert session.messages[0]["role"] == "assistant"
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
@@ -735,17 +741,14 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
 
 
 def test_restore_final_response_checkpoint_preserves_matching_provider_state() -> None:
-    loop = _mk_loop()
     state = _provider_state()
     session = Session(
         key="test:final-checkpoint",
         provider_state=state,
         metadata={
-            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+            RUNTIME_CHECKPOINT_KEY: {
                 "phase": "final_response",
-                AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY: (
-                    AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
-                ),
+                PROVIDER_STATE_CHECKPOINT_VERSION_KEY: PROVIDER_STATE_CHECKPOINT_VERSION,
                 "assistant_message": {
                     "role": "assistant",
                     "content": "finished",
@@ -756,21 +759,20 @@ def test_restore_final_response_checkpoint_preserves_matching_provider_state() -
         },
     )
 
-    restored = loop._restore_runtime_checkpoint(session)
+    restored = restore_runtime_checkpoint(session)
 
     assert restored is True
     assert session.messages[-1]["content"] == "finished"
     assert session.provider_state is state
-    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+    assert session.metadata.get(RUNTIME_CHECKPOINT_KEY) is None
 
 
 def test_restore_legacy_final_checkpoint_discards_unproven_provider_state() -> None:
-    loop = _mk_loop()
     session = Session(
         key="test:legacy-final-checkpoint",
         provider_state=_provider_state(),
         metadata={
-            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+            RUNTIME_CHECKPOINT_KEY: {
                 "phase": "final_response",
                 "assistant_message": {
                     "role": "assistant",
@@ -782,7 +784,7 @@ def test_restore_legacy_final_checkpoint_discards_unproven_provider_state() -> N
         },
     )
 
-    restored = loop._restore_runtime_checkpoint(session)
+    restored = restore_runtime_checkpoint(session)
 
     assert restored is True
     assert session.messages[-1]["content"] == "finished"
@@ -790,7 +792,6 @@ def test_restore_legacy_final_checkpoint_discards_unproven_provider_state() -> N
 
 
 def test_restore_completed_tools_checkpoint_preserves_matching_provider_state() -> None:
-    loop = _mk_loop()
     tool_result = {
         "role": "tool",
         "tool_call_id": "call_done",
@@ -802,11 +803,9 @@ def test_restore_completed_tools_checkpoint_preserves_matching_provider_state() 
         key="test:completed-tools-checkpoint",
         provider_state=state,
         metadata={
-            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+            RUNTIME_CHECKPOINT_KEY: {
                 "phase": "tools_completed",
-                AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION_KEY: (
-                    AgentLoop._PROVIDER_STATE_CHECKPOINT_VERSION
-                ),
+                PROVIDER_STATE_CHECKPOINT_VERSION_KEY: PROVIDER_STATE_CHECKPOINT_VERSION,
                 "assistant_message": {
                     "role": "assistant",
                     "content": None,
@@ -824,7 +823,7 @@ def test_restore_completed_tools_checkpoint_preserves_matching_provider_state() 
         },
     )
 
-    restored = loop._restore_runtime_checkpoint(session)
+    restored = restore_runtime_checkpoint(session)
 
     assert restored is True
     assert session.messages[-1]["content"] == "compacted result"
@@ -832,7 +831,6 @@ def test_restore_completed_tools_checkpoint_preserves_matching_provider_state() 
 
 
 def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
-    loop = _mk_loop()
     session = Session(
         key="test:checkpoint-overlap",
         messages=[
@@ -860,7 +858,7 @@ def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
             },
         ],
         metadata={
-            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+            RUNTIME_CHECKPOINT_KEY: {
                 "assistant_message": {
                     "role": "assistant",
                     "content": "working",
@@ -896,10 +894,10 @@ def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
         },
     )
 
-    restored = loop._restore_runtime_checkpoint(session)
+    restored = restore_runtime_checkpoint(session)
 
     assert restored is True
-    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+    assert session.metadata.get(RUNTIME_CHECKPOINT_KEY) is None
     assert len(session.messages) == 3
     assert session.messages[0]["role"] == "assistant"
     assert session.messages[1]["tool_call_id"] == "call_done"

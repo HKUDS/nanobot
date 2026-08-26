@@ -1466,7 +1466,7 @@ class AgentLoop:
                     try:
                         key = self._effective_session_key(msg)
                         session = self.sessions.get_or_create(key)
-                        if self._restore_runtime_checkpoint(session):
+                        if restore_runtime_checkpoint(session):
                             self._clear_pending_user_turn(session)
                             self.sessions.save(session)
                             logger.info(
@@ -1823,7 +1823,7 @@ class AgentLoop:
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(session, msg)
 
-        if self._restore_runtime_checkpoint(session):
+        if restore_runtime_checkpoint(session):
             self.sessions.save(session)
         if (
             RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
@@ -2312,10 +2312,6 @@ class AgentLoop:
     def _clear_runtime_checkpoint(self, session: Session) -> None:
         if self._RUNTIME_CHECKPOINT_KEY in session.metadata:
             session.metadata.pop(self._RUNTIME_CHECKPOINT_KEY, None)
-
-    def _restore_runtime_checkpoint(self, session: Session) -> bool:
-        """Materialize an unfinished turn into session history before a new request."""
-        return restore_runtime_checkpoint(session)
 
     async def process_direct(
         self,
