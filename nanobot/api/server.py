@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 from aiohttp import web
 from loguru import logger
 
+from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import safe_filename
@@ -51,6 +52,17 @@ _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
 _SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
 _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_agent")
 _MISSING = object()
+
+
+class _UsageCaptureHook(AgentHook):
+    """Capture the aggregate usage owned by one API run."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.usage: LLMUsage | None = None
+
+    async def after_run(self, context: AgentRunHookContext) -> None:
+        self.usage = context.usage
 
 
 def _app_value(
@@ -399,7 +411,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return resp
 
     # -- non-streaming path (original logic) --
-    usage: LLMUsage | None = None
+    usage_capture = _UsageCaptureHook()
     try:
         async with session_lock:
             try:
@@ -411,13 +423,12 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         session_key=session_key,
                         channel="api",
                         chat_id=API_CHAT_ID,
+                        hooks=[usage_capture],
                     )
                 response_text = _response_text(response)
                 if not response_text or not response_text.strip():
                     logger.warning("Empty response for session {}, using fallback", session_key)
                     response_text = EMPTY_FINAL_RESPONSE_MESSAGE
-                session = agent_loop.sessions.get_or_create(session_key)
-                usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
 
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")
@@ -429,7 +440,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(
-        _chat_completion_response(response_text, model_name, usage)
+        _chat_completion_response(response_text, model_name, usage_capture.usage)
     )
 
 
