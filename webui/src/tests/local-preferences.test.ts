@@ -16,4 +16,12 @@ describe("local preferences", () => {
     writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, browserNotifications: true });
     expect(readLocalPreferences().browserNotifications).toBe(true);
   });
+
+  it("keeps the turn-complete sound opt-in", () => {
+    expect(DEFAULT_LOCAL_PREFS.turnCompleteSound).toBe(false);
+    expect(readLocalPreferences().turnCompleteSound).toBe(false);
+
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, turnCompleteSound: true });
+    expect(readLocalPreferences().turnCompleteSound).toBe(true);
+  });
 });
