@@ -63,8 +63,6 @@ def _is_named_x_search_tool(value: object) -> bool:
 class XAIGrokProvider(LLMProvider):
     """Call xAI's subscription proxy and expose supported hosted tools."""
 
-    supports_progress_deltas = True
-
     def __init__(
         self,
         default_model: str = DEFAULT_XAI_GROK_MODEL,

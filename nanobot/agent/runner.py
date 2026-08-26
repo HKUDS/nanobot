@@ -46,13 +46,11 @@ from nanobot.runtime_context import (
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
 from nanobot.utils.helpers import (
-    IncrementalThinkExtractor,
     build_assistant_message,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     extract_reasoning,
     strip_reasoning_tags,
-    strip_think,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
@@ -67,7 +65,6 @@ from nanobot.utils.runtime import (
 )
 
 ContinuationCallback = Callable[[], str | None]
-ProgressCallback = Callable[[str], Awaitable[None]]
 RetryWaitCallback = Callable[[str], Awaitable[None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[..., Awaitable[Iterable[Any] | None]]
@@ -112,7 +109,6 @@ class AgentRunSpec:
     session_key: str | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
-    progress_callback: ProgressCallback | None = None
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     injection_callback: InjectionCallback | None = None
@@ -951,14 +947,7 @@ class AgentRunner:
             tools=spec.tools.get_definitions(),
         )
         wants_streaming = hook.wants_streaming()
-        progress_callback = spec.progress_callback
-        wants_progress_streaming = (
-            not wants_streaming
-            and progress_callback is not None
-            and getattr(spec.runtime.provider, "supports_progress_deltas", False) is True
-        )
 
-        progress_state: dict[str, bool] | None = None
         active_hosted_tools: dict[str, dict[str, Any]] = {}
         request_started_at = 0.0
         first_output_at: float | None = None
@@ -1029,40 +1018,6 @@ class AgentRunner:
                 on_tool_call_delta=_provider_tool_event,
                 on_stream_recover=_stream_recover,
             )
-        elif wants_progress_streaming:
-            stream_buf = ""
-            think_extractor = IncrementalThinkExtractor()
-            progress_state = {"reasoning_open": False}
-
-            async def _stream_progress(delta: str) -> None:
-                nonlocal stream_buf
-                if not delta:
-                    return
-                _generation_delta(delta)
-                prev_clean = strip_think(stream_buf)
-                stream_buf += delta
-                new_clean = strip_think(stream_buf)
-                incremental = new_clean[len(prev_clean):]
-
-                if await think_extractor.feed(stream_buf, hook.emit_reasoning):
-                    context.streamed_reasoning = True
-                    progress_state["reasoning_open"] = True
-
-                if incremental:
-                    if progress_state["reasoning_open"]:
-                        await hook.emit_reasoning_end()
-                        progress_state["reasoning_open"] = False
-                    context.streamed_content = True
-                    callback = progress_callback
-                    if callback is not None:
-                        await callback(incremental)
-
-            coro = spec.runtime.provider.chat_stream_with_retry(
-                **kwargs,
-                provider_context=provider_context,
-                on_content_delta=_stream_progress,
-                on_tool_call_delta=_provider_tool_event,
-            )
         else:
             coro = spec.runtime.provider.chat_with_retry(
                 **kwargs,
@@ -1074,10 +1029,9 @@ class AgentRunner:
         # very slow deltas can still run forever. Use a more generous wall-clock
         # timeout for streaming while preserving NANOBOT_LLM_TIMEOUT_S=0 as an
         # opt-out for all LLM wall-clock timeouts.
-        is_streaming_request = wants_streaming or wants_progress_streaming
         outer_timeout_s = (
             max(300.0, timeout_s * 2)
-            if is_streaming_request and timeout_s is not None
+            if wants_streaming and timeout_s is not None
             else timeout_s
         )
         request_started_at = time.perf_counter()
@@ -1115,8 +1069,6 @@ class AgentRunner:
                     "error": response.content
                     or "Model request failed before the provider-hosted tool completed.",
                 })
-        if progress_state and progress_state.get("reasoning_open"):
-            await hook.emit_reasoning_end()
         dropped, all_dropped, original_finish_reason = (
             self._drop_malformed_tool_calls(response)
         )

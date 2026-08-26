@@ -44,8 +44,6 @@ _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    supports_progress_deltas = True
-
     def __init__(
         self,
         default_model: str = "openai-codex/gpt-5.6-sol",

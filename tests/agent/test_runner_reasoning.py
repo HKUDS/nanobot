@@ -15,6 +15,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
@@ -33,6 +34,18 @@ class _RecordingHook(AgentHook):
 
     async def emit_reasoning_end(self) -> None:
         self.end_calls += 1
+
+
+class _StreamRecordingHook(_RecordingHook):
+    def __init__(self) -> None:
+        super().__init__()
+        self.streamed: list[str] = []
+
+    def wants_streaming(self) -> bool:
+        return True
+
+    async def on_stream(self, _ctx: AgentHookContext, delta: str) -> None:
+        self.streamed.append(delta)
 
 
 @pytest.mark.asyncio
@@ -201,7 +214,6 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
-    provider.supports_progress_deltas = True
 
     async def chat_stream_with_retry(*, on_content_delta=None, **kwargs):
         if on_content_delta:
@@ -218,12 +230,7 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    progress_calls: list[str] = []
-
-    async def _progress(content: str, **_kwargs):
-        progress_calls.append(content)
-
-    hook = _RecordingHook()
+    hook = _StreamRecordingHook()
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "question"}],
@@ -232,11 +239,10 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=hook,
-        progress_callback=_progress,
     ))
 
     assert result.final_content == "The answer."
-    assert progress_calls, "answer should have streamed via progress callback"
+    assert hook.streamed == ["The ", "answer."]
     assert hook.emitted == ["step-by-step deduction"]
 
 
@@ -247,7 +253,6 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
-    provider.supports_progress_deltas = True
 
     async def chat_stream_with_retry(*, on_content_delta=None, **kwargs):
         if on_content_delta:
@@ -263,10 +268,16 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    async def _progress(content: str, **_kwargs):
+    reasoning_events: list[str] = []
+
+    async def _progress(content: str, *, reasoning: bool = False, **_kwargs):
+        if reasoning:
+            reasoning_events.append(content)
+
+    async def _stream(_content: str) -> None:
         pass
 
-    hook = _RecordingHook()
+    hook = AgentProgressHook(on_progress=_progress, on_stream=_stream)
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "question"}],
@@ -275,12 +286,10 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=hook,
-        progress_callback=_progress,
     ))
 
     assert result.final_content == "The answer."
-    assert hook.emitted == ["working..."]
-    assert hook.end_calls >= 1, "reasoning stream must be closed once the answer starts"
+    assert reasoning_events == ["working..."]
 
 
 @pytest.mark.asyncio
@@ -318,14 +327,6 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
     assert result.final_content == "answer"
     assert hook.emitted == ["hidden thought"]
     assert hook.end_calls == 1
-
-
-class _StreamRecordingHook(_RecordingHook):
-    def wants_streaming(self) -> bool:
-        return True
-
-    async def on_stream(self, _ctx: AgentHookContext, delta: str) -> None:
-        pass
 
 
 @pytest.mark.asyncio

@@ -157,10 +157,6 @@ class FallbackProvider(LLMProvider):
         super().set_llm_call_observer(observer)
         self._primary.set_llm_call_observer(observer)
 
-    @property
-    def supports_progress_deltas(self) -> bool:
-        return bool(getattr(self._primary, "supports_progress_deltas", False))
-
     def can_resume_conversation_state(
         self,
         state: ProviderConversationState,
