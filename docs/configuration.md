@@ -2085,11 +2085,11 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 > When a restricted WebUI chat selects a project outside the configured agent
 > workspace, that project becomes the normal file and shell boundary. Nanobot
 > adds capability-specific, read-only access for built-in skills, the agent
-> workspace's `skills/` directory, and the exact agent
-> `memory/history.jsonl` file. Neighboring memory/profile files and all
-> cross-workspace writes remain denied. Agent-owned `SOUL.md` and `USER.md` are
-> assembled into model context directly; this does not grant file tools broader
-> access to the agent workspace.
+> workspace's `skills/` directory. Durable memory is accessed through the
+> read-only `recall_memory` tool, not through a cross-workspace filesystem
+> exception. Agent-owned `SOUL.md` and `USER.md` are assembled into model
+> context directly; this does not grant file tools broader access to the agent
+> workspace.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -2253,7 +2253,8 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
   "agents": {
     "defaults": {
       "idleCompactAfterMinutes": 15,
-      "idleCompactCheckIntervalSeconds": 60
+      "idleCompactCheckIntervalSeconds": 60,
+      "legacyMemoryPromptInjection": false
     }
   }
 }
@@ -2263,6 +2264,7 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 |--------|---------|-------------|
 | `agents.defaults.idleCompactAfterMinutes` | `15` | Minutes of idle time before auto-compaction starts. Set to `0` to disable. The default is close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
 | `agents.defaults.idleCompactCheckIntervalSeconds` | `60` | Minimum number of seconds between scans for idle sessions. Set to `0` to scan on every idle tick (~1 s). |
+| `agents.defaults.legacyMemoryPromptInjection` | `false` | Restore automatic `MEMORY.md` and recent-history system-prompt sections for compatibility. The active session checkpoint summary is included in either mode. |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 
@@ -2270,10 +2272,11 @@ How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
 2. **Background checkpoint**: Unprocessed turns are merged with the previous summary into a cumulative checkpoint; failures fall back to a bounded checkpoint that represents both.
 3. **Transcript preservation**: The complete session transcript remains stored, while future model requests receive the latest checkpoint alongside the retained recent suffix.
-4. **Restart-safe resume**: The latest checkpoint is mirrored into session metadata so it can still be recovered after a process restart. `memory/history.jsonl` remains the ingestion journal for Dream and is not injected entry-by-entry into ordinary requests.
+4. **Explicit durable recall**: `memory/MEMORY.md` and individual `memory/history.jsonl` rows are not injected into ordinary requests. The agent retrieves them through `recall_memory`; Dream consumes the same journal independently.
+5. **Restart-safe resume**: The active checkpoint is mirrored into session metadata so it can be restored after a process restart.
 
 > [!NOTE]
-> Auto compact does not remove structured messages from `sessions/<key>.jsonl`; it advances the checkpoint watermark only after the replacement checkpoint has been durably recorded.
+> Auto compact does not remove structured messages from `sessions/<key>.jsonl`; it advances the checkpoint watermark only after the replacement checkpoint has been durably recorded. Set `legacyMemoryPromptInjection` to `true` only while migrating an integration that depends on automatic `MEMORY.md` or recent-journal prompt sections.
 
 ## Timezone
 

@@ -127,9 +127,12 @@ nanobot uses two related stores:
 | Store | Location | Purpose |
 |---|---|---|
 | Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` | Recent conversation turns replayed into context |
-| Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
+| Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Durable facts and ingestion records retrieved with `recall_memory` |
 
-Dream is a periodic consolidation job. It reads accumulated history and updates workspace memory so useful context can survive beyond short session replay.
+Dream is a periodic curation job. It reads accumulated ingestion records and
+updates workspace memory so useful knowledge survives beyond session replay.
+Memory records are not added to the default system prompt; the agent retrieves
+relevant records explicitly.
 
 The configured workspace contains a `.nanobot/workspace-id` file. It contains only an
 opaque random identifier—never conversation content or credentials. Keep it with workspace
