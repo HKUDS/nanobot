@@ -9,6 +9,7 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools import ToolResult
+from nanobot.agent.tools.execution import is_ssrf_violation
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -66,20 +67,20 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
 def test_is_ssrf_violation_recognizes_private_url_blocks():
     """SSRF rejections are classified separately from workspace boundaries."""
     ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
-    assert AgentRunner._is_ssrf_violation(ssrf_msg) is True
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(ssrf_msg) is True
+    assert is_ssrf_violation(
         "URL validation failed: Blocked: host resolves to private/internal address 192.168.1.2"
     ) is True
 
     # Workspace-bound markers are NOT classified as SSRF.
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(
         "Error: Command blocked by safety guard (path outside working dir)"
     ) is False
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(
         "Path /tmp/x is outside allowed directory /ws"
     ) is False
     # Deny / allowlist filter messages stay non-fatal too.
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(
         "Error: Command blocked by deny pattern filter"
     ) is False
 
