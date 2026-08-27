@@ -104,11 +104,11 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
 export function userMessageText(
   content: string,
   media: readonly UserMessageMedia[] = [],
+  displayContent?: string,
 ): string {
   const { imageLabels, attachmentNames } = projectUserMessage(media)
   return [
-    content,
-    imageLabels.join(" "),
+    displayContent ?? [content, imageLabels.join(" ")].filter(Boolean).join("\n"),
     attachmentNames.length ? `Attachments: ${attachmentNames.join(", ")}` : "",
   ].filter(Boolean).join("\n")
 }
@@ -130,6 +130,7 @@ export class Transcript {
     renderable: TextRenderable
     content: string
     media: UserMessageMedia[]
+    displayContent?: string
   }>()
   private readonly userTurnIds = new Set<string>()
   private wrote = false
@@ -177,7 +178,11 @@ export class Transcript {
     this.theme = theme
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const message of this.userMessages) {
-      message.renderable.content = this.userMessageContent(message.content, message.media)
+      message.renderable.content = this.userMessageContent(
+        message.content,
+        message.media,
+        message.displayContent,
+      )
     }
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
     for (const frame of this.frames) frame.borderColor = theme.border
@@ -247,7 +252,7 @@ export class Transcript {
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
       if (message.role === "user") {
-        this.user(message.content, message.turnId, message.media)
+        this.user(message.content, message.turnId, message.media, message.displayContent)
       }
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
@@ -264,7 +269,7 @@ export class Transcript {
     for (const message of messages) {
       if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue
-        this.writeUser(message.content, message.media, index++)
+        this.writeUser(message.content, message.media, index++, message.displayContent)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeMarkdown(message.content, false, index++)
@@ -290,11 +295,16 @@ export class Transcript {
     return this.root.scrollTop <= 0
   }
 
-  user(content: string, turnId?: string, media: readonly UserMessageMedia[] = []): boolean {
+  user(
+    content: string,
+    turnId?: string,
+    media: readonly UserMessageMedia[] = [],
+    displayContent?: string,
+  ): boolean {
     if (turnId && this.userTurnIds.has(turnId)) return false
     this.noteOutput()
     this.finishActivity()
-    this.writeUser(content, media)
+    this.writeUser(content, media, undefined, displayContent)
     if (turnId) this.userTurnIds.add(turnId)
     return true
   }
@@ -583,18 +593,23 @@ export class Transcript {
     content: string,
     media: readonly UserMessageMedia[] = [],
     index?: number,
+    displayContent?: string,
   ): void {
     const retainedMedia = [...media]
     const renderable = this.writeRole(
       "›",
-      this.userMessageContent(content, retainedMedia),
+      this.userMessageContent(content, retainedMedia, displayContent),
       "user",
       index,
     )
-    this.userMessages.add({ renderable, content, media: retainedMedia })
+    this.userMessages.add({ renderable, content, media: retainedMedia, displayContent })
   }
 
-  private userMessageContent(content: string, media: readonly UserMessageMedia[]): StyledText {
+  private userMessageContent(
+    content: string,
+    media: readonly UserMessageMedia[],
+    displayContent?: string,
+  ): StyledText {
     const { imageLabels, attachmentNames } = projectUserMessage(media)
     const chunks: TextChunk[] = []
     const append = (text: string) => {
@@ -604,8 +619,27 @@ export class Transcript {
       if (chunks.length) append("\n")
     }
 
-    append(content)
-    if (imageLabels.length) {
+    if (displayContent !== undefined) {
+      const ranges = imageLabels
+        .map((label) => ({ label, start: displayContent.indexOf(label) }))
+        .filter(({ start }) => start >= 0)
+        .sort((left, right) => left.start - right.start)
+      let cursor = 0
+      for (const { label, start } of ranges) {
+        append(displayContent.slice(cursor, start))
+        chunks.push({
+          __isChunk: true,
+          text: label,
+          fg: RGBA.fromHex(this.theme.user),
+          attributes: TextAttributes.BOLD,
+        })
+        cursor = start + label.length
+      }
+      append(displayContent.slice(cursor))
+    } else {
+      append(content)
+    }
+    if (displayContent === undefined && imageLabels.length) {
       nextLine()
       for (const [index, label] of imageLabels.entries()) {
         if (index > 0) append(" ")

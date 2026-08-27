@@ -69,6 +69,9 @@ test("projects image media as stable placeholders without exposing filenames", (
     "[Image #2] [Image #1]",
     "Attachments: report.pdf",
   ].join("\n"))
+  expect(userMessageText("What is this?", [
+    { name: "clipboard-image-1.png" },
+  ], "What is this? [Image #1]")).toBe("What is this? [Image #1]")
 })
 
 function contrastRatio(foreground: string, background: string): number {
@@ -338,10 +341,16 @@ describe("NanobotTui layout", () => {
       dispose: async () => { disposed = true },
     }
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const transport = client(sent, [], [], sentOptions)
+    const recordSend = transport.send
+    transport.send = (content, messageOptions) => {
+      recordSend(content, messageOptions)
+      return `image-turn-${sent.length}`
+    }
     const app = NanobotTui.mount(
       setup.renderer,
       options,
-      client(sent, [], [], sentOptions),
+      transport,
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
       undefined,
       clipboard,
@@ -394,6 +403,7 @@ describe("NanobotTui layout", () => {
       data_url: "data:image/png;base64,AAEC/w==",
       name: "clipboard-image-1.png",
     }])
+    expect(sentOptions[0]?.displayContent).toBe("[Image #1]")
     await setup.flush()
     const frame = setup.captureCharFrame()
     expect(frame).toContain("[Image #1]")
@@ -404,16 +414,20 @@ describe("NanobotTui layout", () => {
     expect(imageChunk?.attributes).toBe(TextAttributes.BOLD)
     expect(imageChunk?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
 
-    setup.mockInput.pressKey("v", { meta: true })
-    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    await setup.mockInput.typeText("这是什么？ ")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.status.plainText.includes("Pasted Image #1"), 3_000)
+    expect(ui.composer.plainText).toBe("这是什么？ [Image #1] ")
     setup.mockInput.pressTab()
     expect(ui.status.plainText).toContain("Images cannot be queued")
-    expect(ui.composer.plainText).toBe("[Image #1] ")
-    await setup.mockInput.typeText("caption")
+    expect(ui.composer.plainText).toBe("这是什么？ [Image #1] ")
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
-    expect(sent[1]).toBe("caption")
+    expect(sent[1]).toBe("这是什么？")
     expect(sentOptions[1]?.media).toHaveLength(1)
+    expect(sentOptions[1]?.displayContent).toBe("这是什么？ [Image #1]")
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("这是什么？ [Image #1]")
 
     setup.renderer.destroy()
     expect(disposed).toBeTrue()
@@ -646,6 +660,7 @@ describe("NanobotTui layout", () => {
       event: "user_message",
       chat_id: "chat",
       text: "one more remote detail",
+      display_text: "one more remote detail [Image #2]",
       turn_id: "remote-steer",
       active_turn_id: "remote-turn",
       starts_turn: false,
@@ -663,6 +678,7 @@ describe("NanobotTui layout", () => {
     expect(occurrences(frame, "Attachments: report.pdf")).toBe(1)
     expect(occurrences(frame, "one more remote detail")).toBe(1)
     expect(occurrences(frame, "[Image #2]")).toBe(1)
+    expect(frame).toContain("one more remote detail [Image #2]")
     expect(frame).not.toContain("clipboard-image-2.png")
     expect(state.activeTurn).toBeTrue()
     expect(state.activeTurnId).toBe("remote-turn")

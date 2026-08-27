@@ -35,6 +35,7 @@ describe("ComposerDraft", () => {
     expect(second?.text).toBe("[Image #2] ")
     const visible = `compare ${second?.text}${first?.text}`
     expect(draft.expand(visible)).toBe("compare   ")
+    expect(draft.display(visible)).toBe(visible)
     expect(draft.media(visible)).toEqual([
       { data_url: "data:image/jpeg;base64,BBBB", name: "clipboard-image-2.jpg" },
       { data_url: "data:image/png;base64,AAAA", name: "clipboard-image-1.png" },

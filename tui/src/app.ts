@@ -1011,7 +1011,12 @@ export class NanobotTui {
     this.mentionMenu.hide()
     this.skillMenu.hide()
     this.recordPrompt(prompt.content)
-    this.transcript.user(prompt.content, turnId, prompt.options.media)
+    this.transcript.user(
+      prompt.content,
+      turnId,
+      prompt.options.media,
+      prompt.options.displayContent,
+    )
     this.hostBlocked = false
     this.setCurrentTask(prompt.content)
     if (steering) {
@@ -1101,7 +1106,12 @@ export class NanobotTui {
         this.reconcileTurnOwnership(event)
         return
       case "user_message": {
-        if (this.transcript.user(event.text, event.turn_id, event.media_urls)) {
+        if (this.transcript.user(
+          event.text,
+          event.turn_id,
+          event.media_urls,
+          event.display_text,
+        )) {
           this.recordPrompt(event.text)
         }
         this.hostBlocked = false
@@ -1566,10 +1576,12 @@ export class NanobotTui {
     const visible = this.composer.plainText.trim()
     const content = this.draft.expand(visible).trim()
     const media = this.draft.media(visible)
+    const displayContent = this.draft.display(visible).trim()
     return {
       content,
       options: {
         ...mentionOptions(content, this.availableMentions()),
+        ...(media.length ? { displayContent } : {}),
         ...(media.length ? { media } : {}),
       },
     }

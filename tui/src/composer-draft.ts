@@ -172,6 +172,10 @@ export class ComposerDraft {
     return expanded
   }
 
+  display(visible: string): string {
+    return this.expandPastes(visible)
+  }
+
   media(visible: string): OutboundMedia[] {
     return [...this.images]
       .filter(([label]) => visible.includes(label))

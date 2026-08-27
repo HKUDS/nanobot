@@ -807,6 +807,7 @@ class WebUITranscriptRecorder:
         text: str,
         *,
         metadata: dict[str, Any],
+        display_text: str | None = None,
         media_paths: list[str] | None = None,
         cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
@@ -817,6 +818,7 @@ class WebUITranscriptRecorder:
         payload = build_user_transcript_event(
             chat_id,
             text,
+            display_text=display_text,
             media_paths=media_paths,
             cli_apps=cli_apps,
             mcp_presets=mcp_presets,
@@ -1049,6 +1051,7 @@ def build_user_transcript_event(
     chat_id: str,
     text: str,
     *,
+    display_text: str | None = None,
     media_paths: list[Any] | None = None,
     cli_apps: list[Any] | None = None,
     mcp_presets: list[Any] | None = None,
@@ -1062,6 +1065,8 @@ def build_user_transcript_event(
         "chat_id": chat_id,
         "text": text,
     }
+    if display_text is not None:
+        event["display_text"] = display_text
     if paths:
         event["media_paths"] = paths
     apps = [
@@ -2146,6 +2151,9 @@ def replay_transcript_to_ui_messages(
                 **_turn_fields(rec, "user"),
                 "createdAt": _created_at_ms(rec, idx),
             }
+            display_text = rec.get("display_text")
+            if isinstance(display_text, str):
+                row["displayContent"] = display_text
             if media_att:
                 row["media"] = media_att
                 if all(m.get("kind") == "image" for m in media_att):
