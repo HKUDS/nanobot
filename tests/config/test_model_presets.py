@@ -351,6 +351,16 @@ def test_validator_rejects_unknown_preset() -> None:
         })
 
 
+def test_validator_rejects_unknown_spawn_preset() -> None:
+    with pytest.raises(
+        ValueError,
+        match="spawn_presets entry 'unknown' not found in model_presets",
+    ):
+        Config.model_validate({
+            "agents": {"defaults": {"spawnPresets": ["unknown"]}},
+        })
+
+
 def test_validator_accepts_dream_model_preset() -> None:
     config = Config.model_validate({
         "modelPresets": {
