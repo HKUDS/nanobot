@@ -68,7 +68,6 @@ class MessageTool(Tool):
         self._fallback_chat_id = default_chat_id
         self._fallback_message_id = default_message_id
         self._fallback_metadata: dict[str, Any] = {}
-        self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
         self._suppress_delivery_var: ContextVar[bool] = ContextVar(
             "message_suppress_delivery",
             default=False,
@@ -87,10 +86,6 @@ class MessageTool(Tool):
         """Set the callback for sending messages."""
         self._send_callback = callback
 
-    def start_turn(self) -> None:
-        """Reset per-turn send tracking."""
-        self._sent_in_turn = False
-
     def set_suppress_delivery(self, active: bool) -> Token[bool]:
         """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
         return self._suppress_delivery_var.set(active)
@@ -98,14 +93,6 @@ class MessageTool(Tool):
     def reset_suppress_delivery(self, token: Token[bool]) -> None:
         """Restore previous delivery-suppression state."""
         self._suppress_delivery_var.reset(token)
-
-    @property
-    def _sent_in_turn(self) -> bool:
-        return self._sent_in_turn_var.get()
-
-    @_sent_in_turn.setter
-    def _sent_in_turn(self, value: bool) -> None:
-        self._sent_in_turn_var.set(value)
 
     @property
     def name(self) -> str:
@@ -244,14 +231,15 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            if channel == default_channel and chat_id == default_chat_id:
-                self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = (
                 f" with {sum(len(row) for row in button_rows)} button(s)"
                 if button_rows
                 else ""
             )
-            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
+            return ToolResult(
+                f"Message sent to {channel}:{chat_id}{media_info}{button_info}",
+                final_response_sent=same_target,
+            )
         except Exception as e:
             return ToolResult.error(f"Error sending message: {str(e)}")

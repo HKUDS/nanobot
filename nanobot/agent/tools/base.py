@@ -145,10 +145,19 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    # The tool already delivered the user-visible response for this run.
+    final_response_sent: bool
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(
+        cls,
+        content: str,
+        *,
+        is_error: bool = False,
+        final_response_sent: bool = False,
+    ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.final_response_sent = final_response_sent
         return obj
 
     @classmethod
