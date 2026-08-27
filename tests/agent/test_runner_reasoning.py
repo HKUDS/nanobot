@@ -9,6 +9,7 @@ channels, gated by ``context.streamed_reasoning`` rather than
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -46,6 +47,39 @@ class _StreamRecordingHook(_RecordingHook):
 
     async def on_stream(self, _ctx: AgentHookContext, delta: str) -> None:
         self.streamed.append(delta)
+
+
+class _LifecycleRecordingHook(AgentHook):
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[str] = []
+
+    def wants_streaming(self) -> bool:
+        return True
+
+    async def emit_reasoning(self, reasoning_content: str | None) -> None:
+        if reasoning_content:
+            self.events.append(f"reasoning:{reasoning_content}")
+
+    async def emit_reasoning_end(self) -> None:
+        self.events.append("reasoning_end")
+
+    async def on_stream(self, _ctx: AgentHookContext, delta: str) -> None:
+        self.events.append(f"content:{delta}")
+
+    async def on_stream_end(self, _ctx: AgentHookContext, *, resuming: bool) -> None:
+        self.events.append(f"stream_end:{resuming}")
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        names = ",".join(call.name for call in context.tool_calls)
+        self.events.append(f"local_tools:{names}")
+
+    async def on_provider_tool_event(
+        self,
+        _context: AgentHookContext,
+        event: dict[str, Any],
+    ) -> None:
+        self.events.append(f"hosted_tool:{event.get('phase')}")
 
 
 @pytest.mark.asyncio
@@ -369,6 +403,155 @@ async def test_runner_streams_native_thinking_deltas_without_post_hoc_dup():
 
     assert result.final_content == "done"
     assert hook.emitted == ["part1", "part2"]
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_native_reasoning_before_streaming_answer():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+
+    async def chat_stream_with_retry(
+        *, on_content_delta=None, on_thinking_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("inspect")
+        if on_content_delta:
+            await on_content_delta("done")
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    hook = _LifecycleRecordingHook()
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "q"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.final_content == "done"
+    assert hook.events == [
+        "reasoning:inspect",
+        "reasoning_end",
+        "content:done",
+        "stream_end:False",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_native_reasoning_before_local_tool_execution():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    responses = iter([
+        LLMResponse(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[ToolCallRequest(id="call-1", name="list_dir", arguments={"path": "."})],
+            usage=None,
+        ),
+        LLMResponse(content="done", tool_calls=[], usage=None),
+    ])
+
+    async def chat_stream_with_retry(
+        *, on_content_delta=None, on_thinking_delta=None, **kwargs
+    ):
+        response = next(responses)
+        if response.tool_calls:
+            if on_thinking_delta:
+                await on_thinking_delta("inspect")
+        elif on_content_delta:
+            await on_content_delta("done")
+        return response
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+    hook = _LifecycleRecordingHook()
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "inspect"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.final_content == "done"
+    assert hook.events == [
+        "reasoning:inspect",
+        "reasoning_end",
+        "stream_end:True",
+        "local_tools:list_dir",
+        "content:done",
+        "stream_end:False",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_native_reasoning_before_hosted_tool_event():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+
+    async def chat_stream_with_retry(
+        *, on_content_delta=None, on_thinking_delta=None, on_tool_call_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("search")
+        if on_tool_call_delta:
+            await on_tool_call_delta({
+                "kind": "hosted_tool",
+                "phase": "start",
+                "call_id": "search-1",
+                "name": "web_search",
+                "arguments": {"query": "nanobot"},
+            })
+            await on_tool_call_delta({
+                "kind": "hosted_tool",
+                "phase": "end",
+                "call_id": "search-1",
+                "name": "web_search",
+                "arguments": {"query": "nanobot"},
+                "result": {"count": 1},
+            })
+        if on_content_delta:
+            await on_content_delta("done")
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    hook = _LifecycleRecordingHook()
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "search"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.final_content == "done"
+    assert hook.events == [
+        "reasoning:search",
+        "reasoning_end",
+        "hosted_tool:start",
+        "hosted_tool:end",
+        "content:done",
+        "stream_end:False",
+    ]
 
 
 @pytest.mark.asyncio

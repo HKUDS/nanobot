@@ -949,6 +949,7 @@ class AgentRunner:
         wants_streaming = hook.wants_streaming()
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
+        native_reasoning_open = False
         request_started_at = 0.0
         first_output_at: float | None = None
         generation_started_at: float | None = None
@@ -971,9 +972,17 @@ class AgentRunner:
             generation_elapsed_s += max(0.0, time.perf_counter() - generation_started_at)
             generation_started_at = None
 
+        async def _close_native_reasoning() -> None:
+            nonlocal native_reasoning_open
+            if not native_reasoning_open:
+                return
+            native_reasoning_open = False
+            await hook.emit_reasoning_end()
+
         async def _provider_tool_event(event: dict[str, Any]) -> None:
             if event.get("kind") != "hosted_tool":
                 return
+            await _close_native_reasoning()
             await hook.on_provider_tool_event(context, event)
             call_id = event.get("call_id")
             if not call_id:
@@ -991,10 +1000,11 @@ class AgentRunner:
                 _generation_delta(delta)
                 if delta:
                     context.streamed_content = True
+                    await _close_native_reasoning()
                 await hook.on_stream(context, delta)
 
             async def _thinking(delta: str) -> None:
-                nonlocal thinking_buf
+                nonlocal native_reasoning_open, thinking_buf
                 if not delta:
                     return
                 _generation_delta(delta)
@@ -1004,10 +1014,12 @@ class AgentRunner:
                 incremental = new_clean[len(prev_clean):]
                 if incremental:
                     context.streamed_reasoning = True
+                    native_reasoning_open = True
                     await hook.emit_reasoning(incremental)
 
             async def _stream_recover() -> None:
                 _pause_generation()
+                await _close_native_reasoning()
                 await hook.on_stream_end(context, resuming=True)
 
             coro = spec.runtime.provider.chat_stream_with_retry(
@@ -1054,6 +1066,7 @@ class AgentRunner:
                     error_kind="timeout",
                 )
         _pause_generation()
+        await _close_native_reasoning()
         if first_output_at is not None:
             response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
         if generation_elapsed_s > 0:
