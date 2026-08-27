@@ -14,6 +14,7 @@ const workspace = process.env.NANOBOT_TUI_WORKSPACE?.trim() || ""
 const hostWorkspace = process.cwd()
 const bootstrapUrl = process.env.NANOBOT_TUI_BOOTSTRAP_URL?.trim() || ""
 const wsUrl = process.env.NANOBOT_TUI_WS_URL?.trim() || ""
+const healthUrl = process.env.NANOBOT_TUI_HEALTH_URL?.trim() || ""
 const gatewayStopCommand = process.env.NANOBOT_TUI_GATEWAY_STOP_COMMAND?.trim()
   || "nanobot gateway stop"
 if (!bootstrapUrl && !wsUrl) {
@@ -24,6 +25,7 @@ const options: AppOptions = {
     ? {
         bootstrapUrl,
         bootstrapSecret: process.env.NANOBOT_TUI_BOOTSTRAP_SECRET?.trim() || "",
+        healthUrl: healthUrl || undefined,
       }
     : { wsUrl }),
   apiUrl: process.env.NANOBOT_TUI_API_URL?.trim() || "",

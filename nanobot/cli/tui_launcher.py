@@ -21,6 +21,7 @@ from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
     _gateway_health_ready,
+    _gateway_health_url,
     _gateway_instance_command,
     _host_for_local_browser,
     _webui_endpoint_reachable,
@@ -96,6 +97,10 @@ def launch_tui(
         env.update(
             {
                 "NANOBOT_TUI_BOOTSTRAP_URL": f"{base_url}/webui/bootstrap",
+                "NANOBOT_TUI_HEALTH_URL": _gateway_health_url(
+                    config.gateway.host,
+                    config.gateway.port,
+                ),
                 "NANOBOT_TUI_API_URL": base_url,
                 "NANOBOT_TUI_MODEL": _model_display(config)[0],
                 "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",

@@ -2392,7 +2392,12 @@ describe("NanobotTui layout", () => {
       handleStatus(
         status: "starting" | "connecting" | "connected" | "reconnecting" | "unavailable" | "error",
         detail?: string,
-        info?: { endpoint: string; attempt: number; elapsedMs: number },
+        info?: {
+          endpoint: string
+          attempt: number
+          elapsedMs: number
+          health?: "ready" | "degraded" | "unreachable"
+        },
       ): void
     }
 
@@ -2409,24 +2414,46 @@ describe("NanobotTui layout", () => {
     ui.handleStatus("connected")
     expect(ui.status.plainText).toBe("Opening chat…")
 
+    ui.handleStatus("error", "gateway sent an invalid event")
+    expect(ui.status.plainText).toBe("Opening chat…")
+    expect(ui.status.plainText).not.toContain("Unable")
+
     ui.handleStatus("reconnecting", "connection closed", {
       endpoint: "127.0.0.1:8769",
       attempt: 2,
       elapsedMs: 800,
     })
-    expect(ui.status.plainText).toBe("Connection interrupted · reconnecting…")
+    expect(ui.status.plainText).toBe("Reconnecting…")
+
+    ui.handleStatus("reconnecting", "connection closed", {
+      endpoint: "127.0.0.1:8769",
+      attempt: 2,
+      elapsedMs: 900,
+      health: "degraded",
+    })
+    expect(ui.status.plainText).toBe("Restoring chat…")
 
     ui.handleStatus("unavailable", "connection refused", {
       endpoint: "127.0.0.1:8769",
       attempt: 7,
       elapsedMs: 3_200,
+      health: "degraded",
+    })
+    expect(ui.status.plainText).toBe("Chat is getting ready…")
+    expect(ui.status.plainText).not.toContain("Unable")
+
+    ui.handleStatus("unavailable", "connection refused", {
+      endpoint: "127.0.0.1:8769",
+      attempt: 8,
+      elapsedMs: 3_500,
+      health: "unreachable",
     })
     expect(ui.status.plainText).toBe("Unable to connect · retrying…")
 
     ui.handleStatus("error", "gateway bootstrap failed: HTTP 401", {
       endpoint: "127.0.0.1:8769",
-      attempt: 8,
-      elapsedMs: 3_500,
+      attempt: 9,
+      elapsedMs: 3_800,
     })
     expect(ui.status.plainText).toBe("Unable to connect · restart nanobot")
     expect(ui.status.plainText).not.toContain("gateway")

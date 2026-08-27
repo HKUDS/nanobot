@@ -22,6 +22,7 @@ import {
   NanobotClient,
   connectionEndpoint,
   fetchAvailableSkills,
+  fetchGatewayHealth,
   fetchHistory,
   fetchGatewayConnection,
   fetchMentionCandidates,
@@ -95,6 +96,7 @@ interface AppOptions {
   wsUrl?: string
   bootstrapUrl?: string
   bootstrapSecret?: string
+  healthUrl?: string
   apiUrl: string
   apiToken: string
   chatId?: string
@@ -378,12 +380,19 @@ function formatElapsed(milliseconds: number): string {
 
 function connectionStatusText(
   status: ConnectionStatus,
+  info?: ConnectionStatusInfo,
 ): string {
   if (status === "starting") return "Starting nanobot…"
   if (status === "connecting") return "Connecting…"
   if (status === "connected") return "Opening chat…"
-  if (status === "reconnecting") return "Connection interrupted · reconnecting…"
-  if (status === "unavailable") return "Unable to connect · retrying…"
+  if (status === "reconnecting") {
+    return info?.health === "degraded" ? "Restoring chat…" : "Reconnecting…"
+  }
+  if (status === "unavailable") {
+    return info?.health === "degraded"
+      ? "Chat is getting ready…"
+      : "Unable to connect · retrying…"
+  }
   if (status === "error") return "Unable to connect · restart nanobot"
   return "Disconnected"
 }
@@ -572,6 +581,9 @@ export class NanobotTui {
               options.apiUrl,
               `tui-${process.pid}`,
             ),
+            ...(options.healthUrl
+              ? { checkHealth: () => fetchGatewayHealth(options.healthUrl || "") }
+              : {}),
             onConnection: (connection) => this.useGatewayConnection(
               connection.apiUrl,
               connection.apiToken,
@@ -1423,7 +1435,10 @@ export class NanobotTui {
     _detail?: string,
     info?: ConnectionStatusInfo,
   ): void {
-    this.connectionMessage = connectionStatusText(status)
+    // Invalid frames do not mean the transport is unavailable. Keep the last
+    // accurate user-facing state unless the protocol supplied connection diagnostics.
+    if (status === "error" && !info) return
+    this.connectionMessage = connectionStatusText(status, info)
     if (status === "connected") {
       this.ready = false
       this.host.reportState("unknown", "Connecting")

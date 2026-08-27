@@ -6,6 +6,7 @@ import {
   connectionEndpoint,
   fetchAvailableSkills,
   fetchGatewayConnection,
+  fetchGatewayHealth,
   fetchHistory,
   fetchMentionCandidates,
   fetchRuntimeControls,
@@ -80,6 +81,41 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("classifies gateway health without sending credentials", async () => {
+    const original = globalThis.fetch
+    const requests: Array<{ url: string; headers: Headers }> = []
+    const responses = [
+      new Response(JSON.stringify({
+        status: "degraded",
+        process: "alive",
+        ready: false,
+        websocket: "unavailable",
+      }), { status: 503 }),
+      new Response(JSON.stringify({
+        status: "ok",
+        process: "alive",
+        ready: true,
+        websocket: "running",
+      })),
+      new Response("not json"),
+    ]
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(input), headers: new Headers(init?.headers) })
+      return Promise.resolve(responses.shift() || new Response("missing", { status: 500 }))
+    }) as typeof fetch
+
+    try {
+      const healthUrl = "http://127.0.0.1:18790/health"
+      expect(await fetchGatewayHealth(healthUrl)).toBe("degraded")
+      expect(await fetchGatewayHealth(healthUrl)).toBe("ready")
+      expect(await fetchGatewayHealth(healthUrl)).toBe("unreachable")
+      expect(requests.map(({ url }) => url)).toEqual([healthUrl, healthUrl, healthUrl])
+      expect(requests.every(({ headers }) => [...headers].length === 0)).toBe(true)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("rejects malformed bootstrap responses without retrying", async () => {
     const original = globalThis.fetch
     globalThis.fetch = (() => Promise.resolve(new Response("not json"))) as unknown as typeof fetch
@@ -148,8 +184,13 @@ describe("gateway protocol", () => {
 
     try {
       const connections: string[] = []
+      let healthChecks = 0
       const client = new NanobotClient({
         resolveConnection: () => new Promise((resolve) => { resolveConnection = resolve }),
+        checkHealth: async () => {
+          healthChecks += 1
+          return "ready"
+        },
         onConnection: (connection) => connections.push(connection.apiToken),
         onEvent: () => undefined,
         onStatus: () => undefined,
@@ -165,6 +206,7 @@ describe("gateway protocol", () => {
       await Bun.sleep(1)
       expect(requestedUrl).toBe("ws://nanobot.test/ws?token=fresh")
       expect(connections).toEqual(["fresh-api-token"])
+      expect(healthChecks).toBe(0)
       client.close()
     } finally {
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
@@ -237,6 +279,7 @@ describe("gateway protocol", () => {
         "tui-42",
       ),
       targetEndpoint: connectionEndpoint(bootstrapUrl),
+      checkHealth: async () => "degraded",
       startupFailureDelayMs: 8,
       reconnectDelayMs: 100,
       onEvent: () => undefined,
@@ -254,6 +297,7 @@ describe("gateway protocol", () => {
         endpoint: "127.0.0.1:8769",
         attempt: 1,
         elapsedMs: expect.any(Number),
+        health: "degraded",
       })
       const visible = JSON.stringify(statuses)
       expect(visible).not.toContain("bootstrap-user")
@@ -296,6 +340,7 @@ describe("gateway protocol", () => {
         }
       },
       targetEndpoint: "127.0.0.1:8769",
+      checkHealth: async () => available ? "ready" : "degraded",
       startupFailureDelayMs: 8,
       reconnectDelayMs: 2,
       startupRetryMaxDelayMs: 2,

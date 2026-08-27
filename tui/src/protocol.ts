@@ -12,7 +12,10 @@ export interface ConnectionStatusInfo {
   attempt: number
   elapsedMs: number
   retryInMs?: number
+  health?: GatewayHealthStatus
 }
+
+export type GatewayHealthStatus = "ready" | "degraded" | "unreachable"
 
 export interface ToolProgressEvent {
   version?: number
@@ -186,6 +189,7 @@ type OutboundEvent =
 export interface ClientOptions {
   url?: string
   resolveConnection?: () => Promise<GatewayConnection>
+  checkHealth?: () => Promise<GatewayHealthStatus>
   onConnection?: (connection: GatewayConnection) => void
   targetEndpoint?: string
   startupFailureDelayMs?: number
@@ -955,6 +959,35 @@ export async function fetchGatewayConnection(
   }
 }
 
+/** Read gateway readiness without sending bootstrap or API credentials. */
+export async function fetchGatewayHealth(
+  healthUrl: string,
+  timeoutMs = 400,
+): Promise<GatewayHealthStatus> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(healthUrl, { signal: controller.signal })
+    if (response.status !== 200 && response.status !== 503) return "unreachable"
+    const payload: unknown = await response.json()
+    if (!isRecord(payload)) return "unreachable"
+    if (
+      response.status === 503
+      && payload.status === "degraded"
+      && payload.ready === false
+      && payload.process === "alive"
+    ) return "degraded"
+    if (response.status === 200 && payload.status === "ok" && payload.ready !== false) {
+      return "ready"
+    }
+    return "unreachable"
+  } catch {
+    return "unreachable"
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Return only the authority users can act on, never credentials or an authenticated path. */
 export function connectionEndpoint(value: string | undefined): string {
   if (!value) return "local gateway"
@@ -1025,6 +1058,7 @@ export class NanobotClient {
   private retryStartedAt = 0
   private nextRetryAt = 0
   private lastFailure = ""
+  private healthStatus: GatewayHealthStatus | undefined
   private failureEscalationTimer: ReturnType<typeof setTimeout> | null = null
   private readonly endpoint: string
   private readonly pendingMutations = new Map<string, {
@@ -1048,6 +1082,7 @@ export class NanobotClient {
     this.retryStartedAt = Date.now()
     this.nextRetryAt = 0
     this.lastFailure = ""
+    this.healthStatus = undefined
     void this.open()
   }
 
@@ -1073,14 +1108,14 @@ export class NanobotClient {
           this.options.onStatus("error", this.lastFailure, this.connectionInfo())
           return
         }
-        this.scheduleReconnect()
+        await this.checkHealthAndScheduleReconnect()
       }
       return
     } finally {
       this.opening = false
     }
     if (!url) {
-      this.options.onStatus("error", "gateway URL is not configured")
+      this.options.onStatus("error", "gateway URL is not configured", this.connectionInfo())
       return
     }
     let socket: WebSocket
@@ -1088,7 +1123,7 @@ export class NanobotClient {
       socket = new WebSocket(url)
     } catch (error) {
       this.lastFailure = sanitizeConnectionFailure(error)
-      this.scheduleReconnect()
+      await this.checkHealthAndScheduleReconnect()
       return
     }
     let opened = false
@@ -1102,6 +1137,7 @@ export class NanobotClient {
       this.retryStartedAt = 0
       this.nextRetryAt = 0
       this.lastFailure = ""
+      this.healthStatus = "ready"
       this.clearFailureEscalation()
       this.options.onStatus("connected", undefined, this.connectionInfo())
     })
@@ -1127,7 +1163,8 @@ export class NanobotClient {
         this.retryStartedAt = Date.now()
       }
       if (!this.lastFailure) this.lastFailure = "connection closed"
-      this.scheduleReconnect()
+      this.reportRetryState()
+      void this.checkHealthAndScheduleReconnect()
     })
   }
 
@@ -1306,6 +1343,17 @@ export class NanobotClient {
     }, delay)
   }
 
+  private async checkHealthAndScheduleReconnect(): Promise<void> {
+    if (this.options.checkHealth) {
+      try {
+        this.healthStatus = await this.options.checkHealth()
+      } catch {
+        this.healthStatus = "unreachable"
+      }
+    }
+    if (!this.closedByClient) this.scheduleReconnect()
+  }
+
   private connectionInfo(): ConnectionStatusInfo {
     return {
       endpoint: this.endpoint,
@@ -1314,6 +1362,7 @@ export class NanobotClient {
       ...(this.nextRetryAt
         ? { retryInMs: Math.max(0, this.nextRetryAt - Date.now()) }
         : {}),
+      ...(this.healthStatus ? { health: this.healthStatus } : {}),
     }
   }
 
