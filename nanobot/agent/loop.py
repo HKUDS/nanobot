@@ -304,6 +304,7 @@ class AgentLoop:
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
         memory_backend: MemoryBackend | None = None,
+        legacy_memory_prompt_injection: bool = False,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -384,7 +385,12 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            legacy_memory_prompt_injection=legacy_memory_prompt_injection,
+        )
         self.memory_backend = (
             memory_backend if memory_backend is not None else self.context.memory
         )
@@ -526,6 +532,7 @@ class AgentLoop:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
+            legacy_memory_prompt_injection=defaults.legacy_memory_prompt_injection,
             session_ttl_minutes=defaults.session_ttl_minutes,
             idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
             tools_config=config.tools,

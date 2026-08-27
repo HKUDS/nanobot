@@ -106,7 +106,7 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     assert "Join them when using `read_file`" in prompt
     assert str(project.resolve()) not in prompt
     assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
-    assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
+    assert "history.jsonl" not in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt
 
@@ -124,7 +124,7 @@ def test_subagent_prompt_uses_relative_paths_in_agent_workspace(tmp_path):
     prompt = manager._build_subagent_prompt()
 
     assert str(tmp_path.resolve()) not in prompt
-    assert "History log: memory/history.jsonl" in prompt
+    assert "history.jsonl" not in prompt
     assert "### Workspace skills (`skills`)" in prompt
 
 

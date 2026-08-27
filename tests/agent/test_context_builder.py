@@ -310,7 +310,8 @@ class TestBuildSystemPrompt:
 
         assert str(tmp_path.resolve()) not in result
         assert "Agent profile: SOUL.md and USER.md" in result
-        assert "History log: memory/history.jsonl" in result
+        assert "`recall_memory`" in result
+        assert "memory/history.jsonl" not in result
         assert "Custom skills: skills/{skill-name}/SKILL.md" in result
 
     def test_selected_project_identity_keeps_agent_data_in_agent_workspace(self, tmp_path):
@@ -333,7 +334,7 @@ class TestBuildSystemPrompt:
         assert "Be helpful and concise." in result
 
     def test_includes_session_summary(self, tmp_path):
-        builder = _builder(tmp_path)
+        builder = ContextBuilder(tmp_path)
         summary = {
             "text": "Previous chat about Python.",
             "last_active": "2026-08-19T10:00:00",

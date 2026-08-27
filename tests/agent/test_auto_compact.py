@@ -700,7 +700,8 @@ class TestAutoCompactIntegration:
             for m in session_after.get_history(max_messages=len(session_after.messages))
         )
 
-        # Summary should NOT be persisted in session (ephemeral, one-shot)
+        # The checkpoint stays in metadata, not as a synthetic transcript message,
+        # and is injected exactly once into the next model-facing system prompt.
         assert not any(
             "[Resumed Session]" in str(m.get("content", "")) for m in session_after.messages
         )
@@ -710,7 +711,7 @@ class TestAutoCompactIntegration:
             "[/Runtime Context]" in str(m.get("content", "")) for m in session_after.messages
         )
 
-        # Pending summary should be consumed (one-shot)
+        # The in-memory handoff is one-shot; persisted metadata remains authoritative.
         assert "cli:test" not in loop.auto_compact._summaries
 
         # The new message should be processed (response exists)

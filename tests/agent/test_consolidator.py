@@ -308,6 +308,8 @@ class TestConsolidatorPromptContract:
         assert "complete replacement memory overview" in prompt
         assert "Preserve every still-relevant fact" in prompt
         assert "without earlier `history.jsonl` entries" in prompt
+        assert "check context below" not in prompt.lower()
+        assert "Do not output duplicate facts from the conversation chunk" in prompt
         assert "Do not mark something [skip] merely because it might already exist" in prompt
 
 

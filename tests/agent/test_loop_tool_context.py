@@ -105,6 +105,26 @@ def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
     assert loop.tools.has("read_file")
 
 
+def test_loop_from_config_wires_legacy_memory_prompt_switch(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "workspace": str(tmp_path),
+                "legacyMemoryPromptInjection": True,
+            }
+        }
+    })
+
+    loop = AgentLoop.from_config(
+        config,
+        tool_registry=registry,
+        provider=_provider_for_loop(),
+    )
+
+    assert loop.context.legacy_memory_prompt_injection is True
+
+
 @pytest.mark.asyncio
 async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()
