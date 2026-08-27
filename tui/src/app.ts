@@ -520,6 +520,9 @@ export class NanobotTui {
   private skillLoadId = 0
   private clipboardImagePending = false
   private clipboardPasteGeneration = 0
+  private composerValue = ""
+  private composerCursor = 0
+  private reconcilingComposer = false
 
   private constructor(
     renderer: CliRenderer,
@@ -753,23 +756,14 @@ export class NanobotTui {
         { name: "return", action: "submit" },
       ],
       onCursorChange: () => {
+        this.keepComposerCursorOutsideImages()
         if (!this.sessionMenu.visible && !this.branchMenu.visible) this.syncComposerMenus()
       },
-      onContentChange: () => {
-        this.draft.prune(this.composer.plainText)
-        const clearedUnsent = this.unsentSubmit && !this.composer.plainText.trim()
-        if (clearedUnsent) this.unsentSubmit = false
-        this.runtimeControls.hide()
-        if (this.contextPanel.visible && this.composer.plainText) this.contextPanel.hide()
-        this.syncComposerPlaceholder()
-        if (this.sessionMenu.visible) this.syncSessionMenu()
-        else if (this.branchMenu.visible) this.syncBranchMenu()
-        else this.syncComposerMenus()
-        this.resizeComposer()
-        if (clearedUnsent && !this.activeTurn) {
-          this.status.content = this.ready ? this.readyStatus() : this.connectionMessage
-        }
-      },
+      onContentChange: () => this.handleComposerContentChange(),
+      onMouseDown: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
+      onMouseUp: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
+      onMouseDrag: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
+      onMouseDragEnd: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
       // IMEs may commit their final composed glyph after Enter. Matching the
       // OpenCode/OpenTUI integration, defer twice before reading plainText.
       onSubmit: () => this.deferSubmit(),
@@ -1794,6 +1788,20 @@ export class NanobotTui {
       key.preventDefault()
       return
     }
+    if (!key.ctrl && !key.meta && !key.shift && (key.name === "left" || key.name === "right")) {
+      const direction = key.name === "left" ? -1 : 1
+      const target = this.draft.moveImageCursor(
+        this.composer.plainText,
+        this.composerStringCursor(),
+        direction,
+      )
+      if (target !== null) {
+        this.composerCursor = target
+        this.setComposerStringCursor(this.composer.plainText, target)
+        key.preventDefault()
+        return
+      }
+    }
     if (!key.ctrl && !key.meta && (key.name === "up" || key.name === "down")) {
       const direction = key.name === "up" ? -1 : 1
       const boundary = direction < 0 ? 0 : this.composer.plainText.length
@@ -2173,6 +2181,52 @@ export class NanobotTui {
 
   private composerStringCursor(): number {
     return this.composer.editBuffer.getTextRange(0, this.composer.cursorOffset).length
+  }
+
+  private keepComposerCursorOutsideImages(): void {
+    if (this.reconcilingComposer) return
+    const value = this.composer.plainText
+    const cursor = this.composerStringCursor()
+    const target = this.draft.snapImageCursor(value, cursor, this.composerCursor)
+    this.composerCursor = target
+    if (target !== cursor) this.setComposerStringCursor(value, target)
+  }
+
+  private handleComposerContentChange(): void {
+    if (this.reconcilingComposer) return
+    let value = this.composer.plainText
+    let cursor = this.composerStringCursor()
+    const edit = this.draft.reconcileImageEdit(this.composerValue, value, cursor)
+    if (edit.value !== value) {
+      this.reconcilingComposer = true
+      try {
+        this.composer.replaceText(edit.value)
+        this.composer.clearSelection()
+        this.setComposerStringCursor(edit.value, edit.cursor)
+      } finally {
+        this.reconcilingComposer = false
+      }
+      value = edit.value
+      cursor = edit.cursor
+    }
+    this.composerValue = value
+    this.composerCursor = cursor
+    this.draft.prune(value)
+    const clearedUnsent = this.unsentSubmit && !value.trim()
+    if (clearedUnsent) this.unsentSubmit = false
+    this.runtimeControls.hide()
+    if (this.contextPanel.visible && value) this.contextPanel.hide()
+    this.syncComposerPlaceholder()
+    if (this.sessionMenu.visible) this.syncSessionMenu()
+    else if (this.branchMenu.visible) this.syncBranchMenu()
+    else this.syncComposerMenus()
+    this.resizeComposer()
+    if (clearedUnsent && !this.activeTurn) {
+      this.status.content = this.ready ? this.readyStatus() : this.connectionMessage
+    }
+    if (edit.removedImages.length) {
+      this.status.content = `Removed ${edit.removedImages.join(", ")}`
+    }
   }
 
   private setComposerStringCursor(value: string, cursor: number): void {

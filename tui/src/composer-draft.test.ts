@@ -45,6 +45,34 @@ describe("ComposerDraft", () => {
     expect(draft.media(second?.text || "")).toEqual([])
   })
 
+  test("removes a partially edited image placeholder as one atomic unit", () => {
+    const draft = new ComposerDraft()
+    const image = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    const previous = `before ${image?.text}after`
+    const value = previous.replace("[Image #1]", "Image #1]")
+
+    expect(draft.reconcileImageEdit(previous, value, 7)).toEqual({
+      value: "before  after",
+      cursor: 7,
+      removedImages: ["Image #1"],
+    })
+    expect(draft.imageCount).toBe(0)
+    expect(draft.media(value)).toEqual([])
+  })
+
+  test("snaps cursor movement across complete image placeholders", () => {
+    const draft = new ComposerDraft()
+    const image = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    const visible = `a ${image?.text}b`
+
+    expect(draft.snapImageCursor(visible, 3, 2)).toBe(12)
+    expect(draft.snapImageCursor(visible, 11, 12)).toBe(2)
+    expect(draft.snapImageCursor(visible, 2, 0)).toBe(2)
+    expect(draft.snapImageCursor(visible, 12, 13)).toBe(12)
+    expect(draft.moveImageCursor(visible, 2, 1)).toBe(12)
+    expect(draft.moveImageCursor(visible, 12, -1)).toBe(2)
+  })
+
   test("allocates image labels around literal composer text", () => {
     const draft = new ComposerDraft()
     const content = "Explain [Image #1]"

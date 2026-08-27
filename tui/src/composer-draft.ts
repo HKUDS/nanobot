@@ -10,6 +10,17 @@ export interface PasteInsertion {
   description: string
 }
 
+export interface DraftEditReconciliation {
+  value: string
+  cursor: number
+  removedImages: string[]
+}
+
+interface DraftRange {
+  start: number
+  end: number
+}
+
 const IMAGE_EXTENSIONS = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -79,6 +90,78 @@ export class ComposerDraft {
 
   private labelOccurrences(content: string, label: string): number {
     return content.split(label).length - 1
+  }
+
+  private imageRanges(visible: string): DraftRange[] {
+    const ranges: DraftRange[] = []
+    for (const label of this.images.keys()) {
+      let start = visible.indexOf(label)
+      while (start >= 0) {
+        ranges.push({ start, end: start + label.length })
+        start = visible.indexOf(label, start + label.length)
+      }
+    }
+    return ranges.sort((left, right) => left.start - right.start)
+  }
+
+  snapImageCursor(visible: string, cursor: number, previousCursor: number): number {
+    const range = this.imageRanges(visible)
+      .find(({ start, end }) => cursor > start && cursor < end)
+    if (!range) return cursor
+    if (previousCursor <= range.start) return range.end
+    if (previousCursor >= range.end) return range.start
+    return cursor - range.start < range.end - cursor ? range.start : range.end
+  }
+
+  moveImageCursor(visible: string, cursor: number, direction: -1 | 1): number | null {
+    const range = this.imageRanges(visible).find(({ start, end }) => (
+      direction < 0
+        ? cursor > start && cursor <= end
+        : cursor >= start && cursor < end
+    ))
+    if (!range) return null
+    return direction < 0 ? range.start : range.end
+  }
+
+  reconcileImageEdit(
+    previous: string,
+    value: string,
+    cursor: number,
+  ): DraftEditReconciliation {
+    const missing = [...this.images.keys()].filter((label) => !value.includes(label))
+    if (!missing.length) return { value, cursor, removedImages: [] }
+
+    const removedImages = missing.map((label) => label.slice(1, -1))
+    const ranges = missing.flatMap((label) => {
+      const start = previous.indexOf(label)
+      return start < 0 ? [] : [{ start, end: start + label.length }]
+    })
+    for (const label of missing) this.images.delete(label)
+    if (!ranges.length) return { value, cursor, removedImages }
+
+    let oldStart = 0
+    const sharedLength = Math.min(previous.length, value.length)
+    while (oldStart < sharedLength && previous[oldStart] === value[oldStart]) oldStart += 1
+
+    let oldEnd = previous.length
+    let newEnd = value.length
+    while (
+      oldEnd > oldStart
+      && newEnd > oldStart
+      && previous[oldEnd - 1] === value[newEnd - 1]
+    ) {
+      oldEnd -= 1
+      newEnd -= 1
+    }
+
+    const replaceStart = Math.min(oldStart, ...ranges.map((range) => range.start))
+    const replaceEnd = Math.max(oldEnd, ...ranges.map((range) => range.end))
+    const inserted = value.slice(oldStart, newEnd)
+    return {
+      value: previous.slice(0, replaceStart) + inserted + previous.slice(replaceEnd),
+      cursor: replaceStart + inserted.length,
+      removedImages,
+    }
   }
 
   hasImageLabelConflict(visible: string): boolean {

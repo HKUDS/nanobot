@@ -375,6 +375,74 @@ describe("NanobotTui layout", () => {
     expect(disposed).toBeTrue()
   })
 
+  test("keeps image placeholders atomic for cursor movement and deletion", async () => {
+    const clipboard: ClipboardImageReader = {
+      read: async () => ({
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,AAEC/w==",
+      }),
+      dispose: async () => undefined,
+    }
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      undefined,
+      clipboard,
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      draft: { imageCount: number }
+      status: { plainText: string }
+    }
+
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    await setup.flush()
+    await setup.mockMouse.click(ui.composer.x + 5, ui.composer.y)
+    expect(ui.composer.cursorOffset > 0 && ui.composer.cursorOffset < 10).toBeFalse()
+    ui.composer.cursorOffset = 0
+    setup.mockInput.pressArrow("right")
+    await waitUntil(() => ui.composer.cursorOffset === 10)
+    setup.mockInput.pressArrow("left")
+    await waitUntil(() => ui.composer.cursorOffset === 0)
+
+    setup.mockInput.pressArrow("right", { shift: true })
+    await waitUntil(() => ui.composer.cursorOffset === 10)
+    await setup.mockInput.typeText("replacement")
+    await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.plainText).toContain("replacement")
+    expect(ui.composer.plainText).not.toContain("Image #1")
+
+    ui.composer.setText("")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    ui.composer.cursorOffset = 0
+    setup.mockInput.pressKey("DELETE")
+    await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.plainText.trim()).toBe("")
+    expect(ui.status.plainText).toContain("Removed Image #1")
+
+    ui.composer.setText("")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    ui.composer.cursorOffset = 10
+    setup.mockInput.pressBackspace()
+    await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.plainText.trim()).toBe("")
+
+    ui.composer.setText("")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    ui.composer.setText("Image #1] ")
+    await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.plainText.trim()).toBe("")
+  })
+
   test("keeps clipboard failures visible while an agent turn is active", async () => {
     const sent: string[] = []
     const clipboard: ClipboardImageReader = {
