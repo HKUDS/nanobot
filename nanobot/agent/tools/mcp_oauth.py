@@ -53,8 +53,10 @@ class _StoredServer(TypedDict, total=False):
     write_lease: str
     tokens: dict[str, Any]
     expires_at: float
+    token_issuer: str
     client_info: dict[str, Any]
     oauth_metadata: dict[str, Any]
+    oauth_issuer: str
     redirect_uri: str
 
 
@@ -82,8 +84,10 @@ class MCPOAuthHandlers:
 class _OAuthSnapshot:
     tokens: OAuthToken | None
     expires_at: float | None
+    token_issuer: str | None
     client_info: OAuthClientInformationFull | None
     oauth_metadata: OAuthMetadata | None
+    oauth_issuer: str | None
 
 
 @dataclass(frozen=True)
@@ -91,6 +95,7 @@ class _RefreshLease:
     lock: BaseAsyncFileLock
     access_token: str
     refresh_token: str
+    token_issuer: str
 
 
 def _store_path() -> Path:
@@ -99,6 +104,10 @@ def _store_path() -> Path:
 
 def _server_fingerprint(server_url: str) -> str:
     return hashlib.sha256(server_url.strip().encode("utf-8")).hexdigest()
+
+
+def _normalize_issuer(value: str) -> str:
+    return value.rstrip("/")
 
 
 def _empty_store() -> _CredentialStore:
@@ -131,6 +140,9 @@ def _stored_server(value: object) -> _StoredServer | None:
         and math.isfinite(expires_at)
     ):
         entry["expires_at"] = float(expires_at)
+    token_issuer = raw.get("token_issuer")
+    if isinstance(token_issuer, str) and token_issuer:
+        entry["token_issuer"] = token_issuer
     client_info = raw.get("client_info")
     if isinstance(client_info, dict):
         client_values = cast(dict[object, object], client_info)
@@ -141,6 +153,9 @@ def _stored_server(value: object) -> _StoredServer | None:
         metadata_values = cast(dict[object, object], oauth_metadata)
         if all(isinstance(key, str) for key in metadata_values):
             entry["oauth_metadata"] = cast(dict[str, Any], metadata_values)
+    oauth_issuer = raw.get("oauth_issuer")
+    if isinstance(oauth_issuer, str) and oauth_issuer:
+        entry["oauth_issuer"] = _normalize_issuer(oauth_issuer)
     return entry
 
 
@@ -310,6 +325,11 @@ class MCPOAuthStorage:
         if isinstance(raw_expiry, (int, float)) and not isinstance(raw_expiry, bool):
             expires_at = float(raw_expiry)
 
+        token_issuer: str | None = None
+        raw_token_issuer = entry.get("token_issuer") if entry is not None else None
+        if isinstance(raw_token_issuer, str) and raw_token_issuer:
+            token_issuer = raw_token_issuer
+
         client_info: OAuthClientInformationFull | None = None
         raw_client = entry.get("client_info") if entry is not None else None
         if isinstance(raw_client, dict):
@@ -332,7 +352,19 @@ class MCPOAuthStorage:
                     self.server_name,
                 )
 
-        return _OAuthSnapshot(tokens, expires_at, client_info, oauth_metadata)
+        oauth_issuer: str | None = None
+        raw_oauth_issuer = entry.get("oauth_issuer") if entry is not None else None
+        if isinstance(raw_oauth_issuer, str) and raw_oauth_issuer:
+            oauth_issuer = _normalize_issuer(raw_oauth_issuer)
+
+        return _OAuthSnapshot(
+            tokens,
+            expires_at,
+            token_issuer,
+            client_info,
+            oauth_metadata,
+            oauth_issuer,
+        )
 
     async def get_snapshot(self) -> _OAuthSnapshot:
         entry = await asyncio.to_thread(self._read_entry_sync)
@@ -341,27 +373,42 @@ class MCPOAuthStorage:
     async def get_tokens(self) -> OAuthToken | None:
         return (await self.get_snapshot()).tokens
 
-    async def set_tokens(self, tokens: OAuthToken) -> None:
-        raw = tokens.model_dump(mode="json", exclude_none=True)
-
-        def update(entry: _StoredServer) -> None:
-            entry["tokens"] = raw
+    @staticmethod
+    def _replace_tokens(entry: _StoredServer, tokens: OAuthToken | None) -> None:
+        if tokens is None:
+            entry.pop("tokens", None)
+            entry.pop("expires_at", None)
+            entry.pop("token_issuer", None)
+        else:
+            entry["tokens"] = tokens.model_dump(mode="json", exclude_none=True)
             if tokens.expires_in is None:
                 entry.pop("expires_at", None)
             else:
                 entry["expires_at"] = time.time() + float(tokens.expires_in)
 
+    async def set_tokens(self, tokens: OAuthToken) -> None:
+        def update(entry: _StoredServer) -> None:
+            self._replace_tokens(entry, tokens)
+            issuer = entry.get("oauth_issuer")
+            if isinstance(issuer, str) and issuer:
+                entry["token_issuer"] = _normalize_issuer(issuer)
+            else:
+                entry.pop("token_issuer", None)
+
         await asyncio.to_thread(self._update_entry_sync, update)
 
     async def clear_tokens(self) -> None:
         def update(entry: _StoredServer) -> None:
-            entry.pop("tokens", None)
-            entry.pop("expires_at", None)
+            self._replace_tokens(entry, None)
 
         await asyncio.to_thread(self._update_entry_sync, update, create=False)
 
-    async def get_token_expiry(self) -> float | None:
-        return (await self.get_snapshot()).expires_at
+    async def clear_tokens_and_client(self) -> None:
+        def update(entry: _StoredServer) -> None:
+            self._replace_tokens(entry, None)
+            entry.pop("client_info", None)
+
+        await asyncio.to_thread(self._update_entry_sync, update, create=False)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         return (await self.get_snapshot()).client_info
@@ -374,33 +421,46 @@ class MCPOAuthStorage:
 
         await asyncio.to_thread(self._update_entry_sync, update)
 
-    async def get_oauth_metadata(self) -> OAuthMetadata | None:
-        return (await self.get_snapshot()).oauth_metadata
-
-    async def set_oauth_metadata(self, metadata: OAuthMetadata) -> None:
+    async def set_oauth_metadata(
+        self,
+        metadata: OAuthMetadata,
+        *,
+        issuer: str | None = None,
+    ) -> None:
         raw = metadata.model_dump(mode="json", exclude_none=True)
+        oauth_issuer = _normalize_issuer(issuer or str(metadata.issuer))
 
         def update(entry: _StoredServer) -> None:
             entry["oauth_metadata"] = raw
+            entry["oauth_issuer"] = oauth_issuer
 
         await asyncio.to_thread(self._update_entry_sync, update)
 
     async def clear_oauth_metadata(self) -> None:
         def update(entry: _StoredServer) -> None:
             entry.pop("oauth_metadata", None)
+            entry.pop("oauth_issuer", None)
 
         await asyncio.to_thread(self._update_entry_sync, update, create=False)
 
     @staticmethod
-    def _token_pair(entry: _StoredServer) -> tuple[str, str] | None:
+    def _token_binding(entry: _StoredServer) -> tuple[str, str, str] | None:
         raw = entry.get("tokens")
         if not isinstance(raw, dict):
             return None
         access_token = raw.get("access_token")
         refresh_token = raw.get("refresh_token")
-        if not isinstance(access_token, str) or not isinstance(refresh_token, str):
+        token_issuer = entry.get("token_issuer")
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or not isinstance(refresh_token, str)
+            or not refresh_token
+            or not isinstance(token_issuer, str)
+            or not token_issuer
+        ):
             return None
-        return access_token, refresh_token
+        return access_token, refresh_token, token_issuer
 
     def refresh_lock(self) -> BaseAsyncFileLock:
         path = _store_path()
@@ -426,21 +486,14 @@ class MCPOAuthStorage:
             entry, changed = self._bind_entry_unlocked(payload, create=False)
             if (
                 entry is None
-                or self._token_pair(entry) != (lease.access_token, lease.refresh_token)
+                or self._token_binding(entry)
+                != (lease.access_token, lease.refresh_token, lease.token_issuer)
             ):
                 if changed:
                     _write_store_unlocked(path, payload)
                 return False
 
-            if tokens is None:
-                entry.pop("tokens", None)
-                entry.pop("expires_at", None)
-            else:
-                entry["tokens"] = tokens.model_dump(mode="json", exclude_none=True)
-                if tokens.expires_in is None:
-                    entry.pop("expires_at", None)
-                else:
-                    entry["expires_at"] = time.time() + float(tokens.expires_in)
+            self._replace_tokens(entry, tokens)
             if clear_client:
                 entry.pop("client_info", None)
             _write_store_unlocked(path, payload)
@@ -469,8 +522,7 @@ class MCPOAuthStorage:
         def update(entry: _StoredServer) -> None:
             changed = entry.get("redirect_uri") != redirect_uri
             if reset:
-                entry.pop("tokens", None)
-                entry.pop("expires_at", None)
+                self._replace_tokens(entry, None)
                 entry.pop("client_info", None)
             elif changed:
                 # Dynamic registrations bind a client to its redirect URI.
@@ -541,6 +593,7 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
             "mcp_oauth_refresh_claim",
             default=None,
         )
+        self._token_issuer: str | None = None
         super().__init__(
             server_url,
             client_metadata,
@@ -558,8 +611,10 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
     def _apply_snapshot(self, snapshot: _OAuthSnapshot) -> None:
         self.context.current_tokens = snapshot.tokens
         self.context.token_expiry_time = snapshot.expires_at
+        self._token_issuer = snapshot.token_issuer
         self.context.client_info = snapshot.client_info
         self.context.oauth_metadata = snapshot.oauth_metadata
+        self.context.auth_server_url = snapshot.oauth_issuer
 
     async def _reload_after_lost_claim(self, lease: _RefreshLease) -> bool:
         snapshot = await self._nanobot_storage.get_snapshot()
@@ -600,6 +655,7 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
                 if not cleared:
                     return await self._reload_after_lost_claim(lease)
                 self.context.clear_tokens()
+                self._token_issuer = None
                 if clear_client:
                     self.context.client_info = None
                 return False
@@ -653,14 +709,28 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
         if stored_tokens is None or (
             stored_tokens.access_token,
             stored_tokens.refresh_token,
-        ) != (tokens.access_token, tokens.refresh_token):
+            snapshot.token_issuer,
+        ) != (tokens.access_token, tokens.refresh_token, self._token_issuer):
             await lock.release()
             self._apply_snapshot(snapshot)
             raise _RetryOAuthWithStoredCredentials
+        metadata = self.context.oauth_metadata
+        token_issuer = self._token_issuer
+        oauth_issuer = self.context.auth_server_url
+        if metadata is None or oauth_issuer is None or token_issuer != _normalize_issuer(oauth_issuer):
+            try:
+                await self._nanobot_storage.clear_tokens()
+            finally:
+                await lock.release()
+            self.context.clear_tokens()
+            self._token_issuer = None
+            raise _RetryOAuthWithStoredCredentials
+        assert token_issuer is not None
         lease = _RefreshLease(
             lock=lock,
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
+            token_issuer=token_issuer,
         )
         self._refresh_claim.set(lease)
         self._refresh_attempted.set(True)
@@ -672,10 +742,22 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
 
     async def _perform_authorization(self) -> httpx.Request:
         metadata = self.context.oauth_metadata
+        oauth_issuer: str | None = None
         if metadata is not None:
-            await self._nanobot_storage.set_oauth_metadata(metadata)
-        if self._refresh_after_discovery.get():
+            oauth_issuer = _normalize_issuer(self.context.auth_server_url or str(metadata.issuer))
+            await self._nanobot_storage.set_oauth_metadata(metadata, issuer=oauth_issuer)
+        if (
+            self._refresh_after_discovery.get()
+            and metadata is not None
+            and oauth_issuer == self._token_issuer
+        ):
             raise _RetryOAuthWithDiscoveredMetadata
+        if self._refresh_after_discovery.get():
+            await self._nanobot_storage.clear_tokens_and_client()
+            self.context.clear_tokens()
+            self.context.client_info = None
+            self._token_issuer = None
+            raise _RetryOAuthWithStoredCredentials
         return await super()._perform_authorization()
 
     async def async_auth_flow(
