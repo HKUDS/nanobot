@@ -37,9 +37,8 @@ if TYPE_CHECKING:
         wait=BooleanSchema(
             description=(
                 "Wait for the subagent and return its result directly. Use this for a "
-                "blocking consultation that must inform the current turn. Issue independent "
-                "consultations together so they can run concurrently. Defaults to false for "
-                "background execution."
+                "blocking consultation that must inform the current turn. Defaults to "
+                "false for background execution."
             ),
             default=False,
         ),
@@ -69,8 +68,7 @@ class SpawnTool(Tool):
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "Set wait=true for a consultation whose result must inform the current turn. "
-            "Issue independent consultations together so they can run concurrently. "
-            "Background results report back automatically; do not poll for completion. "
+            "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
