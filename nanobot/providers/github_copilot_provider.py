@@ -255,6 +255,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _attempt_transport: str | None = None,
     ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat(
@@ -266,6 +267,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             reasoning_effort=reasoning_effort,
             tool_choice=tool_choice,
             provider_context=provider_context,
+            _attempt_transport=_attempt_transport,
         )
 
     async def chat_stream(
@@ -281,6 +283,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _attempt_transport: str | None = None,
     ) -> LLMResponse:
         await self._refresh_client_api_key()
         return await super().chat_stream(
@@ -295,4 +298,5 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
             provider_context=provider_context,
+            _attempt_transport=_attempt_transport,
         )

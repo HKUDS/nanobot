@@ -896,6 +896,83 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
 
 
 @pytest.mark.asyncio
+async def test_codex_attempt_route_exposes_native_compaction_fallback(
+    monkeypatch,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state_provider = provider._responses_state_provider()
+    state = build_responses_state(
+        provider=state_provider,
+        model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old"}],
+        output_items=[{"type": "reasoning", "encrypted_content": "opaque"}],
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
+    )
+    bodies: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        **kwargs,
+    ):
+        _ = url, headers, verify, kwargs
+        bodies.append(body)
+        if body["input"][-1].get("type") == "compaction_trigger":
+            raise _CodexHTTPError(
+                "HTTP 400: Codex API request failed",
+                status_code=400,
+                compaction_unsupported=True,
+            )
+        return provider_base.LLMResponse(content="done")
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex",
+        fake_request,
+    )
+    provider_context = provider_base.ProviderCallContext(
+        conversation_state=state.with_pending_messages([
+            {"role": "user", "content": "new"},
+        ]),
+        context_window_tokens=100,
+    )
+    route = provider.create_attempt_route(
+        model="openai-codex/gpt-5.6-sol",
+        generation=provider_base.GenerationSettings(max_tokens=5),
+        context_window_tokens=100,
+        provider_context=provider_context,
+        retry_mode="standard",
+    )
+    native_attempt = await route.start()
+    assert isinstance(native_attempt, provider_base.ProviderAttempt)
+
+    first_response = await provider.chat_with_retry(
+        [{"role": "user", "content": "new"}],
+        max_tokens=5,
+        provider_context=native_attempt.provider_context,
+        _provider_attempt=native_attempt,
+    )
+    local_fit_attempt = await route.advance(first_response, streamed=False)
+    assert isinstance(local_fit_attempt, provider_base.ProviderAttempt)
+    final_response = await provider.chat_with_retry(
+        [{"role": "user", "content": "new"}],
+        max_tokens=5,
+        provider_context=local_fit_attempt.provider_context,
+        _provider_attempt=local_fit_attempt,
+    )
+
+    assert first_response.error_kind == "native_compaction_fallback"
+    assert local_fit_attempt.native_compaction is False
+    assert final_response.content == "done"
+    assert len(bodies) == 2
+    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
+    assert bodies[1]["input"][-1] != {"type": "compaction_trigger"}
+    assert provider.supports_native_compaction() is False
+
+
+@pytest.mark.asyncio
 async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
     def fake_token(**_kwargs):
         return SimpleNamespace(account_id="acct", access="token")

@@ -27,8 +27,10 @@ from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import (
+    NATIVE_COMPACTION_FALLBACK_ERROR_KIND,
     LLMProvider,
     LLMResponse,
+    ProviderAttempt,
     ProviderCallContext,
     ProviderConversationState,
 )
@@ -176,6 +178,17 @@ class AzureOpenAIProvider(LLMProvider):
         _ = model
         return self._native_compaction_available
 
+    def mark_native_compaction_unsupported(
+        self,
+        status_code: int | None = None,
+    ) -> None:
+        self._native_compaction_available = False
+        logger.warning(
+            "Azure Responses server compaction unsupported; disabled for this provider "
+            "instance (status={})",
+            status_code,
+        )
+
     def _build_body(
         self,
         messages: list[dict[str, Any]],
@@ -247,23 +260,23 @@ class AzureOpenAIProvider(LLMProvider):
     async def _create_response_with_compaction_fallback(
         self,
         body: dict[str, Any],
+        *,
+        allow_fallback: bool = True,
     ) -> Any:
         """Retry once without server compaction when Azure rejects the option."""
         try:
             return cast(Any, await self._client.responses.create(**body))
         except Exception as exc:
             if (
-                "context_management" not in body
+                not allow_fallback
+                or "context_management" not in body
                 or not is_compaction_compatibility_error(exc)
             ):
                 raise
-            self._native_compaction_available = False
-            body.pop("context_management", None)
-            logger.warning(
-                "Azure Responses server compaction unsupported; disabled for this provider "
-                "instance (status={})",
-                getattr(exc, "status_code", None),
+            self.mark_native_compaction_unsupported(
+                getattr(exc, "status_code", None)
             )
+            body.pop("context_management", None)
             return cast(Any, await self._client.responses.create(**body))
 
     @staticmethod
@@ -345,6 +358,7 @@ class AzureOpenAIProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _allow_compaction_fallback: bool = True,
     ) -> LLMResponse:
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
@@ -352,7 +366,10 @@ class AzureOpenAIProvider(LLMProvider):
             provider_context,
         )
         try:
-            response = await self._create_response_with_compaction_fallback(body)
+            response = await self._create_response_with_compaction_fallback(
+                body,
+                allow_fallback=_allow_compaction_fallback,
+            )
             return parse_response_output(
                 response,
                 state_provider=self._responses_state_provider(),
@@ -360,7 +377,27 @@ class AzureOpenAIProvider(LLMProvider):
                 state_input_items=cast(list[dict[str, Any]], body["input"]),
             )
         except Exception as e:
-            return self._handle_error(e)
+            response = self._handle_error(e)
+            if (
+                not _allow_compaction_fallback
+                and "context_management" in body
+                and is_compaction_compatibility_error(e)
+            ):
+                response.error_kind = NATIVE_COMPACTION_FALLBACK_ERROR_KIND
+            return response
+
+    async def chat_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
+            _allow_compaction_fallback=False,
+        )
 
     async def chat_stream(
         self,
@@ -375,6 +412,7 @@ class AzureOpenAIProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _allow_compaction_fallback: bool = True,
     ) -> LLMResponse:
         _ = on_thinking_delta
         body = self._build_body(
@@ -385,7 +423,10 @@ class AzureOpenAIProvider(LLMProvider):
         body["stream"] = True
 
         try:
-            stream = await self._create_response_with_compaction_fallback(body)
+            stream = await self._create_response_with_compaction_fallback(
+                body,
+                allow_fallback=_allow_compaction_fallback,
+            )
             capture = ResponsesStreamCapture()
             content, tool_calls, finish_reason, usage, reasoning_content = (
                 await consume_sdk_stream(
@@ -412,7 +453,27 @@ class AzureOpenAIProvider(LLMProvider):
                 )
             return result
         except Exception as e:
-            return self._handle_error(e)
+            response = self._handle_error(e)
+            if (
+                not _allow_compaction_fallback
+                and "context_management" in body
+                and is_compaction_compatibility_error(e)
+            ):
+                response.error_kind = NATIVE_COMPACTION_FALLBACK_ERROR_KIND
+            return response
+
+    async def chat_stream_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
+            _allow_compaction_fallback=False,
+        )
 
     def get_default_model(self) -> str:
         return self.default_model

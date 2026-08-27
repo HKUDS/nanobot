@@ -14,7 +14,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 import json_repair
 from loguru import logger
@@ -28,6 +28,12 @@ STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
+ROUTE_FALLBACK_ERROR_KIND = "route_fallback"
+NATIVE_COMPACTION_FALLBACK_ERROR_KIND = "native_compaction_fallback"
+_ATTEMPT_ROUTE_ERROR_KINDS = frozenset({
+    ROUTE_FALLBACK_ERROR_KIND,
+    NATIVE_COMPACTION_FALLBACK_ERROR_KIND,
+})
 
 RetryEventCallback = Callable[[str], Awaitable[None]]
 LLMCallObserver = Callable[["LLMCallRecord"], None]
@@ -597,6 +603,78 @@ class GenerationSettings:
     reasoning_effort: str | None = None
 
 
+ProviderContinuation = Literal["resume", "rebuild"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderAttempt:
+    """One fully resolved provider call.
+
+    Routing wrappers may choose another provider, model, or transport after an
+    attempt fails.  Those choices are represented by a new value instead of
+    mutating the request that was already prepared for this attempt.
+    """
+
+    provider: LLMProvider
+    model: str
+    transport: str
+    generation: GenerationSettings
+    context_window_tokens: int | None
+    provider_context: ProviderCallContext | None = field(default=None, repr=False)
+    continuation: ProviderContinuation = "rebuild"
+    native_compaction: bool = False
+    retry_mode: str = "standard"
+    on_retry_wait: RetryEventCallback | None = field(default=None, repr=False)
+    on_retry_exhausted: RetryEventCallback | None = field(default=None, repr=False)
+
+
+class ProviderAttemptRoute(Protocol):
+    """Advance one request through concrete provider attempts."""
+
+    async def start(self) -> ProviderAttempt | LLMResponse: ...
+
+    async def advance(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse: ...
+
+
+class _DefaultProviderAttemptRoute:
+    def __init__(
+        self,
+        attempt: ProviderAttempt,
+        native_compaction_fallback: ProviderAttempt | None,
+    ) -> None:
+        self._attempt = attempt
+        self._native_compaction_fallback = native_compaction_fallback
+
+    async def start(self) -> ProviderAttempt | LLMResponse:
+        return self._attempt
+
+    async def advance(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse:
+        if (
+            not streamed
+            and self._attempt.native_compaction
+            and self._native_compaction_fallback is not None
+            and response.finish_reason == "error"
+            and response.error_kind == NATIVE_COMPACTION_FALLBACK_ERROR_KIND
+        ):
+            self._attempt.provider.mark_native_compaction_unsupported(
+                response.error_status_code
+            )
+            self._attempt = self._native_compaction_fallback
+            self._native_compaction_fallback = None
+            return self._attempt
+        return response
+
+
 _SYNTHETIC_USER_CONTENT = "(conversation continued)"
 
 
@@ -789,6 +867,112 @@ class LLMProvider(ABC):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Whether requests may include provider-native context compaction."""
         return False
+
+    def mark_native_compaction_unsupported(
+        self,
+        status_code: int | None = None,
+    ) -> None:
+        """Remember that native compaction failed for future attempt routes."""
+        _ = status_code
+
+    def _build_provider_attempt(
+        self,
+        *,
+        model: str | None,
+        generation: GenerationSettings,
+        context_window_tokens: int | None,
+        provider_context: ProviderCallContext | None,
+        transport: str = "default",
+        native_compaction: bool | None = None,
+        allow_continuation: bool = True,
+        retry_mode: str = "standard",
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+    ) -> ProviderAttempt:
+        """Resolve immutable execution values for one concrete call."""
+        resolved_model = model or self.get_default_model()
+        supports_native = (
+            self.supports_native_compaction(resolved_model)
+            if native_compaction is None
+            else native_compaction
+        )
+        source_context = provider_context
+        state = source_context.conversation_state if source_context is not None else None
+        if (
+            not allow_continuation
+            or state is None
+            or not self.can_resume_conversation_state(state, resolved_model)
+        ):
+            state = None
+        attempt_context_window = context_window_tokens if supports_native else None
+        session_id = source_context.session_id if source_context is not None else None
+        attempt_context = (
+            ProviderCallContext(
+                conversation_state=state,
+                context_window_tokens=attempt_context_window,
+                session_id=session_id,
+            )
+            if source_context is not None
+            else None
+        )
+        return ProviderAttempt(
+            provider=self,
+            model=resolved_model,
+            transport=transport,
+            generation=generation,
+            context_window_tokens=context_window_tokens,
+            provider_context=attempt_context,
+            continuation="resume" if state is not None else "rebuild",
+            native_compaction=supports_native,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+        )
+
+    def create_attempt_route(
+        self,
+        *,
+        model: str | None,
+        generation: GenerationSettings,
+        context_window_tokens: int | None,
+        provider_context: ProviderCallContext | None,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> ProviderAttemptRoute:
+        """Return the explicit route for one provider request.
+
+        Ordinary providers have one attempt. Routing providers override this
+        method to yield a new immutable attempt when a real fallback occurs.
+        """
+        _ = on_stream_recover
+        supports_native = self.supports_native_compaction(model)
+        attempt = self._build_provider_attempt(
+            model=model,
+            generation=generation,
+            context_window_tokens=context_window_tokens,
+            provider_context=provider_context,
+            native_compaction=supports_native,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+        )
+        native_compaction_fallback = (
+            self._build_provider_attempt(
+                model=model,
+                generation=generation,
+                context_window_tokens=context_window_tokens,
+                provider_context=provider_context,
+                native_compaction=False,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+                on_retry_exhausted=on_retry_exhausted,
+            )
+            if supports_native
+            else None
+        )
+        return _DefaultProviderAttemptRoute(attempt, native_compaction_fallback)
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1166,8 +1350,21 @@ class LLMProvider(ABC):
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         try:
+            provider_attempt = kwargs.pop("_provider_attempt", None)
             provider_context = kwargs.pop("provider_context", None)
-            if isinstance(provider_context, ProviderCallContext):
+            if isinstance(provider_attempt, ProviderAttempt):
+                if provider_attempt.provider is not self:
+                    raise ValueError("provider attempt does not belong to this provider")
+                response = await self.chat_attempt(
+                    attempt=provider_attempt,
+                    provider_context=(
+                        provider_context
+                        if isinstance(provider_context, ProviderCallContext)
+                        else None
+                    ),
+                    **kwargs,
+                )
+            elif isinstance(provider_context, ProviderCallContext):
                 response = await self.chat_with_context(
                     provider_context=provider_context,
                     **kwargs,
@@ -1246,6 +1443,26 @@ class LLMProvider(ABC):
         _ = provider_context
         return await self.chat(**kwargs)
 
+    async def chat_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Execute one resolved non-streaming attempt.
+
+        Providers with more than one wire transport override this hook. Ordinary
+        providers retain the existing chat/context behavior.
+        """
+        _ = attempt
+        if provider_context is not None:
+            return await self.chat_with_context(
+                provider_context=provider_context,
+                **kwargs,
+            )
+        return await self.chat(**kwargs)
+
     async def chat_stream_with_context(
         self,
         *,
@@ -1254,6 +1471,22 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """Streaming continuation hook with a context-free default."""
         _ = provider_context
+        return await self.chat_stream(**kwargs)
+
+    async def chat_stream_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Execute one resolved streaming attempt."""
+        _ = attempt
+        if provider_context is not None:
+            return await self.chat_stream_with_context(
+                provider_context=provider_context,
+                **kwargs,
+            )
         return await self.chat_stream(**kwargs)
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
@@ -1308,8 +1541,21 @@ class LLMProvider(ABC):
             return response
 
         try:
+            provider_attempt = kwargs.pop("_provider_attempt", None)
             provider_context = kwargs.pop("provider_context", None)
-            if isinstance(provider_context, ProviderCallContext):
+            if isinstance(provider_attempt, ProviderAttempt):
+                if provider_attempt.provider is not self:
+                    raise ValueError("provider attempt does not belong to this provider")
+                response = await self.chat_stream_attempt(
+                    attempt=provider_attempt,
+                    provider_context=(
+                        provider_context
+                        if isinstance(provider_context, ProviderCallContext)
+                        else None
+                    ),
+                    **kwargs,
+                )
+            elif isinstance(provider_context, ProviderCallContext):
                 response = await self.chat_stream_with_context(
                     provider_context=provider_context,
                     **kwargs,
@@ -1356,6 +1602,7 @@ class LLMProvider(ABC):
         on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
         on_retry_exhausted: RetryEventCallback | None = None,
+        _provider_attempt: ProviderAttempt | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -1390,6 +1637,8 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
+        if _provider_attempt is not None:
+            kw["_provider_attempt"] = _provider_attempt
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
         return await self._run_chat_with_retry(
@@ -1416,6 +1665,7 @@ class LLMProvider(ABC):
         on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
         on_retry_exhausted: RetryEventCallback | None = None,
+        _provider_attempt: ProviderAttempt | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -1440,6 +1690,8 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
+        if _provider_attempt is not None:
+            kw["_provider_attempt"] = _provider_attempt
         return await self._run_chat_with_retry(
             kw,
             messages,
@@ -1591,6 +1843,8 @@ class LLMProvider(ABC):
             attempt += 1
             response = await call(**kw)
             if response.finish_reason != "error":
+                return response
+            if response.error_kind in _ATTEMPT_ROUTE_ERROR_KINDS:
                 return response
             last_response = response
             if should_retry_guard is not None and not should_retry_guard():

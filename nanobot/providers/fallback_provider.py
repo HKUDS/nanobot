@@ -1,21 +1,24 @@
 """Provider wrapper that transparently fails over to fallback models on error."""
 
-# pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
+# pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false, reportPrivateUsage=false
 
 from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.providers.base import (
+    RETRY_AFTER_BUFFER,
     GenerationSettings,
     LLMCallObserver,
     LLMProvider,
     LLMResponse,
+    ProviderAttempt,
+    ProviderAttemptRoute,
     ProviderCallContext,
     ProviderConversationState,
     RetryEventCallback,
@@ -95,6 +98,367 @@ _FALLBACK_ERROR_TOKENS = (
 FallbackModelObserver = Callable[[str], Awaitable[None]]
 
 
+@dataclass(frozen=True, slots=True)
+class _FallbackCandidate:
+    provider: LLMProvider
+    model: str
+    generation: GenerationSettings
+    context_window_tokens: int | None
+    fallback_index: int | None
+
+
+class _FallbackAttemptRoute:
+    def __init__(
+        self,
+        owner: FallbackProvider,
+        *,
+        model: str | None,
+        generation: GenerationSettings,
+        context_window_tokens: int | None,
+        provider_context: ProviderCallContext | None,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None,
+        fallback_stream_recovery: bool,
+    ) -> None:
+        self._owner = owner
+        self._primary_model = model or owner._primary.get_default_model()
+        self._primary_generation = generation
+        self._request_context_window_tokens = context_window_tokens
+        self._provider_context = provider_context
+        self._on_retry_wait = on_retry_wait
+        self._on_retry_exhausted = on_retry_exhausted
+        self._on_stream_recover = on_stream_recover
+        self._fallback_stream_recovery = fallback_stream_recovery
+        self._position = -1 if owner._primary_available() else 0
+        self._primary_was_attempted = self._position == -1
+        self._primary_error = "unknown error"
+        self._last_response: LLMResponse | None = None
+        self._last_exhausted_message: str | None = None
+        self._candidate: _FallbackCandidate | None = None
+        self._child_route: ProviderAttemptRoute | None = None
+        self._recover_before_next_attempt = False
+
+    async def start(self) -> ProviderAttempt | LLMResponse:
+        if not self._primary_was_attempted:
+            logger.debug(
+                "Primary model '{}' circuit open; skipping",
+                self._primary_model,
+            )
+        return await self._start_candidate()
+
+    async def advance(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse:
+        if self._child_route is None:
+            return response
+        step = await self._child_route.advance(response, streamed=streamed)
+        if isinstance(step, ProviderAttempt):
+            return step
+        return await self._finish_candidate(step, streamed=streamed)
+
+    async def _capture_exhaustion(self, message: str) -> None:
+        self._last_exhausted_message = message
+
+    def _candidate_for_position(self) -> _FallbackCandidate | None:
+        if self._position == -1:
+            return _FallbackCandidate(
+                provider=self._owner._primary,
+                model=self._primary_model,
+                generation=self._primary_generation,
+                context_window_tokens=(
+                    self._owner._primary_context_window_tokens
+                    if self._owner._primary_context_window_tokens is not None
+                    else self._request_context_window_tokens
+                ),
+                fallback_index=None,
+            )
+        if self._position >= len(self._owner._fallback_presets):
+            return None
+
+        preset = self._owner._fallback_presets[self._position]
+        model = preset.model
+        try:
+            provider = self._owner._provider_factory(preset)
+            provider.set_llm_call_observer(self._owner._llm_call_observer)
+        except Exception as exc:
+            logger.warning(
+                "Failed to create provider for fallback '{}': {}",
+                model,
+                exc,
+            )
+            return None
+        return _FallbackCandidate(
+            provider=provider,
+            model=model,
+            generation=GenerationSettings(
+                max_tokens=preset.max_tokens,
+                temperature=preset.temperature,
+                reasoning_effort=preset.reasoning_effort,
+            ),
+            context_window_tokens=preset.context_window_tokens,
+            fallback_index=self._position,
+        )
+
+    async def _start_candidate(self) -> ProviderAttempt | LLMResponse:
+        while self._position < len(self._owner._fallback_presets):
+            candidate = self._candidate_for_position()
+            if candidate is None:
+                self._position += 1
+                continue
+            self._candidate = candidate
+            self._last_exhausted_message = None
+            if candidate.fallback_index is not None:
+                self._log_fallback_start(candidate)
+            self._child_route = candidate.provider.create_attempt_route(
+                model=candidate.model,
+                generation=candidate.generation,
+                context_window_tokens=candidate.context_window_tokens,
+                provider_context=self._provider_context,
+                retry_mode="standard",
+                on_retry_wait=self._on_retry_wait,
+                on_retry_exhausted=self._capture_exhaustion,
+                on_stream_recover=self._on_stream_recover,
+            )
+            step = await self._child_route.start()
+            if isinstance(step, ProviderAttempt):
+                if self._recover_before_next_attempt:
+                    self._recover_before_next_attempt = False
+                    if self._on_stream_recover is not None:
+                        await self._on_stream_recover()
+                return step
+            return await self._finish_candidate(step, streamed=False)
+        return await self._finish_route()
+
+    def _log_fallback_start(self, candidate: _FallbackCandidate) -> None:
+        index = candidate.fallback_index
+        if index is None:
+            return
+        if index == 0 and not self._primary_was_attempted:
+            logger.info(
+                "Primary model '{}' circuit open, trying fallback '{}'",
+                self._primary_model,
+                candidate.model,
+            )
+        elif index == 0:
+            logger.info(
+                "Primary model '{}' failed: {}; trying fallback '{}'",
+                self._primary_model,
+                self._primary_error,
+                candidate.model,
+            )
+        else:
+            logger.info(
+                "Fallback '{}' also failed, trying next fallback '{}'",
+                self._owner._fallback_presets[index - 1].model,
+                candidate.model,
+            )
+
+    async def _finish_candidate(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse:
+        candidate = self._candidate
+        if candidate is None:
+            return response
+        if response.finish_reason != "error":
+            if candidate.fallback_index is None:
+                self._owner._primary_failures = 0
+                self._owner._primary_tripped_at = None
+            else:
+                await self._owner._notify_fallback_model(candidate.model)
+                logger.info(
+                    "Fallback '{}' succeeded after primary '{}' failed",
+                    candidate.model,
+                    self._primary_model,
+                )
+            return response
+
+        self._last_response = response
+        if streamed:
+            if (response.error_kind or "").lower() != "timeout":
+                logger.warning(
+                    "Model error but content already streamed; skipping failover"
+                )
+                return response
+            if (
+                candidate.fallback_index is not None
+                and not self._fallback_stream_recovery
+            ):
+                return response
+            logger.warning(
+                "Model '{}' stream stalled after content was emitted; "
+                "starting a new stream segment and trying next fallback",
+                candidate.model,
+            )
+            self._recover_before_next_attempt = True
+
+        if candidate.fallback_index is None:
+            self._primary_error = (response.content or self._primary_error)[:120]
+            if not self._owner._should_fallback(response):
+                logger.warning(
+                    "Primary model '{}' returned non-fallbackable error: {}",
+                    self._primary_model,
+                    (response.content or "")[:120],
+                )
+                return response
+            self._owner._primary_failures += 1
+            if self._owner._primary_failures >= _PRIMARY_FAILURE_THRESHOLD:
+                self._owner._primary_tripped_at = time.monotonic()
+                logger.warning(
+                    "Primary model '{}' circuit open after {} consecutive failures",
+                    self._primary_model,
+                    self._owner._primary_failures,
+                )
+        else:
+            logger.warning(
+                "Fallback '{}' also failed: {}",
+                candidate.model,
+                (response.content or "")[:120],
+            )
+
+        self._position = 0 if candidate.fallback_index is None else candidate.fallback_index + 1
+        return await self._start_candidate()
+
+    async def _finish_route(self) -> LLMResponse:
+        logger.warning(
+            "All {} fallback model(s) failed",
+            len(self._owner._fallback_presets),
+        )
+        if self._last_response is not None:
+            if self._last_exhausted_message and self._on_retry_exhausted:
+                await self._on_retry_exhausted(self._last_exhausted_message)
+            return replace(
+                self._last_response,
+                preserve_provider_state_on_error=True,
+            )
+        retry_after_s = (
+            max(
+                0.1,
+                _PRIMARY_COOLDOWN_S
+                - (time.monotonic() - self._owner._primary_tripped_at),
+            )
+            if self._owner._primary_tripped_at is not None
+            else None
+        )
+        return LLMResponse(
+            content=(
+                f"Primary model '{self._primary_model}' circuit open "
+                "and no fallbacks available"
+            ),
+            finish_reason="error",
+            preserve_provider_state_on_error=True,
+            error_retry_after_s=retry_after_s,
+            error_should_retry=True,
+        )
+
+
+class _PersistentFallbackRoute:
+    """Repeat the full fallback chain without mutating an emitted attempt."""
+
+    def __init__(
+        self,
+        *,
+        owner: FallbackProvider,
+        route_factory: Callable[[], ProviderAttemptRoute],
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        self._owner = owner
+        self._route_factory = route_factory
+        self._on_retry_wait = on_retry_wait
+        self._on_retry_exhausted = on_retry_exhausted
+        self._on_stream_recover = on_stream_recover
+        self._route = route_factory()
+        self._attempt = 0
+        self._last_error_key: str | None = None
+        self._identical_error_count = 0
+
+    async def start(self) -> ProviderAttempt | LLMResponse:
+        step = await self._route.start()
+        if isinstance(step, ProviderAttempt):
+            return step
+        return await self._retry_or_finish(step, streamed=False)
+
+    async def advance(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse:
+        step = await self._route.advance(response, streamed=streamed)
+        if isinstance(step, ProviderAttempt):
+            return step
+        return await self._retry_or_finish(step, streamed=streamed)
+
+    async def _retry_or_finish(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse:
+        if response.finish_reason != "error":
+            return response
+        if streamed:
+            if (response.error_kind or "").lower() != "timeout":
+                return response
+            if self._on_stream_recover is not None:
+                await self._on_stream_recover()
+
+        self._attempt += 1
+        error_key = ((response.content or "").strip().lower() or None)
+        if error_key and error_key == self._last_error_key:
+            self._identical_error_count += 1
+        else:
+            self._last_error_key = error_key
+            self._identical_error_count = 1 if error_key else 0
+
+        if not self._owner.is_transient_response(response):
+            return response
+        if self._identical_error_count >= self._owner._PERSISTENT_IDENTICAL_ERROR_LIMIT:
+            logger.warning(
+                "Stopping persistent retry after {} identical transient errors: {}",
+                self._identical_error_count,
+                (response.content or "")[:120].lower(),
+            )
+            if self._on_retry_exhausted is not None:
+                await self._on_retry_exhausted(
+                    "Persistent retry stopped after "
+                    f"{self._identical_error_count} identical errors."
+                )
+            return response
+
+        delays = list(self._owner._CHAT_RETRY_DELAYS)
+        retry_after = self._owner._extract_retry_after_from_response(response)
+        base_delay = delays[min(self._attempt - 1, len(delays) - 1)]
+        delay = retry_after + RETRY_AFTER_BUFFER if retry_after else base_delay
+        delay = min(delay, self._owner._PERSISTENT_MAX_DELAY)
+        logger.warning(
+            "LLM transient error (attempt {}{}), retrying in {}s: {}",
+            self._attempt,
+            "+" if self._attempt > len(delays) else f"/{len(delays)}",
+            int(round(delay)),
+            (response.content or "")[:120].lower(),
+        )
+        await self._owner._sleep_with_heartbeat(
+            delay,
+            attempt=self._attempt,
+            persistent=True,
+            on_retry_wait=self._on_retry_wait,
+        )
+        self._route = self._route_factory()
+        next_step = await self._route.start()
+        if isinstance(next_step, ProviderAttempt):
+            return next_step
+        return await self._retry_or_finish(next_step, streamed=False)
+
+
 class FallbackProvider(LLMProvider):
     """Wrap a primary provider and transparently failover to fallback models.
 
@@ -167,22 +531,62 @@ class FallbackProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         return self._primary.supports_native_compaction(model)
 
-    def _primary_call_context(
+    def create_attempt_route(
         self,
-        provider_context: ProviderCallContext,
+        *,
         model: str | None,
-    ) -> ProviderCallContext:
-        context_window_tokens = (
-            self._primary_context_window_tokens
-            if self._primary_context_window_tokens is not None
-            else provider_context.context_window_tokens
-        )
-        if not self._primary.supports_native_compaction(model):
-            context_window_tokens = None
-        return ProviderCallContext(
-            conversation_state=provider_context.conversation_state,
-            context_window_tokens=context_window_tokens,
-            session_id=provider_context.session_id,
+        generation: GenerationSettings,
+        context_window_tokens: int | None,
+        provider_context: ProviderCallContext | None,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        _fallback_stream_recovery: bool | None = None,
+    ) -> ProviderAttemptRoute:
+        if not self._has_fallbacks:
+            return self._primary.create_attempt_route(
+                model=model,
+                generation=generation,
+                context_window_tokens=(
+                    self._primary_context_window_tokens
+                    if self._primary_context_window_tokens is not None
+                    else context_window_tokens
+                ),
+                provider_context=provider_context,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+                on_retry_exhausted=on_retry_exhausted,
+                on_stream_recover=on_stream_recover,
+            )
+
+        def _route(
+            terminal_callback: RetryEventCallback | None,
+        ) -> ProviderAttemptRoute:
+            return _FallbackAttemptRoute(
+                self,
+                model=model,
+                generation=generation,
+                context_window_tokens=context_window_tokens,
+                provider_context=provider_context,
+                on_retry_wait=on_retry_wait,
+                on_retry_exhausted=terminal_callback,
+                on_stream_recover=on_stream_recover,
+                fallback_stream_recovery=(
+                    on_stream_recover is not None
+                    if _fallback_stream_recovery is None
+                    else _fallback_stream_recovery
+                ),
+            )
+
+        if retry_mode != "persistent":
+            return _route(on_retry_exhausted)
+        return _PersistentFallbackRoute(
+            owner=self,
+            route_factory=lambda: _route(None),
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            on_stream_recover=on_stream_recover,
         )
 
     def _primary_available(self) -> bool:
@@ -194,11 +598,138 @@ class FallbackProvider(LLMProvider):
             return True
         return False
 
+    def _generation_for_route(self, kwargs: dict[str, Any]) -> GenerationSettings:
+        defaults = self.generation
+        max_tokens = kwargs.get("max_tokens")
+        temperature = kwargs.get("temperature")
+        reasoning_effort = kwargs.get("reasoning_effort", defaults.reasoning_effort)
+        return GenerationSettings(
+            max_tokens=max_tokens if isinstance(max_tokens, int) else defaults.max_tokens,
+            temperature=(
+                temperature
+                if isinstance(temperature, (int, float))
+                else defaults.temperature
+            ),
+            reasoning_effort=(
+                reasoning_effort if isinstance(reasoning_effort, str) else None
+            ),
+        )
+
+    async def _execute_attempt_route(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        stream: bool,
+        retry: bool,
+        retry_mode: str = "standard",
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Execute direct and retrying entry points through one fallback policy."""
+        source_kwargs = dict(kwargs)
+        provider_context = source_kwargs.pop("provider_context", None)
+        source_kwargs.pop("_provider_attempt", None)
+        source_kwargs.pop("on_stream_recover", None)
+        typed_context = (
+            provider_context
+            if isinstance(provider_context, ProviderCallContext)
+            else None
+        )
+        attempt_streamed = False
+        suppress_deltas = False
+
+        async def _recover_stream() -> None:
+            nonlocal attempt_streamed, suppress_deltas
+            attempt_streamed = False
+            if on_stream_recover is not None:
+                await on_stream_recover()
+            else:
+                suppress_deltas = True
+
+        route = self.create_attempt_route(
+            model=source_kwargs.get("model"),
+            generation=self._generation_for_route(source_kwargs),
+            context_window_tokens=(
+                typed_context.context_window_tokens
+                if typed_context is not None
+                else None
+            ),
+            provider_context=typed_context,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            on_stream_recover=_recover_stream if stream else None,
+            _fallback_stream_recovery=on_stream_recover is not None,
+        )
+        step = await route.start()
+        while isinstance(step, ProviderAttempt):
+            attempt = step
+            attempt_streamed = False
+            original_delta = (
+                None if suppress_deltas else source_kwargs.get("on_content_delta")
+            )
+            delta_callback = cast(
+                Callable[[str], Awaitable[None]] | None,
+                original_delta if callable(original_delta) else None,
+            )
+
+            async def _tracking_delta(text: str) -> None:
+                nonlocal attempt_streamed
+                if text:
+                    attempt_streamed = True
+                if delta_callback is not None:
+                    await delta_callback(text)
+
+            call_kwargs: dict[str, Any] = {
+                **source_kwargs,
+                "model": attempt.model,
+                "max_tokens": attempt.generation.max_tokens,
+                "temperature": attempt.generation.temperature,
+            }
+            if attempt.generation.reasoning_effort is None:
+                call_kwargs.pop("reasoning_effort", None)
+            else:
+                call_kwargs["reasoning_effort"] = attempt.generation.reasoning_effort
+            if stream:
+                call_kwargs["on_content_delta"] = (
+                    _tracking_delta if original_delta is not None else None
+                )
+
+            if retry:
+                call_kwargs.update({
+                    "retry_mode": attempt.retry_mode,
+                    "on_retry_wait": attempt.on_retry_wait,
+                    "on_retry_exhausted": attempt.on_retry_exhausted,
+                    "provider_context": attempt.provider_context,
+                    "_provider_attempt": attempt,
+                })
+                if stream:
+                    if on_stream_recover is not None:
+                        call_kwargs["on_stream_recover"] = _recover_stream
+                    response = await attempt.provider.chat_stream_with_retry(**call_kwargs)
+                else:
+                    response = await attempt.provider.chat_with_retry(**call_kwargs)
+            elif stream:
+                response = await attempt.provider.chat_stream_attempt(
+                    attempt=attempt,
+                    provider_context=attempt.provider_context,
+                    **call_kwargs,
+                )
+            else:
+                response = await attempt.provider.chat_attempt(
+                    attempt=attempt,
+                    provider_context=attempt.provider_context,
+                    **call_kwargs,
+                )
+            step = await route.advance(response, streamed=attempt_streamed)
+        return step
+
     async def chat(self, **kwargs: Any) -> LLMResponse:
-        if not self._has_fallbacks:
-            return await self._primary.chat(**kwargs)
-        return await self._try_with_fallback(
-            lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
+        return await self._execute_attempt_route(
+            kwargs,
+            stream=False,
+            retry=False,
         )
 
     async def _run_chat_with_retry(
@@ -213,66 +744,15 @@ class FallbackProvider(LLMProvider):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Retry each provider before advancing through the fallback chain."""
-        call_kwargs = dict(kw)
-        provider_context = call_kwargs.get("provider_context")
-        if isinstance(provider_context, ProviderCallContext):
-            call_kwargs["provider_context"] = self._primary_call_context(
-                provider_context,
-                call_kwargs.get("model"),
-            )
-        if not self._has_fallbacks:
-            call_kwargs.update({
-                "retry_mode": retry_mode,
-                "on_retry_wait": on_retry_wait,
-                "on_retry_exhausted": on_retry_exhausted,
-            })
-            if stream:
-                return await self._primary.chat_stream_with_retry(**call_kwargs)
-            return await self._primary.chat_with_retry(**call_kwargs)
-
-        has_streamed: list[bool] | None = None
-        recover_stream = on_stream_recover
-        if stream:
-            streamed = [False]
-            has_streamed = streamed
-            original_delta = call_kwargs.get("on_content_delta")
-
-            async def _tracking_delta(text: str) -> None:
-                if text:
-                    streamed[0] = True
-                if original_delta:
-                    await original_delta(text)
-
-            async def _recover_stream() -> None:
-                streamed[0] = False
-                if on_stream_recover:
-                    await on_stream_recover()
-
-            if original_delta is not None:
-                call_kwargs["on_content_delta"] = _tracking_delta
-            if on_stream_recover is not None:
-                call_kwargs["on_stream_recover"] = _recover_stream
-                recover_stream = _recover_stream
-
-        async def _call_provider(
-            provider: LLMProvider,
-            provider_kwargs: dict[str, Any],
-        ) -> LLMResponse:
-            if stream:
-                return await provider.chat_stream_with_retry(**provider_kwargs)
-            return await provider.chat_with_retry(**provider_kwargs)
-
-        return await self._retry_with_fallback(
-            _call_provider,
-            call_kwargs,
-            original_messages,
+        _ = original_messages, should_retry_guard
+        return await self._execute_attempt_route(
+            kw,
+            stream=stream,
+            retry=True,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
-            has_streamed=has_streamed,
-            on_stream_recover=recover_stream,
-            persistent_retry_guard=should_retry_guard,
+            on_stream_recover=on_stream_recover,
         )
 
     async def chat_with_context(
@@ -281,101 +761,14 @@ class FallbackProvider(LLMProvider):
         provider_context: ProviderCallContext,
         **kwargs: Any,
     ) -> LLMResponse:
-        call_kwargs: dict[str, Any] = dict(kwargs)
-        call_kwargs["provider_context"] = self._primary_call_context(
-            provider_context,
-            kwargs.get("model"),
-        )
-        if not self._has_fallbacks:
-            return await self._primary.chat_with_context(**call_kwargs)
-        return await self._try_with_fallback(
-            lambda p, kw: p.chat_with_context(**kw),
-            call_kwargs,
-            has_streamed=None,
-        )
+        return await self.chat(**kwargs, provider_context=provider_context)
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
         on_stream_recover = kwargs.pop("on_stream_recover", None)
-        if not self._has_fallbacks:
-            return await self._primary.chat_stream(**kwargs)
-
-        has_streamed: list[bool] = [False]
-        original_delta = kwargs.get("on_content_delta")
-
-        async def _tracking_delta(text: str) -> None:
-            if text:
-                has_streamed[0] = True
-            if original_delta:
-                await original_delta(text)
-
-        kwargs["on_content_delta"] = _tracking_delta
-        return await self._try_with_fallback(
-            lambda p, kw: p.chat_stream(**kw),
+        return await self._execute_attempt_route(
             kwargs,
-            has_streamed=has_streamed,
-            on_stream_recover=on_stream_recover,
-        )
-
-    async def _retry_with_fallback(
-        self,
-        call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
-        kwargs: dict[str, Any],
-        original_messages: list[dict[str, Any]],
-        *,
-        retry_mode: str,
-        on_retry_wait: RetryEventCallback | None,
-        on_retry_exhausted: RetryEventCallback | None,
-        has_streamed: list[bool] | None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None,
-        persistent_retry_guard: Callable[[], bool] | None,
-    ) -> LLMResponse:
-        """Retry each candidate, deferring terminal events until the chain fails."""
-
-        async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
-            last_exhausted_message: str | None = None
-
-            async def _capture_exhaustion(message: str) -> None:
-                nonlocal last_exhausted_message
-                last_exhausted_message = message
-
-            async def _call_candidate(
-                provider: LLMProvider,
-                candidate_kwargs: dict[str, Any],
-            ) -> LLMResponse:
-                nonlocal last_exhausted_message
-                last_exhausted_message = None
-                return await call(provider, {
-                    **candidate_kwargs,
-                    "retry_mode": "standard",
-                    "on_retry_wait": on_retry_wait,
-                    "on_retry_exhausted": _capture_exhaustion,
-                })
-
-            response = await self._try_with_fallback(
-                _call_candidate,
-                chain_kwargs,
-                has_streamed=has_streamed,
-                on_stream_recover=on_stream_recover,
-            )
-            if (
-                retry_mode != "persistent"
-                and response.finish_reason == "error"
-                and last_exhausted_message
-                and on_retry_exhausted
-            ):
-                await on_retry_exhausted(last_exhausted_message)
-            return response
-
-        if retry_mode != "persistent":
-            return await _call_chain(**kwargs)
-        return await self._run_with_retry(
-            _call_chain,
-            dict(kwargs),
-            original_messages,
-            retry_mode="persistent",
-            on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted,
-            should_retry_guard=persistent_retry_guard,
+            stream=True,
+            retry=False,
             on_stream_recover=on_stream_recover,
         )
 
@@ -386,211 +779,10 @@ class FallbackProvider(LLMProvider):
         **kwargs: Any,
     ) -> LLMResponse:
         on_stream_recover = kwargs.pop("on_stream_recover", None)
-        call_kwargs: dict[str, Any] = dict(kwargs)
-        call_kwargs["provider_context"] = self._primary_call_context(
-            provider_context,
-            kwargs.get("model"),
-        )
-        if not self._has_fallbacks:
-            return await self._primary.chat_stream_with_context(**call_kwargs)
-
-        has_streamed: list[bool] = [False]
-        original_delta = call_kwargs.get("on_content_delta")
-
-        async def _tracking_delta(text: str) -> None:
-            if text:
-                has_streamed[0] = True
-            if original_delta:
-                await original_delta(text)
-
-        call_kwargs["on_content_delta"] = _tracking_delta
-        return await self._try_with_fallback(
-            lambda p, kw: p.chat_stream_with_context(**kw),
-            call_kwargs,
-            has_streamed=has_streamed,
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
             on_stream_recover=on_stream_recover,
-        )
-
-    async def _try_with_fallback(
-        self,
-        call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
-        kwargs: dict[str, Any],
-        has_streamed: list[bool] | None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
-    ) -> LLMResponse:
-        primary_model = kwargs.get("model") or self._primary.get_default_model()
-        primary_was_attempted = False
-        primary_response: LLMResponse | None = None
-        primary_error = "unknown error"
-        # A primary error eligible for failover did not return a replacement
-        # continuation, so the incoming primary state remains reusable.
-        preserve_primary_state = True
-
-        if self._primary_available():
-            primary_was_attempted = True
-            response = await call(self._primary, kwargs)
-            if response.finish_reason != "error":
-                self._primary_failures = 0
-                self._primary_tripped_at = None
-                return response
-            primary_response = response
-            primary_error = (response.content or primary_error)[:120]
-
-            if has_streamed is not None and has_streamed[0]:
-                is_timeout = (response.error_kind or "").lower() == "timeout"
-                if is_timeout:
-                    logger.warning(
-                        "Primary model '{}' stream stalled after content was emitted; "
-                        "attempting failover anyway",
-                        primary_model,
-                    )
-                    has_streamed[0] = False
-                    if on_stream_recover:
-                        await on_stream_recover()
-                    else:
-                        kwargs["on_content_delta"] = None
-                else:
-                    logger.warning(
-                        "Primary model error but content already streamed; skipping failover"
-                    )
-                    return response
-
-            if not self._should_fallback(response):
-                logger.warning(
-                    "Primary model '{}' returned non-fallbackable error: {}",
-                    primary_model,
-                    (response.content or "")[:120],
-                )
-                return response
-
-            self._primary_failures += 1
-            if self._primary_failures >= _PRIMARY_FAILURE_THRESHOLD:
-                self._primary_tripped_at = time.monotonic()
-                logger.warning(
-                    "Primary model '{}' circuit open after {} consecutive failures",
-                    primary_model, self._primary_failures,
-                )
-        else:
-            logger.debug("Primary model '{}' circuit open; skipping", primary_model)
-
-        last_response = primary_response
-        primary_skipped = not primary_was_attempted
-        for idx, fallback in enumerate(self._fallback_presets):
-            fallback_model = fallback.model
-            if has_streamed is not None and has_streamed[0]:
-                is_timeout = (
-                    last_response is not None
-                    and (last_response.error_kind or "").lower() == "timeout"
-                )
-                if is_timeout and on_stream_recover:
-                    logger.warning(
-                        "Fallback model '{}' stream stalled after content was emitted; "
-                        "starting a new stream segment and trying next fallback",
-                        self._fallback_presets[idx - 1].model if idx > 0 else primary_model,
-                    )
-                    has_streamed[0] = False
-                    await on_stream_recover()
-                else:
-                    break
-            if idx == 0 and primary_skipped:
-                logger.info(
-                    "Primary model '{}' circuit open, trying fallback '{}'",
-                    primary_model, fallback_model,
-                )
-            elif idx == 0:
-                logger.info(
-                    "Primary model '{}' failed: {}; trying fallback '{}'",
-                    primary_model, primary_error, fallback_model,
-                )
-            else:
-                logger.info(
-                    "Fallback '{}' also failed, trying next fallback '{}'",
-                    self._fallback_presets[idx - 1].model, fallback_model,
-                )
-            try:
-                fallback_provider = self._provider_factory(fallback)
-                fallback_provider.set_llm_call_observer(self._llm_call_observer)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to create provider for fallback '{}': {}", fallback_model, exc
-                )
-                continue
-
-            fallback_kwargs = {
-                **kwargs,
-                "model": fallback_model,
-                "max_tokens": fallback.max_tokens,
-                "temperature": fallback.temperature,
-            }
-            provider_context = fallback_kwargs.get("provider_context")
-            if isinstance(provider_context, ProviderCallContext):
-                state = provider_context.conversation_state
-                if state is not None and not fallback_provider.can_resume_conversation_state(
-                    state,
-                    fallback_model,
-                ):
-                    state = None
-                context_window_tokens = (
-                    fallback.context_window_tokens
-                    if fallback_provider.supports_native_compaction(fallback_model)
-                    else None
-                )
-                fallback_kwargs["provider_context"] = ProviderCallContext(
-                    conversation_state=state,
-                    context_window_tokens=context_window_tokens,
-                    session_id=provider_context.session_id,
-                )
-            if fallback.reasoning_effort is None:
-                fallback_kwargs.pop("reasoning_effort", None)
-            else:
-                fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
-            fallback_response = await call(fallback_provider, fallback_kwargs)
-
-            if fallback_response.finish_reason != "error":
-                # Do not publish a model switch merely because a fallback was
-                # attempted.  A fallback can fail just like the primary, and
-                # the WebUI would otherwise show a misleading success signal.
-                # Publish only after this response is known to be usable.
-                await self._notify_fallback_model(fallback_model)
-                logger.info(
-                    "Fallback '{}' succeeded after primary '{}' failed",
-                    fallback_model, primary_model,
-                )
-                return fallback_response
-
-            last_response = fallback_response
-            logger.warning(
-                "Fallback '{}' also failed: {}",
-                fallback_model,
-                (fallback_response.content or "")[:120],
-            )
-
-        logger.warning(
-            "All {} fallback model(s) failed",
-            len(self._fallback_presets),
-        )
-        # Return the last error response we saw (primary or last fallback).
-        if last_response is not None:
-            return replace(
-                last_response,
-                preserve_provider_state_on_error=preserve_primary_state,
-            )
-        # Primary was skipped and no fallback returned a response. Keep the result
-        # transient until the primary circuit is eligible for another probe.
-        retry_after_s = (
-            max(
-                0.1,
-                _PRIMARY_COOLDOWN_S - (time.monotonic() - self._primary_tripped_at),
-            )
-            if self._primary_tripped_at is not None
-            else None
-        )
-        return LLMResponse(
-            content=f"Primary model '{primary_model}' circuit open and no fallbacks available",
-            finish_reason="error",
-            preserve_provider_state_on_error=preserve_primary_state,
-            error_retry_after_s=retry_after_s,
-            error_should_retry=True,
         )
 
     async def _notify_fallback_model(self, model: str) -> None:

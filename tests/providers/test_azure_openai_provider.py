@@ -11,7 +11,12 @@ from nanobot.providers.azure_openai_provider import (
     AzureOpenAIProvider,
     _AzureTokenProvider,
 )
-from nanobot.providers.base import LLMResponse, ProviderCallContext
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMResponse,
+    ProviderAttempt,
+    ProviderCallContext,
+)
 
 # ---------------------------------------------------------------------------
 # Init & validation
@@ -413,6 +418,48 @@ async def test_chat_retries_without_unsupported_server_compaction():
     assert create.await_count == 2
     assert "context_management" in create.call_args_list[0].kwargs
     assert "context_management" not in create.call_args_list[1].kwargs
+    assert provider.supports_native_compaction() is False
+
+
+@pytest.mark.asyncio
+async def test_attempt_route_exposes_unsupported_server_compaction():
+    provider = AzureOpenAIProvider(
+        api_key="test-key",
+        api_base="https://test.openai.azure.com",
+        default_model="gpt-5.6",
+    )
+
+    class UnsupportedCompactionError(Exception):
+        status_code = 400
+        body = {"error": {"message": "Unknown parameter: context_management"}}
+
+    provider._client.responses = MagicMock()
+    provider._client.responses.create = AsyncMock(
+        side_effect=UnsupportedCompactionError()
+    )
+    provider_context = ProviderCallContext(context_window_tokens=200_000)
+    route = provider.create_attempt_route(
+        model="gpt-5.6",
+        generation=GenerationSettings(),
+        context_window_tokens=200_000,
+        provider_context=provider_context,
+        retry_mode="standard",
+    )
+    native_attempt = await route.start()
+    assert isinstance(native_attempt, ProviderAttempt)
+
+    response = await provider.chat_with_retry(
+        [{"role": "user", "content": "Hi"}],
+        provider_context=native_attempt.provider_context,
+        _provider_attempt=native_attempt,
+    )
+    local_fit_attempt = await route.advance(response, streamed=False)
+
+    assert response.error_kind == "native_compaction_fallback"
+    assert provider._client.responses.create.await_count == 1
+    assert isinstance(local_fit_attempt, ProviderAttempt)
+    assert local_fit_attempt.native_compaction is False
+    assert local_fit_attempt.provider_context == ProviderCallContext()
     assert provider.supports_native_compaction() is False
 
 

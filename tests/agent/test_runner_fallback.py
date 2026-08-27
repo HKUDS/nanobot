@@ -732,6 +732,33 @@ class TestFallbackOnStreamStalledAfterContent:
         assert streamed == ["stream stalled", "fallback ok"]
         assert recoveries == ["recover"]
 
+    @pytest.mark.asyncio
+    async def test_timeout_in_fallback_without_recovery_stops_chain(self) -> None:
+        primary = _FakeProvider("primary", _error_response(""))
+        fallback_a = _FakeProvider(
+            "fallback-a",
+            _make_response(
+                "fallback stream stalled",
+                finish_reason="error",
+                error_kind="timeout",
+            ),
+        )
+        fallback_b = _FakeProvider("fallback-b", _make_response("unexpected"))
+        factory = MagicMock(side_effect=[fallback_a, fallback_b])
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a"), _fallback("fallback-b")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat_stream(
+            messages=[{"role": "user", "content": "hi"}],
+            on_content_delta=AsyncMock(),
+        )
+
+        assert result.content == "fallback stream stalled"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
 
 class TestFailoverOnEmptyChoices:
     """Fallback should trigger when API returns empty choices (no error metadata)."""

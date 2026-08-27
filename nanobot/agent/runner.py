@@ -30,6 +30,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     LLMUsage,
+    ProviderAttempt,
     ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
@@ -928,6 +929,73 @@ class AgentRunner:
         kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
+    async def _execute_provider_route(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None,
+        provider_context: ProviderCallContext | None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Drive one-way provider routing from immutable source messages."""
+        generation = spec.runtime.generation
+        route = spec.runtime.provider.create_attempt_route(
+            model=spec.runtime.model,
+            generation=generation,
+            context_window_tokens=spec.runtime.context_window_tokens,
+            provider_context=provider_context,
+            retry_mode=spec.provider_retry_mode,
+            on_retry_wait=spec.retry_wait_callback,
+            on_retry_exhausted=spec.retry_wait_callback,
+            on_stream_recover=on_stream_recover,
+        )
+        step = await route.start()
+        while isinstance(step, ProviderAttempt):
+            attempt = step
+            attempt_streamed = False
+
+            async def _tracking_content_delta(delta: str) -> None:
+                nonlocal attempt_streamed
+                if delta:
+                    attempt_streamed = True
+                if on_content_delta is not None:
+                    await on_content_delta(delta)
+
+            async def _recover_stream() -> None:
+                nonlocal attempt_streamed
+                if on_stream_recover is not None:
+                    await on_stream_recover()
+                attempt_streamed = False
+
+            kwargs = self._build_request_kwargs(spec, messages, tools=tools)
+            kwargs.update({
+                "model": attempt.model,
+                "temperature": attempt.generation.temperature,
+                "max_tokens": attempt.generation.max_tokens,
+                "reasoning_effort": attempt.generation.reasoning_effort,
+                "retry_mode": attempt.retry_mode,
+                "on_retry_wait": attempt.on_retry_wait,
+                "on_retry_exhausted": attempt.on_retry_exhausted,
+                "provider_context": attempt.provider_context,
+                "_provider_attempt": attempt,
+            })
+            if on_content_delta is not None:
+                response = await attempt.provider.chat_stream_with_retry(
+                    **kwargs,
+                    on_content_delta=_tracking_content_delta,
+                    on_thinking_delta=on_thinking_delta,
+                    on_tool_call_delta=on_tool_call_delta,
+                    on_stream_recover=_recover_stream,
+                )
+            else:
+                response = await attempt.provider.chat_with_retry(**kwargs)
+            step = await route.advance(response, streamed=attempt_streamed)
+        return step
+
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -941,11 +1009,6 @@ class AgentRunner:
     ) -> LLMResponse:
         timeout_s = self._resolve_llm_timeout_s(spec)
 
-        kwargs = self._build_request_kwargs(
-            spec,
-            messages,
-            tools=spec.tools.get_definitions(),
-        )
         wants_streaming = hook.wants_streaming()
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
@@ -1022,8 +1085,10 @@ class AgentRunner:
                 await _close_native_reasoning()
                 await hook.on_stream_end(context, resuming=True)
 
-            coro = spec.runtime.provider.chat_stream_with_retry(
-                **kwargs,
+            coro = self._execute_provider_route(
+                spec,
+                messages,
+                tools=spec.tools.get_definitions(),
                 provider_context=provider_context,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
@@ -1031,8 +1096,10 @@ class AgentRunner:
                 on_stream_recover=_stream_recover,
             )
         else:
-            coro = spec.runtime.provider.chat_with_retry(
-                **kwargs,
+            coro = self._execute_provider_route(
+                spec,
+                messages,
+                tools=spec.tools.get_definitions(),
                 provider_context=provider_context,
             )
 
@@ -1271,13 +1338,10 @@ class AgentRunner:
         *,
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        kwargs = self._build_request_kwargs(
+        coro = self._execute_provider_route(
             spec,
             messages,
             tools=None,
-        )
-        coro = spec.runtime.provider.chat_with_retry(
-            **kwargs,
             provider_context=provider_context,
         )
         timeout_s = self._resolve_llm_timeout_s(spec)

@@ -16,8 +16,10 @@ from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
 from nanobot.providers.base import (
+    NATIVE_COMPACTION_FALLBACK_ERROR_KIND,
     LLMProvider,
     LLMResponse,
+    ProviderAttempt,
     ProviderCallContext,
     ProviderConversationState,
     resolve_stream_idle_timeout_s,
@@ -82,6 +84,7 @@ class OpenAICodexProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        allow_compaction_fallback: bool = True,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
@@ -206,7 +209,13 @@ class OpenAICodexProvider(LLMProvider):
                     ]
                 except Exception as compact_error:
                     if is_compaction_compatibility_error(compact_error):
-                        self._native_compaction_available = False
+                        if not allow_compaction_fallback:
+                            response = _codex_error_response(compact_error)
+                            response.error_kind = NATIVE_COMPACTION_FALLBACK_ERROR_KIND
+                            return response
+                        self.mark_native_compaction_unsupported(
+                            getattr(compact_error, "status_code", None)
+                        )
                     logger.warning(
                         "Codex native compaction unavailable; continuing without it "
                         "(type={} status={} disabled={})",
@@ -241,6 +250,7 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _allow_compaction_fallback: bool = True,
     ) -> LLMResponse:
         return await self._call_codex(
             messages,
@@ -250,6 +260,20 @@ class OpenAICodexProvider(LLMProvider):
             reasoning_effort,
             tool_choice,
             provider_context=provider_context,
+            allow_compaction_fallback=_allow_compaction_fallback,
+        )
+
+    async def chat_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
+            _allow_compaction_fallback=False,
         )
 
     async def chat_with_context(
@@ -272,6 +296,7 @@ class OpenAICodexProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _allow_compaction_fallback: bool = True,
     ) -> LLMResponse:
         return await self._call_codex(
             messages=messages,
@@ -284,6 +309,20 @@ class OpenAICodexProvider(LLMProvider):
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
             provider_context=provider_context,
+            allow_compaction_fallback=_allow_compaction_fallback,
+        )
+
+    async def chat_stream_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
+            _allow_compaction_fallback=False,
         )
 
     async def chat_stream_with_context(
@@ -319,6 +358,13 @@ class OpenAICodexProvider(LLMProvider):
         """Use the Codex backend's inline compaction trigger when needed."""
         _ = model
         return self._native_compaction_available
+
+    def mark_native_compaction_unsupported(
+        self,
+        status_code: int | None = None,
+    ) -> None:
+        _ = status_code
+        self._native_compaction_available = False
 
 
 def _strip_model_prefix(model: str) -> str:

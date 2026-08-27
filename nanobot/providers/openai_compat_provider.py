@@ -1,6 +1,6 @@
 """OpenAI-compatible provider for all non-Anthropic LLM APIs."""
 
-# pyright: reportPrivateImportUsage=false
+# pyright: reportPrivateImportUsage=false, reportPrivateUsage=false
 
 from __future__ import annotations
 
@@ -24,11 +24,17 @@ from loguru import logger
 from pydantic.alias_generators import to_snake
 
 from nanobot.providers.base import (
+    NATIVE_COMPACTION_FALLBACK_ERROR_KIND,
+    ROUTE_FALLBACK_ERROR_KIND,
+    GenerationSettings,
     LLMProvider,
     LLMResponse,
     LLMUsage,
+    ProviderAttempt,
+    ProviderAttemptRoute,
     ProviderCallContext,
     ProviderConversationState,
+    RetryEventCallback,
     ToolCallRequest,
     parse_tool_arguments,
     resolve_stream_idle_timeout_s,
@@ -58,6 +64,19 @@ if TYPE_CHECKING:
 AsyncOpenAI: Any = None
 
 _GEMINI_SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
+_RESPONSES_TRANSPORT = "responses"
+_CHAT_COMPLETIONS_TRANSPORT = "chat_completions"
+_RESPONSES_COMPATIBILITY_MARKERS = (
+    "responses",
+    "response api",
+    "max_output_tokens",
+    "instructions",
+    "previous_response",
+    "unsupported",
+    "not supported",
+    "unknown parameter",
+    "unrecognized request argument",
+)
 
 
 def _is_hosted_web_search_type(value: object) -> bool:
@@ -496,6 +515,58 @@ def _merge_responses_extra_body(
             merged["tools"] = configured_tools
 
     return merged
+
+
+class _OpenAICompatAttemptRoute:
+    def __init__(
+        self,
+        provider: OpenAICompatProvider,
+        first_attempt: ProviderAttempt,
+        native_compaction_fallback: ProviderAttempt | None,
+        chat_fallback: ProviderAttempt | None,
+    ) -> None:
+        self._provider = provider
+        self._current = first_attempt
+        self._native_compaction_fallback = native_compaction_fallback
+        self._chat_fallback = chat_fallback
+
+    async def start(self) -> ProviderAttempt | LLMResponse:
+        return self._current
+
+    async def advance(
+        self,
+        response: LLMResponse,
+        *,
+        streamed: bool,
+    ) -> ProviderAttempt | LLMResponse:
+        if streamed:
+            return response
+        if (
+            self._current.native_compaction
+            and self._native_compaction_fallback is not None
+            and response.finish_reason == "error"
+            and response.error_kind == NATIVE_COMPACTION_FALLBACK_ERROR_KIND
+        ):
+            self._provider.mark_native_compaction_unsupported(
+                response.error_status_code
+            )
+            self._current = self._native_compaction_fallback
+            self._native_compaction_fallback = None
+            return self._current
+        if (
+            self._current.transport == _RESPONSES_TRANSPORT
+            and self._chat_fallback is not None
+            and response.finish_reason == "error"
+            and self._provider._should_fallback_from_responses_response(response)
+        ):
+            self._provider._record_responses_failure(
+                self._current.model,
+                self._current.generation.reasoning_effort,
+            )
+            self._current = self._chat_fallback
+            self._chat_fallback = None
+            return self._current
+        return response
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -1167,6 +1238,89 @@ class OpenAICompatProvider(LLMProvider):
             return False
         return _is_direct_openai_base(self._effective_base)
 
+    def create_attempt_route(
+        self,
+        *,
+        model: str | None,
+        generation: GenerationSettings,
+        context_window_tokens: int | None,
+        provider_context: ProviderCallContext | None,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> ProviderAttemptRoute:
+        _ = on_stream_recover
+        if self._should_use_responses_api(model, generation.reasoning_effort):
+            supports_native = self.supports_native_compaction(model)
+            responses_attempt = self._build_provider_attempt(
+                model=model,
+                generation=generation,
+                context_window_tokens=context_window_tokens,
+                provider_context=provider_context,
+                transport=_RESPONSES_TRANSPORT,
+                native_compaction=supports_native,
+                allow_continuation=True,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+                on_retry_exhausted=on_retry_exhausted,
+            )
+            native_compaction_fallback = (
+                self._build_provider_attempt(
+                    model=model,
+                    generation=generation,
+                    context_window_tokens=context_window_tokens,
+                    provider_context=provider_context,
+                    transport=_RESPONSES_TRANSPORT,
+                    native_compaction=False,
+                    allow_continuation=True,
+                    retry_mode=retry_mode,
+                    on_retry_wait=on_retry_wait,
+                    on_retry_exhausted=on_retry_exhausted,
+                )
+                if supports_native
+                else None
+            )
+            can_fallback_to_chat = not self._responses_is_required() and not (
+                self._spec is not None and self._spec.name == "github_copilot"
+            )
+            chat_fallback = (
+                self._build_provider_attempt(
+                    model=model,
+                    generation=generation,
+                    context_window_tokens=context_window_tokens,
+                    provider_context=provider_context,
+                    transport=_CHAT_COMPLETIONS_TRANSPORT,
+                    native_compaction=False,
+                    allow_continuation=False,
+                    retry_mode=retry_mode,
+                    on_retry_wait=on_retry_wait,
+                    on_retry_exhausted=on_retry_exhausted,
+                )
+                if can_fallback_to_chat
+                else None
+            )
+            return _OpenAICompatAttemptRoute(
+                self,
+                responses_attempt,
+                native_compaction_fallback,
+                chat_fallback,
+            )
+
+        chat_attempt = self._build_provider_attempt(
+            model=model,
+            generation=generation,
+            context_window_tokens=context_window_tokens,
+            provider_context=provider_context,
+            transport=_CHAT_COMPLETIONS_TRANSPORT,
+            native_compaction=False,
+            allow_continuation=False,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+        )
+        return _OpenAICompatAttemptRoute(self, chat_attempt, None, None)
+
     def _responses_circuit_allows_probe(
         self,
         model: str | None,
@@ -1214,18 +1368,16 @@ class OpenAICompatProvider(LLMProvider):
             or getattr(response, "text", None)
         )
         body_text = str(body).lower() if body is not None else ""
-        compatibility_markers = (
-            "responses",
-            "response api",
-            "max_output_tokens",
-            "instructions",
-            "previous_response",
-            "unsupported",
-            "not supported",
-            "unknown parameter",
-            "unrecognized request argument",
-        )
-        return any(marker in body_text for marker in compatibility_markers)
+        return any(marker in body_text for marker in _RESPONSES_COMPATIBILITY_MARKERS)
+
+    @staticmethod
+    def _should_fallback_from_responses_response(response: LLMResponse) -> bool:
+        if response.error_kind == ROUTE_FALLBACK_ERROR_KIND:
+            return True
+        if response.error_status_code not in {400, 404, 422}:
+            return False
+        text = (response.content or "").lower()
+        return any(marker in text for marker in _RESPONSES_COMPATIBILITY_MARKERS)
 
     def _build_responses_body(
         self,
@@ -1342,24 +1494,55 @@ class OpenAICompatProvider(LLMProvider):
         self,
         client: Any,
         body: dict[str, Any],
+        *,
+        allow_fallback: bool = True,
     ) -> Any:
         """Retry Responses once without server compaction on compatibility errors."""
         try:
             return await client.responses.create(**body)
         except Exception as exc:
             if (
-                "context_management" not in body
+                not allow_fallback
+                or "context_management" not in body
                 or not is_compaction_compatibility_error(exc)
             ):
                 raise
-            self._native_compaction_available = False
-            body.pop("context_management", None)
-            logger.warning(
-                "Responses server compaction unsupported; disabled for this provider instance "
-                "(status={})",
-                getattr(exc, "status_code", None),
+            self.mark_native_compaction_unsupported(
+                getattr(exc, "status_code", None)
             )
+            body.pop("context_management", None)
             return await client.responses.create(**body)
+
+    def mark_native_compaction_unsupported(
+        self,
+        status_code: int | None = None,
+    ) -> None:
+        self._native_compaction_available = False
+        logger.warning(
+            "Responses server compaction unsupported; disabled for this provider instance "
+            "(status={})",
+            status_code,
+        )
+
+    def _handle_attempt_responses_error(
+        self,
+        error: Exception,
+        body: dict[str, Any] | None,
+    ) -> LLMResponse:
+        response = self._handle_error(
+            error,
+            spec=self._spec,
+            api_base=self.api_base,
+        )
+        if (
+            body is not None
+            and "context_management" in body
+            and is_compaction_compatibility_error(error)
+        ):
+            response.error_kind = NATIVE_COMPACTION_FALLBACK_ERROR_KIND
+        elif self._should_fallback_from_responses_error(error):
+            response.error_kind = ROUTE_FALLBACK_ERROR_KIND
+        return response
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -1922,6 +2105,42 @@ class OpenAICompatProvider(LLMProvider):
             provider_context=provider_context,
         )
 
+    async def chat_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        if attempt.transport not in {
+            _RESPONSES_TRANSPORT,
+            _CHAT_COMPLETIONS_TRANSPORT,
+        }:
+            raise ValueError(f"unsupported OpenAI transport: {attempt.transport}")
+        return await self.chat(
+            **kwargs,
+            provider_context=provider_context,
+            _attempt_transport=attempt.transport,
+        )
+
+    async def chat_stream_attempt(
+        self,
+        *,
+        attempt: ProviderAttempt,
+        provider_context: ProviderCallContext | None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        if attempt.transport not in {
+            _RESPONSES_TRANSPORT,
+            _CHAT_COMPLETIONS_TRANSPORT,
+        }:
+            raise ValueError(f"unsupported OpenAI transport: {attempt.transport}")
+        return await self.chat_stream(
+            **kwargs,
+            provider_context=provider_context,
+            _attempt_transport=attempt.transport,
+        )
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -1932,10 +2151,16 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _attempt_transport: str | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         try:
-            if self._should_use_responses_api(model, reasoning_effort):
+            use_responses = _attempt_transport == _RESPONSES_TRANSPORT or (
+                _attempt_transport is None
+                and self._should_use_responses_api(model, reasoning_effort)
+            )
+            if use_responses:
+                body: dict[str, Any] | None = None
                 try:
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
@@ -1945,6 +2170,7 @@ class OpenAICompatProvider(LLMProvider):
                     responses_raw = await self._create_response_with_compaction_fallback(
                         client,
                         body,
+                        allow_fallback=_attempt_transport is None,
                     )
                     result = parse_response_output(
                         responses_raw,
@@ -1955,6 +2181,11 @@ class OpenAICompatProvider(LLMProvider):
                     self._record_responses_success(model, reasoning_effort)
                     return result
                 except Exception as responses_error:
+                    if _attempt_transport == _RESPONSES_TRANSPORT:
+                        return self._handle_attempt_responses_error(
+                            responses_error,
+                            body,
+                        )
                     if self._spec and self._spec.name == "github_copilot":
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
                         # falling back to /chat/completions cannot succeed and would
@@ -1991,11 +2222,17 @@ class OpenAICompatProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        _attempt_transport: str | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
-            if self._should_use_responses_api(model, reasoning_effort):
+            use_responses = _attempt_transport == _RESPONSES_TRANSPORT or (
+                _attempt_transport is None
+                and self._should_use_responses_api(model, reasoning_effort)
+            )
+            if use_responses:
+                body: dict[str, Any] | None = None
                 try:
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
@@ -2006,6 +2243,7 @@ class OpenAICompatProvider(LLMProvider):
                     responses_stream = await self._create_response_with_compaction_fallback(
                         client,
                         body,
+                        allow_fallback=_attempt_transport is None,
                     )
 
                     async def _timed_stream() -> AsyncIterator[Any]:
@@ -2051,6 +2289,11 @@ class OpenAICompatProvider(LLMProvider):
                         )
                     return result
                 except Exception as responses_error:
+                    if _attempt_transport == _RESPONSES_TRANSPORT:
+                        return self._handle_attempt_responses_error(
+                            responses_error,
+                            body,
+                        )
                     if self._spec and self._spec.name == "github_copilot":
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
                         # falling back to /chat/completions cannot succeed and would
