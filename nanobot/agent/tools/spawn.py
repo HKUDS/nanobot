@@ -37,8 +37,9 @@ if TYPE_CHECKING:
         wait=BooleanSchema(
             description=(
                 "Wait for the subagent and return its result directly. Use this for a "
-                "blocking consultation that must inform the current turn. Defaults to "
-                "false for background execution."
+                "blocking consultation that must inform the current turn. Issue independent "
+                "consultations together so they can run concurrently. Defaults to false for "
+                "background execution."
             ),
             default=False,
         ),
@@ -68,10 +69,16 @@ class SpawnTool(Tool):
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "Set wait=true for a consultation whose result must inform the current turn. "
-            "The subagent will complete the task and report back when done. "
+            "Issue independent consultations together so they can run concurrently. "
+            "Background results report back automatically; do not poll for completion. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
+
+    @property
+    def concurrency_safe(self) -> bool:
+        """Each call owns its task state; the manager serializes capacity admission."""
+        return True
 
     async def execute(
         self,
@@ -82,14 +89,6 @@ class SpawnTool(Tool):
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
-        running = self._manager.get_running_count()
-        limit = self._manager.max_concurrent_subagents
-        if running >= limit:
-            return (
-                f"Cannot spawn subagent: concurrency limit reached "
-                f"({running}/{limit} running). Wait for a running subagent "
-                f"to complete before spawning a new one."
-            )
         request_ctx = current_request_context()
         if request_ctx is None or request_ctx.runtime is None:
             return ToolResult.error("Error: spawn requires an active model runtime")

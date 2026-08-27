@@ -55,7 +55,8 @@ class SubagentStatus:
     label: str
     task_description: str
     started_at: float          # time.monotonic()
-    phase: str = "initializing"  # initializing | awaiting_tools | tools_completed | final_response | done | error
+    # queued | initializing | awaiting_tools | tools_completed | final_response | done | error
+    phase: str = "initializing"
     iteration: int = 0
     tool_events: list[dict[str, str]] = field(default_factory=list)
     usage: LLMUsage | None = None
@@ -147,6 +148,7 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
+        self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
@@ -352,6 +354,35 @@ class SubagentManager:
                     del self._session_tasks[session_key]
 
     async def _run_subagent(
+        self,
+        task_id: str,
+        task: str,
+        label: str,
+        origin: _SubagentOrigin,
+        status: SubagentStatus,
+        runtime: LLMRuntime,
+        origin_message_id: str | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+        *,
+        announce: bool = True,
+    ) -> str:
+        """Wait for capacity, then execute one subagent task."""
+        status.phase = "queued"
+        async with self._run_slots:
+            status.phase = "initializing"
+            return await self._run_admitted_subagent(
+                task_id,
+                task,
+                label,
+                origin,
+                status,
+                runtime,
+                origin_message_id,
+                workspace_scope,
+                announce=announce,
+            )
+
+    async def _run_admitted_subagent(
         self,
         task_id: str,
         task: str,
