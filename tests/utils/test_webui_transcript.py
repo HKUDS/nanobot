@@ -28,31 +28,6 @@ def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
     assert lines[0]["text"] == "hello"
 
 
-def test_replay_keeps_display_text_separate_from_canonical_content() -> None:
-    messages = replay_transcript_to_ui_messages(
-        [
-            {
-                "event": "user",
-                "chat_id": "t-display",
-                "text": "这是什么？",
-                "display_text": "这是什么？ [Image #1]",
-                "media_paths": ["/tmp/clipboard-image-1.png"],
-            },
-        ],
-        augment_user_media=lambda paths: [
-            {
-                "kind": "image",
-                "url": f"/api/media/sig/{Path(paths[0]).name}",
-                "name": Path(paths[0]).name,
-            },
-        ],
-    )
-
-    assert messages[0]["content"] == "这是什么？"
-    assert messages[0]["displayContent"] == "这是什么？ [Image #1]"
-    assert messages[0]["media"][0]["name"] == "clipboard-image-1.png"
-
-
 def test_append_stamps_created_at_ms(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.webui.transcript.time.time", lambda: 1_700_000_000.0)

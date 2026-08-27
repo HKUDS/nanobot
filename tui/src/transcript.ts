@@ -108,7 +108,7 @@ export function userMessageText(
 ): string {
   const { imageLabels, attachmentNames } = projectUserMessage(media)
   return [
-    displayContent ?? [content, imageLabels.join(" ")].filter(Boolean).join("\n"),
+    displayContent ?? [content, imageLabels.join(" ")].filter(Boolean).join(" "),
     attachmentNames.length ? `Attachments: ${attachmentNames.join(", ")}` : "",
   ].filter(Boolean).join("\n")
 }
@@ -252,7 +252,7 @@ export class Transcript {
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
       if (message.role === "user") {
-        this.user(message.content, message.turnId, message.media, message.displayContent)
+        this.user(message.content, message.turnId, message.media)
       }
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
@@ -269,7 +269,7 @@ export class Transcript {
     for (const message of messages) {
       if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue
-        this.writeUser(message.content, message.media, index++, message.displayContent)
+        this.writeUser(message.content, message.media, index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeMarkdown(message.content, false, index++)
@@ -640,7 +640,7 @@ export class Transcript {
       append(content)
     }
     if (displayContent === undefined && imageLabels.length) {
-      nextLine()
+      if (chunks.length) append(" ")
       for (const [index, label] of imageLabels.entries()) {
         if (index > 0) append(" ")
         chunks.push({

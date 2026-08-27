@@ -107,7 +107,6 @@ export type InboundEvent =
       event: "user_message"
       chat_id: string
       text: string
-      display_text?: string
       turn_id?: string
       active_turn_id?: string
       starts_turn: boolean
@@ -231,7 +230,6 @@ export class GatewayConnectionError extends Error {
 export interface HistoryMessage {
   role: "user" | "assistant" | "activity"
   content: string
-  displayContent?: string
   turnId?: string
   media?: MediaAttachment[]
   toolEvents?: ToolProgressEvent[]
@@ -298,7 +296,6 @@ export interface SkillCandidate {
 
 export interface MessageOptions {
   media?: OutboundMedia[]
-  displayContent?: string
   cliApps?: Array<{ name: string }>
   mcpPresets?: Array<{ name: string }>
   sessionMentions?: SessionMention[]
@@ -520,11 +517,8 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   ) return null
   if (
     name === "user_message"
-    && (
-      !optional(record.display_text, "string")
-      || (record.media_urls !== undefined
-        && (!Array.isArray(record.media_urls) || !record.media_urls.every(isMediaAttachment)))
-    )
+    && record.media_urls !== undefined
+    && (!Array.isArray(record.media_urls) || !record.media_urls.every(isMediaAttachment))
   ) return null
   if (
     name === "message"
@@ -647,9 +641,6 @@ export async function fetchHistory(
       messages.push({
         role: "user",
         content,
-        ...(typeof message.displayContent === "string"
-          ? { displayContent: message.displayContent }
-          : {}),
         ...(media.length ? { media } : {}),
         ...(typeof message.turnId === "string" ? { turnId: message.turnId } : {}),
       })
@@ -1209,9 +1200,6 @@ export class NanobotClient {
       webui: true,
       ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
-      ...(options.displayContent !== undefined
-        ? { display_content: options.displayContent }
-        : {}),
       ...(options.media?.length ? { media: options.media } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),

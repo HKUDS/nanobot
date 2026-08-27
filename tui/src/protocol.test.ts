@@ -460,7 +460,6 @@ describe("gateway protocol", () => {
       })
       client.send("hello", {
         media: [{ data_url: "data:image/png;base64,AAAA", name: "clipboard-image-1.png" }],
-        displayContent: "hello [Image #1]",
         cliApps: [{ name: "github" }],
         sessionMentions: [{ name: "plan", session_key: "websocket:plan" }],
         userShell: true,
@@ -479,7 +478,6 @@ describe("gateway protocol", () => {
       expect(outbound[1]?.chat_id).toBe("terminal")
       expect(outbound[1]?.content).toBe("hello")
       expect(outbound[1]?.user_shell).toBe(true)
-      expect(outbound[1]?.display_content).toBe("hello [Image #1]")
       expect(outbound[1]?.media).toEqual([
         { data_url: "data:image/png;base64,AAAA", name: "clipboard-image-1.png" },
       ])
@@ -880,12 +878,7 @@ describe("gateway protocol", () => {
       requested = String(input)
       return Promise.resolve(new Response(JSON.stringify({
         messages: [
-          {
-            role: "user",
-            content: "hello",
-            displayContent: "hello [Image #1]",
-            turnId: "turn-1",
-          },
+          { role: "user", content: "hello", turnId: "turn-1" },
           {
             role: "user",
             content: "",
@@ -910,12 +903,7 @@ describe("gateway protocol", () => {
       const history = await fetchHistory("http://nanobot.test", "token", "chat", "newer-page")
       expect(history).toEqual({
         messages: [
-          {
-            role: "user",
-            content: "hello",
-            displayContent: "hello [Image #1]",
-            turnId: "turn-1",
-          },
+          { role: "user", content: "hello", turnId: "turn-1" },
           {
             role: "user",
             content: "",

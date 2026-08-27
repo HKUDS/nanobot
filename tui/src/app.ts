@@ -1015,7 +1015,7 @@ export class NanobotTui {
       prompt.content,
       turnId,
       prompt.options.media,
-      prompt.options.displayContent,
+      prompt.displayContent,
     )
     this.hostBlocked = false
     this.setCurrentTask(prompt.content)
@@ -1110,7 +1110,6 @@ export class NanobotTui {
           event.text,
           event.turn_id,
           event.media_urls,
-          event.display_text,
         )) {
           this.recordPrompt(event.text)
         }
@@ -1579,9 +1578,9 @@ export class NanobotTui {
     const displayContent = this.draft.display(visible).trim()
     return {
       content,
+      ...(media.length ? { displayContent } : {}),
       options: {
         ...mentionOptions(content, this.availableMentions()),
-        ...(media.length ? { displayContent } : {}),
         ...(media.length ? { media } : {}),
       },
     }

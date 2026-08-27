@@ -218,7 +218,6 @@ class WebUICommandRouter:
         chat_id: str,
         text: str,
         *,
-        display_text: str | None,
         turn_id: str | None,
         starts_turn: bool,
         media_paths: list[str],
@@ -233,8 +232,6 @@ class WebUICommandRouter:
             "text": text,
             "starts_turn": starts_turn,
         }
-        if display_text is not None:
-            body["display_text"] = display_text
         if turn_id is not None:
             body["turn_id"] = turn_id
         media = self._media.augment_transcript_user_media(media_paths)
@@ -514,34 +511,6 @@ class WebUICommandRouter:
             )
             return
 
-        display_content: str | None = None
-        raw_display_content = envelope.get("display_content")
-        if (
-            envelope.get("webui") is True
-            and connection in self._webui_connections
-            and raw_display_content is not None
-        ):
-            if not isinstance(raw_display_content, str):
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="message_rejected",
-                    reason="malformed_display_content",
-                    **rejection_fields,
-                )
-                return
-            display_rejection = self._ingress.validate_text(raw_display_content)
-            if display_rejection is not None:
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="message_rejected",
-                    reason=display_rejection,
-                    **rejection_fields,
-                )
-                return
-            display_content = raw_display_content
-
         try:
             temporary_policy = self._temporary_chats.message_policy(
                 connection,
@@ -680,7 +649,6 @@ class WebUICommandRouter:
                     chat_id,
                     content,
                     metadata=metadata,
-                    display_text=display_content,
                     media_paths=media_paths or None,
                     cli_apps=cli_apps or None,
                     mcp_presets=mcp_presets or None,
@@ -725,7 +693,6 @@ class WebUICommandRouter:
                 connection,
                 chat_id,
                 content,
-                display_text=display_content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
                 media_paths=media_paths,

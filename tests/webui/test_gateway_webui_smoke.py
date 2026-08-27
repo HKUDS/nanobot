@@ -172,7 +172,6 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
                 "type": "message",
                 "chat_id": chat_id,
                 "content": "/model",
-                "display_content": "inspect [Image #1] /model",
                 "webui": True,
                 "turn_id": "smoke-turn",
             }))
@@ -204,10 +203,6 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             token=api_token,
         )
         contents = [str(message.get("content") or "") for message in thread["messages"]]
-        model_prompt = next(
-            message for message in thread["messages"] if message.get("content") == "/model"
-        )
-        assert model_prompt["displayContent"] == "inspect [Image #1] /model"
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
         assert "!printf shell-ok" in contents

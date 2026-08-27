@@ -65,8 +65,7 @@ test("projects image media as stable placeholders without exposing filenames", (
     { kind: "image", name: "screenshot.png" },
     { kind: "file", name: "report.pdf" },
   ])).toBe([
-    "What is this?",
-    "[Image #2] [Image #1]",
+    "What is this? [Image #2] [Image #1]",
     "Attachments: report.pdf",
   ].join("\n"))
   expect(userMessageText("What is this?", [
@@ -403,7 +402,7 @@ describe("NanobotTui layout", () => {
       data_url: "data:image/png;base64,AAEC/w==",
       name: "clipboard-image-1.png",
     }])
-    expect(sentOptions[0]?.displayContent).toBe("[Image #1]")
+    expect(sentOptions[0]).not.toHaveProperty("displayContent")
     await setup.flush()
     const frame = setup.captureCharFrame()
     expect(frame).toContain("[Image #1]")
@@ -425,7 +424,7 @@ describe("NanobotTui layout", () => {
     await waitUntil(() => sent.length === 2)
     expect(sent[1]).toBe("这是什么？")
     expect(sentOptions[1]?.media).toHaveLength(1)
-    expect(sentOptions[1]?.displayContent).toBe("这是什么？ [Image #1]")
+    expect(sentOptions[1]).not.toHaveProperty("displayContent")
     await setup.flush()
     expect(setup.captureCharFrame()).toContain("这是什么？ [Image #1]")
 
@@ -660,7 +659,6 @@ describe("NanobotTui layout", () => {
       event: "user_message",
       chat_id: "chat",
       text: "one more remote detail",
-      display_text: "one more remote detail [Image #2]",
       turn_id: "remote-steer",
       active_turn_id: "remote-turn",
       starts_turn: false,
