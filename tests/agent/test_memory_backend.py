@@ -55,10 +55,20 @@ def test_memory_store_recall_matches_query_terms_without_exact_phrase(tmp_path) 
     assert [record.id for record in records] == ["history:1"]
 
 
+def test_memory_store_recall_keeps_session_history_isolated(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.ingest("Apollo belongs to alpha", session_key="telegram:alpha")
+    store.ingest("Apollo belongs to beta", session_key="slack:beta")
+
+    records = store.recall("Apollo", limit=5, session_key="telegram:alpha")
+
+    assert [record.session_key for record in records] == ["telegram:alpha"]
+
+
 def test_memory_store_recall_skips_corrupt_and_malformed_history(tmp_path) -> None:
     store = MemoryStore(tmp_path)
     store.history_file.write_bytes(
-        b"\xff\n"
+        b'{"cursor":1,"timestamp":"2026-01-01","content":"needle corrupt \xff"}\n'
         b'{"cursor":"bad","timestamp":"2026-01-01","content":"needle bad"}\n'
         b'{"cursor":2,"timestamp":7,"content":"needle malformed"}\n'
         b'{"cursor":3,"timestamp":"2026-01-03","content":"needle valid"}\n'
@@ -110,4 +120,43 @@ async def test_memory_archiver_ingests_through_configured_backend(tmp_path) -> N
         max_chars=64_000,
         session_key="cli:test",
     )
+    assert store.read_unprocessed_history(0) == []
+
+
+@pytest.mark.asyncio
+async def test_memory_archiver_raw_fallback_uses_configured_backend(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    backend = MagicMock(spec=MemoryBackend)
+    provider = MagicMock(spec=LLMProvider)
+    provider.generation = GenerationSettings(max_tokens=100)
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="provider failed", finish_reason="error")
+    )
+    runtime = LLMRuntime.capture(
+        provider,
+        "test-model",
+        context_window_tokens=16_000,
+    )
+    archiver = MemoryArchiver(
+        store=store,
+        backend=backend,
+        build_messages=MagicMock(),
+        get_tool_definitions=MagicMock(return_value=[]),
+    )
+
+    result = await archiver.archive(
+        [{"role": "user", "content": "remember this"}],
+        runtime=runtime,
+        session_key="cli:test",
+        request_messages=[{"role": "user", "content": "summarize"}],
+        request_tools=[],
+    )
+
+    assert result is None
+    backend.ingest.assert_called_once()
+    assert backend.ingest.call_args.args[0].startswith("[RAW] 1 messages")
+    assert backend.ingest.call_args.kwargs == {
+        "session_key": "cli:test",
+        "max_chars": 16_000,
+    }
     assert store.read_unprocessed_history(0) == []

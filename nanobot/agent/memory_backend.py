@@ -36,6 +36,7 @@ class MemoryBackend(Protocol):
         query: str,
         *,
         limit: int,
+        session_key: str | None = None,
     ) -> list[MemoryRecord]:
-        """Return at most ``limit`` relevant records for ``query``."""
+        """Return records visible to ``session_key``; ``None`` is unscoped."""
         ...

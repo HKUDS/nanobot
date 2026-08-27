@@ -108,7 +108,7 @@ class MemoryStore:
     @staticmethod
     def read_file(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
+            return path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return ""
 
@@ -284,8 +284,13 @@ class MemoryStore:
         query: str,
         *,
         limit: int,
+        session_key: str | None = None,
     ) -> list[MemoryRecord]:
-        """Search durable MEMORY.md content and valid history journal entries."""
+        """Search global MEMORY.md plus history visible to ``session_key``.
+
+        ``None`` is an explicit unscoped backend query and searches all valid
+        history entries. Agent tools pass the active request's session key.
+        """
         needle = query.strip().casefold()
         if not needle or limit <= 0:
             return []
@@ -311,6 +316,8 @@ class MemoryStore:
             ))
 
         for entry, cursor in self._iter_valid_entries():
+            if session_key is not None and entry.get("session_key") != session_key:
+                continue
             content = cast(str, entry["content"])
             score = self._recall_score(content, needle, terms)
             if score is None:
@@ -558,8 +565,12 @@ class MemoryStore:
         """Read all entries from history.jsonl."""
         entries: list[dict[str, Any]] = []
         with suppress(FileNotFoundError):
-            with open(self.history_file, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
+            with open(self.history_file, "rb") as f:
+                for raw_line in f:
+                    try:
+                        line = raw_line.decode("utf-8")
+                    except UnicodeDecodeError:
+                        continue
                     line = line.strip()
                     if line:
                         try:
@@ -918,7 +929,7 @@ class MemoryArchiver:
         backend: MemoryBackend | None = None,
     ) -> None:
         self.store = store
-        self.backend = backend or store
+        self.backend = backend if backend is not None else store
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._resolve_prompt_context = resolve_prompt_context

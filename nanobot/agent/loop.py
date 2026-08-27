@@ -278,7 +278,6 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        memory_backend: MemoryBackend | None = None,
         tool_registry: ToolRegistry | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
@@ -304,6 +303,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        memory_backend: MemoryBackend | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -385,7 +385,9 @@ class AgentLoop:
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
-        self.memory_backend = memory_backend or self.context.memory
+        self.memory_backend = (
+            memory_backend if memory_backend is not None else self.context.memory
+        )
         self.sessions = session_manager or SessionManager(workspace)
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.

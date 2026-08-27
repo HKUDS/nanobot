@@ -14,6 +14,7 @@ from loguru import logger
 
 from nanobot.agent.memory_backend import MemoryBackend
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
@@ -86,6 +87,7 @@ class RecallMemoryTool(Tool):
                 self._backend.recall,
                 query,
                 limit=bounded_limit,
+                session_key=current_request_session_key(),
             )
         except Exception:
             logger.exception("Memory recall failed")
