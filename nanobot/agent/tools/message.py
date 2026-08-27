@@ -25,7 +25,7 @@ _CURRENT_MESSAGE_SENDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
 
 
 @contextmanager
-def track_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
+def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
     """Record successful MessageTool targets within one agent run."""
     sends: set[tuple[str, str]] = set()
     token = _CURRENT_MESSAGE_SENDS.set(sends)
