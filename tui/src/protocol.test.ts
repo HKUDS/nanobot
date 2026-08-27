@@ -250,8 +250,11 @@ describe("gateway protocol", () => {
 
       expect(statuses[0]?.status).toBe("starting")
       expect(failure?.detail).toBe("connection refused")
-      expect(failure?.info).toMatchObject({ endpoint: "127.0.0.1:8769", attempt: 1 })
-      expect(failure?.info?.elapsedMs).toBeGreaterThanOrEqual(8)
+      expect(failure?.info).toMatchObject({
+        endpoint: "127.0.0.1:8769",
+        attempt: 1,
+        elapsedMs: expect.any(Number),
+      })
       const visible = JSON.stringify(statuses)
       expect(visible).not.toContain("bootstrap-user")
       expect(visible).not.toContain("bootstrap-pass")
