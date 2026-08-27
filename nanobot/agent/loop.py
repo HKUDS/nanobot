@@ -41,7 +41,6 @@ from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, res
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
-from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
     TurnDeliveryFactory,
@@ -644,19 +643,10 @@ class AgentLoop:
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_events=self.runtime_events,
+            runtime_control=AgentRuntimeControl(self),
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
-
-        # MyTool receives only the explicit runtime-control capability.
-        if self.tools_config.my.enable:
-            self.tools.register(
-                MyTool(
-                    runtime_control=AgentRuntimeControl(self),
-                    modify_allowed=self.tools_config.my.allow_set,
-                )
-            )
-            registered.append("my")
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 
