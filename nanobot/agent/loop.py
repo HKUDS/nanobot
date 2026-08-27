@@ -430,8 +430,8 @@ class AgentLoop:
             ("cron", self._cron_turns),
             ("local trigger", self._local_trigger_turns),
         )
-        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
-        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
+        # NANOBOT_MAX_CONCURRENT_REQUESTS: unset or <=0 means unlimited.
+        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "0"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
