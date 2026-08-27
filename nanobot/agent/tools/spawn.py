@@ -110,8 +110,10 @@ class SpawnTool(Tool):
         runtime = request_ctx.runtime
         if preset is not None:
             if preset not in self._spawn_presets:
+                available = ", ".join(sorted(self._spawn_presets)) or "(none)"
                 return ToolResult.error(
-                    f"Error: spawn preset {preset!r} is not allowlisted"
+                    f"Error: spawn preset {preset!r} is not allowlisted. "
+                    f"Available: {available}"
                 )
             if self._preset_snapshot_loader is None:
                 return ToolResult.error("Error: spawn preset resolution is unavailable")
