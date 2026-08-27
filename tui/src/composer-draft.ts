@@ -128,17 +128,6 @@ export class ComposerDraft {
     value: string,
     cursor: number,
   ): DraftEditReconciliation {
-    const missing = [...this.images.keys()].filter((label) => !value.includes(label))
-    if (!missing.length) return { value, cursor, removedImages: [] }
-
-    const removedImages = missing.map((label) => label.slice(1, -1))
-    const ranges = missing.flatMap((label) => {
-      const start = previous.indexOf(label)
-      return start < 0 ? [] : [{ start, end: start + label.length }]
-    })
-    for (const label of missing) this.images.delete(label)
-    if (!ranges.length) return { value, cursor, removedImages }
-
     let oldStart = 0
     const sharedLength = Math.min(previous.length, value.length)
     while (oldStart < sharedLength && previous[oldStart] === value[oldStart]) oldStart += 1
@@ -154,13 +143,23 @@ export class ComposerDraft {
       newEnd -= 1
     }
 
+    const ranges = this.imageRanges(previous).filter(({ start, end }) => (
+      oldStart === oldEnd
+        ? oldStart > start && oldStart < end
+        : oldStart < end && oldEnd > start
+    ))
+    if (!ranges.length) return { value, cursor, removedImages: [] }
+
     const replaceStart = Math.min(oldStart, ...ranges.map((range) => range.start))
     const replaceEnd = Math.max(oldEnd, ...ranges.map((range) => range.end))
     const inserted = value.slice(oldStart, newEnd)
+    const reconciled = previous.slice(0, replaceStart) + inserted + previous.slice(replaceEnd)
+    const missing = [...this.images.keys()].filter((label) => !reconciled.includes(label))
+    for (const label of missing) this.images.delete(label)
     return {
-      value: previous.slice(0, replaceStart) + inserted + previous.slice(replaceEnd),
+      value: reconciled,
       cursor: replaceStart + inserted.length,
-      removedImages,
+      removedImages: missing.map((label) => label.slice(1, -1)),
     }
   }
 

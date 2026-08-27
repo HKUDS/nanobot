@@ -60,6 +60,20 @@ describe("ComposerDraft", () => {
     expect(draft.media(value)).toEqual([])
   })
 
+  test("removes an edited duplicate occurrence without leaving a placeholder fragment", () => {
+    const draft = new ComposerDraft()
+    const image = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    const label = image?.text.trim() || ""
+    const previous = `${label} ${label}`
+
+    expect(draft.reconcileImageEdit(previous, previous.slice(1), 0)).toEqual({
+      value: ` ${label}`,
+      cursor: 0,
+      removedImages: [],
+    })
+    expect(draft.imageCount).toBe(1)
+  })
+
   test("snaps cursor movement across complete image placeholders", () => {
     const draft = new ComposerDraft()
     const image = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })

@@ -30,8 +30,9 @@ Changes reuse the gateway's normal model command and workspace policy checks.
 When you scroll away from the latest output, the scrollbar and `Ctrl+End` hint appear only until
 you return to the bottom. Large pastes are represented by a short editable placeholder in the
 composer; nanobot sends the original text unchanged. Press `Ctrl+V` or `Alt+V` while the composer
-is focused to attach an image from the system clipboard. Image bytes stay behind editable
-`[Image #n]` placeholders until the message is sent; deleting a placeholder removes its image.
+is focused to attach an image from the system clipboard. Image bytes stay behind removable
+`[Image #n]` placeholders until the message is sent; each placeholder behaves as one unit, and
+deleting it removes its image.
 
 While nanobot is working, the composer prompt becomes
 `Enter send now · Tab send next`; narrow terminals shorten it to `Enter now · Tab next`.
