@@ -6,7 +6,7 @@ description: Retrieve Dream-managed durable memory through the read-only recall 
 # Memory
 
 Use `recall_memory` when past facts, decisions, preferences, or events would help
-with the current task. Durable memory is not loaded into the system prompt.
+with the current task. By default, durable memory is not loaded into the system prompt.
 
 ## Recall Past Context
 
