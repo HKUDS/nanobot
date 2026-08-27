@@ -44,7 +44,7 @@ def session_context_payload(session: Session) -> dict[str, Any]:
         "schema_version": 1,
         "session_key": session.key,
         "total_messages": len(session.messages),
-        "archived_messages": min(session.last_consolidated, len(session.messages)),
+        "archived_messages": min(session.last_archived, len(session.messages)),
         "replay_messages": len(replay),
         "estimated_replay_tokens": replay_tokens,
         "estimated_summary_tokens": summary_tokens,

@@ -343,6 +343,7 @@ class TestConsolidatorTokenBudget:
         """No consolidation when tokens are within budget."""
         session = MagicMock()
         session.last_consolidated = 0
+        session.last_archived = 0
         session.messages = [{"role": "user", "content": "hi"}]
         session.key = "test:key"
         consolidator.sessions._session_cache[session.key] = session
@@ -421,7 +422,7 @@ class TestConsolidatorTokenBudget:
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
         consolidator.pick_consolidation_boundary = MagicMock(return_value=(50, 800))
-        consolidator._build_messages = MagicMock(side_effect=_build_test_messages)
+        consolidator.archiver._build_messages = MagicMock(side_effect=_build_test_messages)
         mock_provider.estimate_prompt_tokens.return_value = (100, "test-counter")
         mock_provider.chat_with_retry.return_value = LLMResponse(
             content="Token overflow summary.",
@@ -437,8 +438,8 @@ class TestConsolidatorTokenBudget:
         assert "final 50 conversation messages" in request["messages"][-1]["content"]
         assert request["tools"] == []
         assert request["tool_choice"] == "none"
-        assert session.last_consolidated == 50
-        assert session.provider_state is None
+        assert session.last_archived == 50
+        assert session.provider_state == _provider_state()
 
     async def test_raw_archive_fallback_advances_last_consolidated(
         self, consolidator, runtime
@@ -448,14 +449,12 @@ class TestConsolidatorTokenBudget:
         on every subsequent maybe_consolidate_by_tokens() call, spamming
         duplicate [RAW] entries into history.jsonl."""
         consolidator._SAFETY_BUFFER = 0
-        session = MagicMock()
-        session.last_consolidated = 0
-        session.key = "test:key"
+        session = Session(key="test:key")
+        session.provider_state = _provider_state()
         session.messages = [
             {"role": "user" if i in {0, 50} else "assistant", "content": f"m{i}"}
             for i in range(70)
         ]
-        session.metadata = {}
         consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
@@ -467,8 +466,10 @@ class TestConsolidatorTokenBudget:
 
         consolidator.archive_session.assert_awaited_once()
         # The chunk is considered "materialized" (as a raw-archive breadcrumb),
-        # so last_consolidated must have moved past it.
-        assert session.last_consolidated == 50
+        # so the archive watermark must have moved past it without touching
+        # the provider-owned continuation state.
+        assert session.last_archived == 50
+        assert session.provider_state == _provider_state()
 
     async def test_raw_archive_fallback_breaks_round_loop(
         self, consolidator, runtime
@@ -478,6 +479,7 @@ class TestConsolidatorTokenBudget:
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0
+        session.last_archived = 0
         session.key = "test:key"
         session.messages = [
             {"role": "user" if i in {0, 20, 40, 60} else "assistant", "content": f"m{i}"}
@@ -503,6 +505,7 @@ class TestConsolidatorTokenBudget:
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0
+        session.last_archived = 0
         session.key = "test:key"
         session.messages = [
             {
@@ -521,7 +524,7 @@ class TestConsolidatorTokenBudget:
 
         consolidator.archive_session.assert_awaited_once()
         # pick_consolidation_boundary finds the only boundary at idx=61
-        assert session.last_consolidated == 61
+        assert session.last_archived == 61
 
 
 class TestCompactIdleSession:
@@ -575,8 +578,8 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:test")
         assert len(reloaded.messages) == 40
         assert reloaded.messages[0]["content"] == "user msg 0"
-        assert reloaded.last_consolidated == 40
-        assert reloaded.provider_state is None
+        assert reloaded.last_archived == 40
+        assert reloaded.provider_state == _provider_state()
         visible = reloaded.get_history(max_messages=40)
         assert len(visible) == 8
         assert visible[0]["content"] == "user msg 16"
@@ -705,6 +708,7 @@ class TestCompactIdleSession:
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:rawdrop")
+        session.provider_state = _provider_state()
         for i in range(18):
             session.add_message("user", f"user msg {i}")
             session.add_message("assistant", f"assistant msg {i}")
@@ -723,6 +727,7 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:rawdrop")
         assert len(reloaded.messages) == 38
         assert reloaded.messages[-1]["content"] == "RETAINED_SUFFIX_marker"
+        assert reloaded.provider_state == _provider_state()
 
     @pytest.mark.asyncio
     async def test_idle_compact_writes_session_key_to_history(
@@ -923,7 +928,7 @@ class TestCompactIdleSession:
         runtime,
     ):
         tools = [{"type": "function", "function": {"name": "lookup"}}]
-        real_consolidator._get_tool_definitions.return_value = tools
+        real_consolidator.archiver._get_tool_definitions.return_value = tools
         mock_provider.chat_with_retry.return_value = LLMResponse(
             content="Overview from the temporary turn.",
             finish_reason="stop",

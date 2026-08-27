@@ -311,7 +311,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
-    if session.last_consolidated < len(snapshot):
+    if session.last_archived < len(snapshot):
         runtime = ctx.runtime or loop.runtime_for_session(session)
         archive_snapshot = replace(
             session,
