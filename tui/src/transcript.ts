@@ -3,10 +3,12 @@ import {
   MarkdownRenderable,
   RGBA,
   ScrollBoxRenderable,
+  StyledText,
   SyntaxStyle,
   TextAttributes,
   TextRenderable,
   type CliRenderer,
+  type TextChunk,
   type TreeSitterClient,
 } from "@opentui/core"
 
@@ -63,14 +65,51 @@ const ACTIVITY_PREVIEW_LINES = 4
 // subsequent deltas to the renderer cadence.
 const STREAM_FLUSH_MS = 32
 
+export interface UserMessageMedia {
+  kind?: MediaAttachment["kind"]
+  name?: string
+}
+
+interface UserMessageProjection {
+  imageLabels: string[]
+  attachmentNames: string[]
+}
+
+function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProjection {
+  const imageNames: Array<string | undefined> = []
+  const attachmentNames: string[] = []
+  for (const item of media) {
+    // Outbound TUI media has no explicit kind because this path currently only
+    // sends clipboard images. Gateway and history media carry the kind.
+    if (item.kind === undefined || item.kind === "image") imageNames.push(item.name)
+    else if (item.name) attachmentNames.push(item.name)
+  }
+
+  const used = new Set<number>()
+  let next = 1
+  const imageLabels = imageNames.map((name) => {
+    const match = name?.match(/^clipboard-image-(\d+)\.[^.]+$/iu)
+    const preferred = match ? Number(match[1]) : 0
+    let index = Number.isSafeInteger(preferred) && preferred > 0 && !used.has(preferred)
+      ? preferred
+      : next
+    while (used.has(index)) index += 1
+    used.add(index)
+    while (used.has(next)) next += 1
+    return `[Image #${index}]`
+  })
+  return { imageLabels, attachmentNames }
+}
+
 export function userMessageText(
   content: string,
-  media: readonly Pick<MediaAttachment, "name">[] = [],
+  media: readonly UserMessageMedia[] = [],
 ): string {
-  const attachments = media.flatMap(({ name }) => name ? [name] : [])
+  const { imageLabels, attachmentNames } = projectUserMessage(media)
   return [
     content,
-    attachments.length ? `Attachments: ${attachments.join(", ")}` : "",
+    imageLabels.join(" "),
+    attachmentNames.length ? `Attachments: ${attachmentNames.join(", ")}` : "",
   ].filter(Boolean).join("\n")
 }
 
@@ -87,6 +126,11 @@ export class Transcript {
   private readonly activities = new Set<Activity>()
   private readonly frames = new Set<BoxRenderable>()
   private readonly userRows = new Set<BoxRenderable>()
+  private readonly userMessages = new Set<{
+    renderable: TextRenderable
+    content: string
+    media: UserMessageMedia[]
+  }>()
   private readonly userTurnIds = new Set<string>()
   private wrote = false
   private nextId = 0
@@ -132,6 +176,9 @@ export class Transcript {
     const previousSyntax = this.theme.syntax
     this.theme = theme
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
+    for (const message of this.userMessages) {
+      message.renderable.content = this.userMessageContent(message.content, message.media)
+    }
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
     for (const frame of this.frames) frame.borderColor = theme.border
     for (const row of this.userRows) {
@@ -187,6 +234,7 @@ export class Transcript {
     this.activities.clear()
     this.frames.clear()
     this.userRows.clear()
+    this.userMessages.clear()
     this.userTurnIds.clear()
     this.wrote = false
     this.nextId = 0
@@ -199,7 +247,7 @@ export class Transcript {
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
       if (message.role === "user") {
-        this.user(userMessageText(message.content, message.media), message.turnId)
+        this.user(message.content, message.turnId, message.media)
       }
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
@@ -216,7 +264,7 @@ export class Transcript {
     for (const message of messages) {
       if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue
-        this.writeRole("›", userMessageText(message.content, message.media), "user", index++)
+        this.writeUser(message.content, message.media, index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeMarkdown(message.content, false, index++)
@@ -242,11 +290,11 @@ export class Transcript {
     return this.root.scrollTop <= 0
   }
 
-  user(content: string, turnId?: string): boolean {
+  user(content: string, turnId?: string, media: readonly UserMessageMedia[] = []): boolean {
     if (turnId && this.userTurnIds.has(turnId)) return false
     this.noteOutput()
     this.finishActivity()
-    this.writeRole("›", content, "user")
+    this.writeUser(content, media)
     if (turnId) this.userTurnIds.add(turnId)
     return true
   }
@@ -354,6 +402,7 @@ export class Transcript {
     this.activity = null
     this.frames.clear()
     this.userRows.clear()
+    this.userMessages.clear()
     this.theme.syntax.destroy()
   }
 
@@ -486,7 +535,7 @@ export class Transcript {
   }
 
   private createText(
-    content: string,
+    content: string | StyledText,
     tone: "text" | "muted" | "error" | "user",
     bold = false,
     id = "text",
@@ -505,10 +554,10 @@ export class Transcript {
 
   private writeRole(
     marker: string,
-    content: string,
+    content: string | StyledText,
     tone: "muted" | "error" | "user",
     index?: number,
-  ): void {
+  ): TextRenderable {
     const row = this.createRow(tone === "user" ? "user" : "notice", "row")
     if (tone === "user") {
       row.backgroundColor = this.theme.userBackground
@@ -527,6 +576,52 @@ export class Transcript {
     row.add(text)
     this.root.add(row, index)
     this.wrote = true
+    return text
+  }
+
+  private writeUser(
+    content: string,
+    media: readonly UserMessageMedia[] = [],
+    index?: number,
+  ): void {
+    const retainedMedia = [...media]
+    const renderable = this.writeRole(
+      "›",
+      this.userMessageContent(content, retainedMedia),
+      "user",
+      index,
+    )
+    this.userMessages.add({ renderable, content, media: retainedMedia })
+  }
+
+  private userMessageContent(content: string, media: readonly UserMessageMedia[]): StyledText {
+    const { imageLabels, attachmentNames } = projectUserMessage(media)
+    const chunks: TextChunk[] = []
+    const append = (text: string) => {
+      if (text) chunks.push({ __isChunk: true, text })
+    }
+    const nextLine = () => {
+      if (chunks.length) append("\n")
+    }
+
+    append(content)
+    if (imageLabels.length) {
+      nextLine()
+      for (const [index, label] of imageLabels.entries()) {
+        if (index > 0) append(" ")
+        chunks.push({
+          __isChunk: true,
+          text: label,
+          fg: RGBA.fromHex(this.theme.user),
+          attributes: TextAttributes.BOLD,
+        })
+      }
+    }
+    if (attachmentNames.length) {
+      nextLine()
+      append(`Attachments: ${attachmentNames.join(", ")}`)
+    }
+    return new StyledText(chunks)
   }
 
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {

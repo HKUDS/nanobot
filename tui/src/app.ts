@@ -62,7 +62,6 @@ import {
 } from "./diff-viewer"
 import {
   Transcript,
-  userMessageText,
   type TranscriptNavigation,
   type TranscriptTheme,
 } from "./transcript"
@@ -189,6 +188,7 @@ const LIGHT: Palette = {
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
 const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
 const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
+const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
@@ -261,6 +261,12 @@ function syntaxStyle(palette: Palette): SyntaxStyle {
     "markup.link.url": { ...color(palette.link), underline: true },
     "markup.raw": color(palette.warm),
     conceal: color(palette.faint),
+  })
+}
+
+function composerSyntaxStyle(palette: Palette): SyntaxStyle {
+  return SyntaxStyle.fromStyles({
+    [IMAGE_PLACEHOLDER_STYLE]: { fg: RGBA.fromHex(palette.accent), bold: true },
   })
 }
 
@@ -445,6 +451,7 @@ export class NanobotTui {
   private readonly titleText: TextRenderable
   private readonly composerFrame: BoxRenderable
   private readonly composer: TextareaRenderable
+  private composerSyntax: SyntaxStyle
   private readonly status: TextRenderable
   private readonly meta: TextRenderable
   private readonly host: TuiHost
@@ -547,6 +554,7 @@ export class NanobotTui {
     this.backgroundKnown = options.theme !== "auto" || renderer.themeMode !== null
     this.activeThemeMode = this.resolveThemeMode(renderer.themeMode)
     this.palette = this.activeThemeMode === "light" ? LIGHT : DARK
+    this.composerSyntax = composerSyntaxStyle(this.palette)
     this.host = host
     this.transcript = new Transcript(
       renderer,
@@ -743,6 +751,7 @@ export class NanobotTui {
       backgroundColor: composerSurface,
       focusedBackgroundColor: composerSurface,
       cursorColor: this.palette.accent,
+      syntaxStyle: this.composerSyntax,
       // A steady line cursor avoids the block-cell trails produced by some
       // terminals when a retained full-screen UI redraws around the composer.
       cursorStyle: { style: "line", blinking: false },
@@ -1002,8 +1011,7 @@ export class NanobotTui {
     this.mentionMenu.hide()
     this.skillMenu.hide()
     this.recordPrompt(prompt.content)
-    const display = userMessageText(prompt.content, prompt.options.media)
-    this.transcript.user(display, turnId)
+    this.transcript.user(prompt.content, turnId, prompt.options.media)
     this.hostBlocked = false
     this.setCurrentTask(prompt.content)
     if (steering) {
@@ -1093,8 +1101,9 @@ export class NanobotTui {
         this.reconcileTurnOwnership(event)
         return
       case "user_message": {
-        const content = userMessageText(event.text, event.media_urls)
-        if (this.transcript.user(content, event.turn_id)) this.recordPrompt(event.text)
+        if (this.transcript.user(event.text, event.turn_id, event.media_urls)) {
+          this.recordPrompt(event.text)
+        }
         this.hostBlocked = false
         this.setCurrentTask(event.text)
         this.reconcileTurnOwnership(event)
@@ -1913,6 +1922,11 @@ export class NanobotTui {
     this.composer.textColor = this.palette.text
     this.composer.focusedTextColor = this.palette.text
     this.composer.cursorColor = this.palette.accent
+    const previousComposerSyntax = this.composerSyntax
+    this.composerSyntax = composerSyntaxStyle(this.palette)
+    this.composer.syntaxStyle = this.composerSyntax
+    this.syncComposerImageHighlights(this.composer.plainText)
+    void this.renderer.idle().catch(() => {}).finally(() => previousComposerSyntax.destroy())
     this.renderTitleColor()
     this.status.fg = this.palette.muted
     this.meta.fg = this.palette.faint
@@ -2212,6 +2226,7 @@ export class NanobotTui {
     this.composerValue = value
     this.composerCursor = cursor
     this.draft.prune(value)
+    this.syncComposerImageHighlights(value)
     const clearedUnsent = this.unsentSubmit && !value.trim()
     if (clearedUnsent) this.unsentSubmit = false
     this.runtimeControls.hide()
@@ -2230,6 +2245,10 @@ export class NanobotTui {
   }
 
   private setComposerStringCursor(value: string, cursor: number): void {
+    this.composer.cursorOffset = this.composerOffsetForStringIndex(value, cursor)
+  }
+
+  private composerOffsetForStringIndex(value: string, cursor: number): number {
     const target = Math.min(Math.max(cursor, 0), value.length)
     const before = value.slice(0, target)
     const row = before.split("\n").length - 1
@@ -2243,7 +2262,21 @@ export class NanobotTui {
       if (candidateLength > target) break
       if (candidateLength === target) offset = candidate
     }
-    this.composer.cursorOffset = offset
+    return offset
+  }
+
+  private syncComposerImageHighlights(value: string): void {
+    this.composer.clearAllHighlights()
+    const styleId = this.composerSyntax.getStyleId(IMAGE_PLACEHOLDER_STYLE)
+    if (styleId === null) return
+    for (const range of this.draft.imagePlaceholderRanges(value)) {
+      this.composer.addHighlightByCharRange({
+        start: this.composerOffsetForStringIndex(value, range.start),
+        end: this.composerOffsetForStringIndex(value, range.end),
+        styleId,
+        priority: 100,
+      })
+    }
   }
 
   private setComposer(content: string): void {
@@ -2876,6 +2909,7 @@ export class NanobotTui {
     this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.stopSessionRefresh()
+    this.composerSyntax.destroy()
     this.transcript.destroy()
     this.diffViewer.destroy()
     void this.clipboardImageReader.dispose().catch(() => {})

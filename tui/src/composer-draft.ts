@@ -16,11 +16,6 @@ export interface DraftEditReconciliation {
   removedImages: string[]
 }
 
-interface DraftRange {
-  start: number
-  end: number
-}
-
 const IMAGE_EXTENSIONS = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -92,8 +87,8 @@ export class ComposerDraft {
     return content.split(label).length - 1
   }
 
-  private imageRanges(visible: string): DraftRange[] {
-    const ranges: DraftRange[] = []
+  imagePlaceholderRanges(visible: string): Array<{ start: number; end: number }> {
+    const ranges: Array<{ start: number; end: number }> = []
     for (const label of this.images.keys()) {
       let start = visible.indexOf(label)
       while (start >= 0) {
@@ -105,7 +100,7 @@ export class ComposerDraft {
   }
 
   snapImageCursor(visible: string, cursor: number, previousCursor: number): number {
-    const range = this.imageRanges(visible)
+    const range = this.imagePlaceholderRanges(visible)
       .find(({ start, end }) => cursor > start && cursor < end)
     if (!range) return cursor
     if (previousCursor <= range.start) return range.end
@@ -114,7 +109,7 @@ export class ComposerDraft {
   }
 
   moveImageCursor(visible: string, cursor: number, direction: -1 | 1): number | null {
-    const range = this.imageRanges(visible).find(({ start, end }) => (
+    const range = this.imagePlaceholderRanges(visible).find(({ start, end }) => (
       direction < 0
         ? cursor > start && cursor <= end
         : cursor >= start && cursor < end
@@ -143,7 +138,7 @@ export class ComposerDraft {
       newEnd -= 1
     }
 
-    const ranges = this.imageRanges(previous).filter(({ start, end }) => (
+    const ranges = this.imagePlaceholderRanges(previous).filter(({ start, end }) => (
       oldStart === oldEnd
         ? oldStart > start && oldStart < end
         : oldStart < end && oldEnd > start

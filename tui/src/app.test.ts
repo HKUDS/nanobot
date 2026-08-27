@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { BoxRenderable, CliRenderEvents, TextareaRenderable, TextRenderable } from "@opentui/core"
+import {
+  BoxRenderable,
+  CliRenderEvents,
+  StyledText,
+  TextareaRenderable,
+  TextAttributes,
+  TextRenderable,
+} from "@opentui/core"
 import {
   MockTreeSitterClient,
   createTestRenderer,
@@ -16,7 +23,7 @@ import type {
 } from "./protocol"
 import type { HostAgentState, HostMetadata, TuiHost } from "./host"
 import type { ClipboardImageReader } from "./clipboard-image"
-import type { Transcript } from "./transcript"
+import { userMessageText, type Transcript } from "./transcript"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -50,6 +57,18 @@ test("formats a reusable session ID after exit", () => {
   expect(sessionExitMessage("resume-chat")).toBe(
     "Resume with: nanobot agent --session websocket:resume-chat\n",
   )
+})
+
+test("projects image media as stable placeholders without exposing filenames", () => {
+  expect(userMessageText("What is this?", [
+    { name: "clipboard-image-2.png" },
+    { kind: "image", name: "screenshot.png" },
+    { kind: "file", name: "report.pdf" },
+  ])).toBe([
+    "What is this?",
+    "[Image #2] [Image #1]",
+    "Attachments: report.pdf",
+  ].join("\n"))
 })
 
 function contrastRatio(foreground: string, background: string): number {
@@ -334,13 +353,31 @@ describe("NanobotTui layout", () => {
       draft: { imageCount: number }
       promptHistory: string[]
       status: { plainText: string }
+      transcript: {
+        userMessages: Set<{ renderable: TextRenderable }>
+      }
     }
 
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.composer.plainText === "[Image #1] ")
     expect(ui.status.plainText).toContain("Pasted Image #1")
+    const placeholderStyle = ui.composer.syntaxStyle?.getStyle("image.placeholder")
+    expect(placeholderStyle?.bold).toBeTrue()
+    expect(placeholderStyle?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
+    const placeholderStyleId = ui.composer.syntaxStyle?.getStyleId("image.placeholder")
+    if (placeholderStyleId === null || placeholderStyleId === undefined) {
+      throw new Error("image placeholder style was not registered")
+    }
+    expect(ui.composer.getLineHighlights(0)).toEqual([{
+      start: 0,
+      end: 10,
+      styleId: placeholderStyleId,
+      priority: 100,
+      hlRef: 0,
+    }])
     ui.composer.setText("")
     await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.getLineHighlights(0)).toEqual([])
 
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.composer.plainText === "[Image #1] ")
@@ -358,7 +395,14 @@ describe("NanobotTui layout", () => {
       name: "clipboard-image-1.png",
     }])
     await setup.flush()
-    expect(setup.captureCharFrame()).toContain("Attachments: clipboard-image-1.png")
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("[Image #1]")
+    expect(frame).not.toContain("clipboard-image-1.png")
+    const userContent = [...ui.transcript.userMessages].at(-1)?.renderable.content
+    expect(userContent).toBeInstanceOf(StyledText)
+    const imageChunk = (userContent as StyledText).chunks.find(({ text }) => text === "[Image #1]")
+    expect(imageChunk?.attributes).toBe(TextAttributes.BOLD)
+    expect(imageChunk?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
 
     setup.mockInput.pressKey("v", { meta: true })
     await waitUntil(() => ui.composer.plainText === "[Image #1] ")
@@ -605,6 +649,11 @@ describe("NanobotTui layout", () => {
       turn_id: "remote-steer",
       active_turn_id: "remote-turn",
       starts_turn: false,
+      media_urls: [{
+        kind: "image",
+        url: "/api/media/sig/image",
+        name: "clipboard-image-2.png",
+      }],
     })
     await setup.flush()
 
@@ -613,6 +662,8 @@ describe("NanobotTui layout", () => {
     expect(occurrences(frame, "hello from terminal A")).toBe(1)
     expect(occurrences(frame, "Attachments: report.pdf")).toBe(1)
     expect(occurrences(frame, "one more remote detail")).toBe(1)
+    expect(occurrences(frame, "[Image #2]")).toBe(1)
+    expect(frame).not.toContain("clipboard-image-2.png")
     expect(state.activeTurn).toBeTrue()
     expect(state.activeTurnId).toBe("remote-turn")
 
@@ -1983,19 +2034,26 @@ describe("NanobotTui layout", () => {
       composer: {
         backgroundColor: { intent: string; toInts(): number[] }
         textColor: { toInts(): number[] }
+        syntaxStyle: { getStyle(name: string): { fg?: { toInts(): number[] } } | undefined } | null
       }
       transcript: {
         markdown: Set<{ syntaxStyle: object }>
         frames: Set<{ borderColor: { toInts(): number[] } }>
         userRows: Set<{ backgroundColor: { intent: string; toInts(): number[] } }>
-        user(content: string): void
+        userMessages: Set<{ renderable: TextRenderable }>
+        user(content: string, turnId?: string, media?: Array<{ kind: "image"; name: string }>): void
       }
     }
-    internals.transcript.user("Existing question")
+    internals.transcript.user("Existing question", undefined, [{
+      kind: "image",
+      name: "clipboard-image-1.png",
+    }])
     const userRow = [...internals.transcript.userRows][0]
+    const userMessage = [...internals.transcript.userMessages][0]
     const markdown = [...internals.transcript.markdown][0]
     const sessionFrame = [...internals.transcript.frames][0]
     const darkSyntax = markdown?.syntaxStyle
+    const darkComposerSyntax = internals.composer.syntaxStyle
 
     expect(userRow?.backgroundColor.intent).toBe("default")
 
@@ -2014,6 +2072,12 @@ describe("NanobotTui layout", () => {
     expect(sessionFrame?.borderColor.toInts().slice(0, 3)).toEqual([212, 212, 216])
     expect(userRow?.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
+    expect(internals.composer.syntaxStyle).not.toBe(darkComposerSyntax)
+    expect(internals.composer.syntaxStyle?.getStyle("image.placeholder")?.fg?.toInts().slice(0, 3))
+      .toEqual([185, 77, 11])
+    const recolored = userMessage?.renderable.content as StyledText
+    expect(recolored.chunks.find(({ text }) => text === "[Image #1]")?.fg?.toInts().slice(0, 3))
+      .toEqual([185, 77, 11])
   })
 
   test("distinguishes the composer with a quiet focus edge", async () => {
