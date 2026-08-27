@@ -965,6 +965,10 @@ export class NanobotTui {
       return
     }
     const command = this.commandMenu.resolve(visibleContent)
+    if ((command || visibleContent.startsWith("!")) && this.draft.media(visibleContent).length) {
+      this.status.content = "Images cannot be used with commands · remove the image first"
+      return
+    }
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
       else if (command.command.action === "context") void this.openContext()

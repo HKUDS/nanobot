@@ -526,6 +526,50 @@ describe("NanobotTui layout", () => {
     await waitUntil(() => setup?.captureCharFrame().includes("No image in clipboard") === true)
   })
 
+  test("keeps image placeholders out of command arguments", async () => {
+    const sent: string[] = []
+    const clipboard: ClipboardImageReader = {
+      read: async () => ({
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,AAEC/w==",
+      }),
+      dispose: async () => undefined,
+    }
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(sent),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      undefined,
+      clipboard,
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      status: { plainText: string }
+      commandMenu: { setCommands(commands: SlashCommand[]): void }
+    }
+    ui.commandMenu.setCommands([{
+      command: "/model",
+      title: "Model",
+      description: "Show or switch model presets",
+      argHint: "[preset]",
+      lifecycle: "side_channel",
+      acceptsArgs: true,
+    }])
+
+    await setup.mockInput.typeText("/model ")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "/model [Image #1] ")
+    ui.composer.submit()
+    await waitUntil(() => ui.status.plainText.includes("Images cannot be used with commands"))
+
+    expect(sent).toEqual([])
+    expect(ui.composer.plainText).toBe("/model [Image #1] ")
+  })
+
   test("ignores a clipboard result that finishes after the renderer is destroyed", async () => {
     let resolveRead: ((image: {
       mimeType: "image/png"
