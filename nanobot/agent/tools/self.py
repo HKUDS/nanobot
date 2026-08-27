@@ -1,8 +1,5 @@
 """MyTool: runtime state inspection and configuration for the agent loop."""
 
-# Tool.execute accepts heterogeneous schemas.
-# pyright: reportIncompatibleMethodOverride=false
-
 from __future__ import annotations
 
 import time
@@ -353,7 +350,8 @@ class MyTool(Tool):
     # Action dispatch
     # ------------------------------------------------------------------
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         action: str,
         key: str | None = None,

@@ -1,7 +1,5 @@
 """Cron tool for scheduling reminders and tasks."""
 
-# pyright: reportIncompatibleMethodOverride=false
-
 from __future__ import annotations
 
 from contextvars import ContextVar, Token
@@ -133,7 +131,8 @@ class CronTool(Tool):
             errors.append("job_id is required when action='remove'")
         return errors
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         action: str,
         name: str | None = None,

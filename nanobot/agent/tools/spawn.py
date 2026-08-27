@@ -1,7 +1,5 @@
 """Spawn tool for creating background subagents."""
 
-# pyright: reportIncompatibleMethodOverride=false
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -73,7 +71,8 @@ class SpawnTool(Tool):
             "and use a dedicated subdirectory when helpful."
         )
 
-    async def execute(
+    # Typed kwargs are narrower than Tool.execute(**kwargs).
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         task: str,
         label: str | None = None,
