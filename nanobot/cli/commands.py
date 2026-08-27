@@ -87,7 +87,12 @@ app = typer.Typer(
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
     help=f"{__logo__} nanobot - Personal AI Assistant",
-    no_args_is_help=True,
+    epilog=(
+        "Run `nanobot` without a subcommand to start the terminal agent. "
+        "Use `nanobot agent --help` for agent options."
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
 )
 
 console = Console()
@@ -98,7 +103,7 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     version: bool = typer.Option(
@@ -110,7 +115,11 @@ def main(
     # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
     # role identity correct until that launcher is regenerated.
     command = ctx.invoked_subcommand
-    set_cli_process_identity([command] if command else sys.argv[1:])
+    set_cli_process_identity([command] if command else ["agent"])
+    if command is None:
+        from nanobot.cli.entry import _run_agent
+
+        _run_agent([], prog_name="nanobot")
 
 
 # ============================================================================

@@ -146,7 +146,7 @@ Activate it with `source .venv/bin/activate` on macOS/Linux or
 python -m pip install -e .
 ```
 
-After that, the normal commands are identical to a stable install. `nanobot agent` runs the TUI
+After that, the normal commands are identical to a stable install. `nanobot` runs the TUI
 from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later
 `git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun
 `python -m pip install -e .` when Python dependencies change. Contributors should also read
@@ -206,10 +206,10 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 **Prefer to work entirely in the terminal?**
 
 ```bash
-nanobot agent
+nanobot
 ```
 
-This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI.
+This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI. The explicit `nanobot agent` form remains available for compatibility.
 
 - Type `/` to discover commands, `/sessions` to switch conversations, or `@` to mention an app, MCP server, or saved session.
 - Press `Enter` to send. While nanobot is working, `Enter` sends now and `Tab` sends after the current response. Press `Shift+Enter` to add a newline (`Ctrl+J` works in terminals that cannot distinguish modified Enter keys).
@@ -220,7 +220,7 @@ Each launch starts a new session by default. Use `--session` to resume one and `
 For one request and an immediate exit, use:
 
 ```bash
-nanobot agent -m "Hello!"
+nanobot -m "Hello!"
 ```
 
 The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot webui` and open **Settings → Models** first.

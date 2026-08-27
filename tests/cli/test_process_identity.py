@@ -58,6 +58,24 @@ def test_legacy_console_entrypoint_still_sets_subcommand_identity(
     assert commands == [["webui"]]
 
 
+def test_legacy_console_entrypoint_routes_bare_command_to_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identities: list[list[str]] = []
+    launches: list[tuple[list[str], str]] = []
+    monkeypatch.setattr("nanobot.cli.commands.set_cli_process_identity", identities.append)
+    monkeypatch.setattr(
+        "nanobot.cli.entry._run_agent",
+        lambda args, *, prog_name: launches.append((args, prog_name)),
+    )
+
+    result = CliRunner().invoke(app, [])
+
+    assert result.exit_code == 0
+    assert identities == [["agent"]]
+    assert launches == [([], "nanobot")]
+
+
 def test_named_executable_creates_stable_role_symlink(
     tmp_path: Path,
 ) -> None:
