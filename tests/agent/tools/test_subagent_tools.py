@@ -211,6 +211,78 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_spawn_tool_resolves_preset_runtime(tmp_path):
+    """A preset passed to spawn() should resolve to the preset's runtime."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    preset_runtime = _runtime(provider, model="preset-model")
+
+    class FakeResolver:
+        def resolve_preset(self, name):
+            assert name == "tomatenhd"
+            return preset_runtime
+
+    tool = SpawnTool(mgr, resolver=FakeResolver())
+    seen = {}
+
+    async def fake_run(spec):
+        seen["runtime"] = spec.runtime
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=_runtime(provider),
+    )):
+        result = await tool.execute(task="do task", preset="tomatenhd")
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["runtime"] is preset_runtime
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_rejects_preset_with_temperature():
+    """preset and temperature are mutually exclusive on the spawn tool."""
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    class Manager:
+        max_concurrent_subagents = 1
+
+        def get_running_count(self):
+            return 0
+
+    tool = SpawnTool(Manager())
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=_runtime(MagicMock()),
+    )):
+        result = await tool.execute(task="do task", preset="x", temperature=0.5)
+
+    assert "mutually exclusive" in result
+
+
+@pytest.mark.asyncio
 async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     """SpawnTool should return an error string when the concurrency limit is reached."""
     from nanobot.agent.subagent import SubagentManager
