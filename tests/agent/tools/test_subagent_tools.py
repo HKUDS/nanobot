@@ -211,6 +211,159 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_spawn_tool_uses_allowlisted_preset_runtime(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.model_presets import build_static_preset_snapshot
+    from nanobot.agent.tools.context import request_context
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import Config
+
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "workspace": str(tmp_path),
+                "spawnPresets": ["fast"],
+            }
+        },
+        "modelPresets": {
+            "fast": {
+                "model": "preset-model",
+                "provider": "openai",
+                "maxTokens": 1234,
+                "contextWindowTokens": 4321,
+                "temperature": 0.6,
+                "reasoningEffort": "high",
+            }
+        },
+    })
+    providers = {"preset-model": MagicMock(), "updated-model": MagicMock()}
+    preset = config.model_presets["fast"]
+    registry = ToolRegistry()
+
+    def load_preset(name):
+        current = config.model_presets[name]
+        return build_static_preset_snapshot(providers[current.model], name, current)
+
+    loop = AgentLoop.from_config(
+        config,
+        bus=MessageBus(),
+        provider=MagicMock(),
+        preset_snapshot_loader=load_preset,
+        tool_registry=registry,
+    )
+    seen = []
+
+    async def fake_run(spec):
+        seen.append(spec.runtime)
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    loop.subagents.runner.run = AsyncMock(side_effect=fake_run)
+    parent_runtime = _runtime(MagicMock(), model="main-model")
+    tool = registry.get("spawn")
+    assert tool is not None
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=parent_runtime,
+    )):
+        result = await tool.execute(task="do task", preset="fast", wait=True)
+        config.model_presets["fast"] = preset.model_copy(update={
+            "model": "updated-model",
+            "max_tokens": 5678,
+            "context_window_tokens": 8192,
+        })
+        await tool.execute(task="do another task", preset="fast", wait=True)
+
+    runtime = seen[0]
+    assert result == "done"
+    assert runtime.provider is providers["preset-model"]
+    assert runtime.model == "preset-model"
+    assert runtime.generation.max_tokens == 1234
+    assert runtime.generation.temperature == 0.6
+    assert runtime.generation.reasoning_effort == "high"
+    assert runtime.context_window_tokens == 4321
+    assert runtime.snapshot_signature == (
+        "model_preset",
+        "fast",
+        preset.model_dump_json(),
+    )
+    assert parent_runtime.model == "main-model"
+    assert seen[1].model == "updated-model"
+    assert seen[1].provider is providers["updated-model"]
+    assert seen[1].generation.max_tokens == 5678
+    assert seen[1].context_window_tokens == 8192
+    assert seen[0].snapshot_signature != seen[1].snapshot_signature
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("allowlist", "preset", "loader"),
+    [
+        (["fast"], "unknown", lambda _name: None),
+        (["missing"], "missing", lambda name: (_ for _ in ()).throw(KeyError(name))),
+    ],
+)
+async def test_spawn_tool_rejects_unavailable_preset_without_touching_main_runtime(
+    allowlist,
+    preset,
+    loader,
+):
+    from nanobot.agent.tools.context import request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    manager = MagicMock()
+    manager.max_concurrent_subagents = 1
+    manager.get_running_count.return_value = 0
+    manager.spawn = AsyncMock(return_value="started")
+    parent_runtime = _runtime(MagicMock(), model="main-model")
+    tool = SpawnTool(
+        manager,
+        spawn_presets=allowlist,
+        preset_snapshot_loader=loader,
+    )
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        runtime=parent_runtime,
+    )):
+        result = await tool.execute(task="do task", preset=preset)
+
+    assert result.is_error
+    assert "spawn preset" in result
+    manager.spawn.assert_not_awaited()
+    assert parent_runtime.model == "main-model"
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_empty_allowlist_rejects_preset_but_keeps_default_path():
+    from nanobot.agent.tools.context import request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    manager = MagicMock()
+    manager.max_concurrent_subagents = 1
+    manager.get_running_count.return_value = 0
+    manager.spawn = AsyncMock(return_value="started")
+    parent_runtime = _runtime(MagicMock(), model="main-model")
+    tool = SpawnTool(manager)
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        runtime=parent_runtime,
+    )):
+        rejected = await tool.execute(task="preset", preset="fast")
+        result = await tool.execute(task="default")
+
+    assert rejected.is_error
+    assert result == "started"
+    manager.spawn.assert_awaited_once()
+    assert manager.spawn.await_args.kwargs["runtime"] is parent_runtime
+
+
+@pytest.mark.asyncio
 async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager

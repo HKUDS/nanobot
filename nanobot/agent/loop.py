@@ -295,6 +295,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        spawn_presets: list[str] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -456,7 +457,11 @@ class AgentLoop:
         self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
-        self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
+        self._register_default_tools(
+            provider_snapshot_loader=provider_snapshot_loader,
+            preset_snapshot_loader=preset_snapshot_loader,
+            spawn_presets=spawn_presets,
+        )
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -505,6 +510,7 @@ class AgentLoop:
             model=model,
             max_iterations=defaults.max_tool_iterations,
             max_concurrent_subagents=defaults.max_concurrent_subagents,
+            spawn_presets=defaults.spawn_presets,
             context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
@@ -624,6 +630,8 @@ class AgentLoop:
         self,
         *,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
+        preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None,
+        spawn_presets: list[str] | None,
     ) -> None:
         """Register the default set of tools via plugin loader."""
         from nanobot.agent.tools.context import ToolContext
@@ -638,6 +646,8 @@ class AgentLoop:
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
+            preset_snapshot_loader=preset_snapshot_loader,
+            spawn_presets=spawn_presets or [],
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,

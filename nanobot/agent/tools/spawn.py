@@ -15,8 +15,10 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.security.workspace_access import current_workspace_scope
+from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 if TYPE_CHECKING:
+    from nanobot.agent.model_presets import PresetSnapshotLoader
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import ToolContext
 
@@ -25,6 +27,9 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        preset=StringSchema(
+            "Model preset for the subagent; only allowlisted presets are accepted"
+        ),
         temperature=NumberSchema(
             description=(
                 "Optional sampling temperature for the subagent "
@@ -48,15 +53,26 @@ if TYPE_CHECKING:
 class SpawnTool(Tool):
     """Tool to spawn a subagent for background task execution."""
 
-    def __init__(self, manager: "SubagentManager"):
+    def __init__(
+        self,
+        manager: "SubagentManager",
+        spawn_presets: list[str] | None = None,
+        preset_snapshot_loader: "PresetSnapshotLoader | None" = None,
+    ):
         self._manager = manager
+        self._spawn_presets = frozenset(spawn_presets or ())
+        self._preset_snapshot_loader = preset_snapshot_loader
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
         manager = ctx.subagent_manager
         if manager is None:
             raise RuntimeError("SpawnTool requires an initialized subagent manager")
-        return cls(manager=manager)
+        return cls(
+            manager=manager,
+            spawn_presets=ctx.spawn_presets,
+            preset_snapshot_loader=ctx.preset_snapshot_loader,
+        )
 
     @property
     def name(self) -> str:
@@ -82,6 +98,7 @@ class SpawnTool(Tool):
         self,
         task: str,
         label: str | None = None,
+        preset: str | None = None,
         temperature: float | None = None,
         wait: bool = False,
         **kwargs: Any,
@@ -90,13 +107,29 @@ class SpawnTool(Tool):
         request_ctx = current_request_context()
         if request_ctx is None or request_ctx.runtime is None:
             return ToolResult.error("Error: spawn requires an active model runtime")
+        runtime = request_ctx.runtime
+        if preset is not None:
+            if preset not in self._spawn_presets:
+                return ToolResult.error(
+                    f"Error: spawn preset {preset!r} is not allowlisted"
+                )
+            if self._preset_snapshot_loader is None:
+                return ToolResult.error("Error: spawn preset resolution is unavailable")
+            try:
+                runtime = runtime_from_provider_snapshot(
+                    self._preset_snapshot_loader(preset)
+                )
+            except (KeyError, ValueError) as exc:
+                return ToolResult.error(
+                    f"Error: failed to resolve spawn preset {preset!r}: {exc}"
+                )
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
         session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
         method = self._manager.run_inline if wait else self._manager.spawn
         return await method(
             task=task,
-            runtime=request_ctx.runtime,
+            runtime=runtime,
             label=label,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
