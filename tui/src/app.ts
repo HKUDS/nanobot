@@ -382,19 +382,15 @@ function connectionStatusText(
   status: ConnectionStatus,
   info?: ConnectionStatusInfo,
 ): string {
-  if (status === "starting") return "Starting nanobot…"
-  if (status === "connecting") return "Connecting…"
-  if (status === "connected") return "Opening chat…"
-  if (status === "reconnecting") {
-    return info?.health === "degraded" ? "Restoring chat…" : "Reconnecting…"
-  }
+  if (["starting", "connecting", "connected"].includes(status)) return "Getting ready…"
+  if (status === "reconnecting") return "Resuming…"
   if (status === "unavailable") {
     return info?.health === "degraded"
-      ? "Chat is getting ready…"
-      : "Unable to connect · retrying…"
+      ? "Still getting ready…"
+      : "Nanobot is taking longer to respond…"
   }
-  if (status === "error") return "Unable to connect · restart nanobot"
-  return "Disconnected"
+  if (status === "error") return "Nanobot unavailable · restart nanobot"
+  return "Session ended"
 }
 
 function singleLine(value: string, limit = 120): string {
@@ -473,7 +469,7 @@ export class NanobotTui {
   private submitPending = false
   private submitGeneration = 0
   private unsentSubmit = false
-  private connectionMessage = "Connecting…"
+  private connectionMessage = "Getting ready…"
   private readonly promptHistory: string[] = []
   private historyCursor = 0
   private historyDraft = ""
@@ -771,7 +767,7 @@ export class NanobotTui {
     })
     this.status = new TextRenderable(renderer, {
       id: "nanobot-tui-status",
-      content: "Connecting…",
+      content: "Getting ready…",
       fg: this.palette.muted,
       height: 1,
       width: "auto",
@@ -857,7 +853,7 @@ export class NanobotTui {
     // Network setup and small menu payloads do not depend on terminal colors.
     // Start them while OSC theme detection is in flight instead of serializing
     // up to one second of otherwise independent startup work.
-    this.host.reportState("unknown", "Connecting")
+    this.host.reportState("unknown", "Getting ready")
     this.client.connect()
     void this.loadCommands()
     void this.loadMentions()
@@ -1441,7 +1437,7 @@ export class NanobotTui {
     this.connectionMessage = connectionStatusText(status, info)
     if (status === "connected") {
       this.ready = false
-      this.host.reportState("unknown", "Connecting")
+      this.host.reportState("unknown", "Getting ready")
       this.renderConnectionMessage()
       return
     }
@@ -1476,7 +1472,7 @@ export class NanobotTui {
   private markSubmitUnsent(sendFailed = false): void {
     this.unsentSubmit = true
     if (sendFailed) {
-      this.status.content = "Not sent · send failed; press Enter to retry when chat is ready"
+      this.status.content = "Not sent · send failed; press Enter to retry when ready"
       return
     }
     this.renderConnectionMessage()

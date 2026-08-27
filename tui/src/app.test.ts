@@ -182,7 +182,7 @@ describe("NanobotTui layout", () => {
       expect(setup.renderer.height).toBe(height)
       expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
       expect(occurrences(frame, "Ready")).toBe(0)
-      expect(occurrences(frame, "Connecting…")).toBe(1)
+      expect(occurrences(frame, "Getting ready…")).toBe(1)
       expect(occurrences(frame, "nanobot  ·  test/model")).toBe(1)
     }
 
@@ -2406,16 +2406,16 @@ describe("NanobotTui layout", () => {
       attempt: 1,
       elapsedMs: 0,
     })
-    expect(ui.status.plainText).toBe("Starting nanobot…")
+    expect(ui.status.plainText).toBe("Getting ready…")
 
     ui.handleStatus("connecting")
-    expect(ui.status.plainText).toBe("Connecting…")
+    expect(ui.status.plainText).toBe("Getting ready…")
 
     ui.handleStatus("connected")
-    expect(ui.status.plainText).toBe("Opening chat…")
+    expect(ui.status.plainText).toBe("Getting ready…")
 
     ui.handleStatus("error", "gateway sent an invalid event")
-    expect(ui.status.plainText).toBe("Opening chat…")
+    expect(ui.status.plainText).toBe("Getting ready…")
     expect(ui.status.plainText).not.toContain("Unable")
 
     ui.handleStatus("reconnecting", "connection closed", {
@@ -2423,7 +2423,7 @@ describe("NanobotTui layout", () => {
       attempt: 2,
       elapsedMs: 800,
     })
-    expect(ui.status.plainText).toBe("Reconnecting…")
+    expect(ui.status.plainText).toBe("Resuming…")
 
     ui.handleStatus("reconnecting", "connection closed", {
       endpoint: "127.0.0.1:8769",
@@ -2431,7 +2431,7 @@ describe("NanobotTui layout", () => {
       elapsedMs: 900,
       health: "degraded",
     })
-    expect(ui.status.plainText).toBe("Restoring chat…")
+    expect(ui.status.plainText).toBe("Resuming…")
 
     ui.handleStatus("unavailable", "connection refused", {
       endpoint: "127.0.0.1:8769",
@@ -2439,7 +2439,7 @@ describe("NanobotTui layout", () => {
       elapsedMs: 3_200,
       health: "degraded",
     })
-    expect(ui.status.plainText).toBe("Chat is getting ready…")
+    expect(ui.status.plainText).toBe("Still getting ready…")
     expect(ui.status.plainText).not.toContain("Unable")
 
     ui.handleStatus("unavailable", "connection refused", {
@@ -2448,14 +2448,15 @@ describe("NanobotTui layout", () => {
       elapsedMs: 3_500,
       health: "unreachable",
     })
-    expect(ui.status.plainText).toBe("Unable to connect · retrying…")
+    expect(ui.status.plainText).toBe("Nanobot is taking longer to respond…")
+    expect(ui.status.plainText).not.toContain("Unable")
 
     ui.handleStatus("error", "gateway bootstrap failed: HTTP 401", {
       endpoint: "127.0.0.1:8769",
       attempt: 9,
       elapsedMs: 3_800,
     })
-    expect(ui.status.plainText).toBe("Unable to connect · restart nanobot")
+    expect(ui.status.plainText).toBe("Nanobot unavailable · restart nanobot")
     expect(ui.status.plainText).not.toContain("gateway")
     expect(ui.status.plainText).not.toContain("127.0.0.1")
     expect(ui.status.plainText).not.toContain("HTTP")
