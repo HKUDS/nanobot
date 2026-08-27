@@ -148,28 +148,28 @@ def test_retain_recent_legal_suffix_keeps_recent_messages():
     assert session.messages[-1]["content"] == "msg9"
 
 
-def test_retain_recent_legal_suffix_adjusts_last_consolidated():
+def test_retain_recent_legal_suffix_adjusts_last_archived():
     session = Session(key="test:trim-cons")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 7
+    session.last_archived = 7
 
     session.retain_recent_legal_suffix(4)
 
     assert len(session.messages) == 4
-    assert session.last_consolidated == 1
+    assert session.last_archived == 1
 
 
 def test_retain_recent_legal_suffix_zero_clears_session():
     session = Session(key="test:trim-zero")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 5
+    session.last_archived = 5
 
     session.retain_recent_legal_suffix(0)
 
     assert session.messages == []
-    assert session.last_consolidated == 0
+    assert session.last_archived == 0
 
 
 def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
@@ -188,15 +188,15 @@ def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
     assert history[0]["content"] == "keep"
 
 
-# --- last_consolidated > 0 ---
+# --- last_archived > 0 ---
 
-def test_orphan_trim_with_last_consolidated():
-    """Orphan trimming works correctly when session is partially consolidated."""
+def test_orphan_trim_with_last_archived():
+    """Orphan trimming works correctly when a session is partially archived."""
     session = Session(key="test:consolidated")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"old {i}"})
         session.messages.extend(_tool_turn("cons", i))
-    session.last_consolidated = 30
+    session.last_archived = 30
 
     session.messages.append({"role": "user", "content": "recent"})
     for i in range(15):
@@ -213,7 +213,7 @@ def test_get_history_replays_recent_messages_after_full_archive():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"u{i}"})
         session.messages.append({"role": "assistant", "content": f"a{i}"})
-    session.last_consolidated = len(session.messages)
+    session.last_archived = len(session.messages)
 
     history = session.get_history(max_messages=100)
 
@@ -229,8 +229,8 @@ def test_get_history_replays_recent_messages_after_full_archive():
     ]
 
 
-def test_get_history_extends_compacted_replay_to_preceding_user():
-    session = Session(key="test:compacted-tool-turn")
+def test_get_history_extends_archived_replay_to_preceding_user():
+    session = Session(key="test:archived-tool-turn")
     session.messages.extend(
         [
             {"role": "user", "content": "old"},
@@ -242,7 +242,7 @@ def test_get_history_extends_compacted_replay_to_preceding_user():
             {"role": "assistant", "content": "done"},
         ]
     )
-    session.last_consolidated = len(session.messages)
+    session.last_archived = len(session.messages)
 
     history = session.get_history(max_messages=100)
 
@@ -251,8 +251,8 @@ def test_get_history_extends_compacted_replay_to_preceding_user():
     _assert_no_orphans(history)
 
 
-def test_compacted_tool_turn_can_extend_past_message_cap():
-    session = Session(key="test:long-compacted-tool-turn")
+def test_archived_tool_turn_can_extend_past_message_cap():
+    session = Session(key="test:long-archived-tool-turn")
     session.messages.extend(
         [
             {"role": "user", "content": "old"},
@@ -263,7 +263,7 @@ def test_compacted_tool_turn_can_extend_past_message_cap():
     for i in range(50):
         session.messages.extend(_tool_turn("keep", i))
     session.messages.append({"role": "assistant", "content": "done"})
-    session.last_consolidated = len(session.messages)
+    session.last_archived = len(session.messages)
 
     history = session.get_history(max_messages=120)
 
@@ -635,7 +635,7 @@ def test_fork_session_allows_index_equal_to_user_count(tmp_path):
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
 
 
-def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefix(tmp_path):
+def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")
     source.messages = [
@@ -644,7 +644,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
         {"role": "user", "content": "round2 fork me"},
         {"role": "assistant", "content": "answer2"},
     ]
-    source.last_consolidated = 4
+    source.last_archived = 4
     source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
     manager.save(source)
 
@@ -656,7 +656,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
 
     assert forked is not None
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
-    assert forked.last_consolidated == 0
+    assert forked.last_archived == 0
     assert "_last_summary" not in forked.metadata
 
 
@@ -880,7 +880,7 @@ def test_retain_recent_legal_suffix_returns_all_on_zero():
     session = Session(key="test:zero-return")
     for i in range(5):
         session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 3
+    session.last_archived = 3
 
     result = session.retain_recent_legal_suffix(0)
 
@@ -889,22 +889,21 @@ def test_retain_recent_legal_suffix_returns_all_on_zero():
     assert session.messages == []
 
 
-def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
-    """last_consolidated after retain_recent_legal_suffix should reflect how
-    many retained messages were inside the old consolidated prefix."""
+def test_retain_recent_legal_suffix_last_archived_correct_in_else_branch():
+    """last_archived should count retained messages from the old archived prefix."""
     session = Session(key="test:else-lc-correct")
     # 20 messages: u0..u9, a0..a9
     for i in range(10):
         session.messages.append({"role": "user", "content": f"u{i}"})
     for i in range(10):
         session.messages.append({"role": "assistant", "content": f"a{i}"})
-    session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
+    session.last_archived = 12  # u0..u9, a0, a1 archived
 
     result = session.retain_recent_legal_suffix(4)
 
     # Retained messages start from latest user (u9) + max_messages forward
     # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
     # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
-    assert session.last_consolidated == 3
+    assert session.last_archived == 3
     # already_cons should count dropped messages with original index < 12
     assert result.already_consolidated_count == 9

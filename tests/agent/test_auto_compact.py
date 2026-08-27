@@ -88,11 +88,11 @@ def _make_fake_compact(
         state["count"] += 1
         session = loop.sessions.get_or_create(key)
 
-        tail = list(session.messages[session.last_consolidated:])
+        tail = list(session.messages[session.last_archived:])
         if not tail:
             loop.sessions.save(session)
             return ""
-        archive_end = session.last_consolidated + len(tail)
+        archive_end = session.last_archived + len(tail)
         archive_msgs = tail
 
         last_active = session.updated_at
@@ -109,7 +109,7 @@ def _make_fake_compact(
                 "last_active": last_active.isoformat(),
             }
 
-        session.last_consolidated = archive_end
+        session.last_archived = archive_end
         loop.sessions.save(session)
         return s
 
@@ -399,12 +399,12 @@ class TestAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_respects_last_consolidated(self, tmp_path):
-        """_archive should only archive un-consolidated messages."""
+    async def test_auto_compact_respects_last_archived(self, tmp_path):
+        """_archive should process only unarchived messages."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 14)
-        session.last_consolidated = 18
+        session.last_archived = 18
         loop.sessions.save(session)
 
         archived_messages = []

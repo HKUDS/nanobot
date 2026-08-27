@@ -291,7 +291,7 @@ class TestCmdNewUnifiedSession:
         archived = loop.consolidator.archive_session.call_args.args[0]
         assert archived.key == "unified:default"
         assert archived.messages == expected_snapshot
-        assert archived.last_consolidated == 0
+        assert archived.last_archived == 0
         loop.consolidator.archive_session.assert_called_once_with(
             archived,
             archive_end=len(expected_snapshot),

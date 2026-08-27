@@ -14,7 +14,6 @@ def test_session_context_separates_archive_progress_from_replay() -> None:
     session = Session(
         key="websocket:context",
         messages=messages,
-        last_consolidated=2,
         metadata={
             "_last_summary": {
                 "text": "The archived conversation settled the old question.",
@@ -23,6 +22,7 @@ def test_session_context_separates_archive_progress_from_replay() -> None:
         },
     )
 
+    session.last_archived = 2
     replay = session.get_history(max_messages=0, include_runtime_context=False)
     replay_tokens = sum(estimate_message_tokens(message) for message in replay)
     summary_tokens = estimate_message_tokens(

@@ -16,7 +16,7 @@ def _runtime(_session: Session | None = None):
 def _make_session(
     key: str = "cli:test",
     messages: list | None = None,
-    last_consolidated: int = 0,
+    last_archived: int = 0,
     updated_at: datetime | None = None,
     metadata: dict | None = None,
 ) -> Session:
@@ -25,8 +25,8 @@ def _make_session(
         key=key,
         messages=messages or [],
         metadata=metadata or {},
-        last_consolidated=last_consolidated,
     )
+    session.last_archived = last_archived
     if updated_at is not None:
         session.updated_at = updated_at
     return session
@@ -408,7 +408,7 @@ class TestCheckExpired:
         last_active = datetime(2026, 1, 1, 10, 0, 0)
         session = _make_session("cli:done", updated_at=last_active)
         _add_turns(session, 2)
-        session.last_consolidated = len(session.messages)
+        session.last_archived = len(session.messages)
         mock_sm.list_sessions.return_value = [
             {"key": "cli:done", "updated_at": last_active.isoformat()},
         ]

@@ -179,7 +179,7 @@ def test_compact_probe_keeps_delivery_in_visible_suffix():
         {"role": "assistant", "content": "a2"},
         {"role": "assistant", "content": "a3"},
     ]
-    probe = Session(key="test:probe", messages=tail, last_consolidated=0)
+    probe = Session(key="test:probe", messages=tail)
 
     probe.retain_recent_legal_suffix(3, extend_to_user=True)
 
