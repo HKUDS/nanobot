@@ -19,7 +19,6 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.llm_usage.context import (
     LLMUsageSource,
@@ -133,7 +132,6 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
-    final_response_sent: bool = False
     # Terminal tail to emit when the preceding final-content prefix was already streamed.
     pending_stream_content: str | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
@@ -486,7 +484,6 @@ class AgentRunner:
         # injected user input starts a new logical answer and clears the chain.
         length_recovery_parts: list[str] = []
         had_injections = False
-        final_response_sent = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
         pending_stream_content: str | None = None
@@ -596,10 +593,6 @@ class AgentRunner:
                     workspace_violation_counts,
                     hook,
                     context,
-                )
-                final_response_sent = final_response_sent or any(
-                    isinstance(result, ToolResult) and result.final_response_sent
-                    for result in results
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(
@@ -911,7 +904,6 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
-            final_response_sent=final_response_sent,
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
         )

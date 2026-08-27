@@ -38,6 +38,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
+from nanobot.agent.tools.message import track_message_deliveries
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.turn_delivery import (
@@ -1982,30 +1983,31 @@ class AgentLoop:
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
         await ctx.delivery.running(started_at=ctx.visible_run_started_at)
-        result = await self._run_agent_loop(
-            ctx.initial_messages,
-            runtime=runtime,
-            on_progress=ctx.on_progress,
-            on_stream=ctx.on_stream,
-            on_stream_end=ctx.on_stream_end,
-            on_retry_wait=ctx.on_retry_wait,
-            session=ctx.session,
-            pending_queue=ctx.pending_queue,
-            ephemeral=ctx.ephemeral,
-            run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
-            hooks=ctx.hooks,
-            hook_factories=ctx.hook_factories,
-            turn_scopes=ctx.turn_scopes,
-            tools=ctx.tools,
-            request_context=ctx.request_context,
-            provider_state=ctx.provider_state,
-        )
+        with track_message_deliveries() as message_sends:
+            result = await self._run_agent_loop(
+                ctx.initial_messages,
+                runtime=runtime,
+                on_progress=ctx.on_progress,
+                on_stream=ctx.on_stream,
+                on_stream_end=ctx.on_stream_end,
+                on_retry_wait=ctx.on_retry_wait,
+                session=ctx.session,
+                pending_queue=ctx.pending_queue,
+                ephemeral=ctx.ephemeral,
+                run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
+                hooks=ctx.hooks,
+                hook_factories=ctx.hook_factories,
+                turn_scopes=ctx.turn_scopes,
+                tools=ctx.tools,
+                request_context=ctx.request_context,
+                provider_state=ctx.provider_state,
+            )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages
         ctx.stop_reason = result.stop_reason
         if (
             ctx.kind is TurnKind.USER
-            and result.final_response_sent
+            and (ctx.delivery.route.channel, ctx.delivery.route.chat_id) in message_sends
             and (not result.had_injections or result.stop_reason == "empty_final_response")
         ):
             ctx.suppress_response = True

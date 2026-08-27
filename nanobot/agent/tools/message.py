@@ -2,9 +2,11 @@
 
 # pyright: reportIncompatibleMethodOverride=false
 
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from pathlib import Path
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, cast
 
 from loguru import logger
 
@@ -15,6 +17,22 @@ from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameter
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
+
+_CURRENT_MESSAGE_SENDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+    "message_sends",
+    default=None,
+)
+
+
+@contextmanager
+def track_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
+    """Record successful MessageTool targets within one agent run."""
+    sends: set[tuple[str, str]] = set()
+    token = _CURRENT_MESSAGE_SENDS.set(sends)
+    try:
+        yield sends
+    finally:
+        _CURRENT_MESSAGE_SENDS.reset(token)
 
 
 @tool_parameters(
@@ -231,15 +249,15 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
+            sends = _CURRENT_MESSAGE_SENDS.get()
+            if sends is not None:
+                sends.add((channel, chat_id))
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = (
                 f" with {sum(len(row) for row in button_rows)} button(s)"
                 if button_rows
                 else ""
             )
-            return ToolResult(
-                f"Message sent to {channel}:{chat_id}{media_info}{button_info}",
-                final_response_sent=same_target,
-            )
+            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
             return ToolResult.error(f"Error sending message: {str(e)}")
