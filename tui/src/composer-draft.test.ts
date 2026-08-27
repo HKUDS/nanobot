@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { ComposerDraft } from "./composer-draft"
+import { ComposerDraft, MAX_DRAFT_IMAGES } from "./composer-draft"
 
 describe("ComposerDraft", () => {
   test("keeps ordinary pastes editable as ordinary text", () => {
@@ -24,5 +24,85 @@ describe("ComposerDraft", () => {
     draft.prune(second.text)
     expect(draft.expand(first.text.trim())).toBe(first.text.trim())
     expect(draft.expand(second.text.trim())).toBe(content)
+  })
+
+  test("keeps image bytes outside the editor and drops attachments with deleted placeholders", () => {
+    const draft = new ComposerDraft()
+    const first = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    const second = draft.image({ mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,BBBB" })
+
+    expect(first?.text).toBe("[Image #1] ")
+    expect(second?.text).toBe("[Image #2] ")
+    const visible = `compare ${second?.text}${first?.text}`
+    expect(draft.expand(visible)).toBe("compare   ")
+    expect(draft.media(visible)).toEqual([
+      { data_url: "data:image/jpeg;base64,BBBB", name: "clipboard-image-2.jpg" },
+      { data_url: "data:image/png;base64,AAAA", name: "clipboard-image-1.png" },
+    ])
+
+    draft.prune(first?.text || "")
+    expect(draft.imageCount).toBe(1)
+    expect(draft.media(second?.text || "")).toEqual([])
+  })
+
+  test("allocates image labels around literal composer text", () => {
+    const draft = new ComposerDraft()
+    const content = "Explain [Image #1]"
+    const insertion = draft.image(
+      { mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" },
+      content,
+    )
+
+    expect(insertion?.text).toBe("[Image #2] ")
+    expect(draft.expand(`${content} ${insertion?.text}`.trim())).toBe(`${content} `)
+  })
+
+  test("detects image labels duplicated after insertion without deleting text", () => {
+    const draft = new ComposerDraft()
+    const image = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    const visible = `${image?.text}Explain [Image #1]`
+
+    expect(draft.hasImageLabelConflict(visible)).toBeTrue()
+    expect(draft.expand(visible)).toBe(visible)
+  })
+
+  test("detects image labels inside compacted paste text added afterward", () => {
+    const draft = new ComposerDraft()
+    const image = draft.image({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    const content = ["Explain [Image #1]", ...Array.from({ length: 11 }, () => "detail")].join("\n")
+    const paste = draft.paste(content)
+    const visible = `${image?.text}${paste.text}`
+
+    expect(draft.hasImageLabelConflict(visible)).toBeTrue()
+    expect(draft.expand(visible)).toContain("Explain [Image #1]")
+  })
+
+  test("allocates image labels around hidden compacted paste text", () => {
+    const draft = new ComposerDraft()
+    const content = ["Explain [Image #1]", ...Array.from({ length: 11 }, () => "detail")].join("\n")
+    const paste = draft.paste(content)
+    const image = draft.image(
+      { mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" },
+      paste.text,
+    )
+
+    expect(image?.text).toBe("[Image #2] ")
+    expect(draft.expand(`${paste.text}${image?.text}`)).toContain("Explain [Image #1]")
+  })
+
+  test("matches the gateway image count before accepting another placeholder", () => {
+    const draft = new ComposerDraft()
+    for (let index = 0; index < MAX_DRAFT_IMAGES; index += 1) {
+      expect(draft.image({
+        mimeType: "image/png",
+        dataUrl: `data:image/png;base64,${index}`,
+      })).not.toBeNull()
+    }
+
+    expect(draft.image({
+      mimeType: "image/png",
+      dataUrl: "data:image/png;base64,overflow",
+    })).toBeNull()
+    expect(draft.imageCount).toBe(MAX_DRAFT_IMAGES)
   })
 })

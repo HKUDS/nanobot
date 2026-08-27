@@ -459,6 +459,7 @@ describe("gateway protocol", () => {
         }),
       })
       client.send("hello", {
+        media: [{ data_url: "data:image/png;base64,AAAA", name: "clipboard-image-1.png" }],
         cliApps: [{ name: "github" }],
         sessionMentions: [{ name: "plan", session_key: "websocket:plan" }],
         userShell: true,
@@ -477,6 +478,9 @@ describe("gateway protocol", () => {
       expect(outbound[1]?.chat_id).toBe("terminal")
       expect(outbound[1]?.content).toBe("hello")
       expect(outbound[1]?.user_shell).toBe(true)
+      expect(outbound[1]?.media).toEqual([
+        { data_url: "data:image/png;base64,AAAA", name: "clipboard-image-1.png" },
+      ])
       expect(outbound[1]?.cli_apps).toEqual([{ name: "github" }])
       expect(outbound[1]?.session_mentions).toEqual([
         { name: "plan", session_key: "websocket:plan" },
@@ -876,6 +880,12 @@ describe("gateway protocol", () => {
         messages: [
           { role: "user", content: "hello", turnId: "turn-1" },
           {
+            role: "user",
+            content: "",
+            turnId: "turn-image",
+            media: [{ kind: "image", url: "/api/media/sig/image", name: "shot.png" }],
+          },
+          {
             role: "tool",
             kind: "trace",
             content: "read_file",
@@ -883,7 +893,7 @@ describe("gateway protocol", () => {
             toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
           },
           { role: "assistant", kind: "reasoning", content: "private thought" },
-          { role: "assistant", content: "hi", forkIndex: 1 },
+          { role: "assistant", content: "hi", forkIndex: 2 },
         ],
         page: { has_more_before: true, before_cursor: "older-1" },
       })))
@@ -895,11 +905,17 @@ describe("gateway protocol", () => {
         messages: [
           { role: "user", content: "hello", turnId: "turn-1" },
           {
+            role: "user",
+            content: "",
+            turnId: "turn-image",
+            media: [{ kind: "image", url: "/api/media/sig/image", name: "shot.png" }],
+          },
+          {
             role: "activity",
             content: "read_file",
             toolEvents: [{ phase: "end", call_id: "read-1", name: "read_file" }],
           },
-          { role: "assistant", content: "hi", forkIndex: 1 },
+          { role: "assistant", content: "hi", forkIndex: 2 },
         ],
         hasMoreBefore: true,
         beforeCursor: "older-1",

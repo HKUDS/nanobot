@@ -15,6 +15,7 @@ import type {
   WorkspaceScopePayload,
 } from "./protocol"
 import type { HostAgentState, HostMetadata, TuiHost } from "./host"
+import type { ClipboardImageReader } from "./clipboard-image"
 import type { Transcript } from "./transcript"
 
 const options: AppOptions = {
@@ -304,6 +305,130 @@ describe("NanobotTui layout", () => {
     await waitUntil(() => sent.length === 1)
     expect(sent).toEqual([pasted])
     expect(ui.composer.plainText).toBe("")
+  })
+
+  test("pastes clipboard images into removable placeholders and sends their data", async () => {
+    const sent: string[] = []
+    const sentOptions: MessageOptions[] = []
+    let disposed = false
+    const clipboard: ClipboardImageReader = {
+      read: async () => ({
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,AAEC/w==",
+      }),
+      dispose: async () => { disposed = true },
+    }
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(sent, [], [], sentOptions),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      undefined,
+      clipboard,
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      draft: { imageCount: number }
+      promptHistory: string[]
+      status: { plainText: string }
+    }
+
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    expect(ui.status.plainText).toContain("Pasted Image #1")
+    ui.composer.setText("")
+    await waitUntil(() => ui.draft.imageCount === 0)
+
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    await setup.mockInput.typeText("[Image #1]")
+    ui.composer.submit()
+    await waitUntil(() => ui.status.plainText.includes("Duplicate image placeholder"))
+    expect(sent).toEqual([])
+    ui.composer.setText("[Image #1]")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+    expect(sent).toEqual([""])
+    expect(ui.promptHistory).toEqual([])
+    expect(sentOptions[0]?.media).toEqual([{
+      data_url: "data:image/png;base64,AAEC/w==",
+      name: "clipboard-image-1.png",
+    }])
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("Attachments: clipboard-image-1.png")
+
+    setup.mockInput.pressKey("v", { meta: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    setup.mockInput.pressTab()
+    expect(ui.status.plainText).toContain("Images cannot be queued")
+    expect(ui.composer.plainText).toBe("[Image #1] ")
+    await setup.mockInput.typeText("caption")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 2)
+    expect(sent[1]).toBe("caption")
+    expect(sentOptions[1]?.media).toHaveLength(1)
+
+    setup.renderer.destroy()
+    expect(disposed).toBeTrue()
+  })
+
+  test("keeps clipboard failures visible while an agent turn is active", async () => {
+    const sent: string[] = []
+    const clipboard: ClipboardImageReader = {
+      read: async () => { throw new Error("No image in clipboard") },
+      dispose: async () => undefined,
+    }
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(sent),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      undefined,
+      clipboard,
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+    composer.setText("start")
+    composer.submit()
+    await waitUntil(() => sent.length === 1)
+
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => setup?.captureCharFrame().includes("No image in clipboard") === true)
+  })
+
+  test("ignores a clipboard result that finishes after the renderer is destroyed", async () => {
+    let resolveRead: ((image: {
+      mimeType: "image/png"
+      dataUrl: string
+    }) => void) | undefined
+    let disposed = false
+    const clipboard: ClipboardImageReader = {
+      read: () => new Promise((resolve) => { resolveRead = resolve }),
+      dispose: async () => { disposed = true },
+    }
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      options,
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+      undefined,
+      clipboard,
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => resolveRead !== undefined)
+    setup.renderer.destroy()
+    resolveRead?.({ mimeType: "image/png", dataUrl: "data:image/png;base64,AAAA" })
+    await Bun.sleep(10)
+    expect(disposed).toBeTrue()
   })
 
   test("steers with Enter, queues with Tab, and restores queued text with Alt+Up", async () => {

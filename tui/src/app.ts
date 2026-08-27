@@ -62,10 +62,15 @@ import {
 } from "./diff-viewer"
 import {
   Transcript,
+  userMessageText,
   type TranscriptNavigation,
   type TranscriptTheme,
 } from "./transcript"
-import { ComposerDraft } from "./composer-draft"
+import { ComposerDraft, MAX_DRAFT_IMAGES } from "./composer-draft"
+import {
+  createClipboardImageReader,
+  type ClipboardImageReader,
+} from "./clipboard-image"
 import { BranchMenu, branchPoints } from "./branch-menu"
 import {
   MentionMenu,
@@ -510,8 +515,11 @@ export class NanobotTui {
   private hostWorkspace: string
   private hostBranch: string
   private readonly apiReauthenticator: ApiReauthenticator | undefined
+  private readonly clipboardImageReader: ClipboardImageReader
   private apiRefreshPromise: Promise<GatewayApiConnection> | null = null
   private skillLoadId = 0
+  private clipboardImagePending = false
+  private clipboardPasteGeneration = 0
 
   private constructor(
     renderer: CliRenderer,
@@ -519,8 +527,10 @@ export class NanobotTui {
     client?: ChatClient,
     treeSitterClient = getTreeSitterClient(),
     host: TuiHost = createTuiHost({}),
+    clipboardImageReader: ClipboardImageReader = createClipboardImageReader(),
   ) {
     this.renderer = renderer
+    this.clipboardImageReader = clipboardImageReader
     this.defaultModelName = options.model
     this.defaultModelPreset = options.modelPreset
     this.modelName = options.model
@@ -845,8 +855,16 @@ export class NanobotTui {
     client?: ChatClient,
     treeSitterClient?: TreeSitterClient,
     host?: TuiHost,
+    clipboardImageReader?: ClipboardImageReader,
   ): NanobotTui {
-    return new NanobotTui(renderer, options, client, treeSitterClient, host)
+    return new NanobotTui(
+      renderer,
+      options,
+      client,
+      treeSitterClient,
+      host,
+      clipboardImageReader,
+    )
   }
 
   async start(): Promise<void> {
@@ -889,7 +907,6 @@ export class NanobotTui {
   private submit(): void {
     if (this.quitting || this.composer.isDestroyed) return
     const visibleContent = this.composer.plainText.trim()
-    const content = this.draft.expand(visibleContent).trim()
     if (this.sessionLoading) {
       this.status.content = "Loading sessions…"
       return
@@ -968,7 +985,8 @@ export class NanobotTui {
       this.markSubmitUnsent()
       return
     }
-    const prompt = { content, options: mentionOptions(content, this.availableMentions()) }
+    const prompt = this.composerPrompt()
+    if (!this.canSendPrompt(prompt)) return
     if (this.activeTurn) {
       this.sendPrompt(prompt, true)
       return
@@ -990,7 +1008,8 @@ export class NanobotTui {
     this.mentionMenu.hide()
     this.skillMenu.hide()
     this.recordPrompt(prompt.content)
-    this.transcript.user(prompt.content, turnId)
+    const display = userMessageText(prompt.content, prompt.options.media)
+    this.transcript.user(display, turnId)
     this.hostBlocked = false
     this.setCurrentTask(prompt.content)
     if (steering) {
@@ -1080,11 +1099,7 @@ export class NanobotTui {
         this.reconcileTurnOwnership(event)
         return
       case "user_message": {
-        const attachments = event.media_urls?.map((media) => media.name).filter(Boolean) || []
-        const content = [
-          event.text,
-          attachments.length ? `Attachments: ${attachments.join(", ")}` : "",
-        ].filter(Boolean).join("\n")
+        const content = userMessageText(event.text, event.media_urls)
         if (this.transcript.user(content, event.turn_id)) this.recordPrompt(event.text)
         this.hostBlocked = false
         this.setCurrentTask(event.text)
@@ -1544,6 +1559,34 @@ export class NanobotTui {
     return queue
   }
 
+  private composerPrompt(): QueuedPrompt {
+    const visible = this.composer.plainText.trim()
+    const content = this.draft.expand(visible).trim()
+    const media = this.draft.media(visible)
+    return {
+      content,
+      options: {
+        ...mentionOptions(content, this.availableMentions()),
+        ...(media.length ? { media } : {}),
+      },
+    }
+  }
+
+  private hasPrompt(prompt: QueuedPrompt): boolean {
+    return Boolean(prompt.content || prompt.options.media?.length)
+  }
+
+  private canSendPrompt(prompt: QueuedPrompt): boolean {
+    if (this.draft.hasImageLabelConflict(this.composer.plainText)) {
+      this.status.content = "Duplicate image placeholder text · rename or remove it before sending"
+      return false
+    }
+    if (!this.hasPrompt(prompt)) return false
+    if ((prompt.options.media?.length || 0) <= MAX_DRAFT_IMAGES) return true
+    this.status.content = `Remove images until ${MAX_DRAFT_IMAGES} or fewer remain`
+    return false
+  }
+
   private restoreQueuedPrompts(): void {
     const queued = this.promptQueue.restore()
     if (!queued.length) return
@@ -1555,6 +1598,10 @@ export class NanobotTui {
   private queueFollowUp(): void {
     if (!this.activeTurn || !this.ready) return
     const visibleContent = this.composer.plainText.trim()
+    if (this.draft.media(visibleContent).length) {
+      this.status.content = "Images cannot be queued · press Enter to send now"
+      return
+    }
     const content = this.draft.expand(visibleContent).trim()
     if (!content) return
     this.promptQueue.enqueue({
@@ -1719,6 +1766,18 @@ export class NanobotTui {
         return
       }
     }
+    if (
+      (key.ctrl || key.meta)
+      && key.name.toLocaleLowerCase() === "v"
+      && !this.sessionLoading
+      && !this.sessionMenu.visible
+      && !this.branchMenu.visible
+      && !this.contextPanel.visible
+    ) {
+      key.preventDefault()
+      void this.pasteClipboardImage()
+      return
+    }
     if (this.activeTurn && !key.ctrl && !key.meta && key.name === "tab") {
       this.queueFollowUp()
       key.preventDefault()
@@ -1795,7 +1854,7 @@ export class NanobotTui {
   }
 
   private navigateHistory(direction: -1 | 1): boolean {
-    if (this.promptHistory.length === 0) return false
+    if (this.promptHistory.length === 0 || this.draft.imageCount) return false
     if (direction < 0) {
       if (this.historyCursor === this.promptHistory.length) this.historyDraft = this.composer.plainText
       if (this.historyCursor === 0) return false
@@ -2134,6 +2193,7 @@ export class NanobotTui {
   }
 
   private setComposer(content: string): void {
+    this.clipboardPasteGeneration += 1
     this.draft.clear()
     this.composer.setText(content)
     this.composer.cursorOffset = content.length
@@ -2141,8 +2201,42 @@ export class NanobotTui {
 
   private clearComposer(): void {
     this.unsentSubmit = false
-    this.draft.clear()
-    this.composer.setText("")
+    this.setComposer("")
+  }
+
+  private async pasteClipboardImage(): Promise<void> {
+    if (this.clipboardImagePending) return
+    if (this.draft.imageCount >= MAX_DRAFT_IMAGES) {
+      this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images`
+      return
+    }
+    const generation = this.clipboardPasteGeneration
+    this.clipboardImagePending = true
+    this.status.content = "Reading clipboard image…"
+    try {
+      const image = await this.clipboardImageReader.read()
+      if (this.quitting || generation !== this.clipboardPasteGeneration) return
+      const insertion = this.draft.image(image, this.composer.plainText)
+      if (!insertion) {
+        this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images`
+        return
+      }
+      this.composer.insertText(insertion.text)
+      this.status.content = `Pasted ${insertion.description} · review before sending`
+    } catch (error) {
+      if (
+        this.quitting
+        || this.composer.isDestroyed
+        || generation !== this.clipboardPasteGeneration
+      ) return
+      const message = error instanceof Error
+        ? error.message
+        : "Clipboard image paste is unavailable"
+      this.status.content = message
+      this.transcript.notice(message, true)
+    } finally {
+      this.clipboardImagePending = false
+    }
   }
 
   private handlePaste(event: PasteEvent): void {
@@ -2496,6 +2590,7 @@ export class NanobotTui {
   }
 
   private recordPrompt(content: string): void {
+    if (!content) return
     if (this.promptHistory.at(-1) !== content) this.promptHistory.push(content)
     if (this.promptHistory.length > 50) this.promptHistory.shift()
     this.historyCursor = this.promptHistory.length
@@ -2723,10 +2818,13 @@ export class NanobotTui {
   }
 
   private handleDestroy = (): void => {
+    this.quitting = true
+    this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.stopSessionRefresh()
     this.transcript.destroy()
     this.diffViewer.destroy()
+    void this.clipboardImageReader.dispose().catch(() => {})
     this.host.release()
     this.client.close()
   }

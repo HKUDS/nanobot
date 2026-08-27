@@ -10,7 +10,12 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 
-import type { FileEditEvent, HistoryMessage, ToolProgressEvent } from "./protocol"
+import type {
+  FileEditEvent,
+  HistoryMessage,
+  MediaAttachment,
+  ToolProgressEvent,
+} from "./protocol"
 import { renderLatexAsUnicode } from "./latex"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
@@ -57,6 +62,17 @@ const ACTIVITY_PREVIEW_LINES = 4
 // additional visible frames. Paint the first token immediately, then coalesce
 // subsequent deltas to the renderer cadence.
 const STREAM_FLUSH_MS = 32
+
+export function userMessageText(
+  content: string,
+  media: readonly Pick<MediaAttachment, "name">[] = [],
+): string {
+  const attachments = media.flatMap(({ name }) => name ? [name] : [])
+  return [
+    content,
+    attachments.length ? `Attachments: ${attachments.join(", ")}` : "",
+  ].filter(Boolean).join("\n")
+}
 
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
@@ -182,7 +198,9 @@ export class Transcript {
 
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
-      if (message.role === "user") this.user(message.content, message.turnId)
+      if (message.role === "user") {
+        this.user(userMessageText(message.content, message.media), message.turnId)
+      }
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
@@ -198,7 +216,7 @@ export class Transcript {
     for (const message of messages) {
       if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue
-        this.writeRole("›", message.content, "user", index++)
+        this.writeRole("›", userMessageText(message.content, message.media), "user", index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeMarkdown(message.content, false, index++)

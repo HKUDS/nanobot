@@ -53,9 +53,14 @@ interface FileDiff {
   text?: string
 }
 
-interface MediaAttachment {
+export interface MediaAttachment {
   kind: "image" | "video" | "file"
   url: string
+  name?: string
+}
+
+export interface OutboundMedia {
+  data_url: string
   name?: string
 }
 
@@ -181,6 +186,7 @@ type OutboundEvent =
       turn_id: string
       webui: true
       workspace_scope?: WorkspaceScopePayload
+      media?: OutboundMedia[]
       cli_apps?: Array<{ name: string }>
       mcp_presets?: Array<{ name: string }>
       session_mentions?: SessionMention[]
@@ -225,6 +231,7 @@ export interface HistoryMessage {
   role: "user" | "assistant" | "activity"
   content: string
   turnId?: string
+  media?: MediaAttachment[]
   toolEvents?: ToolProgressEvent[]
   fileEdits?: FileEditEvent[]
   forkIndex?: number
@@ -288,6 +295,7 @@ export interface SkillCandidate {
 }
 
 export interface MessageOptions {
+  media?: OutboundMedia[]
   cliApps?: Array<{ name: string }>
   mcpPresets?: Array<{ name: string }>
   sessionMentions?: SessionMention[]
@@ -623,18 +631,20 @@ export async function fetchHistory(
       (role !== "user" && role !== "assistant")
       || message.kind === "reasoning"
       || typeof content !== "string"
-      || !content.trim()
     ) {
       continue
     }
+    const media = Array.isArray(message.media) ? message.media.filter(isMediaAttachment) : []
     if (role === "user") {
+      if (!content.trim() && !media.length) continue
       userIndex += 1
       messages.push({
         role: "user",
         content,
+        ...(media.length ? { media } : {}),
         ...(typeof message.turnId === "string" ? { turnId: message.turnId } : {}),
       })
-    } else {
+    } else if (content.trim()) {
       messages.push({ role: "assistant", content, forkIndex: userIndex })
     }
   }
@@ -1190,6 +1200,7 @@ export class NanobotClient {
       webui: true,
       ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
+      ...(options.media?.length ? { media: options.media } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
       ...(options.sessionMentions?.length
