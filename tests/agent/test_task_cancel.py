@@ -254,7 +254,7 @@ class TestDispatch:
         assert isinstance(second.event, StreamEndEvent)
 
     @pytest.mark.asyncio
-    async def test_processing_lock_serializes(self):
+    async def test_same_session_dispatches_serialize(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
