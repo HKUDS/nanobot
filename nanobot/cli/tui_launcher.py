@@ -67,6 +67,8 @@ _TUI_RELEASE_LIMITS = {
 _TUI_DETACH_EXIT_CODE = 90
 _GATEWAY_READY_TIMEOUT_S = 20.0
 _GATEWAY_READY_POLL_S = 0.1
+_TUI_DEPENDENCY_METADATA = ("package.json", "bun.lock")
+_TUI_DEPENDENCY_CACHE = ".nanobot-install.sha256"
 
 
 @dataclass(frozen=True)
@@ -224,6 +226,21 @@ def _tui_source_dir(project_root: Path) -> Path | None:
 
 def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
     dependency = source_dir / "node_modules" / "@opentui" / "core"
+    cache = source_dir / "node_modules" / _TUI_DEPENDENCY_CACHE
+    fingerprint = _tui_dependency_fingerprint(source_dir)
+    if dependency.is_dir() and fingerprint is not None:
+        try:
+            if cache.read_text(encoding="ascii") == f"{fingerprint}\n":
+                return _source_tui_command(source_dir, bun)
+        except (OSError, UnicodeError):
+            pass
+
+    try:
+        cache.unlink(missing_ok=True)
+    except OSError as exc:
+        raise TuiUnavailableError(
+            f"could not prepare the TUI dependency install: {exc}"
+        ) from exc
     try:
         install = subprocess.run(
             [bun, "install", "--frozen-lockfile"],
@@ -238,6 +255,37 @@ def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
         detail = (install.stderr or install.stdout).strip().splitlines()
         suffix = f": {detail[-1]}" if detail else ""
         raise TuiUnavailableError(f"could not install TUI dependencies{suffix}")
+
+    current_fingerprint = _tui_dependency_fingerprint(source_dir)
+    if fingerprint is not None and current_fingerprint == fingerprint:
+        pending = cache.with_name(f"{cache.name}.tmp-{os.getpid()}")
+        try:
+            pending.write_text(f"{fingerprint}\n", encoding="ascii")
+            pending.replace(cache)
+        except OSError:
+            try:
+                pending.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    return _source_tui_command(source_dir, bun)
+
+
+def _tui_dependency_fingerprint(source_dir: Path) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        for name in _TUI_DEPENDENCY_METADATA:
+            content = (source_dir / name).read_bytes()
+            digest.update(name.encode())
+            digest.update(b"\0")
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _source_tui_command(source_dir: Path, bun: str) -> list[str]:
     executable = named_executable(
         bun,
         name="nanobot-tui",

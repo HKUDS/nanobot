@@ -51,6 +51,14 @@ def _release_archive(
     return payload, checksum
 
 
+def _tui_source(tmp_path: Path) -> Path:
+    source_dir = tmp_path / "tui"
+    source_dir.mkdir()
+    (source_dir / "package.json").write_text('{"dependencies": {}}\n', encoding="utf-8")
+    (source_dir / "bun.lock").write_text('lockfileVersion = 1\n', encoding="utf-8")
+    return source_dir
+
+
 @pytest.mark.parametrize(
     ("session_id", "expected"),
     [
@@ -525,18 +533,18 @@ def test_classic_options_require_an_explicit_classic_prompt(
         )
 
 
-def test_source_checkout_refreshes_locked_tui_dependencies(
+def test_source_checkout_installs_missing_locked_tui_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    source_dir = tmp_path / "tui"
-    source_dir.mkdir()
-    (source_dir / "node_modules" / "@opentui" / "core").mkdir(parents=True)
+    source_dir = _tui_source(tmp_path)
+    dependency = source_dir / "node_modules" / "@opentui" / "core"
     bun = str(tmp_path / "bun")
 
     def install(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command == [bun, "install", "--frozen-lockfile"]
         assert kwargs["cwd"] == source_dir
+        dependency.mkdir(parents=True)
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", install)
@@ -549,6 +557,82 @@ def test_source_checkout_refreshes_locked_tui_dependencies(
         f"{bun}-named",
         str(source_dir / "src" / "index.ts"),
     ]
+
+
+def test_source_checkout_skips_install_when_locked_dependencies_are_current(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_dir = _tui_source(tmp_path)
+    dependency = source_dir / "node_modules" / "@opentui" / "core"
+    installs: list[list[str]] = []
+
+    def install(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        installs.append(command)
+        dependency.mkdir(parents=True)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", install)
+
+    _resolve_source_tui_command(source_dir, "bun")
+    _resolve_source_tui_command(source_dir, "bun")
+
+    assert installs == [["bun", "install", "--frozen-lockfile"]]
+
+
+@pytest.mark.parametrize("metadata_name", ["package.json", "bun.lock"])
+def test_source_checkout_refreshes_dependencies_when_metadata_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    metadata_name: str,
+) -> None:
+    source_dir = _tui_source(tmp_path)
+    dependency = source_dir / "node_modules" / "@opentui" / "core"
+    installs: list[list[str]] = []
+
+    def install(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        installs.append(command)
+        dependency.mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", install)
+
+    _resolve_source_tui_command(source_dir, "bun")
+    with (source_dir / metadata_name).open("a", encoding="utf-8") as metadata:
+        metadata.write("changed\n")
+    _resolve_source_tui_command(source_dir, "bun")
+
+    assert installs == [
+        ["bun", "install", "--frozen-lockfile"],
+        ["bun", "install", "--frozen-lockfile"],
+    ]
+
+
+def test_failed_source_dependency_install_does_not_leave_a_valid_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_dir = _tui_source(tmp_path)
+    dependency = source_dir / "node_modules" / "@opentui" / "core"
+    outcomes = iter((0, 1, 0))
+    installs = 0
+
+    def install(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal installs
+        installs += 1
+        dependency.mkdir(parents=True, exist_ok=True)
+        returncode = next(outcomes)
+        return subprocess.CompletedProcess(command, returncode, "", "partial install")
+
+    monkeypatch.setattr("nanobot.cli.tui_launcher.subprocess.run", install)
+
+    _resolve_source_tui_command(source_dir, "bun")
+    dependency.rmdir()
+    with pytest.raises(TuiUnavailableError, match="partial install"):
+        _resolve_source_tui_command(source_dir, "bun")
+    _resolve_source_tui_command(source_dir, "bun")
+
+    assert installs == 3
 
 
 def test_source_checkout_fails_when_locked_dependencies_cannot_be_refreshed(
