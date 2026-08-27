@@ -59,7 +59,7 @@ def test_tool_context_has_required_fields():
         "config", "workspace", "bus", "subagent_manager",
         "cron_service", "exec_session_manager", "file_state_store",
         "provider_snapshot_loader", "image_generation_provider_configs", "timezone",
-        "runtime_control",
+        "runtime_control", "memory",
     }
     assert required <= field_names
 
@@ -73,6 +73,7 @@ def test_tool_context_defaults():
     assert ctx.provider_snapshot_loader is None
     assert ctx.image_generation_provider_configs is None
     assert ctx.runtime_control is None
+    assert ctx.memory is None
     assert ctx.timezone == "UTC"
 
 

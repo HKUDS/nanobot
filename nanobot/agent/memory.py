@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 
 from loguru import logger
 
+from nanobot.agent.memory_backend import MemoryBackend, MemoryRecord
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import (
@@ -75,6 +76,7 @@ class MemoryStore:
     _LEGACY_RAW_MESSAGE_RE = re.compile(
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
+    _RECALL_CONTENT_CHARS = 800
 
     def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
         self.workspace = workspace
@@ -106,7 +108,7 @@ class MemoryStore:
     @staticmethod
     def read_file(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8", errors="replace")
         except FileNotFoundError:
             return ""
 
@@ -260,6 +262,119 @@ class MemoryStore:
     def get_memory_context(self) -> str:
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    # -- pluggable memory boundary ------------------------------------------
+
+    def ingest(
+        self,
+        content: str,
+        *,
+        session_key: str | None = None,
+        max_chars: int | None = None,
+    ) -> None:
+        """Persist memory material in the file backend's ingestion journal."""
+        self.append_history(
+            content,
+            session_key=session_key,
+            max_chars=max_chars,
+        )
+
+    def recall(
+        self,
+        query: str,
+        *,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        """Search durable MEMORY.md content and valid history journal entries."""
+        needle = query.strip().casefold()
+        if not needle or limit <= 0:
+            return []
+        terms = {
+            token
+            for token in re.findall(r"[\w-]+", needle)
+            if len(token) >= 2
+        }
+        ranked: list[tuple[int, int, MemoryRecord]] = []
+
+        for index, paragraph in enumerate(self._memory_paragraphs(), start=1):
+            score = self._recall_score(paragraph, needle, terms)
+            if score is None:
+                continue
+            ranked.append((
+                score + 50,
+                index,
+                MemoryRecord(
+                    id=f"memory:{index}",
+                    source="memory/MEMORY.md",
+                    content=self._recall_excerpt(paragraph, needle, terms),
+                ),
+            ))
+
+        for entry, cursor in self._iter_valid_entries():
+            content = cast(str, entry["content"])
+            score = self._recall_score(content, needle, terms)
+            if score is None:
+                continue
+            ranked.append((
+                score,
+                cursor,
+                MemoryRecord(
+                    id=f"history:{cursor}",
+                    source="memory/history.jsonl",
+                    content=self._recall_excerpt(content, needle, terms),
+                    timestamp=cast(str, entry["timestamp"]),
+                    session_key=cast(str | None, entry.get("session_key")),
+                ),
+            ))
+
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [record for _, _, record in ranked[:limit]]
+
+    def _memory_paragraphs(self) -> list[str]:
+        return [
+            paragraph.strip()
+            for paragraph in re.split(r"\n\s*\n", self.read_memory())
+            if paragraph.strip()
+        ]
+
+    @staticmethod
+    def _recall_score(
+        content: str,
+        needle: str,
+        terms: set[str],
+    ) -> int | None:
+        folded = content.casefold()
+        exact_count = folded.count(needle)
+        matched_terms = sum(1 for term in terms if term in folded)
+        if exact_count == 0 and matched_terms == 0:
+            return None
+        return exact_count * 100 + matched_terms * 10
+
+    @classmethod
+    def _recall_excerpt(
+        cls,
+        content: str,
+        needle: str,
+        terms: set[str],
+    ) -> str:
+        compact = " ".join(content.split())
+        if len(compact) <= cls._RECALL_CONTENT_CHARS:
+            return compact
+        folded = compact.casefold()
+        index = folded.find(needle)
+        if index < 0:
+            index = min(
+                (match for term in terms if (match := folded.find(term)) >= 0),
+                default=0,
+            )
+        start = max(0, index - cls._RECALL_CONTENT_CHARS // 3)
+        end = min(len(compact), start + cls._RECALL_CONTENT_CHARS)
+        start = max(0, end - cls._RECALL_CONTENT_CHARS)
+        return (
+            ("…" if start else "")
+            + compact[start:end].strip()
+            + ("…" if end < len(compact) else "")
+        )
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
@@ -443,7 +558,7 @@ class MemoryStore:
         """Read all entries from history.jsonl."""
         entries: list[dict[str, Any]] = []
         with suppress(FileNotFoundError):
-            with open(self.history_file, "r", encoding="utf-8") as f:
+            with open(self.history_file, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     line = line.strip()
                     if line:
@@ -800,13 +915,15 @@ class MemoryArchiver:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
+        backend: MemoryBackend | None = None,
     ) -> None:
         self.store = store
+        self.backend = backend or store
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._resolve_prompt_context = resolve_prompt_context
 
-    def _raw_checkpoint(
+    async def _raw_checkpoint(
         self,
         messages: list[dict[str, Any]],
         *,
@@ -815,7 +932,7 @@ class MemoryArchiver:
         max_tokens: int,
     ) -> str:
         """Persist the failed chunk and return a bounded replacement checkpoint."""
-        raw = self.store.raw_archive(messages, session_key=session_key)
+        raw = await self._raw_archive(messages, session_key=session_key)
         token_limit = max(1, max_tokens)
         if not previous_summary:
             return truncate_text_to_tokens(raw, token_limit)
@@ -840,6 +957,48 @@ class MemoryArchiver:
             token_limit,
         )
 
+    async def _ingest(
+        self,
+        content: str,
+        *,
+        session_key: str,
+        max_chars: int,
+    ) -> None:
+        await asyncio.to_thread(
+            self.backend.ingest,
+            content,
+            session_key=session_key,
+            max_chars=max_chars,
+        )
+
+    async def _raw_archive(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        session_key: str,
+    ) -> str:
+        if self.backend is self.store:
+            return await asyncio.to_thread(
+                self.store.raw_archive,
+                messages,
+                session_key=session_key,
+            )
+        formatted = truncate_text(
+            self.store._format_messages(public_history_messages(messages)),
+            _RAW_ARCHIVE_MAX_CHARS,
+        )
+        checkpoint = f"[RAW] {len(messages)} messages\n{formatted}"
+        await self._ingest(
+            checkpoint,
+            session_key=session_key,
+            max_chars=_RAW_ARCHIVE_MAX_CHARS,
+        )
+        logger.warning(
+            "Memory consolidation degraded: raw-archived {} messages",
+            len(messages),
+        )
+        return checkpoint
+
     async def archive(
         self,
         messages: list[dict[str, Any]],
@@ -854,8 +1013,8 @@ class MemoryArchiver:
         if not messages:
             return None
 
-        def raw_fallback() -> str:
-            return self._raw_checkpoint(
+        async def raw_fallback() -> str:
+            return await self._raw_checkpoint(
                 messages,
                 session_key=session_key,
                 previous_summary=previous_summary,
@@ -875,27 +1034,31 @@ class MemoryArchiver:
                 )
         except Exception:
             logger.warning("Memory archive provider call failed, raw-dumping to history")
-            return raw_fallback()
+            return await raw_fallback()
         if response.finish_reason in {"error", "length"}:
             logger.warning(
                 "Memory archive provider did not complete ({}), raw-dumping to history",
                 response.finish_reason,
             )
-            return raw_fallback()
+            return await raw_fallback()
         if response.has_tool_calls is True:
             logger.warning("Memory archive provider returned tool calls, raw-dumping to history")
-            return raw_fallback()
+            return await raw_fallback()
         summary = response.content
         if not summary or not summary.strip():
             logger.warning("Memory archive provider returned no summary, raw-dumping to history")
-            return raw_fallback()
+            return await raw_fallback()
         summary = self.store._normalize_history_entry(summary)
         if not summary:
             logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
-            return raw_fallback()
+            return await raw_fallback()
         if summary == "(nothing)":
             return "(nothing)"
-        self.store.append_history(summary, session_key=session_key)
+        await self._ingest(
+            summary,
+            max_chars=_HISTORY_ENTRY_HARD_CAP,
+            session_key=session_key,
+        )
         return summary
 
     async def archive_session(
@@ -916,8 +1079,8 @@ class MemoryArchiver:
         )
         previous_summary = session_summary["text"] if session_summary else None
 
-        def raw_fallback() -> str:
-            return self._raw_checkpoint(
+        async def raw_fallback() -> str:
+            return await self._raw_checkpoint(
                 messages,
                 session_key=session.key,
                 previous_summary=previous_summary,
@@ -929,7 +1092,7 @@ class MemoryArchiver:
                 "Memory archive has no safe input budget for {}; raw-dumping",
                 session.key,
             )
-            return raw_fallback()
+            return await raw_fallback()
         prefix = Session(
             key=session.key,
             messages=list(session.messages[:archive_end]),
@@ -945,7 +1108,7 @@ class MemoryArchiver:
                 "Memory archive cannot replay the full chunk for {}; raw-dumping",
                 session.key,
             )
-            return raw_fallback()
+            return await raw_fallback()
         prompt = render_template(
             "agent/consolidator_archive.md",
             strip=True,
@@ -977,7 +1140,7 @@ class MemoryArchiver:
                 input_token_budget,
                 source,
             )
-            return raw_fallback()
+            return await raw_fallback()
         return await self.archive(
             messages,
             runtime=runtime,
@@ -1000,6 +1163,7 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
+        backend: MemoryBackend | None = None,
     ):
         self.store = store
         self.sessions = sessions
@@ -1010,6 +1174,7 @@ class Consolidator:
             build_messages=build_messages,
             get_tool_definitions=get_tool_definitions,
             resolve_prompt_context=resolve_prompt_context,
+            backend=backend,
         )
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
@@ -1073,7 +1238,7 @@ class Consolidator:
             previous_summary=previous_summary,
         )
         if summary == "(nothing)":
-            summary = self.archiver._raw_checkpoint(
+            summary = await self.archiver._raw_checkpoint(
                 source_messages,
                 session_key=session_key,
                 previous_summary=previous_summary,
