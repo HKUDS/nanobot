@@ -29,10 +29,7 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large, the `Consolidator` summarizes older turns and
-appends the result to `memory/history.jsonl`, while keeping recent conversation
-available. Each summary preserves useful long-term facts and a short handoff
-for active work.
+When a conversation grows large, the `Consolidator` summarizes older turns and appends the result to `memory/history.jsonl`, while keeping recent conversation available. Each summary preserves useful long-term facts and a short handoff for active work.
 
 This file is:
 
