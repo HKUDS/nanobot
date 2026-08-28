@@ -240,8 +240,11 @@ async def test_spawn_tool_uses_allowlisted_preset_runtime(tmp_path):
     providers = {"preset-model": MagicMock(), "updated-model": MagicMock()}
     preset = config.model_presets["fast"]
     registry = ToolRegistry()
+    load_count = 0
 
     def load_preset(name):
+        nonlocal load_count
+        load_count += 1
         current = config.model_presets[name]
         return build_static_preset_snapshot(providers[current.model], name, current)
 
@@ -271,11 +274,13 @@ async def test_spawn_tool_uses_allowlisted_preset_runtime(tmp_path):
         runtime=parent_runtime,
     )):
         result = await tool.execute(task="do task", preset="fast", wait=True)
+        await tool.execute(task="reuse preset", preset="fast", wait=True)
         config.model_presets["fast"] = preset.model_copy(update={
             "model": "updated-model",
             "max_tokens": 5678,
             "context_window_tokens": 8192,
         })
+        loop.invalidate_runtime_config()
         await tool.execute(task="do another task", preset="fast", wait=True)
 
     runtime = seen[0]
@@ -292,11 +297,49 @@ async def test_spawn_tool_uses_allowlisted_preset_runtime(tmp_path):
         preset.model_dump_json(),
     )
     assert parent_runtime.model == "main-model"
-    assert seen[1].model == "updated-model"
-    assert seen[1].provider is providers["updated-model"]
-    assert seen[1].generation.max_tokens == 5678
-    assert seen[1].context_window_tokens == 8192
-    assert seen[0].snapshot_signature != seen[1].snapshot_signature
+    assert seen[1] is seen[0]
+    assert load_count == 2
+    assert seen[2].model == "updated-model"
+    assert seen[2].provider is providers["updated-model"]
+    assert seen[2].generation.max_tokens == 5678
+    assert seen[2].context_window_tokens == 8192
+    assert seen[0].snapshot_signature != seen[2].snapshot_signature
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_refreshes_allowlist_and_description(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.context import request_context
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.bus.queue import MessageBus
+
+    allowed = ["fast"]
+    registry = ToolRegistry()
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=MagicMock(),
+        workspace=tmp_path,
+        tool_registry=registry,
+        spawn_presets=["stale"],
+        spawn_presets_loader=lambda: allowed,
+    )
+    tool = registry.get("spawn")
+    assert tool is not None
+    first_definitions = registry.get_definitions()
+    assert "Available model presets: fast" in str(first_definitions)
+
+    allowed.clear()
+    loop.invalidate_runtime_config()
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        runtime=_runtime(MagicMock()),
+    )):
+        result = await tool.execute(task="do task", preset="fast")
+
+    assert result.is_error
+    assert "Available: (none)" in result
+    assert "Available model presets: (none)" in str(registry.get_definitions())
 
 
 @pytest.mark.asyncio
@@ -322,8 +365,8 @@ async def test_spawn_tool_rejects_unavailable_preset_without_touching_main_runti
     parent_runtime = _runtime(MagicMock(), model="main-model")
     tool = SpawnTool(
         manager,
-        spawn_presets=allowlist,
-        preset_snapshot_loader=loader,
+        spawn_presets_loader=lambda: allowlist,
+        preset_runtime_resolver=loader,
     )
     with request_context(RequestContext(
         channel="test",

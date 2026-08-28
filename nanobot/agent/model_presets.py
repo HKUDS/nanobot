@@ -12,6 +12,7 @@ from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
 
 PresetSnapshotLoader = Callable[[str], ProviderSnapshot]
 PresetCatalogLoader = Callable[[], Mapping[str, ModelPresetConfig]]
+SpawnPresetsLoader = Callable[[], list[str]]
 
 
 def default_selection_signature(
@@ -37,6 +38,17 @@ def load_model_preset_catalog(
             config_path=config_path,
         ),
     )
+
+
+def load_spawn_presets(config_path: Path | None = None) -> list[str]:
+    """Load the current subagent preset allowlist from the configured file."""
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+
+    config = resolve_config_env_vars(
+        load_config(config_path),
+        config_path=config_path,
+    )
+    return list(config.agents.defaults.spawn_presets)
 
 
 def make_preset_snapshot_loader(
@@ -78,6 +90,8 @@ def build_runtime_preset_snapshot(
 def normalize_preset_name(name: str | None, presets: dict[str, ModelPresetConfig]) -> str:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("model_preset must be a non-empty string")
+    if name in presets:
+        return name
     name = name.strip()
     if name in presets:
         return name

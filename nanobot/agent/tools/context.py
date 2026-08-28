@@ -92,5 +92,5 @@ class ToolContext:
     workspace_sandbox: WorkspaceSandboxStatus | None = None
     runtime_events: RuntimeEventBus | None = None
     runtime_control: RuntimeControl | None = None
-    preset_snapshot_loader: Callable[[str], ProviderSnapshot] | None = None
-    spawn_presets: list[str] = field(default_factory=list)
+    preset_runtime_resolver: Callable[[str], LLMRuntime] | None = None
+    spawn_presets_loader: Callable[[], list[str]] | None = None

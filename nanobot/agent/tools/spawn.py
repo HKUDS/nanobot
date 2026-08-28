@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
@@ -15,12 +16,11 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.security.workspace_access import current_workspace_scope
-from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 if TYPE_CHECKING:
-    from nanobot.agent.model_presets import PresetSnapshotLoader
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import ToolContext
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @tool_parameters(
@@ -56,12 +56,14 @@ class SpawnTool(Tool):
     def __init__(
         self,
         manager: "SubagentManager",
-        spawn_presets: list[str] | None = None,
-        preset_snapshot_loader: "PresetSnapshotLoader | None" = None,
+        spawn_presets_loader: Callable[[], list[str]] | None = None,
+        preset_runtime_resolver: Callable[[str], LLMRuntime] | None = None,
     ):
         self._manager = manager
-        self._spawn_presets = frozenset(spawn_presets or ())
-        self._preset_snapshot_loader = preset_snapshot_loader
+        self._spawn_presets_loader: Callable[[], list[str]] = (
+            spawn_presets_loader or (lambda: [])
+        )
+        self._preset_runtime_resolver = preset_runtime_resolver
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -70,8 +72,8 @@ class SpawnTool(Tool):
             raise RuntimeError("SpawnTool requires an initialized subagent manager")
         return cls(
             manager=manager,
-            spawn_presets=ctx.spawn_presets,
-            preset_snapshot_loader=ctx.preset_snapshot_loader,
+            spawn_presets_loader=ctx.spawn_presets_loader,
+            preset_runtime_resolver=ctx.preset_runtime_resolver,
         )
 
     @property
@@ -80,13 +82,15 @@ class SpawnTool(Tool):
 
     @property
     def description(self) -> str:
+        available = ", ".join(sorted(self._spawn_presets_loader())) or "(none)"
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "Set wait=true for a consultation whose result must inform the current turn. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
-            "and use a dedicated subdirectory when helpful."
+            "and use a dedicated subdirectory when helpful. "
+            f"Available model presets: {available}."
         )
 
     @property
@@ -109,18 +113,17 @@ class SpawnTool(Tool):
             return ToolResult.error("Error: spawn requires an active model runtime")
         runtime = request_ctx.runtime
         if preset is not None:
-            if preset not in self._spawn_presets:
-                available = ", ".join(sorted(self._spawn_presets)) or "(none)"
+            spawn_presets = self._spawn_presets_loader()
+            if preset not in spawn_presets:
+                available = ", ".join(sorted(spawn_presets)) or "(none)"
                 return ToolResult.error(
                     f"Error: spawn preset {preset!r} is not allowlisted. "
                     f"Available: {available}"
                 )
-            if self._preset_snapshot_loader is None:
+            if self._preset_runtime_resolver is None:
                 return ToolResult.error("Error: spawn preset resolution is unavailable")
             try:
-                runtime = runtime_from_provider_snapshot(
-                    self._preset_snapshot_loader(preset)
-                )
+                runtime = self._preset_runtime_resolver(preset)
             except (KeyError, ValueError) as exc:
                 return ToolResult.error(
                     f"Error: failed to resolve spawn preset {preset!r}: {exc}"
