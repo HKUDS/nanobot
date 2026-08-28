@@ -25,6 +25,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
+from nanobot.session.async_compat import call_session_manager
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
@@ -1110,6 +1111,22 @@ class Consolidator:
             weakref.WeakValueDictionary()
         )
 
+    async def _get_or_create_session(self, key: str) -> Session:
+        return await call_session_manager(
+            self.sessions,
+            "get_or_create_async",
+            self.sessions.get_or_create,
+            key,
+        )
+
+    async def _save_session(self, session: Session) -> None:
+        await call_session_manager(
+            self.sessions,
+            "save_async",
+            self.sessions.save,
+            session,
+        )
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
@@ -1254,7 +1271,7 @@ class Consolidator:
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            session = await self._get_or_create_session(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1282,7 +1299,7 @@ class Consolidator:
                     )
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
-                    self.sessions.save(session)
+                    await self._save_session(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(
