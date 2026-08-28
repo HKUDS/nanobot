@@ -376,9 +376,10 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
 @pytest.mark.asyncio
 async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
     """Adjacent blocking consultations should share one concurrent tool batch."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.execution import execute_tool_calls
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.agent.tools.spawn import SpawnTool
     from nanobot.bus.queue import MessageBus
@@ -410,14 +411,6 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
     tools = ToolRegistry()
     tools.register(SpawnTool(manager))
     runtime = _runtime(MagicMock())
-    spec = AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
-        runtime=runtime,
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        concurrent_tools=True,
-    )
     calls = [
         ToolCallRequest(
             id="spawn-1",
@@ -437,7 +430,15 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
         session_key="test:c1",
         runtime=runtime,
     )):
-        execution = asyncio.create_task(AgentRunner()._execute_tools(spec, calls, {}, {}))
+        execution = asyncio.create_task(execute_tool_calls(
+            tools,
+            calls,
+            concurrent=True,
+            external_lookup_counts={},
+            workspace_violation_counts={},
+            hook=AgentHook(),
+            context=AgentHookContext(iteration=0, messages=[], session_key="test:c1"),
+        ))
         await asyncio.wait_for(both_entered.wait(), timeout=1.0)
         release.set()
         results, events = await execution
