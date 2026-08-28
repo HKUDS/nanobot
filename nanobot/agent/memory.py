@@ -25,7 +25,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.async_compat import call_session_manager
+from nanobot.session.async_manager import AsyncSessionManager
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
@@ -1096,9 +1096,13 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
+        session_io: AsyncSessionManager | None = None,
     ):
         self.store = store
         self.sessions = sessions
+        self.session_io = session_io or AsyncSessionManager(sessions)
+        if self.session_io.manager is not sessions:
+            raise ValueError("async session manager must wrap the consolidator session manager")
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self.archiver = MemoryArchiver(
@@ -1109,22 +1113,6 @@ class Consolidator:
         )
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
-        )
-
-    async def _get_or_create_session(self, key: str) -> Session:
-        return await call_session_manager(
-            self.sessions,
-            "get_or_create_async",
-            self.sessions.get_or_create,
-            key,
-        )
-
-    async def _save_session(self, session: Session) -> None:
-        await call_session_manager(
-            self.sessions,
-            "save_async",
-            self.sessions.save,
-            session,
         )
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
@@ -1271,7 +1259,7 @@ class Consolidator:
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
-            session = await self._get_or_create_session(session_key)
+            session = await self.session_io.get_or_create(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1299,7 +1287,7 @@ class Consolidator:
                     )
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
-                    await self._save_session(session)
+                    await self.session_io.save(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(
