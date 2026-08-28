@@ -51,7 +51,7 @@ class RecoveryActionError(ValueError):
         self.status = status
 
 
-from nanobot.session.async_manager import AsyncSessionManager
+from nanobot.session.io import SessionIO
 
 @dataclasses.dataclass(slots=True)
 class RecoveryCoordinator:
@@ -60,18 +60,18 @@ class RecoveryCoordinator:
     sessions: SessionManager
     bus: MessageBus
     unified_session: bool = False
-    async_session_manager: dataclasses.InitVar[AsyncSessionManager | None] = None
-    session_io: AsyncSessionManager = dataclasses.field(init=False, repr=False)
+    session_io_boundary: dataclasses.InitVar[SessionIO | None] = None
+    session_io: SessionIO = dataclasses.field(init=False, repr=False)
     _active_recovery_tasks: dict[str, asyncio.Task[Any]] = dataclasses.field(
         default_factory=dict,
         init=False,
         repr=False,
     )
 
-    def __post_init__(self, async_session_manager: AsyncSessionManager | None) -> None:
-        self.session_io = async_session_manager or AsyncSessionManager(self.sessions)
-        if self.session_io.manager is not self.sessions:
-            raise ValueError("async session manager must wrap the recovery session manager")
+    def __post_init__(self, session_io_boundary: SessionIO | None) -> None:
+        self.session_io = session_io_boundary or SessionIO(self.sessions)
+        if self.session_io.sessions is not self.sessions:
+            raise ValueError("session I/O must use the recovery session manager")
 
     def register_recovery_task(self, session_key: str, task: asyncio.Task[Any]) -> None:
         """Track the task that owns an explicit recovery continuation."""
