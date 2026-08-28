@@ -98,6 +98,13 @@ class RuntimeControl(Protocol):
         session_key: str | None,
     ) -> LLMRuntime: ...
 
+    async def set_model_preset_async(
+        self,
+        name: str,
+        *,
+        session_key: str | None,
+    ) -> LLMRuntime: ...
+
     def set_max_iterations(self, value: int) -> None: ...
 
     def set_context_window_tokens(self, value: int) -> LLMRuntime: ...
@@ -147,6 +154,12 @@ class _RuntimeControlTarget(Protocol):
 
     def set_session_model_preset(self, session_key: str, name: str) -> LLMRuntime: ...
 
+    async def set_session_model_preset_async(
+        self,
+        session_key: str,
+        name: str,
+    ) -> LLMRuntime: ...
+
 
 class AgentRuntimeControl:
     """Allowlisted adapter from agent-loop state to ``RuntimeControl``."""
@@ -189,6 +202,16 @@ class AgentRuntimeControl:
     ) -> LLMRuntime:
         if session_key is not None:
             return self.__target.set_session_model_preset(session_key, name)
+        return self.__target.set_model_preset(name)
+
+    async def set_model_preset_async(
+        self,
+        name: str,
+        *,
+        session_key: str | None,
+    ) -> LLMRuntime:
+        if session_key is not None:
+            return await self.__target.set_session_model_preset_async(session_key, name)
         return self.__target.set_model_preset(name)
 
     def set_max_iterations(self, value: int) -> None:

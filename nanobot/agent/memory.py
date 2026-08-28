@@ -29,6 +29,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
+from nanobot.session.async_compat import call_session_manager
 from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
     Session,
@@ -1043,6 +1044,22 @@ class Consolidator:
             weakref.WeakValueDictionary()
         )
 
+    async def _get_or_create_session(self, key: str) -> Session:
+        return await call_session_manager(
+            self.sessions,
+            "get_or_create_async",
+            self.sessions.get_or_create,
+            key,
+        )
+
+    async def _save_session(self, session: Session) -> None:
+        await call_session_manager(
+            self.sessions,
+            "save_async",
+            self.sessions.save,
+            session,
+        )
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
@@ -1210,7 +1227,7 @@ class Consolidator:
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            session = await self._get_or_create_session(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1240,7 +1257,7 @@ class Consolidator:
                     # A turn can append while the provider call is in flight. Advance only
                     # through the captured batch so new messages remain eligible next time.
                     session.last_archived = archive_end
-                    self.sessions.save(session)
+                    await self._save_session(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await emit_context_compaction(
                     on_compaction,

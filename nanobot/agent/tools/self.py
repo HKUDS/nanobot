@@ -373,7 +373,7 @@ class MyTool(Tool):
         if not self._modify_allowed:
             return ToolResult.error("Error: set is disabled (tools.my.allow_set is false)")
         if action in ("modify", "set"):
-            return self._modify(key, value)
+            return await self._modify_async(key, value)
         return f"Unknown action: {action}"
 
     # -- inspect --
@@ -492,6 +492,11 @@ class MyTool(Tool):
             return ToolResult.error(f"Error: '{key}' is read-only and cannot be modified")
         return self._modify_scratchpad(key, value)
 
+    async def _modify_async(self, key: str | None, value: Any) -> str:
+        if key == "model_preset":
+            return await self._modify_model_preset_async(value)
+        return self._modify(key, value)
+
     def _modify_model_preset(self, value: Any) -> str:
         if not isinstance(value, str) or not value.strip():
             return ToolResult.error("Error: 'model_preset' must be a non-empty string")
@@ -500,6 +505,34 @@ class MyTool(Tool):
         old = self._runtime_control.snapshot().model_preset
         try:
             runtime = self._runtime_control.set_model_preset(
+                name,
+                session_key=session_key,
+            )
+        except (KeyError, ValueError) as exc:
+            message = str(exc.args[0]) if exc.args else str(exc)
+            punctuation = "" if message.endswith((".", "!", "?")) else "."
+            return ToolResult.error(f"Error: {message}{punctuation}")
+        if session_key:
+            self._audit("modify", f"model_preset = {name!r}")
+            return (
+                f"Set model_preset = {name!r} for the next turn; "
+                f"model will be {runtime.model!r}; "
+                f"context_window_tokens will be {runtime.context_window_tokens!r}"
+            )
+        self._audit("modify", f"model_preset: {old!r} -> {name!r}")
+        return (
+            f"Set model_preset = {name!r} (was {old!r}); model is now {runtime.model!r}; "
+            f"context_window_tokens is now {runtime.context_window_tokens!r}"
+        )
+
+    async def _modify_model_preset_async(self, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return ToolResult.error("Error: 'model_preset' must be a non-empty string")
+        name = value.strip()
+        session_key = current_request_session_key()
+        old = self._runtime_control.snapshot().model_preset
+        try:
+            runtime = await self._runtime_control.set_model_preset_async(
                 name,
                 session_key=session_key,
             )
