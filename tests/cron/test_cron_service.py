@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.cron.service import CronJobSkippedError, CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 
 
 async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
@@ -409,6 +410,39 @@ def test_add_job_preserves_origin_delivery_context(tmp_path) -> None:
     assert reloaded.payload.origin_channel == "slack"
     assert reloaded.payload.origin_chat_id == "C123"
     assert reloaded.payload.origin_metadata == metadata
+
+
+@pytest.mark.asyncio
+async def test_start_heals_runtime_context_from_pending_external_add(tmp_path) -> None:
+    """Flattened runtime blocks from older action files must not be replayed."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    external = CronService(store_path)
+    job = external.add_job(
+        name="quoted reminder",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="remember this",
+        origin_metadata={"webui": True},
+        **_bound_chat("quoted"),
+    )
+
+    action_path = tmp_path / "cron" / "action.jsonl"
+    action = json.loads(action_path.read_text(encoding="utf-8"))
+    action["params"]["payload"]["origin_metadata"][RUNTIME_CONTEXT_INPUT_META] = [
+        {"source": "webui_quote", "content": "quoted reply"}
+    ]
+    action_path.write_text(json.dumps(action), encoding="utf-8")
+
+    owner = CronService(store_path)
+    await owner.start()
+    try:
+        loaded = owner.get_job(job.id)
+        assert loaded is not None
+        assert loaded.payload.origin_metadata == {"webui": True}
+
+        raw = json.loads(store_path.read_text(encoding="utf-8"))
+        assert raw["jobs"][0]["payload"]["originMetadata"] == {"webui": True}
+    finally:
+        owner.stop()
 
 
 @pytest.mark.asyncio

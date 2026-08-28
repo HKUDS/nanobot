@@ -25,6 +25,7 @@ from nanobot.cron.types import (
     CronSchedule,
     CronStore,
 )
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
@@ -115,8 +116,21 @@ def _disable_malformed_legacy_job(job: CronJob) -> None:
     logger.warning("Cron: disabled malformed legacy job '{}' ({}): {}", job.name, job.id, reason)
 
 
+def _persistable_origin_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return a detached JSON-safe routing snapshot for a cron payload."""
+    snapshot: dict[str, Any] = {}
+    for key, value in metadata.items():
+        if key == RUNTIME_CONTEXT_INPUT_META:
+            continue
+        try:
+            snapshot[key] = json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError, RecursionError):
+            continue
+    return snapshot
+
+
 def _normalize_agent_turn_job(job: CronJob) -> bool:
-    """Migrate legacy user cron payloads into session-bound payloads.
+    """Make routing metadata persistable and migrate legacy user cron payloads.
 
     Pre-bound user cron jobs stored their delivery target in ``channel``/``to``.
     Normal user-created legacy jobs always have those fields; if they are
@@ -124,8 +138,12 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     a runtime legacy execution path.
     """
     payload = job.payload
+    origin_metadata = _persistable_origin_metadata(payload.origin_metadata)
+    changed = origin_metadata != payload.origin_metadata
+    payload.origin_metadata = origin_metadata
+
     if payload.kind != "agent_turn" or not _has_legacy_delivery_context(payload):
-        return False
+        return changed
 
     if not payload.channel or not payload.to:
         _disable_malformed_legacy_job(job)
