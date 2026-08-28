@@ -29,7 +29,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.async_manager import AsyncSessionManager
+from nanobot.session.io import SessionIO
 from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
     Session,
@@ -1029,13 +1029,13 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
-        session_io: AsyncSessionManager | None = None,
+        session_io: SessionIO | None = None,
     ):
         self.store = store
         self.sessions = sessions
-        self.session_io = session_io or AsyncSessionManager(sessions)
-        if self.session_io.manager is not sessions:
-            raise ValueError("async session manager must wrap the consolidator session manager")
+        self.session_io = session_io or SessionIO(sessions)
+        if self.session_io.sessions is not sessions:
+            raise ValueError("session I/O must use the consolidator session manager")
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self.archiver = MemoryArchiver(

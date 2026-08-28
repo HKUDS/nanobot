@@ -41,9 +41,9 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
-from nanobot.session.async_manager import AsyncSessionManager
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.io import SessionIO
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import RecoveryCoordinator
 from nanobot.session.session_handles import session_handle_for_name
@@ -199,7 +199,7 @@ def _latest_title_inputs(session: Session) -> tuple[str, str]:
 async def maybe_generate_webui_title(
     *,
     sessions: SessionManager,
-    session_io: AsyncSessionManager | None = None,
+    session_io: SessionIO | None = None,
     session_key: str,
     provider: LLMProvider,
     model: str,
@@ -212,9 +212,9 @@ async def maybe_generate_webui_title(
     so pass ``target_session_key`` to project the title onto that per-chat
     session instead of storing it on the shared one.
     """
-    io = session_io or AsyncSessionManager(sessions)
-    if io.manager is not sessions:
-        raise ValueError("async session manager must wrap the title session manager")
+    io = session_io or SessionIO(sessions)
+    if io.sessions is not sessions:
+        raise ValueError("session I/O must use the title session manager")
     routed_session = await io.get_or_create(session_key)
     target_is_routed = target_session_key is None or target_session_key == session_key
     if target_is_routed or target_session_key is None:
@@ -303,7 +303,7 @@ async def maybe_generate_webui_title_after_turn(
     chat_id: str,
     metadata: dict[str, Any],
     sessions: SessionManager,
-    session_io: AsyncSessionManager | None = None,
+    session_io: SessionIO | None = None,
     session_key: str,
     provider: LLMProvider,
     model: str,
@@ -574,13 +574,13 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     recovery: RecoveryCoordinator | None = None
-    async_session_manager: InitVar[AsyncSessionManager | None] = None
-    session_io: AsyncSessionManager = field(init=False, repr=False)
+    session_io_boundary: InitVar[SessionIO | None] = None
+    session_io: SessionIO = field(init=False, repr=False)
 
-    def __post_init__(self, async_session_manager: AsyncSessionManager | None) -> None:
-        self.session_io = async_session_manager or AsyncSessionManager(self.sessions)
-        if self.session_io.manager is not self.sessions:
-            raise ValueError("async session manager must wrap the WebUI session manager")
+    def __post_init__(self, session_io_boundary: SessionIO | None) -> None:
+        self.session_io = session_io_boundary or SessionIO(self.sessions)
+        if self.session_io.sessions is not self.sessions:
+            raise ValueError("session I/O must use the WebUI session manager")
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""

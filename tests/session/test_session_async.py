@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from filelock import FileLock
 
-from nanobot.session.async_manager import AsyncSessionManager
+from nanobot.session.io import SessionIO
 from nanobot.session.manager import Session, SessionManager, SessionStore
 
 
@@ -36,7 +36,7 @@ async def test_concurrent_first_async_gets_share_cached_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     key = "test:concurrent-first-load"
     load_started = threading.Event()
     release_load = threading.Event()
@@ -72,7 +72,7 @@ async def test_cancelled_load_settles_before_next_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     key = "test:cancelled-load"
     started = threading.Event()
     release = threading.Event()
@@ -111,7 +111,7 @@ async def test_async_methods_offload_third_party_store_and_keep_contract(
     store = MagicMock(spec=SessionStore)
     store.load.return_value = session
     manager = SessionManager(tmp_path, store=store)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     event_loop_thread = threading.get_ident()
     worker_threads: list[int] = []
 
@@ -143,7 +143,7 @@ async def test_save_async_cancellation_settles_disk_and_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     session = Session(key="test:cancel-save")
     session.add_message("user", "persist exactly once")
     started = threading.Event()
@@ -175,7 +175,7 @@ async def test_checkpoint_async_cancellation_settles_disk_and_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     session = manager.get_or_create("test:cancel-checkpoint")
     session.add_message("user", "question")
     manager.save(session)
@@ -212,7 +212,7 @@ async def test_same_session_mutations_run_in_submission_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     session = Session(key="test:ordered-mutations")
     save_started = threading.Event()
     release_save = threading.Event()
@@ -246,7 +246,7 @@ async def test_session_lock_contention_keeps_event_loop_responsive(
     tmp_path: Path,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = AsyncSessionManager(manager)
+    session_io = SessionIO(manager)
     first = manager.get_or_create("test:blocked-save")
     second = manager.get_or_create("test:cached-session")
     first.add_message("user", "hello")

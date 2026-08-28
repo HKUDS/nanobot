@@ -77,13 +77,13 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
 )
 from nanobot.session import turn_continuation
-from nanobot.session.async_manager import AsyncSessionManager
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+from nanobot.session.io import SessionIO
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
 from nanobot.session.model_selection import (
@@ -281,7 +281,7 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        async_session_manager: AsyncSessionManager | None = None,
+        session_io: SessionIO | None = None,
         tool_registry: ToolRegistry | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
@@ -388,9 +388,9 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.session_io = async_session_manager or AsyncSessionManager(self.sessions)
-        if self.session_io.manager is not self.sessions:
-            raise ValueError("async session manager must wrap the agent session manager")
+        self.session_io = session_io or SessionIO(self.sessions)
+        if self.session_io.sessions is not self.sessions:
+            raise ValueError("session I/O must use the agent session manager")
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)

@@ -374,7 +374,7 @@ def _run_gateway(
     )
     from nanobot.providers.fallback_provider import FallbackProvider
     from nanobot.providers.image_generation import image_gen_provider_configs
-    from nanobot.session.async_manager import AsyncSessionManager
+    from nanobot.session.io import SessionIO
     from nanobot.session.manager import SessionManager
     from nanobot.session.recovery import RecoveryCoordinator
     from nanobot.session.webui_turns import (
@@ -442,7 +442,7 @@ def _run_gateway(
             console.print(f"[red]Error: {exc}[/red]")
             raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
-    async_session_manager = AsyncSessionManager(session_manager)
+    session_io = SessionIO(session_manager)
 
     # Use the same runtime identity for foreground and managed gateway processes.
     from nanobot.config.loader import get_config_path
@@ -481,7 +481,7 @@ def _run_gateway(
         sessions=session_manager,
         bus=bus,
         unified_session=config.agents.defaults.unified_session,
-        async_session_manager=async_session_manager,
+        session_io_boundary=session_io,
     )
 
     # Create agent with cron service
@@ -492,7 +492,7 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        async_session_manager=async_session_manager,
+        session_io=session_io,
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
@@ -513,7 +513,7 @@ def _run_gateway(
         sessions=session_manager,
         schedule_background=_schedule_webui_background,
         recovery=recovery,
-        async_session_manager=async_session_manager,
+        session_io_boundary=session_io,
     )
     webui_turn_coordinator.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
@@ -550,12 +550,12 @@ def _run_gateway(
             and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = await async_session_manager.get_or_create(key)
+            session = await session_io.get_or_create(key)
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
             session.add_message("assistant", msg.content, **extra)
-            await async_session_manager.save(session)
+            await session_io.save(session)
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")

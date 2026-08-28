@@ -12,7 +12,7 @@ from nanobot.command.builtin import (
     register_builtin_commands,
 )
 from nanobot.command.router import CommandContext, CommandRouter
-from nanobot.session.async_manager import AsyncSessionManager
+from nanobot.session.io import SessionIO
 
 
 def test_command_context_requires_loop_as_keyword_dependency() -> None:
@@ -115,7 +115,7 @@ class TestMidTurnCommandDispatchedDirectly:
         ))
         loop.sessions.save = MagicMock()
         loop.sessions.invalidate = MagicMock()
-        loop.session_io = AsyncSessionManager(loop.sessions)
+        loop.session_io = SessionIO(loop.sessions)
         loop.schedule_background = MagicMock()
         loop._cancel_active_tasks = AsyncMock(return_value=0)
         return loop
