@@ -94,7 +94,7 @@ import {
   type FooterMode,
   type FooterHintTheme,
 } from "./footer-hints"
-import { createTuiHost, type TuiHost } from "./host"
+import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "./host"
 
 interface AppOptions {
   wsUrl?: string
@@ -820,6 +820,7 @@ export class NanobotTui {
   }
 
   static async create(options: AppOptions): Promise<NanobotTui> {
+    configureOpenTuiEnvironment()
     const host = createTuiHost()
     const renderer = await createCliRenderer({
       targetFps: 30,
