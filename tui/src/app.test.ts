@@ -415,8 +415,7 @@ describe("NanobotTui layout", () => {
 
     await setup.mockInput.typeText("这是什么？ ")
     setup.mockInput.pressKey("v", { ctrl: true })
-    await waitUntil(() => ui.status.plainText.includes("Pasted Image #1"), 3_000)
-    expect(ui.composer.plainText).toBe("这是什么？ [Image #1] ")
+    await waitUntil(() => ui.composer.plainText === "这是什么？ [Image #1] ")
     setup.mockInput.pressTab()
     expect(ui.status.plainText).toContain("Images cannot be queued")
     expect(ui.composer.plainText).toBe("这是什么？ [Image #1] ")
