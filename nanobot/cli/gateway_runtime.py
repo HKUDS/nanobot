@@ -385,7 +385,7 @@ def _run_gateway(
         load_provider_snapshot,
     )
     from nanobot.providers.fallback_provider import FallbackProvider
-    from nanobot.session.io import SessionIO
+    from nanobot.session import io as session_io
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import (
         WebuiTurnCoordinator,
@@ -453,7 +453,6 @@ def _run_gateway(
             console.print(f"[red]Error: {exc}[/red]")
             raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
-    session_io = SessionIO(session_manager)
 
     # Use the same runtime identity for foreground and managed gateway processes.
     from nanobot.config.loader import get_config_path
@@ -492,7 +491,6 @@ def _run_gateway(
         sessions=session_manager,
         bus=bus,
         unified_session=config.agents.defaults.unified_session,
-        session_io_boundary=session_io,
     )
 
     # Create agent with cron service
@@ -503,7 +501,6 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        session_io=session_io,
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,
@@ -522,7 +519,6 @@ def _run_gateway(
         sessions=session_manager,
         schedule_background=_schedule_webui_background,
         recovery=recovery,
-        session_io_boundary=session_io,
     )
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
@@ -558,12 +554,12 @@ def _run_gateway(
             and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = await session_io.get_or_create(key)
+            session = await session_io.get_or_create(session_manager, key)
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
             session.add_message("assistant", msg.content, **extra)
-            await session_io.save(session)
+            await session_io.save(session_manager, session)
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")

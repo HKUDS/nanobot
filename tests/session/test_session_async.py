@@ -1,4 +1,4 @@
-"""Async session boundary persistence and cancellation guarantees."""
+"""Async session adapter persistence and cancellation guarantees."""
 
 import asyncio
 import threading
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from filelock import FileLock
 
-from nanobot.session.io import SessionIO
+from nanobot.session import io as session_io
 from nanobot.session.manager import Session, SessionManager, SessionStore
 
 
@@ -36,7 +36,6 @@ async def test_concurrent_first_async_gets_share_cached_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = SessionIO(manager)
     key = "test:concurrent-first-load"
     load_started = threading.Event()
     release_load = threading.Event()
@@ -50,10 +49,10 @@ async def test_concurrent_first_async_gets_share_cached_identity(
         assert release_load.wait(timeout=1)
 
     monkeypatch.setattr(manager, "_load", delayed_load)
-    first_task = asyncio.create_task(session_io.get_or_create(key))
+    first_task = asyncio.create_task(session_io.get_or_create(manager, key))
     try:
         assert await asyncio.to_thread(load_started.wait, 1)
-        second_task = asyncio.create_task(session_io.get_or_create(key))
+        second_task = asyncio.create_task(session_io.get_or_create(manager, key))
         await asyncio.sleep(0)
         assert not second_task.done()
     finally:
@@ -64,7 +63,7 @@ async def test_concurrent_first_async_gets_share_cached_identity(
     assert load_calls == 1
     assert first is second
     assert manager.get_cached(key) is first
-    assert await session_io.get_or_create(key) is first
+    assert await session_io.get_or_create(manager, key) is first
 
 
 async def test_cancelled_load_settles_before_next_load(
@@ -72,7 +71,6 @@ async def test_cancelled_load_settles_before_next_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = SessionIO(manager)
     key = "test:cancelled-load"
     started = threading.Event()
     release = threading.Event()
@@ -88,10 +86,10 @@ async def test_cancelled_load_settles_before_next_load(
         return loaded
 
     monkeypatch.setattr(manager, "_load", blocked_load)
-    cancelled = asyncio.create_task(session_io.get_or_create(key))
+    cancelled = asyncio.create_task(session_io.get_or_create(manager, key))
     assert await asyncio.to_thread(started.wait, 1)
     cancelled.cancel()
-    follower = asyncio.create_task(session_io.get_or_create(key))
+    follower = asyncio.create_task(session_io.get_or_create(manager, key))
     await asyncio.sleep(0)
     assert not cancelled.done()
     assert not follower.done()
@@ -111,7 +109,6 @@ async def test_async_methods_offload_third_party_store_and_keep_contract(
     store = MagicMock(spec=SessionStore)
     store.load.return_value = session
     manager = SessionManager(tmp_path, store=store)
-    session_io = SessionIO(manager)
     event_loop_thread = threading.get_ident()
     worker_threads: list[int] = []
 
@@ -127,9 +124,9 @@ async def test_async_methods_offload_third_party_store_and_keep_contract(
     store.load.side_effect = load
     store.save.side_effect = save
 
-    assert await session_io.get_or_create(session.key) is session
-    await session_io.save(session, fsync=True)
-    await session_io.save_runtime_checkpoint(session)
+    assert await session_io.get_or_create(manager, session.key) is session
+    await session_io.save(manager, session, fsync=True)
+    await session_io.save_runtime_checkpoint(manager, session)
 
     store.load.assert_called_once_with(session.key)
     assert store.save.call_args_list[0].kwargs == {"fsync": True}
@@ -143,7 +140,6 @@ async def test_save_async_cancellation_settles_disk_and_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = SessionIO(manager)
     session = Session(key="test:cancel-save")
     session.add_message("user", "persist exactly once")
     started = threading.Event()
@@ -159,7 +155,7 @@ async def test_save_async_cancellation_settles_disk_and_cache(
         original_save(target, fsync=fsync)
 
     monkeypatch.setattr(manager._store, "save", blocked_save)
-    task = asyncio.create_task(session_io.save(session))
+    task = asyncio.create_task(session_io.save(manager, session))
 
     await _cancel_blocked_mutation(task, started=started, release=release)
 
@@ -175,7 +171,6 @@ async def test_checkpoint_async_cancellation_settles_disk_and_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = SessionIO(manager)
     session = manager.get_or_create("test:cancel-checkpoint")
     session.add_message("user", "question")
     manager.save(session)
@@ -197,7 +192,7 @@ async def test_checkpoint_async_cancellation_settles_disk_and_cache(
         "save_runtime_checkpoint",
         blocked_checkpoint,
     )
-    task = asyncio.create_task(session_io.save_runtime_checkpoint(session))
+    task = asyncio.create_task(session_io.save_runtime_checkpoint(manager, session))
 
     await _cancel_blocked_mutation(task, started=started, release=release)
 
@@ -212,13 +207,12 @@ async def test_same_session_mutations_run_in_submission_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = SessionIO(manager)
     session = Session(key="test:ordered-mutations")
     save_started = threading.Event()
     release_save = threading.Event()
     checkpoint_started = threading.Event()
-    original_save = manager.save
-    original_checkpoint = manager.save_runtime_checkpoint
+    original_save = manager._store.save
+    original_checkpoint = manager._jsonl_store.save_runtime_checkpoint
 
     def blocked_save(target: Session, *, fsync: bool = False) -> None:
         save_started.set()
@@ -229,11 +223,13 @@ async def test_same_session_mutations_run_in_submission_order(
         checkpoint_started.set()
         original_checkpoint(target)
 
-    monkeypatch.setattr(manager, "save", blocked_save)
-    monkeypatch.setattr(manager, "save_runtime_checkpoint", observed_checkpoint)
-    save_task = asyncio.create_task(session_io.save(session))
+    monkeypatch.setattr(manager._store, "save", blocked_save)
+    monkeypatch.setattr(manager._jsonl_store, "save_runtime_checkpoint", observed_checkpoint)
+    save_task = asyncio.create_task(session_io.save(manager, session))
     assert await asyncio.to_thread(save_started.wait, 1)
-    checkpoint_task = asyncio.create_task(session_io.save_runtime_checkpoint(session))
+    checkpoint_task = asyncio.create_task(
+        session_io.save_runtime_checkpoint(manager, session)
+    )
     await asyncio.sleep(0.01)
     assert not checkpoint_started.is_set()
 
@@ -246,7 +242,6 @@ async def test_session_lock_contention_keeps_event_loop_responsive(
     tmp_path: Path,
 ) -> None:
     manager = SessionManager(tmp_path)
-    session_io = SessionIO(manager)
     first = manager.get_or_create("test:blocked-save")
     second = manager.get_or_create("test:cached-session")
     first.add_message("user", "hello")
@@ -254,14 +249,14 @@ async def test_session_lock_contention_keeps_event_loop_responsive(
     assert lock.timeout == 5
     blocker = FileLock(lock.lock_file, timeout=1)
     blocker.acquire()
-    save_task = asyncio.create_task(session_io.save(first))
+    save_task = asyncio.create_task(session_io.save(manager, first))
     ticks = 0
     try:
         for _ in range(3):
             await asyncio.sleep(0.01)
             ticks += 1
         assert not save_task.done()
-        assert await session_io.get_or_create(second.key) is second
+        assert await session_io.get_or_create(manager, second.key) is second
     finally:
         blocker.release()
 
