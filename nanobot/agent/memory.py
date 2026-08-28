@@ -32,7 +32,6 @@ from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
-    estimate_message_tokens,
     estimate_prompt_tokens_chain,
     strip_think,
     truncate_text,
@@ -956,8 +955,6 @@ class MemoryArchiver:
 class Consolidator:
     """Legacy context-pressure coordinator backed by a MemoryArchiver."""
 
-    _MAX_CONSOLIDATION_ROUNDS = 5
-
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
     def __init__(
@@ -967,12 +964,10 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
-        consolidation_ratio: float = 0.5,
         unified_session: bool = False,
     ):
         self.store = store
         self.sessions = sessions
-        self.consolidation_ratio = consolidation_ratio
         self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
@@ -995,24 +990,19 @@ class Consolidator:
     def pick_consolidation_boundary(
         self,
         session: Session,
-        tokens_to_remove: int,
-    ) -> tuple[int, int] | None:
-        """Pick a user-turn boundary that removes enough old prompt tokens."""
-        start = session.last_archived
-        if start >= len(session.messages) or tokens_to_remove <= 0:
+    ) -> int | None:
+        """Return the fixed user-led boundary before the recent replay tail."""
+        if not session.messages:
             return None
-
-        removed_tokens = 0
-        last_boundary: tuple[int, int] | None = None
-        for idx in range(start, len(session.messages)):
-            message = session.messages[idx]
-            if idx > start and message.get("role") == "user":
-                last_boundary = (idx, removed_tokens)
-                if removed_tokens >= tokens_to_remove:
-                    return last_boundary
-            removed_tokens += estimate_message_tokens(message)
-
-        return last_boundary
+        boundary = max(0, len(session.messages) - MIN_COMPACTED_REPLAY_MESSAGES)
+        while boundary > 0 and session.messages[boundary].get("role") != "user":
+            boundary -= 1
+        if (
+            boundary <= session.last_archived
+            or session.messages[boundary].get("role") != "user"
+        ):
+            return None
+        return boundary
 
     @staticmethod
     def _full_replay_history(
@@ -1106,7 +1096,7 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
     ) -> None:
-        """Loop: archive old messages until prompt fits within safe budget.
+        """Archive one fixed old prefix when the prompt exceeds the safe budget.
 
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
@@ -1124,7 +1114,6 @@ class Consolidator:
                 return
 
             budget = self._input_token_budget(runtime)
-            target = int(budget * self.consolidation_ratio)
             last_summary: str | None = None
             estimated, source = self.estimate_session_prompt_tokens(
                 session,
@@ -1146,58 +1135,37 @@ class Consolidator:
                 self._persist_last_summary(session, last_summary)
                 return
 
-            for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
-                if estimated <= target:
-                    break
-
-                boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
-                if boundary is None:
-                    logger.debug(
-                        "Token consolidation: no safe boundary for {} (round {})",
-                        session.key,
-                        round_num,
-                    )
-                    break
-
-                end_idx = boundary[0]
-
-                chunk = session.messages[session.last_archived:end_idx]
-                if not chunk:
-                    break
-
-                logger.info(
-                    "Token consolidation round {} for {}: {}/{} via {}, chunk={} msgs",
-                    round_num,
+            end_idx = self.pick_consolidation_boundary(session)
+            if end_idx is None:
+                logger.debug(
+                    "Token consolidation: no safe fixed boundary for {}",
                     session.key,
-                    estimated,
-                    runtime.context_window_tokens,
-                    source,
-                    len(chunk),
                 )
-                summary = await self.archive_session(
-                    session,
-                    archive_end=end_idx,
-                    runtime=runtime,
-                )
-                # Advance the cursor either way: on success the chunk was
-                # summarized; on failure archive_session() raw-archived it as
-                # a breadcrumb. Re-archiving the same chunk on the next call
-                # would just emit duplicate [RAW] entries.
-                if summary:
-                    last_summary = summary
-                session.last_archived = end_idx
-                self.sessions.save(session)
-                if not summary:
-                    # LLM is degraded — stop hammering it this call;
-                    # the next invocation can retry a fresh chunk.
-                    break
+                return
 
-                estimated, source = self.estimate_session_prompt_tokens(
-                    session,
-                    runtime=runtime,
-                )
-                if estimated <= 0:
-                    break
+            chunk = session.messages[session.last_archived:end_idx]
+            if not chunk:
+                return
+
+            logger.info(
+                "Token consolidation for {}: {}/{} via {}, chunk={} msgs",
+                session.key,
+                estimated,
+                runtime.context_window_tokens,
+                source,
+                len(chunk),
+            )
+            summary = await self.archive_session(
+                session,
+                archive_end=end_idx,
+                runtime=runtime,
+            )
+            # Advance either way: archive_session raw-archives on degradation,
+            # and replaying the same chunk would duplicate Memory material.
+            if summary:
+                last_summary = summary
+            session.last_archived = end_idx
+            self.sessions.save(session)
 
             # Persist the last summary to session metadata so it can be injected
             # into the runtime context on the next prepare_session() call, aligning

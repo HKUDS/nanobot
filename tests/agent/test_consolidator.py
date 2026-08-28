@@ -232,16 +232,18 @@ class TestConsolidatorSummarize:
 
 
 class TestConsolidatorPromptContract:
-    def test_archive_prompt_outputs_attribute_tags_without_missing_context_claims(self):
+    def test_archive_prompt_preserves_working_state_with_memory_facts(self):
         prompt = render_template("agent/consolidator_archive.md", strip=True, archive_count=4)
 
         assert "SNIP" in prompt
         assert "final 4 conversation messages" in prompt
         for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
             assert mark in prompt
-        assert "check context below" not in prompt.lower()
+        assert "working-state handoff" in prompt
+        assert "exact identifiers needed to continue without rework" in prompt
         assert "Do not output facts already present in the system prompt's Recent History" in prompt
         assert "Do not mark something [skip] merely because it might already exist" in prompt
+
 
 class TestConsolidatorArchiveErrorHandling:
     """archive() must fall back when the LLM does not complete its overview.
@@ -420,7 +422,7 @@ class TestConsolidatorTokenBudget:
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
-        consolidator.pick_consolidation_boundary = MagicMock(return_value=(50, 800))
+        consolidator.pick_consolidation_boundary = MagicMock(return_value=50)
         consolidator.archiver._build_messages = MagicMock(side_effect=_build_test_messages)
         mock_provider.estimate_prompt_tokens.return_value = (100, "test-counter")
         mock_provider.chat_with_retry.return_value = LLMResponse(
@@ -493,7 +495,7 @@ class TestConsolidatorTokenBudget:
 
         await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
 
-        # Exactly one fallback per call — not _MAX_CONSOLIDATION_ROUNDS.
+        # The fixed policy archives at most one prefix per call.
         assert consolidator.archive_session.await_count == 1
 
     async def test_boundary_respected_when_no_intermediate_user_turn(
@@ -520,7 +522,7 @@ class TestConsolidatorTokenBudget:
         await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
 
         consolidator.archive_session.assert_awaited_once()
-        # pick_consolidation_boundary finds the only boundary at idx=61
+        # The fixed recent tail expands backward to the user at idx=61.
         assert session.last_archived == 61
 
 

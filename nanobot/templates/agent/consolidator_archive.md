@@ -6,6 +6,8 @@ Use [skip] unless a fact meets all SNIP criteria:
 - Important: prevents rework or captures preferences / rules
 - Persistent: still relevant after 2 weeks
 
+Also preserve a compact working-state handoff even when it is not Persistent: the active objective, current status, completed steps, unresolved blockers, next action, and exact identifiers needed to continue without rework. Mark these facts [ephemeral].
+
 Format each fact as:
 - [mark] fact content
 

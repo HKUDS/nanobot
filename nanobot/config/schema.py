@@ -155,13 +155,6 @@ class AgentDefaults(Base):
         default=60,
         ge=0,
     )  # Minimum interval in seconds between scans for idle sessions
-    consolidation_ratio: float = Field(
-        default=0.5,
-        ge=0.1,
-        le=0.95,
-        validation_alias=AliasChoices("consolidationRatio"),
-        serialization_alias="consolidationRatio",
-    )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
     @model_validator(mode="before")
