@@ -43,6 +43,13 @@ _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
 )
 
 
+def _with_retry_hint(payload: str) -> str:
+    """Append the recovery hint exactly once."""
+    if payload.endswith(_RETRY_HINT):
+        return payload
+    return payload + _RETRY_HINT
+
+
 async def execute_tool_calls(
     tools: ToolRegistry,
     tool_calls: list[ToolCallRequest],
@@ -105,7 +112,7 @@ async def _execute_tool_call(
             "status": "error",
             "detail": "repeated external lookup blocked",
         }
-        return lookup_error + _RETRY_HINT, event
+        return _with_retry_hint(lookup_error), event
 
     prepare_call = cast(
         Callable[[str, Any], object] | None,
@@ -119,6 +126,7 @@ async def _execute_tool_call(
             if len(prepared_tuple) == 3:
                 tool, params, prep_error = cast(tuple[Any, Any, str | None], prepared_tuple)
     if prep_error:
+        payload = _with_retry_hint(prep_error)
         event = {
             "name": tool_call.name,
             "status": "error",
@@ -126,14 +134,14 @@ async def _execute_tool_call(
         }
         handled = _classify_violation(
             raw_text=prep_error,
-            soft_payload=prep_error + _RETRY_HINT,
+            soft_payload=payload,
             event=event,
             tool_call=tool_call,
             workspace_violation_counts=workspace_violation_counts,
         )
         if handled is not None:
             return handled
-        return prep_error + _RETRY_HINT, event
+        return payload, event
 
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
@@ -150,10 +158,9 @@ async def _execute_tool_call(
             "status": "error",
             "detail": str(exc),
         }
-        payload = f"Error: {type(exc).__name__}: {exc}"
+        payload = _with_retry_hint(f"Error: {type(exc).__name__}: {exc}")
         handled = _classify_violation(
             raw_text=str(exc),
-            # Preserve legacy exception payloads without the retry hint.
             soft_payload=payload,
             event=event,
             tool_call=tool_call,
@@ -165,6 +172,7 @@ async def _execute_tool_call(
 
     if is_tool_error_result(result):
         await hook.on_execute_tool_error(context, tool_call, tool, params, result)
+        payload = _with_retry_hint(result)
         event = {
             "name": tool_call.name,
             "status": "error",
@@ -172,14 +180,14 @@ async def _execute_tool_call(
         }
         handled = _classify_violation(
             raw_text=result,
-            soft_payload=result + _RETRY_HINT,
+            soft_payload=payload,
             event=event,
             tool_call=tool_call,
             workspace_violation_counts=workspace_violation_counts,
         )
         if handled is not None:
             return handled
-        return result + _RETRY_HINT, event
+        return payload, event
 
     await hook.after_execute_tool(context, tool_call, tool, params, result)
 
