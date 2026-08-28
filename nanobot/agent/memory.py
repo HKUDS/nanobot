@@ -22,6 +22,7 @@ from loguru import logger
 
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.runtime_context import public_history_messages
+from nanobot.session.async_compat import call_session_manager
 from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
     Session,
@@ -983,6 +984,22 @@ class Consolidator:
             weakref.WeakValueDictionary()
         )
 
+    async def _get_or_create_session(self, key: str) -> Session:
+        return await call_session_manager(
+            self.sessions,
+            "get_or_create_async",
+            self.sessions.get_or_create,
+            key,
+        )
+
+    async def _save_session(self, session: Session) -> None:
+        await call_session_manager(
+            self.sessions,
+            "save_async",
+            self.sessions.save,
+            session,
+        )
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
@@ -1013,13 +1030,13 @@ class Consolidator:
             return []
         return session.get_history()
 
-    def _persist_last_summary(self, session: Session, summary: str | None) -> None:
+    async def _persist_last_summary(self, session: Session, summary: str | None) -> None:
         if summary and summary != "(nothing)":
             session.metadata["_last_summary"] = {
                 "text": summary,
                 "last_active": session.updated_at.isoformat(),
             }
-            self.sessions.save(session)
+            await self._save_session(session)
 
     def estimate_session_prompt_tokens(
         self,
@@ -1107,7 +1124,7 @@ class Consolidator:
         lock = self.get_lock(session.key)
         async with lock:
             # Refresh session reference: AutoCompact may have replaced it.
-            fresh = self.sessions.get_or_create(session.key)
+            fresh = await self._get_or_create_session(session.key)
             if fresh is not session:
                 session = fresh
             if not session.messages:
@@ -1120,7 +1137,7 @@ class Consolidator:
                 runtime=runtime,
             )
             if estimated <= 0:
-                self._persist_last_summary(session, last_summary)
+                await self._persist_last_summary(session, last_summary)
                 return
             if estimated < budget:
                 unarchived_count = len(session.messages) - session.last_archived
@@ -1132,7 +1149,7 @@ class Consolidator:
                     source,
                     unarchived_count,
                 )
-                self._persist_last_summary(session, last_summary)
+                await self._persist_last_summary(session, last_summary)
                 return
 
             end_idx = self.pick_consolidation_boundary(session)
@@ -1165,12 +1182,12 @@ class Consolidator:
             if summary:
                 last_summary = summary
             session.last_archived = end_idx
-            self.sessions.save(session)
+            await self._save_session(session)
 
             # Persist the last summary to session metadata so it can be injected
             # into the runtime context on the next prepare_session() call, aligning
             # the summary injection strategy with AutoCompact._archive().
-            self._persist_last_summary(session, last_summary)
+            await self._persist_last_summary(session, last_summary)
 
     async def compact_idle_session(
         self,
@@ -1195,7 +1212,7 @@ class Consolidator:
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            session = await self._get_or_create_session(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1219,7 +1236,7 @@ class Consolidator:
             # A turn can append while the provider call is in flight. Advance only
             # through the captured batch so new messages remain eligible next time.
             session.last_archived = archive_end
-            self.sessions.save(session)
+            await self._save_session(session)
 
             visible = session.get_history(
                 max_messages=MIN_COMPACTED_REPLAY_MESSAGES,
