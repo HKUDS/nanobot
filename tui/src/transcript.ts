@@ -145,7 +145,6 @@ export class Transcript {
     private theme: TranscriptTheme,
     private readonly treeSitterClient: TreeSitterClient,
     private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
-    private readonly showHeader = true,
     private readonly workspace = "",
   ) {
     this.root = new ScrollBoxRenderable(renderer, {
@@ -198,7 +197,6 @@ export class Transcript {
   }
 
   header(options: TranscriptHeader): void {
-    if (!this.showHeader) return
     const row = new BoxRenderable(this.renderer, {
       id: this.id("header-row"),
       width: "100%",
@@ -265,7 +263,7 @@ export class Transcript {
     if (messages.length === 0) return
     const previousTop = this.root.scrollTop
     const previousHeight = this.root.scrollHeight
-    let index = this.showHeader ? 1 : 0
+    let index = 1 // Keep the launch header first.
     for (const message of messages) {
       if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue

@@ -11,17 +11,15 @@ bun run --cwd tui build
 
 `nanobot agent` launches this client, leases the shared local gateway or starts it on demand, and passes the local bootstrap endpoint through environment variables. The client paints before gateway readiness, retries bootstrap in the background, and obtains fresh WebSocket and REST credentials for each connection. Other terminals and the WebUI keep that gateway alive; the final interactive launcher to exit releases the on-demand process. `/detach` closes the TUI after promoting the gateway to persistent background mode, keeping any active agent turn running without clients; the restored terminal prints the exact stop command for that config and explicit workspace. `nanobot gateway --background` can start or promote it persistently before opening a client. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified archive that keeps the executable together with its licenses, notices, corresponding application source, source offer, and relinking instructions. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is only selected with `nanobot agent --classic`.
 
-Standalone terminals use OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
+The TUI uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.
 
 Assistant math written with `$...$`, `$$...$$`, `\\(...\\)`, or `\\[...\\]` is presented as
 Unicode plain text so formulas remain readable in terminals without a math renderer. Currency and
 LaTeX inside inline or fenced code remain literal.
 
-## Herdr host mode
+## Herdr pane titles
 
-When Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`, nanobot becomes a quiet hosted client. It uses OpenTUI's main-screen mode instead of hiding the whole run in a temporary alternate screen, removes the launch card and persistent session/model/task chrome, and keeps only the transcript, compact progress, and composer. Herdr remains responsible for workspace, tab, pane, task, and attention navigation, while nanobot keeps its application-level session, new-chat, and branch commands.
-
-The TUI reports its WebSocket session ID, model, Git branch, workspace, last task, and current action through Herdr's supported pane CLI. Sending work reports `working`; a persisted explicit nanobot goal block reports `blocked`; a completed turn reports `idle`; exit releases lifecycle authority. The gateway session remains the durable transcript and resume path. Standalone terminals keep the richer full-screen navigation described below.
+When Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`, nanobot keeps the same full-screen layout, controls, and navigation available in any other terminal. Its only host-specific behavior is reporting the latest user task as the Herdr pane title through the supported pane CLI. Creating a new chat, switching to a chat without a task, and exiting the TUI clear that title. Nanobot does not report agent lifecycle, session, model, Git branch, workspace, or action metadata to Herdr.
 
 The model preset and workspace access labels above the composer are live controls. Click either
 label, then click a choice; arrow keys, `Enter`, and `Esc` provide the same flow without a mouse.

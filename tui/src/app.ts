@@ -94,7 +94,7 @@ import {
   type FooterMode,
   type FooterHintTheme,
 } from "./footer-hints"
-import { createTuiHost, currentGitBranch, type TuiHost } from "./host"
+import { createTuiHost, type TuiHost } from "./host"
 
 interface AppOptions {
   wsUrl?: string
@@ -107,8 +107,6 @@ interface AppOptions {
   model: string
   modelPreset: string
   workspace: string
-  hostWorkspace?: string
-  branch?: string
   version: string
   access: string
   theme: "auto" | ThemeMode
@@ -404,10 +402,6 @@ function connectionStatusText(
   return "Session ended"
 }
 
-function singleLine(value: string, limit = 120): string {
-  return value.replace(/\s+/gu, " ").trim().slice(0, limit)
-}
-
 export function sessionExitMessage(chatId: string): string {
   const sessionId = `websocket:${chatId}`
   return `Resume with: nanobot agent --session ${sessionId}\n`
@@ -465,7 +459,6 @@ export class NanobotTui {
   private activeTurnId: string | null = null
   private activeLabel = "Thinking"
   private activeStartedAt = 0
-  private lastProgress = ""
   private finalMessage = ""
   private turnHadAnswer = false
   private historyLoaded = false
@@ -514,13 +507,8 @@ export class NanobotTui {
   private readonly silentCommandTurns = new Set<string>()
   private currentFileEdits: FileEditEvent[] = []
   private lastFileEdits: FileEditEvent[] = []
-  private currentTask = ""
-  private currentAction = ""
-  private hostBlocked = false
   private recoveryState: RecoveryState | null = null
   private recoveryPending = false
-  private hostWorkspace: string
-  private hostBranch: string
   private readonly apiReauthenticator: ApiReauthenticator | undefined
   private readonly clipboardImageReader: ClipboardImageReader
   private apiRefreshPromise: Promise<GatewayApiConnection> | null = null
@@ -545,8 +533,6 @@ export class NanobotTui {
     this.defaultModelPreset = options.modelPreset
     this.modelName = options.model
     this.modelPreset = options.modelPreset
-    this.hostWorkspace = options.hostWorkspace || options.workspace
-    this.hostBranch = options.branch || ""
     this.apiReauthenticator = options.bootstrapUrl
       ? (rejectedApiToken) => this.refreshApiConnection(rejectedApiToken)
       : undefined
@@ -561,7 +547,6 @@ export class NanobotTui {
       transcriptTheme(this.palette, this.backgroundKnown),
       treeSitterClient,
       (state) => this.handleTranscriptNavigation(state),
-      !host.hosted,
       options.workspace,
     )
     this.commandMenu = new CommandMenu(renderer, commandMenuTheme(this.palette))
@@ -672,21 +657,19 @@ export class NanobotTui {
       truncate: true,
       fg: this.palette.muted,
       selectable: false,
-      ...(host.hosted ? {} : {
-        onMouseOver: () => { this.titleText.fg = this.palette.accent },
-        onMouseOut: () => this.renderTitleColor(),
-        onMouseDown: (event) => {
-          if (event.button !== 0) return
-          event.preventDefault()
-          event.stopPropagation()
-          this.renderer.clearSelection()
-          if (this.sessionLoading || this.sessionMenu.visible) {
-            this.closeSessions()
-            return
-          }
-          void this.openSessions()
-        },
-      }),
+      onMouseOver: () => { this.titleText.fg = this.palette.accent },
+      onMouseOut: () => this.renderTitleColor(),
+      onMouseDown: (event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        event.stopPropagation()
+        this.renderer.clearSelection()
+        if (this.sessionLoading || this.sessionMenu.visible) {
+          this.closeSessions()
+          return
+        }
+        void this.openSessions()
+      },
     })
     this.runtimeControls = new RuntimeControls(
       renderer,
@@ -721,11 +704,9 @@ export class NanobotTui {
       },
     )
     this.title.add(this.titleText)
-    if (!host.hosted) {
-      this.title.add(this.runtimeControls.modelText)
-      this.title.add(this.runtimeControls.accessText)
-      this.title.add(this.runtimeControls.contextText)
-    }
+    this.title.add(this.runtimeControls.modelText)
+    this.title.add(this.runtimeControls.accessText)
+    this.title.add(this.runtimeControls.contextText)
     const composerSurface = this.composerSurface()
     this.composerFrame = new BoxRenderable(renderer, {
       id: "nanobot-tui-composer-frame",
@@ -819,7 +800,7 @@ export class NanobotTui {
     this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
     this.shell.add(this.runtimeControls.menuRoot)
-    if (!host.hosted) this.shell.add(this.title)
+    this.shell.add(this.title)
     this.shell.add(this.queuePreview.root)
     this.shell.add(this.recoveryNotice.root)
     this.shell.add(this.composerFrame)
@@ -836,7 +817,6 @@ export class NanobotTui {
     this.handleResize()
     this.composer.focus()
     this.transcript.header(options)
-    this.syncHostMetadata()
   }
 
   static async create(options: AppOptions): Promise<NanobotTui> {
@@ -845,7 +825,7 @@ export class NanobotTui {
       targetFps: 30,
       exitOnCtrlC: false,
       useMouse: true,
-      screenMode: host.hosted ? "main-screen" : "alternate-screen",
+      screenMode: "alternate-screen",
       externalOutputMode: "passthrough",
       consoleMode: "disabled",
     })
@@ -874,7 +854,6 @@ export class NanobotTui {
     // Network setup and small menu payloads do not depend on terminal colors.
     // Start them while OSC theme detection is in flight instead of serializing
     // up to one second of otherwise independent startup work.
-    this.host.reportState("unknown", "Getting ready")
     this.client.connect()
     void this.loadCommands()
     void this.loadMentions()
@@ -1021,8 +1000,7 @@ export class NanobotTui {
       prompt.options.media,
       prompt.displayContent,
     )
-    this.hostBlocked = false
-    this.setCurrentTask(prompt.content)
+    this.host.reportTitle(prompt.content)
     if (steering) {
       this.renderActiveStatus()
       this.updateMeta()
@@ -1037,12 +1015,9 @@ export class NanobotTui {
     this.readyDetail = ""
     this.finalMessage = ""
     this.turnHadAnswer = false
-    this.lastProgress = ""
     this.activeLabel = "Thinking"
     this.currentFileEdits = []
-    this.setCurrentAction("Thinking")
     this.setActive(true, startedAt)
-    this.reportHostWorking()
   }
 
   private reconcileTurnOwnership(event: {
@@ -1065,7 +1040,6 @@ export class NanobotTui {
     if (event.event === "attached") {
       const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
       this.currentChatId = event.chat_id
-      this.host.reportSession(event.chat_id)
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
         this.applyModelPreset(event.model_preset)
@@ -1117,17 +1091,13 @@ export class NanobotTui {
         )) {
           this.recordPrompt(event.text)
         }
-        this.hostBlocked = false
-        this.setCurrentTask(event.text)
+        this.host.reportTitle(event.text)
         this.reconcileTurnOwnership(event)
-        if (this.activeTurn) this.reportHostWorking()
         return
       }
       case "delta":
         this.setActive(true)
         this.activeLabel = "Writing"
-        if (!this.currentAction) this.setCurrentAction("Writing")
-        this.reportHostWorking()
         this.turnHadAnswer = true
         this.transcript.stream(event.text)
         return
@@ -1147,11 +1117,8 @@ export class NanobotTui {
         }
         if (event.kind) {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
-          this.lastProgress = this.transcript.progress(event.text, event.tool_events)
-          if (this.lastProgress) this.setCurrentAction(this.lastProgress)
-          else if (!this.currentAction) this.setCurrentAction(this.activeLabel)
+          this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
-          this.reportHostWorking()
         } else {
           this.finalMessage = event.text
         }
@@ -1160,10 +1127,8 @@ export class NanobotTui {
         this.activeLabel = "Editing"
         this.currentFileEdits = mergeFileEdits(this.currentFileEdits, event.edits)
         if (this.diffViewer.visible) this.diffViewer.update(this.currentFileEdits)
-        this.lastProgress = this.transcript.fileEdits(event.edits)
-        this.setCurrentAction(this.lastProgress || "Editing")
+        this.transcript.fileEdits(event.edits)
         this.setActive(true)
-        this.reportHostWorking()
         return
       case "reasoning_delta":
         this.activeLabel = "Thinking"
@@ -1197,7 +1162,6 @@ export class NanobotTui {
         if (typeof event.context_window_tokens === "number") {
           this.contextWindowTokens = event.context_window_tokens
         }
-        this.applyHostGoalState(event.goal_state)
         this.updateTitle()
         this.setActive(false)
         // A synthetic/rehydrated turn may already be idle, in which case
@@ -1207,7 +1171,6 @@ export class NanobotTui {
           ? `${(event.latency_ms / 1000).toFixed(1)}s`
           : ""
         this.status.content = this.readyStatus()
-        this.reportHostResting()
         if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
         this.sendNextFollowUp()
         return
@@ -1216,17 +1179,12 @@ export class NanobotTui {
         if (event.status === "running") {
           if (event.turn_id) this.activeTurnId = event.turn_id
           this.activeLabel = "Working"
-          if (!this.currentAction) this.setCurrentAction("Working")
           this.setActive(true, typeof event.started_at === "number" ? event.started_at * 1000 : undefined)
-          this.reportHostWorking()
         } else {
           this.setActive(false)
-          this.reportHostResting()
         }
         return
       case "goal_state":
-        this.applyHostGoalState(event.goal_state)
-        if (!this.activeTurn) this.reportHostResting()
         return
       case "recovery_state":
         this.applyRecoveryState(event)
@@ -1273,8 +1231,6 @@ export class NanobotTui {
         this.turnHadAnswer = false
         this.restoreQueuedPrompts()
         this.setActive(false)
-        this.setCurrentAction(event.reason || event.detail || "Error")
-        this.reportHostResting()
         return
     }
   }
@@ -1312,11 +1268,7 @@ export class NanobotTui {
         this.restorePromptHistory(history.messages)
         const reversedHistory = [...history.messages].reverse()
         const lastUser = reversedHistory.find((message) => message.role === "user")
-        if (lastUser) this.setCurrentTask(lastUser.content)
-        const lastActivity = reversedHistory.find((message) => message.role === "activity")
-        if (lastActivity) {
-          this.setCurrentAction(lastActivity.fileEdits?.length ? "Edited" : lastActivity.content)
-        }
+        if (lastUser) this.host.reportTitle(lastUser.content)
         this.lastFileEdits = latestTurnFileEdits(history.messages)
         if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
       }
@@ -1328,7 +1280,6 @@ export class NanobotTui {
       this.ready = true
       if (!this.activeTurn) {
         this.status.content = this.readyStatus()
-        this.reportHostResting()
       }
     }
   }
@@ -1354,35 +1305,24 @@ export class NanobotTui {
     this.recoveryPending = false
     if (state.status === "resuming") {
       this.recoveryNotice.hide()
-      this.hostBlocked = false
       this.activeLabel = "Continuing"
-      this.setCurrentAction("Continuing interrupted task")
       this.setActive(true)
-      this.reportHostWorking()
       return
     }
     if (state.status === "awaiting_user" || state.status === "failed") {
       this.activeTurnId = null
       this.setActive(false)
-      this.hostBlocked = true
       this.recoveryNotice.show(state)
-      const detail = state.reason || (state.status === "failed"
-        ? "Recovery failed"
-        : "Task interrupted")
-      this.setCurrentAction(detail)
       this.status.content = state.can_continue === false
         ? "Interrupted · dismiss to start a new message"
         : "Interrupted · continue or dismiss"
-      this.host.reportState("blocked", detail)
       this.composer.focus()
       return
     }
     this.clearRecoveryState()
     this.activeTurnId = null
-    this.hostBlocked = false
     this.setActive(false)
     if (this.ready) this.status.content = this.readyStatus()
-    this.reportHostResting()
   }
 
   private async updateRecovery(action: "continue" | "dismiss"): Promise<void> {
@@ -1414,7 +1354,6 @@ export class NanobotTui {
       this.recoveryPending = false
       this.recoveryNotice.setBusy(false)
       this.status.content = error instanceof Error ? error.message : String(error)
-      this.host.reportState("blocked", state.reason || "Task interrupted")
     } finally {
       this.composer.focus()
     }
@@ -1468,13 +1407,11 @@ export class NanobotTui {
     this.connectionMessage = connectionStatusText(status, info)
     if (status === "connected") {
       this.ready = false
-      this.host.reportState("unknown", "Getting ready")
       this.renderConnectionMessage()
       return
     }
     if (["starting", "connecting", "reconnecting", "unavailable"].includes(status)) {
       this.ready = false
-      this.host.reportState("unknown", this.connectionMessage)
       if (status === "reconnecting" || status === "unavailable") this.setActive(false)
       this.renderConnectionMessage()
       return
@@ -1482,14 +1419,12 @@ export class NanobotTui {
     if (status === "error") {
       if (info) this.ready = false
       this.setActive(false)
-      this.host.reportState("unknown", this.connectionMessage)
       this.renderConnectionMessage()
       return
     }
     if (!this.quitting) {
       this.ready = false
       this.setActive(false)
-      this.host.reportState("unknown", "Disconnected")
       this.renderConnectionMessage()
     }
   }
@@ -1529,7 +1464,6 @@ export class NanobotTui {
     }
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.shimmerTimer = null
-    this.lastProgress = ""
     this.status.content = this.readyStatus()
   }
 
@@ -1953,7 +1887,7 @@ export class NanobotTui {
     this.syncComposerPlaceholder()
     this.contextPanel.resize(this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
-    if (!this.host.hosted) this.title.visible = this.renderer.height >= 14
+    this.title.visible = this.renderer.height >= 14
     this.runtimeControls.resize(this.renderer.width)
     this.updateTitle()
     this.updateMeta()
@@ -2022,10 +1956,6 @@ export class NanobotTui {
   }
 
   private updateTitle(): void {
-    if (this.host.hosted) {
-      this.syncHostMetadata()
-      return
-    }
     const identity = this.sessionTitle.trim() || "nanobot"
     this.titleText.maxWidth = Math.max(8, Math.floor(this.renderer.width * 0.38))
     this.titleText.content = identity
@@ -2036,67 +1966,12 @@ export class NanobotTui {
         : ""} ctx`
     this.runtimeControls.updateModel(this.modelName, this.modelPreset)
     this.runtimeControls.updateContext(context)
-    this.syncHostMetadata()
   }
 
   private renderTitleColor(): void {
-    this.titleText.fg = !this.host.hosted && (this.sessionLoading || this.sessionMenu.visible)
+    this.titleText.fg = this.sessionLoading || this.sessionMenu.visible
       ? this.palette.accent
       : this.palette.muted
-  }
-
-  private setCurrentTask(task: string): void {
-    const next = singleLine(task)
-    if (!next || next === this.currentTask) return
-    this.currentTask = next
-    this.updateTitle()
-  }
-
-  private setCurrentAction(action: string): void {
-    const next = singleLine(action.replace(/^\s*[·›✓×]\s*/u, ""), 80)
-    if (!next || next === this.currentAction) return
-    this.currentAction = next
-    this.syncHostMetadata()
-  }
-
-  private clearHostContext(): void {
-    this.currentTask = ""
-    this.currentAction = ""
-    this.hostBlocked = false
-    this.updateTitle()
-  }
-
-  private syncHostMetadata(): void {
-    const model = [this.modelPreset, this.modelName].filter(Boolean).join(" · ")
-    this.host.reportMetadata({
-      model,
-      branch: this.hostBranch,
-      workspace: this.hostWorkspace,
-      task: this.currentTask,
-      action: this.currentAction,
-    })
-  }
-
-  private applyHostGoalState(state: Record<string, unknown> | undefined): void {
-    if (!state) return
-    this.hostBlocked = state.status === "blocked"
-    if (!this.hostBlocked) return
-    const summary = typeof state.ui_summary === "string" ? state.ui_summary : ""
-    const recap = typeof state.recap === "string" ? state.recap : ""
-    const objective = typeof state.objective === "string" ? state.objective : ""
-    this.setCurrentAction(summary || recap || objective || "Needs input")
-    this.host.reportState("blocked", summary || recap || objective || this.currentTask)
-  }
-
-  private reportHostResting(): void {
-    this.host.reportState(
-      this.hostBlocked ? "blocked" : "idle",
-      this.hostBlocked ? this.currentAction || this.currentTask : this.currentAction,
-    )
-  }
-
-  private reportHostWorking(): void {
-    if (!this.hostBlocked) this.host.reportState("working", this.currentTask)
   }
 
   private resizeComposer(): void {
@@ -2384,11 +2259,6 @@ export class NanobotTui {
   }
 
   private applyWorkspaceScope(scope: WorkspaceScopePayload): void {
-    if (scope.project_path) {
-      this.hostWorkspace = scope.project_path
-      this.hostBranch = currentGitBranch(scope.project_path)
-      this.syncHostMetadata()
-    }
     this.runtimeControls.updateWorkspaceScope(scope)
     this.updateTitle()
     if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
@@ -2480,8 +2350,7 @@ export class NanobotTui {
       this.clearPromptQueue()
       this.sessionMetadataId += 1
       this.sessionTitle = `Fork · ${preview.slice(0, 48)}`
-      this.clearHostContext()
-      this.setCurrentTask(preview)
+      this.host.reportTitle(preview)
       this.contextTokens = null
       this.lastUsage = null
       this.readyDetail = ""
@@ -2578,7 +2447,7 @@ export class NanobotTui {
       this.clearRecoveryState()
       this.queuePreview.update([])
       this.sessionMetadataId += 1
-      this.clearHostContext()
+      this.host.reportTitle("")
       this.sessionTitle = sessionLabel(session)
       this.applySessionModel(session)
       this.applySessionScope(session)
@@ -2614,7 +2483,7 @@ export class NanobotTui {
       this.clearRecoveryState()
       this.clearPromptQueue()
       this.sessionMetadataId += 1
-      this.clearHostContext()
+      this.host.reportTitle("")
       this.sessionTitle = "New chat"
       this.sessionModelPreset = null
       this.modelName = this.defaultModelName
@@ -2661,17 +2530,13 @@ export class NanobotTui {
     if (!silent) this.recordPrompt(content)
 
     if (lifecycle === "agent_turn") {
-      this.hostBlocked = false
-      this.setCurrentTask(content)
+      this.host.reportTitle(content)
       this.activeTurnId = turnId
       this.finalMessage = ""
       this.turnHadAnswer = false
-      this.lastProgress = ""
       this.activeLabel = "Thinking"
       this.currentFileEdits = []
-      this.setCurrentAction("Thinking")
       this.setActive(true)
-      this.reportHostWorking()
     } else if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null
       this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
@@ -2679,12 +2544,10 @@ export class NanobotTui {
       this.finalMessage = ""
       this.turnHadAnswer = false
       this.setActive(false)
-      this.reportHostResting()
       this.status.content = "Resetting chat…"
     } else if (lifecycle === "stop_active_turn") {
       this.activeTurnId = null
       this.setActive(false)
-      this.reportHostResting()
       this.status.content = "Stopping…"
     } else if (!this.activeTurn) {
       this.status.content = `Running ${content.split(/\s+/u, 1)[0]}…`

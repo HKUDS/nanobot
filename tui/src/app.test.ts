@@ -21,7 +21,7 @@ import type {
   SlashCommand,
   WorkspaceScopePayload,
 } from "./protocol"
-import type { HostAgentState, HostMetadata, TuiHost } from "./host"
+import type { TuiHost } from "./host"
 import type { ClipboardImageReader } from "./clipboard-image"
 import { userMessageText, type Transcript } from "./transcript"
 
@@ -3075,23 +3075,18 @@ describe("NanobotTui layout", () => {
   })
 })
 
-describe("NanobotTui in a Herdr pane", () => {
-  test("keeps local navigation while reporting task, session, lifecycle, and metadata", async () => {
-    const setup = await createTestRenderer({ width: 80, height: 22, screenMode: "main-screen" })
-    const states: Array<{ state: HostAgentState; message?: string }> = []
-    const metadata: HostMetadata[] = []
-    const sessions: string[] = []
+describe("NanobotTui with a Herdr pane title reporter", () => {
+  test("keeps the full terminal experience while reporting task titles", async () => {
+    const setup = await createTestRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    const titles: string[] = []
     let released = false
     const host: TuiHost = {
-      hosted: true,
-      reportState(state, message) { states.push({ state, ...(message ? { message } : {}) }) },
-      reportSession(sessionId) { sessions.push(sessionId) },
-      reportMetadata(value) { metadata.push(value) },
+      reportTitle(title) { titles.push(title) },
       release() { released = true },
     }
     const app = NanobotTui.mount(
       setup.renderer,
-      { ...options, branch: "feat/herdr" },
+      options,
       client(),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
       host,
@@ -3127,10 +3122,14 @@ describe("NanobotTui in a Herdr pane", () => {
     })
     await setup.flush()
     const activeFrame = setup.captureCharFrame()
+    expect(activeFrame).toContain(">_  nanobot")
+    expect(activeFrame).toContain("test/model")
     expect(occurrences(activeFrame, "› Ship the Herdr integration")).toBe(1)
     expect(occurrences(activeFrame, "app.ts")).toBe(1)
     expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
     expect(ui.composerFrame.height).toBe(3)
+    expect(titles).toEqual(["Ship the Herdr integration"])
+
     app.accept({
       event: "turn_end",
       chat_id: "chat",
@@ -3141,27 +3140,6 @@ describe("NanobotTui in a Herdr pane", () => {
         ui_summary: "Approval required",
       },
     })
-    await setup.flush()
-    const frame = setup.captureCharFrame()
-
-    expect(sessions).toEqual(["chat"])
-    expect(occurrences(frame, "› Ship the Herdr integration")).toBe(1)
-    expect(frame).not.toContain(">_  nanobot")
-    expect(frame).not.toContain("test/model")
-    expect(states.some(({ state }) => state === "working")).toBe(true)
-    expect(states.at(-1)).toEqual({ state: "blocked", message: "Approval required" })
-    expect(metadata.at(-1)).toMatchObject({
-      model: "default · test/model",
-      branch: "feat/herdr",
-      workspace: "/tmp/nanobot-workspace",
-      task: "Ship the Herdr integration",
-      action: "Approval required",
-    })
-
-    setup.resize(42, 6)
-    await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("› Ship the Herdr integration")
-
     app.accept({
       event: "user_message",
       chat_id: "chat",
@@ -3169,13 +3147,8 @@ describe("NanobotTui in a Herdr pane", () => {
       turn_id: "turn-2",
       starts_turn: true,
     })
-    app.accept({
-      event: "turn_end",
-      chat_id: "chat",
-      turn_id: "turn-2",
-      goal_state: { active: false },
-    })
-    expect(states.at(-1)?.state).toBe("idle")
+
+    expect(titles).toEqual(["Ship the Herdr integration", "Approved"])
 
     app.stop()
     expect(released).toBe(true)
