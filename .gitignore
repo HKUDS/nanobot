@@ -101,3 +101,6 @@ exp/
 .playwright-mcp/
 bridge/node_modules/
 webui/.verify-*
+
+# Local notes (never ship on a PR)
+BUILDLOG.md
