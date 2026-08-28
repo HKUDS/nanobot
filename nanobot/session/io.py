@@ -1,4 +1,4 @@
-"""Event-loop-safe access to the synchronous session manager."""
+"""Event-loop-safe scheduling for synchronous session I/O."""
 
 from __future__ import annotations
 
@@ -10,16 +10,16 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.cancellation import shield_and_drain
 
 
-class AsyncSessionManager:
-    """Move synchronous session transactions off the caller's event loop.
+class SessionIO:
+    """Schedule ``SessionManager`` transactions without blocking the event loop.
 
-    ``SessionManager`` remains the source of persistence and cache semantics.
+    ``SessionManager`` remains the sole owner of persistence and cache semantics.
     This boundary owns only async scheduling, per-session admission, and
     cancellation settlement.
     """
 
-    def __init__(self, manager: SessionManager) -> None:
-        self.manager = manager
+    def __init__(self, sessions: SessionManager) -> None:
+        self.sessions = sessions
         self._session_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
     def _session_lock(self, key: str) -> asyncio.Lock:
@@ -33,16 +33,16 @@ class AsyncSessionManager:
         """Load once per key while preserving the manager's cache identity."""
         async with self._session_lock(key):
             return await shield_and_drain(
-                asyncio.to_thread(self.manager.get_or_create, key)
+                asyncio.to_thread(self.sessions.get_or_create, key)
             )
 
     async def save(self, session: Session, *, fsync: bool = False) -> None:
         """Finish an accepted save before propagating caller cancellation."""
         async with self._session_lock(session.key):
             operation = (
-                asyncio.to_thread(self.manager.save, session, fsync=True)
+                asyncio.to_thread(self.sessions.save, session, fsync=True)
                 if fsync
-                else asyncio.to_thread(self.manager.save, session)
+                else asyncio.to_thread(self.sessions.save, session)
             )
             await shield_and_drain(operation)
 
@@ -50,13 +50,13 @@ class AsyncSessionManager:
         """Finish an accepted checkpoint before propagating caller cancellation."""
         async with self._session_lock(session.key):
             await shield_and_drain(
-                asyncio.to_thread(self.manager.save_runtime_checkpoint, session)
+                asyncio.to_thread(self.sessions.save_runtime_checkpoint, session)
             )
 
     async def read_session_metadata(self, key: str) -> dict[str, Any] | None:
         """Read session metadata without blocking the event loop."""
-        return await asyncio.to_thread(self.manager.read_session_metadata, key)
+        return await asyncio.to_thread(self.sessions.read_session_metadata, key)
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """List sessions without blocking the event loop."""
-        return await asyncio.to_thread(self.manager.list_sessions)
+        return await asyncio.to_thread(self.sessions.list_sessions)

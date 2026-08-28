@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
-from nanobot.session.async_manager import AsyncSessionManager
+from nanobot.session.io import SessionIO
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import (
@@ -32,13 +32,13 @@ class AutoCompact:
         consolidator: Consolidator,
         session_ttl_minutes: int = 0,
         bind_events: SessionEventFactory | None = None,
-        session_io: AsyncSessionManager | None = None,
+        session_io: SessionIO | None = None,
     ):
         self._sessions = sessions
         self._owns_session_io = session_io is None
-        self.session_io = session_io or AsyncSessionManager(sessions)
-        if self.session_io.manager is not sessions:
-            raise ValueError("async session manager must wrap the auto-compact session manager")
+        self.session_io = session_io or SessionIO(sessions)
+        if self.session_io.sessions is not sessions:
+            raise ValueError("session I/O must use the auto-compact session manager")
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
@@ -53,8 +53,8 @@ class AutoCompact:
     def sessions(self, manager: SessionManager) -> None:
         self._sessions = manager
         if self._owns_session_io:
-            self.session_io = AsyncSessionManager(manager)
-        elif self.session_io.manager is not manager:
+            self.session_io = SessionIO(manager)
+        elif self.session_io.sessions is not manager:
             raise ValueError("cannot replace sessions owned by the injected async boundary")
 
     def _is_expired(self, ts: datetime | str | None,
