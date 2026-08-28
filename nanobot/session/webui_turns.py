@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import InitVar, dataclass, field, replace
 from typing import Any, cast
 from uuid import uuid4
 
@@ -41,6 +41,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
+from nanobot.session.async_manager import AsyncSessionManager
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -198,6 +199,7 @@ def _latest_title_inputs(session: Session) -> tuple[str, str]:
 async def maybe_generate_webui_title(
     *,
     sessions: SessionManager,
+    session_io: AsyncSessionManager | None = None,
     session_key: str,
     provider: LLMProvider,
     model: str,
@@ -210,12 +212,15 @@ async def maybe_generate_webui_title(
     so pass ``target_session_key`` to project the title onto that per-chat
     session instead of storing it on the shared one.
     """
-    routed_session = await sessions.get_or_create_async(session_key)
+    io = session_io or AsyncSessionManager(sessions)
+    if io.manager is not sessions:
+        raise ValueError("async session manager must wrap the title session manager")
+    routed_session = await io.get_or_create(session_key)
     target_is_routed = target_session_key is None or target_session_key == session_key
     if target_is_routed or target_session_key is None:
         target_session = routed_session
     else:
-        target_session = await sessions.get_or_create_async(target_session_key)
+        target_session = await io.get_or_create(target_session_key)
     if (
         routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
         and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
@@ -229,7 +234,7 @@ async def maybe_generate_webui_title(
         if cleaned_current_title:
             if cleaned_current_title != current_title:
                 target_session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                await sessions.save_async(target_session)
+                await io.save(target_session)
             return False
         target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
@@ -288,7 +293,7 @@ async def maybe_generate_webui_title(
         )
         return False
     target_session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    await sessions.save_async(target_session)
+    await io.save(target_session)
     return True
 
 
@@ -298,6 +303,7 @@ async def maybe_generate_webui_title_after_turn(
     chat_id: str,
     metadata: dict[str, Any],
     sessions: SessionManager,
+    session_io: AsyncSessionManager | None = None,
     session_key: str,
     provider: LLMProvider,
     model: str,
@@ -307,6 +313,7 @@ async def maybe_generate_webui_title_after_turn(
     origin_session_key = f"{channel}:{chat_id}"
     return await maybe_generate_webui_title(
         sessions=sessions,
+        session_io=session_io,
         session_key=session_key,
         provider=provider,
         model=model,
@@ -567,6 +574,13 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     recovery: RecoveryCoordinator | None = None
+    async_session_manager: InitVar[AsyncSessionManager | None] = None
+    session_io: AsyncSessionManager = field(init=False, repr=False)
+
+    def __post_init__(self, async_session_manager: AsyncSessionManager | None) -> None:
+        self.session_io = async_session_manager or AsyncSessionManager(self.sessions)
+        if self.session_io.manager is not self.sessions:
+            raise ValueError("async session manager must wrap the WebUI session manager")
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
@@ -632,7 +646,7 @@ class WebuiTurnCoordinator:
             or not is_webui_session_key(session_key)
         ):
             return
-        persisted = await self.sessions.read_session_metadata_async(session_key)
+        persisted = await self.session_io.read_session_metadata(session_key)
         metadata_value: object = persisted.get("metadata") if persisted is not None else None
         metadata = (
             cast(dict[str, Any], metadata_value)
@@ -758,7 +772,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = await self.sessions.get_or_create_async(session_key)
+        session = await self.session_io.get_or_create(session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,
@@ -790,6 +804,7 @@ class WebuiTurnCoordinator:
                 chat_id=event.context.chat_id,
                 metadata=event.context.metadata,
                 sessions=self.sessions,
+                session_io=self.session_io,
                 session_key=event.context.session_key,
                 provider=title_llm.provider,
                 model=title_llm.model,

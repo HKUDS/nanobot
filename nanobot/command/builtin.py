@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 import subprocess
 import sys
@@ -18,7 +17,6 @@ from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
-from nanobot.session.async_compat import call_session_manager
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
@@ -28,7 +26,6 @@ if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
     from nanobot.session.manager import Session
     from nanobot.utils.gitstore import CommitInfo
-    from nanobot.utils.llm_runtime import LLMRuntime
 
 # WebUI protocol contract for how a slash command participates in turn state:
 # - side_channel: returns control text without starting or ending an agent turn.
@@ -214,50 +211,6 @@ def builtin_command_starts_agent_turn(text: str) -> bool:
     return spec.lifecycle == "agent_turn_with_args" and bool(args.strip())
 
 
-def _has_native_coroutine_method(target: object, name: str) -> bool:
-    """Check the real target class without trusting dynamic mock attributes."""
-    method = inspect.getattr_static(type(target), name, None)
-    return inspect.iscoroutinefunction(method)
-
-
-async def _get_or_create_session(loop: AgentLoop, key: str) -> Session:
-    sessions = loop.sessions
-    return await call_session_manager(
-        sessions,
-        "get_or_create_async",
-        sessions.get_or_create,
-        key,
-    )
-
-
-async def _save_session(loop: AgentLoop, session: Session) -> None:
-    sessions = loop.sessions
-    await call_session_manager(
-        sessions,
-        "save_async",
-        sessions.save,
-        session,
-    )
-
-
-async def _runtime_for_session(loop: AgentLoop, session: Session) -> LLMRuntime:
-    if _has_native_coroutine_method(loop, "runtime_for_session_async"):
-        return await loop.runtime_for_session_async(session)
-    return await shield_and_drain(asyncio.to_thread(loop.runtime_for_session, session))
-
-
-async def _set_session_model_preset(
-    loop: AgentLoop,
-    session_key: str,
-    name: str,
-) -> LLMRuntime:
-    if _has_native_coroutine_method(loop, "set_session_model_preset_async"):
-        return await loop.set_session_model_preset_async(session_key, name)
-    return await shield_and_drain(
-        asyncio.to_thread(loop.set_session_model_preset, session_key, name)
-    )
-
-
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
@@ -314,8 +267,8 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
-    session = ctx.session or await _get_or_create_session(loop, ctx.key)
-    runtime = ctx.runtime or await _runtime_for_session(loop, session)
+    session = ctx.session or await loop.session_io.get_or_create(ctx.key)
+    runtime = ctx.runtime or await loop.runtime_for_session_async(session)
     ctx_est = 0
     with suppress(Exception):
         ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
@@ -363,12 +316,12 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     loop.discard_session_file_state(ctx.key)
-    session = ctx.session or await _get_or_create_session(loop, ctx.key)
+    session = ctx.session or await loop.session_io.get_or_create(ctx.key)
     snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
     if session.last_archived < len(snapshot):
-        runtime = ctx.runtime or await _runtime_for_session(loop, session)
+        runtime = ctx.runtime or await loop.runtime_for_session_async(session)
         archive_snapshot = replace(
             session,
             messages=snapshot,
@@ -377,7 +330,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         )
     async def reset_and_schedule_archive() -> None:
         session.clear()
-        await _save_session(loop, session)
+        await loop.session_io.save(session)
         loop.sessions.invalidate(session.key)
         if archive_snapshot is not None and runtime is not None:
             loop.schedule_background(
@@ -460,7 +413,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
     if not args:
-        session = ctx.session or await _get_or_create_session(loop, ctx.key)
+        session = ctx.session or await loop.session_io.get_or_create(ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
@@ -470,7 +423,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
     name = args
     try:
-        runtime = await _set_session_model_preset(loop, ctx.key, name)
+        runtime = await loop.set_session_model_preset_async(ctx.key, name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -931,7 +884,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
                 metadata=dict(ctx.msg.metadata or {}),
             )
 
-    session = ctx.session or await _get_or_create_session(ctx.loop, ctx.key)
+    session = ctx.session or await ctx.loop.session_io.get_or_create(ctx.key)
     history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]

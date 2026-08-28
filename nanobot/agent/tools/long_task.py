@@ -17,7 +17,7 @@ from nanobot.agent.tools.context import RequestContext, ToolContext, current_req
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
-from nanobot.session.async_compat import call_session_manager
+from nanobot.session.async_manager import AsyncSessionManager
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
@@ -58,25 +58,19 @@ class _GoalToolsMixin:
         self,
         sessions: SessionManager,
         runtime_events: RuntimeEventBus | None = None,
+        session_io: AsyncSessionManager | None = None,
     ) -> None:
         self._sessions = sessions
+        self._session_io = session_io or AsyncSessionManager(sessions)
+        if self._session_io.manager is not sessions:
+            raise ValueError("async session manager must wrap the goal session manager")
         self._runtime_events = runtime_events
 
     async def _get_or_create_session(self, key: str):
-        return await call_session_manager(
-            self._sessions,
-            "get_or_create_async",
-            self._sessions.get_or_create,
-            key,
-        )
+        return await self._session_io.get_or_create(key)
 
     async def _save_session(self, session: Any) -> None:
-        await call_session_manager(
-            self._sessions,
-            "save_async",
-            self._sessions.save,
-            session,
-        )
+        await self._session_io.save(session)
 
     async def _session(self):
         request_ctx = current_request_context()
@@ -169,8 +163,9 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         self,
         sessions: SessionManager,
         runtime_events: RuntimeEventBus | None = None,
+        session_io: AsyncSessionManager | None = None,
     ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        _GoalToolsMixin.__init__(self, sessions, runtime_events, session_io)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -180,6 +175,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         return cls(
             sessions=sess,
             runtime_events=ctx.runtime_events,
+            session_io=ctx.session_io,
         )
 
     @classmethod
@@ -299,8 +295,9 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         self,
         sessions: SessionManager,
         runtime_events: RuntimeEventBus | None = None,
+        session_io: AsyncSessionManager | None = None,
     ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        _GoalToolsMixin.__init__(self, sessions, runtime_events, session_io)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -310,6 +307,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         return cls(
             sessions=sess,
             runtime_events=ctx.runtime_events,
+            session_io=ctx.session_io,
         )
 
     @classmethod

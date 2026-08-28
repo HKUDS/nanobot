@@ -1,6 +1,5 @@
 """Session management for conversation history."""
 
-import asyncio
 import base64
 import errno
 import hashlib
@@ -31,7 +30,6 @@ from nanobot.runtime_context import (
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
-from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -1663,7 +1661,6 @@ class SessionManager:
         self._cache: OrderedDict[str, Session] = OrderedDict()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
-        self._async_session_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
 
@@ -1763,28 +1760,6 @@ class SessionManager:
         self._remember(session)
         return session
 
-    def _async_session_lock(self, key: str) -> asyncio.Lock:
-        lock = self._async_session_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._async_session_locks[key] = lock
-        return lock
-
-    async def get_or_create_async(self, key: str) -> Session:
-        """Load a session without running file I/O or lock waits on the event loop."""
-        cached = self.get_cached(key)
-        if cached is not None:
-            return cached
-        async with self._async_session_lock(key):
-            cached = self.get_cached(key)
-            if cached is not None:
-                return cached
-            session = await asyncio.to_thread(self._load, key)
-            if session is None:
-                session = Session(key=key)
-            self._remember(session)
-            return session
-
     def get_or_create_transient(
         self,
         key: str,
@@ -1818,17 +1793,6 @@ class SessionManager:
         self._store.save(session, fsync=fsync)
         self._remember(session)
 
-    async def save_async(self, session: Session, *, fsync: bool = False) -> None:
-        """Persist a session without blocking the caller's event loop."""
-        if not session.policy.persist:
-            return
-
-        async def save_and_remember() -> None:
-            await asyncio.to_thread(self._store.save, session, fsync=fsync)
-            self._remember(session)
-
-        await shield_and_drain(save_and_remember())
-
     def save_runtime_checkpoint(self, session: Session) -> None:
         """Persist volatile recovery state without rewriting long history."""
         if not session.policy.persist:
@@ -1840,23 +1804,6 @@ class SessionManager:
         # Third-party stores keep their existing all-or-nothing semantics until
         # they opt into a dedicated checkpoint primitive.
         self.save(session)
-
-    async def save_runtime_checkpoint_async(self, session: Session) -> None:
-        """Persist an in-flight checkpoint without blocking the event loop."""
-        if not session.policy.persist:
-            return
-
-        async def save_and_remember() -> None:
-            if self._store is self._jsonl_store:
-                await asyncio.to_thread(
-                    self._jsonl_store.save_runtime_checkpoint,
-                    session,
-                )
-            else:
-                await asyncio.to_thread(self._store.save, session, fsync=False)
-            self._remember(session)
-
-        await shield_and_drain(save_and_remember())
 
     def rename_model_preset(self, old_name: str, new_name: str) -> int:
         """Rename a session-scoped model preset across durable and live sessions."""
@@ -2002,10 +1949,6 @@ class SessionManager:
         """Read session metadata without loading the transcript."""
         return cast(dict[str, Any] | None, self._store.read_metadata(key))
 
-    async def read_session_metadata_async(self, key: str) -> dict[str, Any] | None:
-        """Read session metadata without blocking the event loop."""
-        return await asyncio.to_thread(self.read_session_metadata, key)
-
     def update_session_metadata(
         self,
         key: str,
@@ -2021,7 +1964,3 @@ class SessionManager:
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())
-
-    async def list_sessions_async(self) -> list[dict[str, Any]]:
-        """List persisted sessions without blocking the event loop."""
-        return await asyncio.to_thread(self.list_sessions)

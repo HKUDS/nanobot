@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import ProviderSnapshot
     from nanobot.security.workspace_access import WorkspaceSandboxStatus
+    from nanobot.session.async_manager import AsyncSessionManager
     from nanobot.session.manager import SessionManager
     from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -85,6 +86,7 @@ class ToolContext:
     cron_service: CronService | None = None
     exec_session_manager: ExecSessionManager | None = None
     sessions: SessionManager | None = None
+    session_io: AsyncSessionManager | None = None
     file_state_store: FileStates | None = None
     provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None
     image_generation_provider_configs: dict[str, ProviderConfig] | None = None

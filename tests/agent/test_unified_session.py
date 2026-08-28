@@ -27,6 +27,7 @@ from nanobot.command.builtin import cmd_new, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.providers.base import GenerationSettings
+from nanobot.session.async_manager import AsyncSessionManager
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -258,6 +259,7 @@ class TestCmdNewUnifiedSession:
         previous_file_state.record_read(tracked_file)
         loop = SimpleNamespace(
             sessions=sessions,
+            session_io=AsyncSessionManager(sessions),
             consolidator=SimpleNamespace(archive_session=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=file_state_store.discard,
@@ -314,10 +316,11 @@ class TestCmdNewUnifiedSession:
 
         loop = SimpleNamespace(
             sessions=sessions,
+            session_io=AsyncSessionManager(sessions),
             consolidator=SimpleNamespace(archive_session=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=MagicMock(),
-            runtime_for_session=MagicMock(return_value=MagicMock()),
+            runtime_for_session_async=AsyncMock(return_value=MagicMock()),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
 
