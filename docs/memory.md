@@ -29,17 +29,10 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When the estimated prompt reaches the model's input budget, the `Consolidator`
-archives one deterministic old prefix. It keeps at least the latest eight
-messages outside that prefix and extends the boundary backward to the `user`
-message that begins the retained turn. There is no configurable consolidation
-ratio; later context pressure can archive another prefix.
-
-The archive summary combines durable memory candidates with a compact
-`[ephemeral]` handoff for the active work, then appends the result to
-`memory/history.jsonl`. Dream can promote durable facts into long-term memory,
-while the handoff preserves the objective, progress, blockers, next action, and
-exact identifiers needed to resume the current task.
+When a conversation grows large, the `Consolidator` summarizes older turns and
+appends the result to `memory/history.jsonl`, while keeping recent conversation
+available. Each summary preserves useful long-term facts and a short handoff
+for active work.
 
 This file is:
 
