@@ -8,7 +8,6 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.command.builtin import cmd_user_shell
 from nanobot.command.router import CommandContext
-from nanobot.session.io import SessionIO
 
 
 def _context(loop: MagicMock, *, trusted: bool, command: str = "pwd") -> CommandContext:
@@ -53,7 +52,6 @@ async def test_user_shell_uses_exec_tool_with_workspace_scope(tmp_path: Path) ->
     loop = MagicMock()
     loop.tools.get.return_value = tool
     loop.sessions.get_or_create.return_value = session
-    loop.session_io = SessionIO(loop.sessions)
     loop.workspace_scopes.for_turn.return_value = scope
     ctx = _context(loop, trusted=True)
 

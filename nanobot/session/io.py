@@ -1,62 +1,54 @@
-"""Event-loop-safe scheduling for synchronous session I/O."""
+"""Async adapters for the synchronous session manager."""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from weakref import WeakValueDictionary
+from collections.abc import Callable
+from typing import Any, ParamSpec, TypeVar
 
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.cancellation import shield_and_drain
 
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
-class SessionIO:
-    """Schedule ``SessionManager`` transactions without blocking the event loop.
 
-    ``SessionManager`` remains the sole owner of persistence and cache semantics.
-    This boundary owns only async scheduling, per-session admission, and
-    cancellation settlement.
-    """
+async def call(operation: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs) -> _T:
+    """Run one synchronous session transaction to settlement in a worker."""
+    return await shield_and_drain(asyncio.to_thread(operation, *args, **kwargs))
 
-    def __init__(self, sessions: SessionManager) -> None:
-        self.sessions = sessions
-        self._session_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
-    def _session_lock(self, key: str) -> asyncio.Lock:
-        lock = self._session_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._session_locks[key] = lock
-        return lock
+async def get_or_create(sessions: SessionManager, key: str) -> Session:
+    """Load a session without blocking the caller's event loop."""
+    return await call(sessions.get_or_create, key)
 
-    async def get_or_create(self, key: str) -> Session:
-        """Load once per key while preserving the manager's cache identity."""
-        async with self._session_lock(key):
-            return await shield_and_drain(
-                asyncio.to_thread(self.sessions.get_or_create, key)
-            )
 
-    async def save(self, session: Session, *, fsync: bool = False) -> None:
-        """Finish an accepted save before propagating caller cancellation."""
-        async with self._session_lock(session.key):
-            operation = (
-                asyncio.to_thread(self.sessions.save, session, fsync=True)
-                if fsync
-                else asyncio.to_thread(self.sessions.save, session)
-            )
-            await shield_and_drain(operation)
+async def save(
+    sessions: SessionManager,
+    session: Session,
+    *,
+    fsync: bool = False,
+) -> None:
+    """Finish an accepted save before propagating caller cancellation."""
+    if fsync:
+        await call(sessions.save, session, fsync=True)
+    else:
+        await call(sessions.save, session)
 
-    async def save_runtime_checkpoint(self, session: Session) -> None:
-        """Finish an accepted checkpoint before propagating caller cancellation."""
-        async with self._session_lock(session.key):
-            await shield_and_drain(
-                asyncio.to_thread(self.sessions.save_runtime_checkpoint, session)
-            )
 
-    async def read_session_metadata(self, key: str) -> dict[str, Any] | None:
-        """Read session metadata without blocking the event loop."""
-        return await asyncio.to_thread(self.sessions.read_session_metadata, key)
+async def save_runtime_checkpoint(sessions: SessionManager, session: Session) -> None:
+    """Finish an accepted checkpoint before propagating caller cancellation."""
+    await call(sessions.save_runtime_checkpoint, session)
 
-    async def list_sessions(self) -> list[dict[str, Any]]:
-        """List sessions without blocking the event loop."""
-        return await asyncio.to_thread(self.sessions.list_sessions)
+
+async def read_session_metadata(
+    sessions: SessionManager,
+    key: str,
+) -> dict[str, Any] | None:
+    """Read session metadata without blocking the event loop."""
+    return await asyncio.to_thread(sessions.read_session_metadata, key)
+
+
+async def list_sessions(sessions: SessionManager) -> list[dict[str, Any]]:
+    """List sessions without blocking the event loop."""
+    return await asyncio.to_thread(sessions.list_sessions)

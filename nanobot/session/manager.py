@@ -9,6 +9,7 @@ import re
 import secrets
 import shutil
 import stat
+import threading
 from collections import OrderedDict
 from contextlib import contextmanager, suppress
 from copy import deepcopy
@@ -1662,27 +1663,41 @@ class SessionManager:
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
+        self._cache_lock = threading.RLock()
+        self._session_locks_guard = threading.Lock()
+        self._session_locks: WeakValueDictionary[str, threading.RLock] = WeakValueDictionary()
         self._delete_observer: Callable[[str], None] | None = None
+
+    def _session_lock(self, key: str) -> threading.RLock:
+        """Return the process-local transaction lock for one session key."""
+        with self._session_locks_guard:
+            lock = self._session_locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._session_locks[key] = lock
+            return lock
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
-        self._overflow_cache.pop(session.key, None)
-        self._cache[session.key] = session
-        self._cache.move_to_end(session.key)
-        while len(self._cache) > self._max_cached_sessions:
-            key, evicted = self._cache.popitem(last=False)
-            self._overflow_cache[key] = evicted
+        with self._cache_lock:
+            self._overflow_cache.pop(session.key, None)
+            self._cache[session.key] = session
+            self._cache.move_to_end(session.key)
+            while len(self._cache) > self._max_cached_sessions:
+                key, evicted = self._cache.popitem(last=False)
+                self._overflow_cache[key] = evicted
 
     def _cached(self, key: str) -> Session | None:
-        session = self._cache.get(key)
-        if session is not None:
-            self._cache.move_to_end(key)
-            return session
+        with self._cache_lock:
+            session = self._cache.get(key)
+            if session is not None:
+                self._cache.move_to_end(key)
+                return session
 
-        session = self._overflow_cache.get(key)
-        if session is not None:
-            self._remember(session)
-        return session
+            session = self._overflow_cache.get(key)
+            if session is not None:
+                self._remember(session)
+            return session
 
     def get_cached(self, key: str) -> Session | None:
         """Return a cached session without creating or loading one from disk."""
@@ -1749,16 +1764,17 @@ class SessionManager:
         Returns:
             The session.
         """
-        session = self._cached(key)
-        if session is not None:
+        with self._session_lock(key):
+            session = self._cached(key)
+            if session is not None:
+                return session
+
+            session = self._load(key)
+            if session is None:
+                session = Session(key=key)
+
+            self._remember(session)
             return session
-
-        session = self._load(key)
-        if session is None:
-            session = Session(key=key)
-
-        self._remember(session)
-        return session
 
     def get_or_create_transient(
         self,
@@ -1772,11 +1788,12 @@ class SessionManager:
             log_content=False,
             disabled_tools=frozenset(disabled_tools),
         )
-        session = self.get_cached(key)
-        if session is None or session.policy != policy:
-            session = Session(key=key, policy=policy)
-            self._remember(session)
-        return session
+        with self._session_lock(key):
+            session = self.get_cached(key)
+            if session is None or session.policy != policy:
+                session = Session(key=key, policy=policy)
+                self._remember(session)
+            return session
 
     def _load(self, key: str) -> Session | None:
         return self._store.load(key)
@@ -1790,28 +1807,31 @@ class SessionManager:
         if not session.policy.persist:
             return
 
-        self._store.save(session, fsync=fsync)
-        self._remember(session)
+        with self._session_lock(session.key):
+            self._store.save(session, fsync=fsync)
+            self._remember(session)
 
     def save_runtime_checkpoint(self, session: Session) -> None:
         """Persist volatile recovery state without rewriting long history."""
         if not session.policy.persist:
             return
-        if self._store is self._jsonl_store:
-            self._jsonl_store.save_runtime_checkpoint(session)
-            self._remember(session)
-            return
-        # Third-party stores keep their existing all-or-nothing semantics until
-        # they opt into a dedicated checkpoint primitive.
-        self.save(session)
+        with self._session_lock(session.key):
+            if self._store is self._jsonl_store:
+                self._jsonl_store.save_runtime_checkpoint(session)
+                self._remember(session)
+                return
+            # Third-party stores keep their existing all-or-nothing semantics until
+            # they opt into a dedicated checkpoint primitive.
+            self.save(session)
 
     def rename_model_preset(self, old_name: str, new_name: str) -> int:
         """Rename a session-scoped model preset across durable and live sessions."""
         if old_name == new_name:
             return 0
 
-        cached = dict(self._overflow_cache.items())
-        cached.update(self._cache)
+        with self._cache_lock:
+            cached = dict(self._overflow_cache.items())
+            cached.update(self._cache)
         keys = set(cached)
         keys.update(item["key"] for item in self._store.list_sessions())
 
@@ -1854,8 +1874,9 @@ class SessionManager:
         flushed.
         """
         flushed = 0
-        cached = dict(self._overflow_cache.items())
-        cached.update(self._cache)
+        with self._cache_lock:
+            cached = dict(self._overflow_cache.items())
+            cached.update(self._cache)
         for key, session in cached.items():
             try:
                 self.save(session, fsync=True)
@@ -1866,16 +1887,18 @@ class SessionManager:
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
-        self._cache.pop(key, None)
-        self._overflow_cache.pop(key, None)
+        with self._session_lock(key), self._cache_lock:
+            self._cache.pop(key, None)
+            self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
-        self.invalidate(key)
-        deleted = self._store.delete(key)
-        if self._delete_observer is not None:
-            self._delete_observer(key)
-        return deleted
+        with self._session_lock(key):
+            self.invalidate(key)
+            deleted = self._store.delete(key)
+            if self._delete_observer is not None:
+                self._delete_observer(key)
+            return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
         """Restore session files to the pre-relocation path for an explicit rollback."""
@@ -1957,10 +1980,11 @@ class SessionManager:
         fsync: bool = False,
     ) -> bool:
         """Atomically update metadata without replacing session history."""
-        updated = self._store.update_metadata(key, updates, fsync=fsync)
-        if updated and (session := self.get_cached(key)) is not None:
-            session.metadata.update(deepcopy(updates))
-        return updated
+        with self._session_lock(key):
+            updated = self._store.update_metadata(key, updates, fsync=fsync)
+            if updated and (session := self.get_cached(key)) is not None:
+                session.metadata.update(deepcopy(updates))
+            return updated
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())

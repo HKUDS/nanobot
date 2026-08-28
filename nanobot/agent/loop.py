@@ -76,6 +76,7 @@ from nanobot.security.workspace_access import (
     bind_workspace_scope,
     reset_workspace_scope,
 )
+from nanobot.session import io as session_io
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
@@ -83,7 +84,6 @@ from nanobot.session.goal_state import (
     runner_wall_llm_timeout_s,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.io import SessionIO
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
 from nanobot.session.model_selection import (
@@ -281,7 +281,6 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        session_io: SessionIO | None = None,
         tool_registry: ToolRegistry | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
@@ -388,9 +387,6 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.session_io = session_io or SessionIO(self.sessions)
-        if self.session_io.sessions is not self.sessions:
-            raise ValueError("session I/O must use the agent session manager")
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
@@ -452,7 +448,6 @@ class AgentLoop:
         self.consolidator = Consolidator(
             store=self.context.memory,
             sessions=self.sessions,
-            session_io=self.session_io,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             resolve_prompt_context=PersistedPromptContextResolver(
@@ -462,7 +457,6 @@ class AgentLoop:
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
-            session_io=self.session_io,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
             bind_compaction=self._idle_compaction_callback,
@@ -564,26 +558,11 @@ class AgentLoop:
         recover_removed: bool = True,
     ) -> LLMRuntime:
         """Resolve the immutable runtime selected by one session."""
-        runtime, changed = self._resolve_session_runtime(
-            session,
-            recover_removed=recover_removed,
-        )
-        if changed:
-            self.sessions.save(session)
-        return runtime
-
-    def _resolve_session_runtime(
-        self,
-        session: Session,
-        *,
-        recover_removed: bool,
-    ) -> tuple[LLMRuntime, bool]:
-        """Resolve runtime state and report whether recovery mutated the session."""
         name = model_preset_from_metadata(session.metadata)
         if name is None:
-            return self.llm_runtime(), False
+            return self.llm_runtime()
         try:
-            return self.runtime_resolver.resolve_preset(name), False
+            return self.runtime_resolver.resolve_preset(name)
         except KeyError:
             if not recover_removed or name in self.runtime_resolver.model_presets:
                 raise
@@ -593,7 +572,8 @@ class AgentLoop:
                 name,
             )
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
-            return self.llm_runtime(), True
+            self.sessions.save(session)
+            return self.llm_runtime()
 
     async def runtime_for_session_async(
         self,
@@ -602,22 +582,11 @@ class AgentLoop:
         recover_removed: bool = True,
     ) -> LLMRuntime:
         """Resolve a session runtime without blocking on recovery persistence."""
-        runtime, changed = self._resolve_session_runtime(
+        return await session_io.call(
+            self.runtime_for_session,
             session,
             recover_removed=recover_removed,
         )
-        if changed:
-            await self.session_io.save(session)
-        return runtime
-
-    def _select_session_model_preset(
-        self,
-        session: Session,
-        name: str,
-    ) -> LLMRuntime:
-        runtime = self.runtime_resolver.resolve_preset(name)
-        session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
-        return runtime
 
     def set_session_model_preset(
         self,
@@ -625,8 +594,9 @@ class AgentLoop:
         name: str,
     ) -> LLMRuntime:
         """Validate and persist one session's preset selection."""
+        runtime = self.runtime_resolver.resolve_preset(name)
         session = self.sessions.get_or_create(session_key)
-        runtime = self._select_session_model_preset(session, name)
+        session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
         self.sessions.save(session)
         return runtime
 
@@ -636,10 +606,7 @@ class AgentLoop:
         name: str,
     ) -> LLMRuntime:
         """Validate and persist one session's preset selection without blocking."""
-        session = await self.session_io.get_or_create(session_key)
-        runtime = self._select_session_model_preset(session, name)
-        await self.session_io.save(session)
-        return runtime
+        return await session_io.call(self.set_session_model_preset, session_key, name)
 
     def _publish_runtime_selection(
         self,
@@ -698,7 +665,6 @@ class AgentLoop:
             cron_service=self.cron_service,
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
-            session_io=self.session_io,
             provider_snapshot_loader=provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
@@ -817,7 +783,7 @@ class AgentLoop:
             **kwargs,
         )
         if persisted:
-            await self.session_io.save(session)
+            await session_io.save(self.sessions, session)
         return persisted
 
     def _build_transcript_input(self, ctx: TurnContext) -> TranscriptInput:
@@ -918,7 +884,7 @@ class AgentLoop:
         if tool is None:
             content = "Shell execution is disabled in this nanobot configuration."
         else:
-            session = ctx.session or await self.session_io.get_or_create(ctx.key)
+            session = ctx.session or await session_io.get_or_create(self.sessions, ctx.key)
             scope = self.workspace_scopes.for_turn(
                 channel=ctx.msg.channel,
                 message_metadata=metadata,
@@ -1477,7 +1443,7 @@ class AgentLoop:
                         )
                         continue
                     pending_msg = routed_msg
-                    session = await self.session_io.get_or_create(effective_key)
+                    session = await session_io.get_or_create(self.sessions, effective_key)
                     followup_id = record_pending_followup(session, pending_msg)
                     if followup_id is not None:
                         pending_msg = dataclasses.replace(
@@ -1487,7 +1453,7 @@ class AgentLoop:
                                 PENDING_FOLLOWUP_ID_KEY: followup_id,
                             },
                         )
-                        await self.session_io.save(session)
+                        await session_io.save(self.sessions, session)
                     try:
                         self._pending_queues[effective_key].put_nowait(pending_msg)
                     except asyncio.QueueFull:
@@ -1595,10 +1561,10 @@ class AgentLoop:
                         raise
                     try:
                         key = self._effective_session_key(msg)
-                        session = await self.session_io.get_or_create(key)
+                        session = await session_io.get_or_create(self.sessions, key)
                         if restore_runtime_checkpoint(session):
                             self._clear_pending_user_turn(session)
-                            await self.session_io.save(session)
+                            await session_io.save(self.sessions, session)
                             logger.info(
                                 "Restored partial context for cancelled session {}",
                                 key,
@@ -1921,7 +1887,7 @@ class AgentLoop:
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:
-                ctx.session = await self.session_io.get_or_create(ctx.session_key)
+                ctx.session = await session_io.get_or_create(self.sessions, ctx.session_key)
         session = ctx.session
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools or self.tools
@@ -1953,12 +1919,12 @@ class AgentLoop:
             self.workspace_scopes.persist_message_scope(session, msg)
 
         if restore_runtime_checkpoint(session):
-            await self.session_io.save(session)
+            await session_io.save(self.sessions, session)
         if (
             RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
             and restore_pending_interruption(session)
         ):
-            await self.session_io.save(session)
+            await session_io.save(self.sessions, session)
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
@@ -2009,7 +1975,7 @@ class AgentLoop:
                     "assistant", result.content, _command=True
                 )
                 self._clear_pending_user_turn(session)
-                await self.session_io.save(session)
+                await session_io.save(self.sessions, session)
                 if not ctx.ephemeral:
                     await self.runtime_event_publisher.session_turn_persisted(
                         ctx.msg,
@@ -2061,7 +2027,7 @@ class AgentLoop:
                 # provider compatibility or prompt assembly work. A compatible
                 # staged state replaces this in a second atomic save below.
                 session.provider_state = None
-                await self.session_io.save(session)
+                await session_io.save(self.sessions, session)
             ctx.input_persisted_early = True
         await ctx.delivery.runtime_admitted(runtime)
 
@@ -2125,7 +2091,7 @@ class AgentLoop:
         elif subagent_followup_persisted and staged_provider_state:
             # Upgrade the replay-safe baseline to the resumable state before
             # prompt assembly and the first model checkpoint.
-            await self.session_io.save(session)
+            await session_io.save(self.sessions, session)
         ctx.transcript_input = self._build_transcript_input(ctx)
 
         if ctx.on_progress is None:
@@ -2215,7 +2181,7 @@ class AgentLoop:
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
-        await self.session_io.save(session)
+        await session_io.save(self.sessions, session)
         if not ctx.ephemeral:
             await self.runtime_event_publisher.session_turn_persisted(
                 ctx.msg,
@@ -2513,7 +2479,7 @@ class AgentLoop:
     ) -> None:
         """Persist the latest in-flight turn state without blocking the event loop."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
-        await self.session_io.save_runtime_checkpoint(session)
+        await session_io.save_runtime_checkpoint(self.sessions, session)
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True

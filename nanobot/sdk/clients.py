@@ -15,6 +15,7 @@ from nanobot.sdk.types import (
     snapshot_from_payload,
     snapshot_from_session,
 )
+from nanobot.session import io as session_io
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -39,7 +40,7 @@ class SessionClient:
         save: bool = True,
     ) -> SessionSnapshot:
         """Import an existing transcript without running the model."""
-        session = await self._loop.session_io.get_or_create(session_key)
+        session = await session_io.get_or_create(self._loop.sessions, session_key)
         if metadata:
             session.metadata.update(deepcopy(dict(metadata)))
 
@@ -61,7 +62,7 @@ class SessionClient:
             session.add_message(role, deepcopy(raw["content"]), **extra)
 
         if save:
-            await self._loop.session_io.save(session)
+            await session_io.save(self._loop.sessions, session)
         return snapshot_from_session(session)
 
     def get(self, session_key: str) -> SessionSnapshot | None:
@@ -109,7 +110,7 @@ class SessionClient:
         key = session_key or snapshot.key
         if not key:
             raise ValueError("restored snapshots must include a session key")
-        session = await self._loop.session_io.get_or_create(key)
+        session = await session_io.get_or_create(self._loop.sessions, key)
         if session.messages:
             raise ValueError(f"restore target session is not empty: {key}")
 
@@ -132,7 +133,7 @@ class SessionClient:
             session.add_message(role, content, **extra)
 
         if save:
-            await self._loop.session_io.save(session)
+            await session_io.save(self._loop.sessions, session)
         return snapshot_from_session(session)
 
     def clear(self, session_key: str) -> SessionSnapshot:
@@ -210,19 +211,19 @@ class RuntimeClient:
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Archive one session through the shared idle-compaction path."""
-        session = await self._loop.session_io.get_or_create(session_key)
+        session = await session_io.get_or_create(self._loop.sessions, session_key)
         runtime = await self._loop.runtime_for_session_async(session)
         await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,
         )
         return snapshot_from_session(
-            await self._loop.session_io.get_or_create(session_key)
+            await session_io.get_or_create(self._loop.sessions, session_key)
         )
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 8) -> str | None:
         """Run idle-session compaction for one session and return the summary."""
-        session = await self._loop.session_io.get_or_create(session_key)
+        session = await session_io.get_or_create(self._loop.sessions, session_key)
         runtime = await self._loop.runtime_for_session_async(session)
         return await self._loop.consolidator.compact_idle_session(
             session_key,

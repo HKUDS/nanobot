@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.bus.outbound_events import ContextCompactionCallback
-from nanobot.session.io import SessionIO
+from nanobot.session import io as session_io
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
 from nanobot.session.summary import SessionSummary, session_summary_from_metadata
 
@@ -30,30 +30,13 @@ class AutoCompact:
         consolidator: Consolidator,
         session_ttl_minutes: int = 0,
         bind_compaction: IdleCompactionCallback | None = None,
-        session_io: SessionIO | None = None,
     ):
-        self._sessions = sessions
-        self._owns_session_io = session_io is None
-        self.session_io = session_io or SessionIO(sessions)
-        if self.session_io.sessions is not sessions:
-            raise ValueError("session I/O must use the auto-compact session manager")
+        self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, SessionSummary] = {}
         self._bind_compaction = bind_compaction
-
-    @property
-    def sessions(self) -> SessionManager:
-        return self._sessions
-
-    @sessions.setter
-    def sessions(self, manager: SessionManager) -> None:
-        self._sessions = manager
-        if self._owns_session_io:
-            self.session_io = SessionIO(manager)
-        elif self.session_io.sessions is not manager:
-            raise ValueError("cannot replace sessions owned by the injected async boundary")
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -121,13 +104,13 @@ class AutoCompact:
         """Schedule idle archival without blocking the event loop."""
         now = datetime.now()
         active_keys = set(active_session_keys)
-        for info in await self.session_io.list_sessions():
+        for info in await session_io.list_sessions(self.sessions):
             key = info.get("key", "")
             if not key or self._is_internal_session(key) or key in self._archiving:
                 continue
             if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
-            session = await self.session_io.get_or_create(key)
+            session = await session_io.get_or_create(self.sessions, key)
             if not self._session_has_unarchived_messages(session):
                 continue
             try:
@@ -149,7 +132,7 @@ class AutoCompact:
                 on_compaction=self._bind_compaction(key) if self._bind_compaction else None,
             )
             if summary and summary != "(nothing)":
-                session = await self.session_io.get_or_create(key)
+                session = await session_io.get_or_create(self.sessions, key)
                 self._record_stored_summary(key, session)
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
@@ -186,7 +169,7 @@ class AutoCompact:
             return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
-            session = await self.session_io.get_or_create(key)
+            session = await session_io.get_or_create(self.sessions, key)
         return self._prepared_summary(session, key)
 
     def _prepared_summary(
