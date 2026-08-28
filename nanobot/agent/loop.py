@@ -73,6 +73,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
 )
 from nanobot.session import turn_continuation
+from nanobot.session.async_compat import call_session_manager
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
@@ -516,6 +517,33 @@ class AgentLoop:
             **extra,
         )
 
+    async def _get_or_create_session(self, key: str) -> Session:
+        """Use native async session loading, with a compatibility fallback."""
+        return await call_session_manager(
+            self.sessions,
+            "get_or_create_async",
+            self.sessions.get_or_create,
+            key,
+        )
+
+    async def _save_session(self, session: Session) -> None:
+        """Use native async session saving, with a compatibility fallback."""
+        await call_session_manager(
+            self.sessions,
+            "save_async",
+            self.sessions.save,
+            session,
+        )
+
+    async def _save_runtime_checkpoint(self, session: Session) -> None:
+        """Use native async checkpoint saving, with a compatibility fallback."""
+        await call_session_manager(
+            self.sessions,
+            "save_runtime_checkpoint_async",
+            self.sessions.save_runtime_checkpoint,
+            session,
+        )
+
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
@@ -559,6 +587,30 @@ class AgentLoop:
             self.sessions.save(session)
             return self.llm_runtime()
 
+    async def runtime_for_session_async(
+        self,
+        session: Session,
+        *,
+        recover_removed: bool = True,
+    ) -> LLMRuntime:
+        """Resolve a session runtime without blocking on recovery persistence."""
+        name = model_preset_from_metadata(session.metadata)
+        if name is None:
+            return self.llm_runtime()
+        try:
+            return self.runtime_resolver.resolve_preset(name)
+        except KeyError:
+            if not recover_removed or name in self.runtime_resolver.model_presets:
+                raise
+            logger.warning(
+                "Session '{}' references removed model preset '{}'; falling back to default",
+                session.key,
+                name,
+            )
+            session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
+            await self._save_session(session)
+            return self.llm_runtime()
+
     def set_session_model_preset(
         self,
         session_key: str,
@@ -569,6 +621,18 @@ class AgentLoop:
         session = self.sessions.get_or_create(session_key)
         session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
         self.sessions.save(session)
+        return runtime
+
+    async def set_session_model_preset_async(
+        self,
+        session_key: str,
+        name: str,
+    ) -> LLMRuntime:
+        """Validate and persist one session's preset selection without blocking."""
+        runtime = self.runtime_resolver.resolve_preset(name)
+        session = await self._get_or_create_session(session_key)
+        session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
+        await self._save_session(session)
         return runtime
 
     def _publish_runtime_selection(
@@ -666,17 +730,14 @@ class AgentLoop:
     def pending_local_trigger_ids_for_session(self, session_key: str) -> set[str]:
         return self._local_trigger_turns.pending_trigger_ids_for_session(session_key)
 
-    def _persist_user_message_early(
+    def _stage_user_message_early(
         self,
         msg: InboundMessage,
         session: Session,
         runtime_context_blocks: list[RuntimeContextBlock] | None = None,
         **kwargs: Any,
     ) -> bool:
-        """Persist the triggering user message before the turn starts.
-
-        Returns True if the message was persisted.
-        """
+        """Add the triggering user message and recovery markers in memory."""
         if not turn_continuation.should_persist_user_message(msg.metadata):
             return False
         media_paths = [
@@ -707,9 +768,44 @@ class AgentLoop:
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(followup_id, str) and followup_id:
                 acknowledge_pending_followups(session, [followup_id])
-            self.sessions.save(session)
             return True
         return False
+
+    def _persist_user_message_early(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        runtime_context_blocks: list[RuntimeContextBlock] | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        """Synchronously persist the user message for compatibility callers."""
+        persisted = self._stage_user_message_early(
+            msg,
+            session,
+            runtime_context_blocks,
+            **kwargs,
+        )
+        if persisted:
+            self.sessions.save(session)
+        return persisted
+
+    async def _persist_user_message_early_async(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        runtime_context_blocks: list[RuntimeContextBlock] | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        """Persist the user message without blocking the event loop."""
+        persisted = self._stage_user_message_early(
+            msg,
+            session,
+            runtime_context_blocks,
+            **kwargs,
+        )
+        if persisted:
+            await self._save_session(session)
+        return persisted
 
     def _build_transcript_input(self, ctx: TurnContext) -> TranscriptInput:
         """Capture the persisted history and fresh input as separate transcript parts."""
@@ -819,7 +915,7 @@ class AgentLoop:
         if tool is None:
             content = "Shell execution is disabled in this nanobot configuration."
         else:
-            session = ctx.session or self.sessions.get_or_create(ctx.key)
+            session = ctx.session or await AgentLoop._get_or_create_session(self, ctx.key)
             scope = self.workspace_scopes.for_turn(
                 channel=ctx.msg.channel,
                 message_metadata=metadata,
@@ -1022,7 +1118,7 @@ class AgentLoop:
                 public_payload[self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] = (
                     self._PROVIDER_STATE_CHECKPOINT_VERSION
                 )
-            self._set_runtime_checkpoint(session, public_payload)
+            await self._set_runtime_checkpoint_async(session, public_payload)
 
         async def _drain_pending(
             *,
@@ -1325,15 +1421,30 @@ class AgentLoop:
             )
         return result
 
-    def _check_expired_sessions_if_due(self) -> None:
-        """Scan idle sessions no more often than the configured interval."""
+    def _idle_compact_scan_due(self) -> bool:
         now = time.monotonic()
         if now < self._next_idle_compact_check_at:
-            return
+            return False
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
+        return True
+
+    def _check_expired_sessions_if_due(self) -> None:
+        """Synchronously scan idle sessions for compatibility with direct callers."""
+        if not self._idle_compact_scan_due():
+            return
         self.auto_compact.check_expired(
             self.schedule_background,
             self.runtime_for_session,
+            active_session_keys=self._pending_queues.keys(),
+        )
+
+    async def _check_expired_sessions_if_due_async(self) -> None:
+        """Scan idle sessions without blocking the event loop."""
+        if not self._idle_compact_scan_due():
+            return
+        await self.auto_compact.check_expired_async(
+            self.schedule_background,
+            self.runtime_for_session_async,
             active_session_keys=self._pending_queues.keys(),
         )
 
@@ -1347,7 +1458,7 @@ class AgentLoop:
                 try:
                     msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    self._check_expired_sessions_if_due()
+                    await self._check_expired_sessions_if_due_async()
                     continue
                 except asyncio.CancelledError:
                     # Preserve real task cancellation so shutdown can complete cleanly.
@@ -1611,10 +1722,10 @@ class AgentLoop:
                         raise
                     try:
                         key = self._effective_session_key(msg)
-                        session = self.sessions.get_or_create(key)
+                        session = await self._get_or_create_session(key)
                         if restore_runtime_checkpoint(session):
                             self._clear_pending_user_turn(session)
-                            self.sessions.save(session)
+                            await self._save_session(session)
                             logger.info(
                                 "Restored partial context for cancelled session {}",
                                 key,
@@ -1959,7 +2070,7 @@ class AgentLoop:
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:
-                ctx.session = self.sessions.get_or_create(ctx.session_key)
+                ctx.session = await self._get_or_create_session(ctx.session_key)
         session = ctx.session
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
@@ -1991,16 +2102,16 @@ class AgentLoop:
             self.workspace_scopes.persist_message_scope(session, msg)
 
         if restore_runtime_checkpoint(session):
-            self.sessions.save(session)
+            await self._save_session(session)
         if (
             RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
             and restore_pending_interruption(session)
         ):
-            self.sessions.save(session)
+            await self._save_session(session)
 
     async def _compact_session(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
-        ctx.session, pending = self.auto_compact.prepare_session(
+        ctx.session, pending = await self.auto_compact.prepare_session_async(
             session,
             ctx.session_key,
         )
@@ -2044,14 +2155,14 @@ class AgentLoop:
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.
             if cmd_ctx.raw.lower() != "/new":
-                ctx.input_persisted_early = self._persist_user_message_early(
+                ctx.input_persisted_early = await self._persist_user_message_early_async(
                     ctx.msg, session, _command=True
                 )
                 session.add_message(
                     "assistant", result.content, _command=True
                 )
                 self._clear_pending_user_turn(session)
-                self.sessions.save(session)
+                await self._save_session(session)
                 if not ctx.ephemeral:
                     await self.runtime_event_publisher.session_turn_persisted(
                         ctx.msg,
@@ -2066,7 +2177,7 @@ class AgentLoop:
         session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
-            runtime = self.runtime_for_session(session)
+            runtime = await self.runtime_for_session_async(session)
             ctx.runtime = runtime
         if ctx.session_key.startswith("dream:"):
             logger.info(
@@ -2103,7 +2214,7 @@ class AgentLoop:
                 # provider compatibility or prompt assembly work. A compatible
                 # staged state replaces this in a second atomic save below.
                 session.provider_state = None
-                self.sessions.save(session)
+                await self._save_session(session)
             ctx.input_persisted_early = True
         await ctx.delivery.runtime_admitted(runtime)
 
@@ -2157,7 +2268,7 @@ class AgentLoop:
         elif stored_state is not None:
             session.provider_state = None
         if ctx.kind is TurnKind.USER:
-            ctx.input_persisted_early = self._persist_user_message_early(
+            ctx.input_persisted_early = await self._persist_user_message_early_async(
                 ctx.msg,
                 session,
                 runtime_context_blocks=ctx.runtime_context_blocks,
@@ -2167,7 +2278,7 @@ class AgentLoop:
         elif subagent_followup_persisted and staged_provider_state:
             # Upgrade the replay-safe baseline to the resumable state before
             # prompt assembly and the first model checkpoint.
-            self.sessions.save(session)
+            await self._save_session(session)
         ctx.transcript_input = self._build_transcript_input(ctx)
 
 
@@ -2251,7 +2362,7 @@ class AgentLoop:
             session.provider_state = None
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
-        self.sessions.save(session)
+        await self._save_session(session)
         if not ctx.ephemeral:
             await self.runtime_event_publisher.session_turn_persisted(
                 ctx.msg,
@@ -2500,9 +2611,18 @@ class AgentLoop:
         return True
 
     def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
-        """Persist the latest in-flight turn state into session metadata."""
+        """Synchronously persist a checkpoint for compatibility callers."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save_runtime_checkpoint(session)
+
+    async def _set_runtime_checkpoint_async(
+        self,
+        session: Session,
+        payload: dict[str, Any],
+    ) -> None:
+        """Persist the latest in-flight turn state without blocking the event loop."""
+        session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
+        await self._save_runtime_checkpoint(session)
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True
