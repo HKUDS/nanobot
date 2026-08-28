@@ -1544,8 +1544,13 @@
       "body": "The gateway rejected this message. Review its text or attachments, then try again."
     },
     "modelRequestFailed": {
-      "title": "Model request failed",
-      "body": "This turn has ended. Send a new message to try again."
+      "connectionTitle": "Could not connect to the model provider",
+      "timeoutTitle": "Model provider request timed out",
+      "rateLimitTitle": "Model provider rate limit reached",
+      "serverTitle": "Model provider service error",
+      "unknownTitle": "Model provider request failed",
+      "bodyWithAttempt": "The request still failed on attempt {{attempts}}, so retries stopped. Check the provider configuration or service status, then try again.",
+      "body": "The request failed, so retries stopped. Check the provider configuration or service status, then try again."
     }
   },
   "workspace": {

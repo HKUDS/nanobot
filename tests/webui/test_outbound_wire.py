@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from nanobot.bus.outbound_events import RecoveryStateEvent, TurnEndEvent
+import pytest
+
+from nanobot.bus.outbound_events import RecoveryStateEvent, RetryStatusEvent, TurnEndEvent
 from nanobot.providers.base import LLMUsage
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
-from nanobot.webui.outbound_wire import encode_recovery_state, encode_turn_end
+from nanobot.webui.outbound_wire import encode_recovery_state, encode_retry_status, encode_turn_end
 
 
 def test_encode_recovery_state_omits_absent_optional_fields() -> None:
@@ -49,6 +51,35 @@ def test_encode_recovery_state_preserves_false_can_continue() -> None:
     }
 
 
+def test_encode_retry_status_projects_relative_wait_and_turn_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.outbound_wire.time.time", lambda: 120.0)
+
+    payload = encode_retry_status(
+        "chat-1",
+        RetryStatusEvent(
+            state="waiting",
+            attempt=2,
+            max_attempts=4,
+            error_kind="connection",
+            next_retry_at=123.5,
+        ),
+        {WEBUI_TURN_METADATA_KEY: "turn-1", "private": "must-not-leak"},
+    )
+
+    assert payload == {
+        "event": "retry_status",
+        "chat_id": "chat-1",
+        "turn_id": "turn-1",
+        "state": "waiting",
+        "attempt": 2,
+        "max_attempts": 4,
+        "error_kind": "connection",
+        "retry_after_s": 3.5,
+    }
+
+
 def test_encode_turn_end_omits_absent_fields_and_private_metadata() -> None:
     payload = encode_turn_end(
         "chat-1",
@@ -75,6 +106,11 @@ def test_encode_turn_end_projects_complete_wire_contract() -> None:
             usage=usage,
             round_usages=(usage,),
             context_window_tokens=128_000,
+            outcome="error",
+            failure_kind="provider",
+            failure_error_kind="connection",
+            failure_attempts=4,
+            failure_message="Connection refused",
         ),
         {WEBUI_TURN_METADATA_KEY: "turn-1", "private": "must-not-leak"},
     )
@@ -88,4 +124,9 @@ def test_encode_turn_end_projects_complete_wire_contract() -> None:
         "usage": usage.to_turn_dict(),
         "round_usages": [usage.to_turn_dict()],
         "context_window_tokens": 128_000,
+        "outcome": "error",
+        "failure_kind": "provider",
+        "failure_error_kind": "connection",
+        "failure_attempts": 4,
+        "failure_message": "Connection refused",
     }

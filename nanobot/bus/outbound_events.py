@@ -73,6 +73,8 @@ class TurnEndEvent(OutboundEvent):
     context_window_tokens: int | None = None
     outcome: str = "completed"
     failure_kind: str | None = None
+    failure_error_kind: str | None = None
+    failure_attempts: int | None = None
     failure_message: str | None = None
 
 
@@ -214,6 +216,8 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
             context_window_tokens=_metadata_int(meta, "context_window_tokens"),
             outcome=_metadata_str(meta, "outcome") or "completed",
             failure_kind=_metadata_str(meta, "failure_kind"),
+            failure_error_kind=_metadata_str(meta, "failure_error_kind"),
+            failure_attempts=_metadata_int(meta, "failure_attempts"),
             failure_message=_metadata_str(meta, "failure_message"),
         )
     if meta.get("_session_updated"):

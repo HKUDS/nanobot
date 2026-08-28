@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
@@ -29,7 +30,7 @@ class RetryStatusWirePayload(_ChatWirePayload):
     attempt: int
     max_attempts: NotRequired[int]
     error_kind: str
-    next_retry_at: NotRequired[float]
+    retry_after_s: NotRequired[float]
 
 
 class TurnEndWirePayload(_ChatWirePayload):
@@ -41,6 +42,8 @@ class TurnEndWirePayload(_ChatWirePayload):
     context_window_tokens: NotRequired[int]
     outcome: NotRequired[str]
     failure_kind: NotRequired[str]
+    failure_error_kind: NotRequired[str]
+    failure_attempts: NotRequired[int]
     failure_message: NotRequired[str]
 
 
@@ -88,7 +91,7 @@ def encode_retry_status(
     if event.max_attempts is not None:
         payload["max_attempts"] = event.max_attempts
     if event.next_retry_at is not None:
-        payload["next_retry_at"] = event.next_retry_at
+        payload["retry_after_s"] = max(0.0, event.next_retry_at - time.time())
     return payload
 
 
@@ -119,6 +122,10 @@ def encode_turn_end(
         payload["outcome"] = event.outcome
     if event.failure_kind is not None:
         payload["failure_kind"] = event.failure_kind
+    if event.failure_error_kind is not None:
+        payload["failure_error_kind"] = event.failure_error_kind
+    if event.failure_attempts is not None:
+        payload["failure_attempts"] = int(event.failure_attempts)
     if event.failure_message is not None:
         payload["failure_message"] = event.failure_message
     return payload

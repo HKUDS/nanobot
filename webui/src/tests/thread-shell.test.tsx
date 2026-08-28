@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import i18n from "@/i18n";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -3795,6 +3796,9 @@ describe("ThreadShell", () => {
 
   it("keeps a terminal model failure visible until the next user action", async () => {
     const client = makeClient();
+    await act(async () => {
+      await i18n.changeLanguage("zh-CN");
+    });
 
     render(
       wrap(
@@ -3817,19 +3821,23 @@ describe("ThreadShell", () => {
         turn_id: "turn-model-failure",
         outcome: "failed",
         failure_kind: "model",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
         failure_message: "Unlocalized server failure",
       });
     });
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("Model request failed");
-    expect(banner).toHaveTextContent("This turn has ended. Send a new message to try again.");
+    expect(banner).toHaveTextContent("无法连接模型提供商");
+    expect(banner).toHaveTextContent(
+      "模型提供商请求在第 4 次尝试后仍然失败，已停止重试。请检查提供商配置或服务状态后重试。",
+    );
     expect(banner).not.toHaveTextContent("Unlocalized server failure");
 
-    fireEvent.change(screen.getByLabelText("Message input"), {
+    fireEvent.change(screen.getByLabelText("消息输入框"), {
       target: { value: "try again" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();

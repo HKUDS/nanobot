@@ -1544,8 +1544,13 @@
       "body": "O gateway rejeitou esta mensagem. Revise o texto ou os anexos e tente novamente."
     },
     "modelRequestFailed": {
-      "title": "A solicitação ao modelo falhou",
-      "body": "Este turno foi encerrado. Envie uma nova mensagem para tentar novamente."
+      "connectionTitle": "Não foi possível conectar ao provedor do modelo",
+      "timeoutTitle": "A solicitação ao provedor do modelo expirou",
+      "rateLimitTitle": "Limite de solicitações do provedor do modelo atingido",
+      "serverTitle": "Erro no serviço do provedor do modelo",
+      "unknownTitle": "Falha na solicitação ao provedor do modelo",
+      "bodyWithAttempt": "A solicitação ainda falhou na tentativa {{attempts}}, então as novas tentativas foram interrompidas. Verifique a configuração ou o status do provedor e tente novamente.",
+      "body": "A solicitação falhou, então as novas tentativas foram interrompidas. Verifique a configuração ou o status do provedor e tente novamente."
     }
   },
   "workspace": {

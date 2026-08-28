@@ -3170,6 +3170,7 @@ describe("useNanobotStream", () => {
   });
 
   it("clears retry status and exposes a terminal model failure at turn end", () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(120_000);
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-retry", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -3184,7 +3185,7 @@ describe("useNanobotStream", () => {
         attempt: 2,
         max_attempts: 4,
         error_kind: "connection",
-        next_retry_at: 123.5,
+        retry_after_s: 3.5,
       });
     });
     expect(result.current.retryStatus).toEqual({
@@ -3217,7 +3218,9 @@ describe("useNanobotStream", () => {
         turn_id: "turn-1",
         outcome: "failed",
         failure_kind: "model",
-        failure_message: "Model request failed. This turn has ended.",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Unlocalized server failure",
       });
     });
     expect(result.current.retryStatus).toBeNull();
@@ -3226,7 +3229,10 @@ describe("useNanobotStream", () => {
       kind: "model_request_failed",
       chatId: "chat-retry",
       turnId: "turn-1",
+      errorKind: "connection",
+      attempts: 4,
     });
+    dateNow.mockRestore();
   });
 
   it("clears runStartedAt on turn_end even without idle", () => {

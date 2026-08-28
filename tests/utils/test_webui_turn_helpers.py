@@ -6,10 +6,18 @@ import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent, UserInputEvent
+from nanobot.bus.outbound_events import (
+    GoalStatusEvent,
+    RetryStatusEvent,
+    TurnEndEvent,
+    TurnModelUpdatedEvent,
+    UserInputEvent,
+)
 from nanobot.bus.runtime_events import (
     RuntimeEventBus,
     RuntimeEventContext,
+    TurnCompleted,
+    TurnRetryStatusChanged,
     TurnRuntimeAdmitted,
     UserInputAccepted,
 )
@@ -218,6 +226,85 @@ async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path)
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "openai-codex/gpt-5.6"
     assert outbound.event.model_preset == "Codex"
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_includes_sanitized_provider_retry_cause(tmp_path) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe(runtime_events)
+    context = RuntimeEventContext(
+        channel="websocket",
+        chat_id="chat-retry",
+        session_key="websocket:chat-retry",
+        metadata={"webui": True, "webui_turn_id": "turn-1"},
+    )
+
+    await runtime_events.publish(TurnRetryStatusChanged(
+        context=context,
+        state="exhausted",
+        attempt=4,
+        max_attempts=4,
+        error_kind="connection",
+    ))
+    await runtime_events.publish(TurnCompleted(
+        context=context,
+        outcome="failed",
+        failure_kind="model",
+    ))
+
+    retry_outbound, completed_outbound = [
+        call.args[0] for call in bus.publish_outbound.await_args_list
+    ]
+    assert isinstance(retry_outbound.event, RetryStatusEvent)
+    assert isinstance(completed_outbound.event, TurnEndEvent)
+    assert completed_outbound.event.failure_error_kind == "connection"
+    assert completed_outbound.event.failure_attempts == 4
+    assert "Connection error" not in (completed_outbound.event.failure_message or "")
+
+
+@pytest.mark.asyncio
+async def test_recovered_retry_cause_is_not_reused_by_turn_end(tmp_path) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe(runtime_events)
+    context = RuntimeEventContext(
+        channel="websocket",
+        chat_id="chat-retry",
+        session_key="websocket:chat-retry",
+        metadata={"webui": True, "webui_turn_id": "turn-1"},
+    )
+
+    for state in ("waiting", "recovered"):
+        await runtime_events.publish(TurnRetryStatusChanged(
+            context=context,
+            state=state,
+            attempt=2,
+            max_attempts=4,
+            error_kind="timeout",
+        ))
+    await runtime_events.publish(TurnCompleted(
+        context=context,
+        outcome="failed",
+        failure_kind="model",
+    ))
+
+    completed = bus.publish_outbound.await_args.args[0]
+    assert isinstance(completed.event, TurnEndEvent)
+    assert completed.event.failure_error_kind is None
+    assert completed.event.failure_attempts is None
 
 
 @pytest.mark.asyncio

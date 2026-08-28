@@ -1530,8 +1530,13 @@
       "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
     },
     "modelRequestFailed": {
-      "title": "La requête au modèle a échoué",
-      "body": "Ce tour est terminé. Envoyez un nouveau message pour réessayer."
+      "connectionTitle": "Impossible de se connecter au fournisseur du modèle",
+      "timeoutTitle": "La requête au fournisseur du modèle a expiré",
+      "rateLimitTitle": "Limite de requêtes du fournisseur du modèle atteinte",
+      "serverTitle": "Erreur du service du fournisseur du modèle",
+      "unknownTitle": "Échec de la requête au fournisseur du modèle",
+      "bodyWithAttempt": "La requête a encore échoué à la tentative {{attempts}} ; les nouvelles tentatives ont donc été arrêtées. Vérifiez la configuration ou l’état du fournisseur, puis réessayez.",
+      "body": "La requête a échoué ; les nouvelles tentatives ont donc été arrêtées. Vérifiez la configuration ou l’état du fournisseur, puis réessayez."
     }
   },
   "workspace": {

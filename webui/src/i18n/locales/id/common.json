@@ -1530,8 +1530,13 @@
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
     },
     "modelRequestFailed": {
-      "title": "Permintaan model gagal",
-      "body": "Giliran ini telah berakhir. Kirim pesan baru untuk mencoba lagi."
+      "connectionTitle": "Tidak dapat terhubung ke penyedia model",
+      "timeoutTitle": "Permintaan ke penyedia model kehabisan waktu",
+      "rateLimitTitle": "Batas permintaan penyedia model tercapai",
+      "serverTitle": "Kesalahan layanan penyedia model",
+      "unknownTitle": "Permintaan ke penyedia model gagal",
+      "bodyWithAttempt": "Permintaan masih gagal pada percobaan ke-{{attempts}}, sehingga percobaan ulang dihentikan. Periksa konfigurasi atau status layanan penyedia, lalu coba lagi.",
+      "body": "Permintaan gagal, sehingga percobaan ulang dihentikan. Periksa konfigurasi atau status layanan penyedia, lalu coba lagi."
     }
   },
   "workspace": {

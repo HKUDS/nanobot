@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
+import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import {
   mergeToolProgressEvents,
   mergeToolProgressTraceLines,
@@ -874,6 +875,12 @@ export function useNanobotStream(
         if (ev.state === "recovered" || ev.state === "cleared") {
           setRetryStatus(null);
         } else {
+          const retryAfterSeconds =
+            typeof ev.retry_after_s === "number" &&
+            Number.isFinite(ev.retry_after_s) &&
+            ev.retry_after_s >= 0
+              ? ev.retry_after_s
+              : undefined;
           setRetryStatus({
             state: ev.state,
             attempt: ev.attempt,
@@ -881,8 +888,8 @@ export function useNanobotStream(
             ...(typeof ev.max_attempts === "number"
               ? { max_attempts: ev.max_attempts }
               : {}),
-            ...(typeof ev.next_retry_at === "number"
-              ? { next_retry_at: ev.next_retry_at }
+            ...(retryAfterSeconds !== undefined
+              ? { next_retry_at: Date.now() / 1000 + retryAfterSeconds }
               : {}),
             ...(ev.turn_id ? { turn_id: ev.turn_id } : {}),
           });
@@ -901,13 +908,24 @@ export function useNanobotStream(
         // loading indicator immediately.
         setIsStreaming(false);
         const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model";
-        if (modelRequestFailed) {
-          setStreamError({
-            kind: "model_request_failed",
-            chatId,
-            ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
-          });
-        }
+        const failureAttempts =
+          typeof ev.failure_attempts === "number"
+          && Number.isInteger(ev.failure_attempts)
+          && ev.failure_attempts > 0
+            ? ev.failure_attempts
+            : undefined;
+        const modelFailure = modelRequestFailed
+          ? {
+              kind: "model_request_failed" as const,
+              chatId,
+              ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
+              ...(typeof ev.failure_error_kind === "string"
+                ? { errorKind: ev.failure_error_kind }
+                : {}),
+              ...(failureAttempts !== undefined ? { attempts: failureAttempts } : {}),
+            }
+          : null;
+        if (modelFailure) setStreamError(modelFailure);
         const completedAt = Date.now();
         setMessages((prev) => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
@@ -936,10 +954,8 @@ export function useNanobotStream(
         });
         suppressStreamUntilTurnEndRef.current = false;
         notifyInBackground(
-          modelRequestFailed
-            ? t("errors.modelRequestFailed.body", {
-                defaultValue: "This turn has ended. Send a new message to try again.",
-              })
+          modelFailure
+            ? resolveModelRequestFailureCopy(modelFailure, t).body
             : ev.outcome === "failed"
               ? ev.failure_message || "This turn failed and has ended."
             : t("recovery.completed", { defaultValue: "Task completed" }),

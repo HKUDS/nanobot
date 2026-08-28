@@ -1531,8 +1531,13 @@
       "body": "El gateway rechazó este mensaje. Revisa el texto o los archivos adjuntos e inténtalo de nuevo."
     },
     "modelRequestFailed": {
-      "title": "La solicitud al modelo falló",
-      "body": "Este turno ha terminado. Envía un mensaje nuevo para volver a intentarlo."
+      "connectionTitle": "No se pudo conectar con el proveedor del modelo",
+      "timeoutTitle": "La solicitud al proveedor del modelo agotó el tiempo de espera",
+      "rateLimitTitle": "Se alcanzó el límite de solicitudes del proveedor del modelo",
+      "serverTitle": "Error del servicio del proveedor del modelo",
+      "unknownTitle": "La solicitud al proveedor del modelo falló",
+      "bodyWithAttempt": "La solicitud siguió fallando en el intento {{attempts}}, por lo que se detuvieron los reintentos. Revisa la configuración o el estado del proveedor y vuelve a intentarlo.",
+      "body": "La solicitud falló, por lo que se detuvieron los reintentos. Revisa la configuración o el estado del proveedor y vuelve a intentarlo."
     }
   },
   "workspace": {

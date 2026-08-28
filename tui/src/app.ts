@@ -404,21 +404,33 @@ function connectionStatusText(
 }
 
 function retryFailureLabel(errorKind: string): string {
-  if (errorKind === "connection") return "Connection failed"
-  if (errorKind === "timeout") return "Model timed out"
-  if (errorKind === "rate_limit") return "Rate limited"
-  if (errorKind === "server") return "Model unavailable"
-  return "Model request failed"
+  if (errorKind === "connection") return "Could not connect to the model provider"
+  if (errorKind === "timeout") return "Model provider request timed out"
+  if (errorKind === "rate_limit") return "Model provider rate limit reached"
+  if (errorKind === "server") return "Model provider service error"
+  return "Model provider request failed"
 }
 
-export function retryStatusLine(status: RetryStatus, nowMs = Date.now()): string {
+export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
+  const reason = retryFailureLabel(errorKind || "unknown")
+  const retryResult = typeof attempts === "number" && Number.isInteger(attempts) && attempts > 0
+    ? ` The request still failed on attempt ${attempts}, so retries stopped.`
+    : " Retries stopped."
+  return `${reason}.${retryResult} Check the provider configuration or service status, then try again.`
+}
+
+interface RenderedRetryStatus extends RetryStatus {
+  nextRetryAtMs?: number
+}
+
+export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
   const label = retryFailureLabel(status.error_kind)
   if (status.state === "exhausted") return `${label} · ending turn`
   if (status.state === "recovered") return "Connection restored"
   if (status.state === "cleared") return "Retry status cleared"
   const remaining = Math.max(
     0,
-    Math.ceil(((status.next_retry_at ?? nowMs / 1000) * 1000 - nowMs) / 1000),
+    Math.ceil(((status.nextRetryAtMs ?? nowMs) - nowMs) / 1000),
   )
   const attempt = status.max_attempts
     ? `${status.attempt}/${status.max_attempts}`
@@ -481,7 +493,7 @@ export class NanobotTui {
   private activeTurn = false
   private activeTurnId: string | null = null
   private activeLabel = "Thinking"
-  private retryStatus: RetryStatus | null = null
+  private retryStatus: RenderedRetryStatus | null = null
   private activeStartedAt = 0
   private finalMessage = ""
   private turnHadAnswer = false
@@ -1164,7 +1176,17 @@ export class NanobotTui {
           if (this.activeTurn) this.renderActiveStatus()
           return
         }
-        this.retryStatus = event
+        const retryAfterSeconds = typeof event.retry_after_s === "number"
+          && Number.isFinite(event.retry_after_s)
+          && event.retry_after_s >= 0
+          ? event.retry_after_s
+          : undefined
+        this.retryStatus = {
+          ...event,
+          ...(retryAfterSeconds !== undefined
+            ? { nextRetryAtMs: Date.now() + retryAfterSeconds * 1000 }
+            : {}),
+        }
         this.setActive(true)
         this.renderActiveStatus()
         return
@@ -1178,7 +1200,9 @@ export class NanobotTui {
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
           this.transcript.notice(
-            event.failure_message || "Model request failed. This turn has ended.",
+            event.failure_kind === "model"
+              ? terminalModelFailureLine(event.failure_error_kind, event.failure_attempts)
+              : event.failure_message || "This turn failed and has ended.",
             true,
           )
         }
@@ -1199,11 +1223,9 @@ export class NanobotTui {
         // A synthetic/rehydrated turn may already be idle, in which case
         // setActive(false) intentionally does not repaint the footer.
         this.updateMeta()
-        this.readyDetail = failed
-          ? "Last turn failed"
-          : typeof event.latency_ms === "number"
-            ? `${(event.latency_ms / 1000).toFixed(1)}s`
-            : ""
+        this.readyDetail = !failed && typeof event.latency_ms === "number"
+          ? `${(event.latency_ms / 1000).toFixed(1)}s`
+          : ""
         this.status.content = this.readyStatus()
         if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
         this.sendNextFollowUp()

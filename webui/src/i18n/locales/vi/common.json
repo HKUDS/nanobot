@@ -1530,8 +1530,13 @@
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
     },
     "modelRequestFailed": {
-      "title": "Yêu cầu mô hình không thành công",
-      "body": "Lượt này đã kết thúc. Hãy gửi tin nhắn mới để thử lại."
+      "connectionTitle": "Không thể kết nối với nhà cung cấp mô hình",
+      "timeoutTitle": "Yêu cầu tới nhà cung cấp mô hình đã hết thời gian chờ",
+      "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
+      "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",
+      "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
+      "bodyWithAttempt": "Yêu cầu vẫn thất bại ở lần thử {{attempts}}, nên hệ thống đã dừng thử lại. Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại.",
+      "body": "Yêu cầu thất bại nên hệ thống đã dừng thử lại. Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại."
     }
   },
   "workspace": {

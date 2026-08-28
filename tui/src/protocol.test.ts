@@ -788,7 +788,7 @@ describe("gateway protocol", () => {
         attempt: 2,
         max_attempts: 4,
         error_kind: "connection",
-        next_retry_at: 123.5,
+        retry_after_s: 3.5,
       }) })
       socket.emit("message", { data: JSON.stringify({
         event: "retry_status",
@@ -805,7 +805,9 @@ describe("gateway protocol", () => {
         turn_id: "turn-1",
         outcome: "failed",
         failure_kind: "model",
-        failure_message: "Model request failed. This turn has ended.",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Model provider request failed.",
       }) })
       socket.emit("message", { data: JSON.stringify({
         event: "retry_status",
@@ -813,6 +815,13 @@ describe("gateway protocol", () => {
         state: "waiting",
         attempt: 0,
         error_kind: "connection",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "turn_end",
+        chat_id: "chat",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_attempts: 0,
       }) })
 
       expect(events).toHaveLength(3)

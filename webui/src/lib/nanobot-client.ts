@@ -104,6 +104,8 @@ export type StreamError =
       kind: "model_request_failed";
       chatId: string;
       turnId?: string;
+      errorKind?: string;
+      attempts?: number;
     };
 
 type ErrorHandler = (error: StreamError) => void;

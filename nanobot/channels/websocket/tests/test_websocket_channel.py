@@ -2808,7 +2808,10 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retry_status_is_transient_and_turn_scoped() -> None:
+async def test_retry_status_is_transient_and_turn_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.outbound_wire.time.time", lambda: 120.0)
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -2840,7 +2843,7 @@ async def test_retry_status_is_transient_and_turn_scoped() -> None:
         "attempt": 2,
         "max_attempts": 4,
         "error_kind": "connection",
-        "next_retry_at": 123.5,
+        "retry_after_s": 3.5,
     }]
 
 
@@ -2887,7 +2890,9 @@ async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
         event=TurnEndEvent(
             outcome="failed",
             failure_kind="model",
-            failure_message="Model request failed. This turn has ended.",
+            failure_error_kind="connection",
+            failure_attempts=4,
+            failure_message="Model provider request failed.",
         ),
     ))
 
@@ -2896,7 +2901,9 @@ async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
         "chat_id": "chat-1",
         "outcome": "failed",
         "failure_kind": "model",
-        "failure_message": "Model request failed. This turn has ended.",
+        "failure_error_kind": "connection",
+        "failure_attempts": 4,
+        "failure_message": "Model provider request failed.",
     }
 
 

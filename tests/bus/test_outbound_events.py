@@ -141,7 +141,13 @@ def test_legacy_webui_runtime_metadata_flags_create_runtime_events() -> None:
         channel="websocket",
         chat_id="chat-1",
         content="",
-        metadata={"_turn_end": True, "latency_ms": 42.0, "goal_state": {"active": False}},
+        metadata={
+            "_turn_end": True,
+            "latency_ms": 42.0,
+            "goal_state": {"active": False},
+            "failure_error_kind": "timeout",
+            "failure_attempts": 4,
+        },
     )
     session_updated = OutboundMessage(
         channel="websocket",
@@ -168,6 +174,8 @@ def test_legacy_webui_runtime_metadata_flags_create_runtime_events() -> None:
     assert isinstance(turn_end_event, TurnEndEvent)
     assert turn_end_event.latency_ms == 42
     assert turn_end_event.goal_state == {"active": False}
+    assert turn_end_event.failure_error_kind == "timeout"
+    assert turn_end_event.failure_attempts == 4
 
     session_updated_event = outbound_event_from_message(session_updated)
     assert isinstance(session_updated_event, SessionUpdatedEvent)

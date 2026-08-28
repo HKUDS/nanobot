@@ -2560,9 +2560,11 @@ describe("NanobotTui layout", () => {
       attempt: 1,
       max_attempts: 4,
       error_kind: "connection",
-      next_retry_at: Date.now() / 1000 + 5,
+      retry_after_s: 5,
     })
-    expect(ui.status.plainText).toMatch(/^Connection failed · retrying in [45]s · attempt 1\/4/u)
+    expect(ui.status.plainText).toMatch(
+      /^Could not connect to the model provider · retrying in [45]s · attempt 1\/4/u,
+    )
 
     app.accept({
       event: "retry_status",
@@ -2572,7 +2574,7 @@ describe("NanobotTui layout", () => {
       attempt: 2,
       max_attempts: 4,
       error_kind: "connection",
-      next_retry_at: Date.now() / 1000 + 3,
+      retry_after_s: 3,
     })
     expect(ui.status.plainText).toContain("attempt 2/4")
 
@@ -2593,13 +2595,20 @@ describe("NanobotTui layout", () => {
       turn_id: "turn-1",
       outcome: "failed",
       failure_kind: "model",
-      failure_message: "Model request failed. This turn has ended.",
+      failure_error_kind: "connection",
+      failure_attempts: 4,
+      failure_message: "Unlocalized server failure",
     })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("Model request failed. This turn has ended.")
-    expect(occurrences(frame, "Model request failed. This turn has ended.")).toBe(1)
-    expect(ui.status.plainText).toBe("Ready · Last turn failed")
+    const terminalFailure = "Could not connect to the model provider. The request still failed "
+      + "on attempt 4, so retries stopped. Check the provider configuration or service status, "
+      + "then try again."
+    expect(frame).toContain("Could not connect to the model provider.")
+    expect(frame.replace(/\s+/gu, " ")).toContain(terminalFailure)
+    expect(frame).not.toContain("Unlocalized server failure")
+    expect(frame).not.toContain("Last turn failed")
+    expect(ui.status.plainText).toBe("Ready")
   })
 
   test("folds long tool traces without discarding their details", async () => {
