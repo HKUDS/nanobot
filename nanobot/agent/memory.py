@@ -25,7 +25,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.io import SessionIO
+from nanobot.session import io as session_io
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
@@ -1096,13 +1096,9 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
-        session_io: SessionIO | None = None,
     ):
         self.store = store
         self.sessions = sessions
-        self.session_io = session_io or SessionIO(sessions)
-        if self.session_io.sessions is not sessions:
-            raise ValueError("session I/O must use the consolidator session manager")
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self.archiver = MemoryArchiver(
@@ -1259,7 +1255,7 @@ class Consolidator:
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
-            session = await self.session_io.get_or_create(session_key)
+            session = await session_io.get_or_create(self.sessions, session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1287,7 +1283,7 @@ class Consolidator:
                     )
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
-                    await self.session_io.save(session)
+                    await session_io.save(self.sessions, session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(
