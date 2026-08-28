@@ -71,7 +71,11 @@ def _run_agent(args: list[str], *, prog_name: str) -> None:
 def main() -> None:
     """Dispatch native TUI startup without importing the complete CLI graph."""
     raw_args = sys.argv[1:]
-    agent_args = _agent_invocation_args(raw_args)
+    # Installed completion scripts call ``nanobot`` without positional arguments
+    # and pass the request through this environment variable. Keep those requests
+    # on the root command so subcommands remain discoverable.
+    shell_completion = bool(os.environ.get("_NANOBOT_COMPLETE"))
+    agent_args = None if shell_completion else _agent_invocation_args(raw_args)
     dispatch_args = ["agent", *agent_args] if agent_args is not None else raw_args
     set_cli_process_identity(dispatch_args)
     _configure_windows_console()
