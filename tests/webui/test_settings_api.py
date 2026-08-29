@@ -1996,24 +1996,69 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
-def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
+def test_provider_models_payload_returns_online_openai_codex_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(
+                OAuthModelInfo(
+                    id="openai-codex/gpt-5.6-sol",
+                    label="GPT-5.6-Sol",
+                    description="Latest frontier agentic coding model.",
+                    owned_by="OpenAI Codex",
+                    context_window=272_000,
+                    reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
+                ),
+            ),
+            source="remote",
+            fetched_at=123,
+        ),
+    )
+
     payload = provider_models_payload({"provider": ["openai_codex"]})
 
     assert payload["status"] == "available"
-    assert payload["catalog_kind"] == "builtin"
-    assert payload["model_count"] == 7
+    assert payload["catalog_kind"] == "hybrid"
+    assert payload["source"] == "remote"
+    assert payload["model_count"] == 1
     assert payload["models"][0] == {
         "id": "openai-codex/gpt-5.6-sol",
         "label": "GPT-5.6-Sol",
         "description": "Latest frontier agentic coding model.",
         "owned_by": "OpenAI Codex",
-        "context_window": 372000,
+        "context_window": 272000,
+        "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "supports_backend_search": False,
     }
-    assert [model["id"] for model in payload["models"][:3]] == [
-        "openai-codex/gpt-5.6-sol",
-        "openai-codex/gpt-5.6-terra",
-        "openai-codex/gpt-5.6-luna",
-    ]
+
+
+def test_provider_models_payload_returns_online_github_copilot_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(
+                OAuthModelInfo(
+                    id="github-copilot/claude-sonnet",
+                    label="Claude Sonnet",
+                    owned_by="GitHub Copilot",
+                    context_window=200_000,
+                ),
+            ),
+            source="remote",
+            fetched_at=123,
+        ),
+    )
+
+    payload = provider_models_payload({"provider": ["github_copilot"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "hybrid"
+    assert payload["source"] == "remote"
+    assert payload["models"][0]["id"] == "github-copilot/claude-sonnet"
 
 
 def test_provider_models_payload_returns_online_xai_grok_models(
@@ -2203,8 +2248,9 @@ def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
     assert _model_catalog_kind(find_by_name("orcarouter")) == "catalog"
-    assert _model_catalog_kind(find_by_name("openai_codex")) == "builtin"
+    assert _model_catalog_kind(find_by_name("openai_codex")) == "hybrid"
     assert _model_catalog_kind(find_by_name("xai_grok")) == "hybrid"
+    assert _model_catalog_kind(find_by_name("github_copilot")) == "hybrid"
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(

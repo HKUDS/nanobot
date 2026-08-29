@@ -409,46 +409,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("openai-codex",),
         env_key="",
         display_name="OpenAI Codex",
-        model_catalog="builtin",
-        builtin_models=(
+        model_catalog="hybrid",
+        builtin_models=tuple(
             ProviderModelSpec(
-                id="openai-codex/gpt-5.6-sol",
-                label="GPT-5.6-Sol",
-                description="Latest frontier agentic coding model.",
-                context_window=372000,
-            ),
-            ProviderModelSpec(
-                id="openai-codex/gpt-5.6-terra",
-                label="GPT-5.6-Terra",
-                description="Balanced agentic coding model for everyday work.",
-                context_window=372000,
-            ),
-            ProviderModelSpec(
-                id="openai-codex/gpt-5.6-luna",
-                label="GPT-5.6-Luna",
-                description="Fast and affordable agentic coding model.",
-                context_window=372000,
-            ),
-            ProviderModelSpec(
-                id="openai-codex/gpt-5.5",
-                label="GPT-5.5",
-                description="Frontier model for complex coding, research, and real-world work.",
-            ),
-            ProviderModelSpec(
-                id="openai-codex/gpt-5.4",
-                label="GPT-5.4",
-                description="Strong model for everyday coding.",
-            ),
-            ProviderModelSpec(
-                id="openai-codex/gpt-5.4-mini",
-                label="GPT-5.4-Mini",
-                description="Small, fast, and cost-efficient model for simpler coding tasks.",
-            ),
-            ProviderModelSpec(
-                id="openai-codex/gpt-5.3-codex-spark",
-                label="GPT-5.3-Codex-Spark",
-                description="Ultra-fast coding model.",
-            ),
+                id=model.id,
+                label=model.label,
+                description=model.description,
+                context_window=model.context_window,
+            )
+            for model in curated_oauth_models("openai_codex")
         ),
         backend="openai_codex",
         detect_by_base_keyword="codex",
@@ -481,6 +450,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("github_copilot", "copilot"),
         env_key="",
         display_name="Github Copilot",
+        model_catalog="hybrid",
+        builtin_models=tuple(
+            ProviderModelSpec(
+                id=model.id,
+                label=model.label,
+                description=model.description,
+                context_window=model.context_window,
+            )
+            for model in curated_oauth_models("github_copilot")
+        ),
         backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
         strip_model_prefix=True,

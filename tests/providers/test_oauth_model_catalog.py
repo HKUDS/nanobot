@@ -6,12 +6,15 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from nanobot.providers.oauth_model_catalog import (
+    DEFAULT_OPENAI_CODEX_MODELS_URL,
     DEFAULT_XAI_GROK_MODELS_URL,
+    OPENAI_CODEX_CATALOG_CLIENT_VERSION,
     OAuthModelCatalog,
     OAuthModelInfo,
     get_oauth_model_catalog,
@@ -21,10 +24,12 @@ from nanobot.providers.xai_oauth import XAIToken
 
 
 @pytest.fixture(autouse=True)
-def _clear_xai_catalog() -> None:
-    invalidate_oauth_model_catalog("xai_grok")
+def _clear_oauth_catalogs() -> None:
+    for provider in ("openai_codex", "xai_grok", "github_copilot"):
+        invalidate_oauth_model_catalog(provider)
     yield
-    invalidate_oauth_model_catalog("xai_grok")
+    for provider in ("openai_codex", "xai_grok", "github_copilot"):
+        invalidate_oauth_model_catalog(provider)
 
 
 def _fallback_model() -> OAuthModelInfo:
@@ -127,6 +132,180 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
     assert get_oauth_model_catalog("xai_grok").source == "cache"
 
 
+def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original_client = httpx.Client
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {
+                        "slug": "gpt-new",
+                        "display_name": "GPT New",
+                        "description": "New model",
+                        "context_window": 300_000,
+                        "priority": 2,
+                        "visibility": "list",
+                        "supported_reasoning_levels": [
+                            {"effort": "low"},
+                            {"effort": "high"},
+                        ],
+                    },
+                    {
+                        "slug": "gpt-first",
+                        "display_name": "GPT First",
+                        "priority": 1,
+                    },
+                    {
+                        "slug": "internal-model",
+                        "display_name": "Internal",
+                        "visibility": "hide",
+                        "priority": 0,
+                    },
+                ]
+            },
+            request=request,
+        )
+
+    def fake_client(**kwargs: object) -> httpx.Client:
+        captured["kwargs"] = kwargs
+        return original_client(
+            transport=httpx.MockTransport(handler),
+            timeout=kwargs["timeout"],
+            follow_redirects=kwargs["follow_redirects"],
+        )
+
+    monkeypatch.setattr(
+        "nanobot.providers.oauth_model_catalog._openai_codex_storage_path",
+        lambda: tmp_path / "auth" / "openai-codex.json",
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.oauth_model_catalog._openai_codex_account_key",
+        lambda: "account-key",
+    )
+    monkeypatch.setattr(
+        "oauth_cli_kit.get_token",
+        lambda **_kwargs: SimpleNamespace(access="secret", account_id="account-42"),
+    )
+    monkeypatch.setattr("nanobot.providers.oauth_model_catalog.httpx.Client", fake_client)
+
+    catalog = get_oauth_model_catalog("openai_codex")
+
+    assert catalog.source == "remote"
+    assert [model.id for model in catalog.models] == [
+        "openai-codex/gpt-first",
+        "openai-codex/gpt-new",
+    ]
+    assert catalog.models[1].context_window == 300_000
+    assert catalog.models[1].reasoning_efforts == ("low", "high")
+    request = captured["request"]
+    assert isinstance(request, httpx.Request)
+    assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
+    assert request.url.params["client_version"] == OPENAI_CODEX_CATALOG_CLIENT_VERSION
+    assert request.headers["Authorization"] == "Bearer secret"
+    assert request.headers["chatgpt-account-id"] == "account-42"
+
+
+def test_github_copilot_catalog_only_lists_compatible_chat_models(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original_client = httpx.Client
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.url.path.endswith("/copilot_internal/v2/token"):
+            return httpx.Response(
+                200,
+                json={
+                    "token": "copilot-secret",
+                    "endpoints": {"api": "https://api.individual.githubcopilot.com"},
+                },
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "claude-sonnet",
+                        "name": "Claude Sonnet",
+                        "model_picker_enabled": True,
+                        "policy": {"state": "enabled"},
+                        "supported_endpoints": ["/chat/completions"],
+                        "capabilities": {
+                            "supports": {"reasoning_effort": ["low", "high"]},
+                            "limits": {"max_context_window_tokens": 200_000},
+                        },
+                    },
+                    {
+                        "id": "responses-only",
+                        "name": "Responses only",
+                        "model_picker_enabled": True,
+                        "supported_endpoints": ["/responses"],
+                    },
+                    {
+                        "id": "disabled",
+                        "model_picker_enabled": True,
+                        "policy": {"state": "disabled"},
+                        "supported_endpoints": ["/chat/completions"],
+                    },
+                ]
+            },
+            request=request,
+        )
+
+    def fake_client(**kwargs: object) -> httpx.Client:
+        return original_client(
+            transport=httpx.MockTransport(handler),
+            timeout=kwargs["timeout"],
+            follow_redirects=kwargs["follow_redirects"],
+        )
+
+    class Storage:
+        def load(self) -> SimpleNamespace:
+            return SimpleNamespace(access="github-secret", account_id="octocat")
+
+        def get_token_path(self) -> Path:
+            return tmp_path / "auth" / "github-copilot.json"
+
+    monkeypatch.setattr(
+        "nanobot.providers.oauth_model_catalog._github_copilot_storage_path",
+        lambda: tmp_path / "auth" / "github-copilot.json",
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.oauth_model_catalog._github_copilot_account_key",
+        lambda: "account-key",
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.oauth_model_catalog._github_copilot_models_url",
+        lambda: "https://api.githubcopilot.com/models",
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.github_copilot_provider.get_storage",
+        lambda: Storage(),
+    )
+    monkeypatch.setattr("nanobot.providers.oauth_model_catalog.httpx.Client", fake_client)
+
+    catalog = get_oauth_model_catalog("github_copilot")
+
+    assert catalog.source == "remote"
+    assert [model.id for model in catalog.models] == ["github-copilot/claude-sonnet"]
+    assert catalog.models[0].context_window == 200_000
+    assert catalog.models[0].reasoning_efforts == ("low", "high")
+    assert len(captured) == 2
+    assert captured[0].headers["Authorization"] == "token github-secret"
+    assert captured[1].headers["Authorization"] == "Bearer copilot-secret"
+    assert str(captured[1].url) == "https://api.individual.githubcopilot.com/models"
+
+
 def test_catalog_single_flights_concurrent_refreshes() -> None:
     calls = 0
     calls_lock = threading.Lock()
@@ -152,6 +331,33 @@ def test_catalog_single_flights_concurrent_refreshes() -> None:
     assert {result.models[0].id for result in results} == {"provider/remote"}
     assert [result.source for result in results].count("remote") == 1
     assert [result.source for result in results].count("cache") == 7
+
+
+def test_catalog_invalidation_discards_an_inflight_account_refresh() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def fetch(_proxy: str | None) -> tuple[OAuthModelInfo, ...]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            assert release.wait(timeout=2)
+            return (OAuthModelInfo(id="provider/old-account", label="Old"),)
+        return (OAuthModelInfo(id="provider/new-account", label="New"),)
+
+    catalog = OAuthModelCatalog(fallback_models=(_fallback_model(),), fetch=fetch)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(catalog.get, cache_key="shared")
+        assert started.wait(timeout=2)
+        catalog.invalidate()
+        release.set()
+        result = future.result(timeout=2)
+
+    assert calls == 2
+    assert result.models[0].id == "provider/new-account"
+    assert catalog.get(cache_key="shared").models[0].id == "provider/new-account"
 
 
 def test_catalog_returns_stale_then_negative_caches_refresh_failure() -> None:

@@ -1534,6 +1534,7 @@ def login_oauth_provider(
             token = login_github_copilot(print_fn=lambda _message: None)
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
+        invalidate_oauth_model_catalog(spec.name)
         return settings_payload(config_path=config_path)
 
     if spec.name == "xai_grok":
@@ -1666,6 +1667,7 @@ def logout_oauth_provider(
     for path in (token_path, token_path.with_suffix(".lock")):
         with suppress(FileNotFoundError):
             path.unlink()
+    invalidate_oauth_model_catalog(spec.name)
     return settings_payload(config_path=config_path)
 
 

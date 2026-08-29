@@ -572,6 +572,10 @@ For OpenAI Codex:
 nanobot provider login openai-codex --set-main
 ```
 
+The WebUI reads the account's Codex model catalog online, including current
+context-window and reasoning-effort metadata. A small compatible catalog remains
+available when the service cannot be reached.
+
 For an eligible X Premium / Grok subscription:
 
 ```bash
@@ -602,6 +606,11 @@ For GitHub Copilot:
 ```bash
 nanobot provider login github-copilot --set-main
 ```
+
+The WebUI reads the models enabled for the signed-in Copilot account. nanobot
+currently lists only entries that support Copilot's chat-completions endpoint;
+models exposed solely through the Responses endpoint stay hidden until that
+wire protocol is supported by the Copilot provider.
 
 Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 

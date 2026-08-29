@@ -729,6 +729,11 @@ Then run:
 nanobot agent -m "Hello!"
 ```
 
+The WebUI model selector loads the models available to the signed-in account
+from Codex's online catalog. Context-window and reasoning-effort metadata come
+from that response; if discovery is unavailable, nanobot keeps a small built-in
+fallback instead of emptying the selector.
+
 Codex Fast mode can be enabled from the WebUI provider settings, or with:
 
 ```json
@@ -807,6 +812,10 @@ a nanobot update.
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+
+After login, the WebUI loads the account-specific Copilot model catalog online.
+Only models compatible with nanobot's current Copilot chat-completions transport
+are shown; Responses-only entries are intentionally omitted.
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash
