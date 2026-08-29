@@ -608,9 +608,8 @@ nanobot provider login github-copilot --set-main
 ```
 
 The WebUI reads the models enabled for the signed-in Copilot account. nanobot
-currently lists only entries that support Copilot's chat-completions endpoint;
-models exposed solely through the Responses endpoint stay hidden until that
-wire protocol is supported by the Copilot provider.
+lists entries that support its current Copilot chat-completions or Responses
+transport and hides models that it cannot route safely.
 
 Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 

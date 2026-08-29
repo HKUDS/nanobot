@@ -207,6 +207,7 @@ class XAIGrokProvider(LLMProvider):
                     )
                     if on_stream_recover is not None:
                         await on_stream_recover()
+                    headers = _build_headers(token.access, wire_model)
 
             content, tool_calls, finish_reason, usage, reasoning_content = result
             usage = _combine_usage(retry_usage, usage)
@@ -614,10 +615,11 @@ def _xai_error_response(exc: Exception) -> LLMResponse:
         )
     message = str(exc).strip() or "unexpected error"
     retry_after = getattr(exc, "retry_after", None)
+    usage = getattr(exc, "usage", None)
     return LLMResponse(
         content=f"Error calling xAI ({type(exc).__name__}): {message}",
         finish_reason="error",
-        usage=getattr(exc, "usage", None),
+        usage=usage if isinstance(usage, LLMUsage) else None,
         retry_after=retry_after,
         error_status_code=int(status_code) if status_code is not None else None,
         error_kind=error_kind,

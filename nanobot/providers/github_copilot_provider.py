@@ -314,7 +314,7 @@ def get_github_copilot_model_catalog(
     account_key = _catalog_account_key(getattr(token, "account_id", None))
     cache_key = (
         f"{storage.get_token_path()}\0{account_key}\0"
-        f"{_resolve('NANOBOT_COPILOT_BASE_URL', DEFAULT_COPILOT_BASE_URL)}"
+        f"{_resolve('NANOBOT_COPILOT_BASE_URL', DEFAULT_COPILOT_BASE_URL)}\0{proxy or ''}"
     )
     return _GITHUB_COPILOT_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
 
@@ -389,10 +389,7 @@ def _parse_github_copilot_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
             or wire_id in seen
             or row.get("model_picker_enabled") is not True
             or policy.get("state") == "disabled"
-            or (
-                isinstance(endpoints, list)
-                and "/chat/completions" not in cast(list[object], endpoints)
-            )
+            or not _copilot_transport_supported(wire_id, endpoints)
         ):
             continue
         seen.add(wire_id)
@@ -417,6 +414,18 @@ def _parse_github_copilot_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
             )
         )
     return tuple(models)
+
+
+def _copilot_transport_supported(wire_id: str, endpoints: object) -> bool:
+    if not isinstance(endpoints, list):
+        return True
+    supported = cast(list[object], endpoints)
+    if "/chat/completions" in supported:
+        return True
+    model = wire_id.lower()
+    return "/responses" in supported and any(
+        token in model for token in ("gpt-5", "o1", "o3", "o4")
+    )
 
 
 def _oauth_fallback_models(provider_name: str) -> tuple[ProviderModelSpec, ...]:

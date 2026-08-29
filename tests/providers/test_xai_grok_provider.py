@@ -637,14 +637,16 @@ async def test_provider_recovers_unfinished_hosted_tool_once_and_preserves_usage
     _mock_token(monkeypatch)
     _mock_model_capabilities(monkeypatch, supports_backend_search=True)
     attempts = 0
+    request_ids: list[str] = []
     streamed: list[str] = []
     recovered: list[bool] = []
     first_usage = LLMUsage.reported(input_tokens=10, output_tokens=2)
     second_usage = LLMUsage.reported(input_tokens=11, output_tokens=4)
 
-    async def fake_request(_url, _headers, body, **kwargs):
+    async def fake_request(_url, headers, body, **kwargs):
         nonlocal attempts
         attempts += 1
+        request_ids.append(headers["x-grok-req-id"])
         assert body["max_turns"] == 5
         if attempts == 1:
             await kwargs["on_content_delta"]("I will keep searching.")
@@ -668,10 +670,41 @@ async def test_provider_recovers_unfinished_hosted_tool_once_and_preserves_usage
     )
 
     assert attempts == 2
+    assert len(set(request_ids)) == 2
     assert recovered == [True]
     assert streamed == ["I will keep searching.", "Final researched answer."]
     assert response.content == "Final researched answer."
     assert response.usage == first_usage + second_usage
+
+
+@pytest.mark.asyncio
+async def test_provider_preserves_usage_when_hosted_tool_recovery_also_fails(
+    monkeypatch,
+) -> None:
+    _mock_token(monkeypatch)
+    _mock_model_capabilities(monkeypatch, supports_backend_search=True)
+    attempts = 0
+    usage = LLMUsage.reported(input_tokens=10, output_tokens=2)
+
+    async def fake_request(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise _XAIIncompleteHostedToolError(
+            [{"name": "x_search", "call_id": f"search-{attempts}"}],
+            usage=usage,
+        )
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider()
+
+    response = await provider.chat_stream_with_retry(
+        [{"role": "user", "content": "Search X"}],
+        on_stream_recover=lambda: _append([], True),
+    )
+
+    assert attempts == 2
+    assert response.finish_reason == "error"
+    assert response.usage == usage + usage
 
 
 @pytest.mark.asyncio

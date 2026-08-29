@@ -814,8 +814,8 @@ a nanobot update.
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 After login, the WebUI loads the account-specific Copilot model catalog online.
-Only models compatible with nanobot's current Copilot chat-completions transport
-are shown; Responses-only entries are intentionally omitted.
+Only models compatible with nanobot's current chat-completions or Responses
+transport are shown.
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash

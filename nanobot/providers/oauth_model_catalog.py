@@ -73,49 +73,51 @@ class OAuthModelCatalog:
 
     def get(self, *, cache_key: str, proxy: str | None = None) -> OAuthModelCatalogSnapshot:
         """Return a fresh catalog, sharing concurrent work and retaining a fallback."""
-        while True:
-            with self._condition:
+        with self._condition:
+            generation = self._generation
+            cached = self._cached_result(cache_key)
+            if cached is not None:
+                return cached
+            while cache_key in self._inflight:
+                self._condition.wait()
+                if generation != self._generation:
+                    return self._stale_or_fallback(None, self._monotonic())
                 cached = self._cached_result(cache_key)
                 if cached is not None:
                     return cached
-                while cache_key in self._inflight:
-                    self._condition.wait()
-                    cached = self._cached_result(cache_key)
-                    if cached is not None:
-                        return cached
-                generation = self._generation
-                self._inflight.add(cache_key)
+            self._inflight.add(cache_key)
 
-            try:
-                models = tuple(self._fetch(proxy))
-                if not models:
-                    raise ValueError("provider returned an empty model catalog")
-            except Exception as exc:
-                logger.warning("OAuth model catalog refresh failed: type={}", type(exc).__name__)
-                with self._condition:
-                    invalidated = generation != self._generation
-                    result = self._failure_result(cache_key) if not invalidated else None
-            else:
-                now = self._monotonic()
-                result = OAuthModelCatalogSnapshot(
-                    models=models,
-                    source="remote",
-                    fetched_at=self._wall_clock(),
+        try:
+            models = tuple(self._fetch(proxy))
+            if not models:
+                raise ValueError("provider returned an empty model catalog")
+        except Exception as exc:
+            logger.warning("OAuth model catalog refresh failed: type={}", type(exc).__name__)
+            with self._condition:
+                result = (
+                    self._stale_or_fallback(None, self._monotonic())
+                    if generation != self._generation
+                    else self._failure_result(cache_key)
                 )
-                with self._condition:
-                    invalidated = generation != self._generation
-                    if not invalidated:
-                        self._store(cache_key, _CacheEntry(snapshot=result, stored_at=now))
-                        self._failures.pop(cache_key, None)
-            finally:
-                with self._condition:
-                    self._inflight.discard(cache_key)
-                    self._condition.notify_all()
+        else:
+            now = self._monotonic()
+            result = OAuthModelCatalogSnapshot(
+                models=models,
+                source="remote",
+                fetched_at=self._wall_clock(),
+            )
+            with self._condition:
+                if generation != self._generation:
+                    result = self._stale_or_fallback(None, now)
+                else:
+                    self._store(cache_key, _CacheEntry(snapshot=result, stored_at=now))
+                    self._failures.pop(cache_key, None)
+        finally:
+            with self._condition:
+                self._inflight.discard(cache_key)
+                self._condition.notify_all()
 
-            if invalidated:
-                continue
-            assert result is not None
-            return result
+        return result
 
     def invalidate(self) -> None:
         """Drop cached work and prevent an older identity refresh from being stored."""
@@ -123,18 +125,23 @@ class OAuthModelCatalog:
             self._generation += 1
             self._entries.clear()
             self._failures.clear()
+            self._condition.notify_all()
 
     def _cached_result(self, cache_key: str) -> OAuthModelCatalogSnapshot | None:
         now = self._monotonic()
         entry = self._entries.get(cache_key)
         if entry is not None and now - entry.stored_at < self._fresh_ttl_s:
             return replace(entry.snapshot, source="cache")
-        if self._failures.get(cache_key, 0) > now:
+        failure_until = self._failures.get(cache_key)
+        if failure_until is not None and failure_until <= now:
+            self._failures.pop(cache_key, None)
+        elif failure_until is not None:
             return self._stale_or_fallback(entry, now)
         return None
 
     def _failure_result(self, cache_key: str) -> OAuthModelCatalogSnapshot:
         now = self._monotonic()
+        self._reserve(cache_key)
         self._failures[cache_key] = now + self._failure_ttl_s
         return self._stale_or_fallback(self._entries.get(cache_key), now)
 
@@ -157,11 +164,23 @@ class OAuthModelCatalog:
         )
 
     def _store(self, cache_key: str, entry: _CacheEntry) -> None:
-        if cache_key not in self._entries and len(self._entries) >= self._max_entries:
-            oldest = min(self._entries, key=lambda key: self._entries[key].stored_at)
-            self._entries.pop(oldest, None)
-            self._failures.pop(oldest, None)
+        self._reserve(cache_key)
         self._entries[cache_key] = entry
+
+    def _reserve(self, cache_key: str) -> None:
+        known = set(self._entries) | set(self._failures)
+        if cache_key in known or len(known) < self._max_entries:
+            return
+        oldest = min(
+            known,
+            key=lambda key: (
+                self._entries[key].stored_at
+                if key in self._entries
+                else self._failures[key] - self._failure_ttl_s
+            ),
+        )
+        self._entries.pop(oldest, None)
+        self._failures.pop(oldest, None)
 
 
 def get_oauth_model_catalog(

@@ -259,8 +259,14 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
                         },
                     },
                     {
-                        "id": "responses-only",
-                        "name": "Responses only",
+                        "id": "gpt-5.4-mini",
+                        "name": "GPT-5.4 Mini",
+                        "model_picker_enabled": True,
+                        "supported_endpoints": ["/responses"],
+                    },
+                    {
+                        "id": "unknown-responses-only",
+                        "name": "Unknown Responses only",
                         "model_picker_enabled": True,
                         "supported_endpoints": ["/responses"],
                     },
@@ -298,13 +304,22 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     catalog = get_oauth_model_catalog("github_copilot")
 
     assert catalog.source == "remote"
-    assert [model.id for model in catalog.models] == ["github-copilot/claude-sonnet"]
+    assert [model.id for model in catalog.models] == [
+        "github-copilot/claude-sonnet",
+        "github-copilot/gpt-5.4-mini",
+    ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
     assert len(captured) == 2
     assert captured[0].headers["Authorization"] == "token github-secret"
     assert captured[1].headers["Authorization"] == "Bearer copilot-secret"
     assert str(captured[1].url) == "https://api.individual.githubcopilot.com/models"
+    assert get_oauth_model_catalog("github_copilot").source == "cache"
+    assert get_oauth_model_catalog(
+        "github_copilot",
+        proxy="http://proxy.example:8080",
+    ).source == "remote"
+    assert len(captured) == 4
 
 
 def test_catalog_single_flights_concurrent_refreshes() -> None:
@@ -337,28 +352,53 @@ def test_catalog_single_flights_concurrent_refreshes() -> None:
 def test_catalog_invalidation_discards_an_inflight_account_refresh() -> None:
     started = threading.Event()
     release = threading.Event()
+    identity = ["old-account"]
+
+    def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
+        current = identity[0]
+        if current == "old-account":
+            started.set()
+            assert release.wait(timeout=2)
+        return (ProviderModelSpec(id=f"provider/{current}", label=current),)
+
+    catalog = OAuthModelCatalog(fallback_models=(_fallback_model(),), fetch=fetch)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        old_future = pool.submit(catalog.get, cache_key="old-key")
+        assert started.wait(timeout=2)
+        identity[0] = "new-account"
+        catalog.invalidate()
+        new_future = pool.submit(catalog.get, cache_key="new-key")
+        new_result = new_future.result(timeout=2)
+        release.set()
+        old_result = old_future.result(timeout=2)
+
+    assert old_result.source == "fallback"
+    assert new_result.models[0].id == "provider/new-account"
+
+    identity[0] = "old-account"
+    assert catalog.get(cache_key="old-key").models[0].id == "provider/old-account"
+
+
+def test_catalog_bounds_failure_only_keys() -> None:
     calls = 0
 
     def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            started.set()
-            assert release.wait(timeout=2)
-            return (ProviderModelSpec(id="provider/old-account", label="Old"),)
-        return (ProviderModelSpec(id="provider/new-account", label="New"),)
+        raise httpx.ConnectError("offline")
 
-    catalog = OAuthModelCatalog(fallback_models=(_fallback_model(),), fetch=fetch)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(catalog.get, cache_key="shared")
-        assert started.wait(timeout=2)
-        catalog.invalidate()
-        release.set()
-        result = future.result(timeout=2)
+    catalog = OAuthModelCatalog(
+        fallback_models=(_fallback_model(),),
+        fetch=fetch,
+        max_entries=2,
+    )
 
-    assert calls == 2
-    assert result.models[0].id == "provider/new-account"
-    assert catalog.get(cache_key="shared").models[0].id == "provider/new-account"
+    for key in ("one", "two", "three"):
+        assert catalog.get(cache_key=key).source == "fallback"
+
+    assert calls == 3
+    assert catalog.get(cache_key="one").source == "fallback"
+    assert calls == 4
 
 
 def test_catalog_returns_stale_then_negative_caches_refresh_failure() -> None:
