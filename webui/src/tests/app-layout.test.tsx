@@ -1201,6 +1201,7 @@ describe("App layout", () => {
     expect(screen.getAllByText("SkillHub")).toHaveLength(2);
     expect(screen.getAllByText("skills.sh")).toHaveLength(2);
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
+    expect(screen.queryByText(/11,831 installs/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "SkillHub" }));
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(screen.queryByText("find-skills")).not.toBeInTheDocument();
