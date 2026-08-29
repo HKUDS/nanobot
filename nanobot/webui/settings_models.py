@@ -28,6 +28,10 @@ from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
+from nanobot.providers.oauth_model_catalog import (
+    get_oauth_model_catalog,
+    invalidate_oauth_model_catalog,
+)
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -660,6 +664,30 @@ def provider_models_payload(
             "status": "available",
             "models": rows,
             "model_count": len(rows),
+        }
+    if catalog_kind == "hybrid":
+        proxy = _resolve_env_placeholders(provider_config.proxy)
+        catalog = get_oauth_model_catalog(spec.name, proxy=proxy)
+        rows = [
+            {
+                "id": model.id,
+                "label": model.label or None,
+                "description": model.description or None,
+                "owned_by": model.owned_by or spec.label,
+                "context_window": model.context_window,
+                "reasoning_efforts": list(model.reasoning_efforts),
+                "supports_backend_search": model.supports_backend_search,
+            }
+            for model in catalog.models
+        ]
+        return {
+            **base_payload,
+            "status": "available",
+            "source": catalog.source,
+            "models": rows,
+            "model_count": len(rows),
+            "message": catalog.message,
+            "fetched_at": catalog.fetched_at,
         }
 
     api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
@@ -1591,6 +1619,7 @@ def complete_oauth_provider(
     oauth_flows.remove(spec.name, flow_id, flow, cancel=False)
     if not token.access:
         raise WebUISettingsError("OAuth login failed", status=401)
+    invalidate_oauth_model_catalog(spec.name)
     return settings_payload(config_path=config_path)
 
 
@@ -1629,6 +1658,7 @@ def logout_oauth_provider(
 
         oauth_flows.clear(spec.name)
         logout_xai_oauth()
+        invalidate_oauth_model_catalog(spec.name)
         return settings_payload(config_path=config_path)
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")

@@ -578,9 +578,13 @@ For an eligible X Premium / Grok subscription:
 nanobot provider login xai-grok --set-main
 ```
 
-This selects `xai-grok/grok-4.6`. The provider reads xAI's model catalog and
-exposes the hosted `x_search` tool only when the selected model advertises
-`supportsBackendSearch`; otherwise the model runs without hosted X Search.
+This selects `xai-grok/grok-4.6`. The WebUI model selector reads xAI's online
+model catalog, so newly available subscription models appear without a nanobot
+release. Online metadata is cached and enriched with nanobot's curated labels;
+if xAI is temporarily unavailable, nanobot uses the last successful catalog or
+a small built-in fallback instead of emptying the selector. The same catalog
+controls whether the provider exposes the hosted `x_search` tool; models that do
+not advertise support continue without hosted X Search.
 When enabled, Grok can search current X posts and return inline source links
 without invoking a local nanobot tool. Credentials are stored under the
 active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in

@@ -17,10 +17,12 @@ from typing import Any
 
 from pydantic.alias_generators import to_snake
 
+from nanobot.providers.oauth_model_catalog import curated_oauth_models
+
 
 @dataclass(frozen=True)
 class ProviderModelSpec:
-    """A curated model exposed by providers without a model-list endpoint."""
+    """Curated model metadata used for fixed catalogs or online fallback."""
 
     id: str
     label: str = ""
@@ -42,7 +44,7 @@ class ProviderSpec:
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
     display_name: str = ""  # shown in `nanobot status`
-    model_catalog: str = "auto"  # WebUI model-list source
+    model_catalog: str = "auto"  # WebUI model-list source, including builtin/hybrid
     builtin_models: tuple[ProviderModelSpec, ...] = ()
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
@@ -459,20 +461,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("xai-grok", "xai_grok"),
         env_key="",
         display_name="xAI Grok",
-        model_catalog="builtin",
-        builtin_models=(
+        model_catalog="hybrid",
+        builtin_models=tuple(
             ProviderModelSpec(
-                id="xai-grok/grok-4.6",
-                label="Grok 4.6",
-                description="Grok via xAI subscription; X Search is enabled when supported.",
-                context_window=500000,
-            ),
-            ProviderModelSpec(
-                id="xai-grok/grok-4.5",
-                label="Grok 4.5",
-                description="Grok via xAI subscription; X Search is enabled when supported.",
-                context_window=500000,
-            ),
+                id=model.id,
+                label=model.label,
+                description=model.description,
+                context_window=model.context_window,
+            )
+            for model in curated_oauth_models("xai_grok")
         ),
         backend="xai_grok",
         default_api_base="https://cli-chat-proxy.grok.com/v1",

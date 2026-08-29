@@ -1295,6 +1295,88 @@ describe("Settings models", () => {
     );
   });
 
+  it("loads hybrid online models for configured OAuth providers", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "xai-grok/grok-4.5",
+        provider: "xai_grok",
+        resolved_provider: "xai_grok",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          model: "xai-grok/grok-4.5",
+          provider: "xai_grok",
+        },
+      ],
+      providers: [
+        {
+          name: "xai_grok",
+          label: "xAI Grok",
+          configured: true,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: "https://cli-chat-proxy.grok.com/v1",
+          model_catalog: "hybrid",
+          oauth_account: "acct-test",
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/provider-models?provider=xai_grok") {
+        return jsonResponse({
+          provider: "xai_grok",
+          label: "xAI Grok",
+          status: "available",
+          catalog_kind: "hybrid",
+          source: "remote",
+          models: [
+            {
+              id: "xai-grok/grok-4.6",
+              label: "Grok 4.6",
+              description: "Latest frontier model",
+              owned_by: "xAI",
+              context_window: 500_000,
+            },
+            {
+              id: "xai-grok/grok-4.5",
+              label: "Grok 4.5",
+              owned_by: "xAI",
+              context_window: 500_000,
+            },
+          ],
+          model_count: 2,
+          fetched_at: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await togglePresetEditor();
+    const modelButtons = await screen.findAllByRole("button", {
+      name: /xai-grok\/grok-4\.5/i,
+    });
+    await openPopover(modelButtons[modelButtons.length - 1]);
+
+    expect(await screen.findByText("Grok 4.6")).toBeInTheDocument();
+    expect(screen.getByText(/Latest frontier model/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider-models?provider=xai_grok",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
   it("creates presets in the inline editor and can cancel without opening a dialog", async () => {
     vi.stubGlobal(
       "fetch",

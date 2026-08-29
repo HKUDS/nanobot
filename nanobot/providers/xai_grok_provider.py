@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import re
-import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -22,6 +20,10 @@ from nanobot.providers.base import (
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
+from nanobot.providers.oauth_model_catalog import (
+    DEFAULT_XAI_GROK_MODEL,
+    get_oauth_model_catalog,
+)
 from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
@@ -29,14 +31,10 @@ from nanobot.providers.openai_responses import (
 )
 from nanobot.providers.xai_oauth import (
     XAI_CLIENT_VERSION,
-    XAIToken,
     get_xai_oauth_token,
 )
 
 DEFAULT_XAI_GROK_URL = "https://cli-chat-proxy.grok.com/v1/responses"
-DEFAULT_XAI_GROK_MODELS_URL = "https://cli-chat-proxy.grok.com/v1/models"
-DEFAULT_XAI_GROK_MODEL = "xai-grok/grok-4.6"
-_MODEL_CAPABILITIES_TTL_S = 5 * 60
 _MAX_ERROR_BODY_CHARS = 1000
 _SENSITIVE_ERROR_KEYS = {
     "accesstoken",
@@ -75,37 +73,20 @@ class XAIGrokProvider(LLMProvider):
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
-        self._model_capabilities: dict[str, bool] | None = None
-        self._model_capabilities_fetched_at = 0.0
 
-    async def _supports_backend_search(self, token: XAIToken, model: str) -> bool:
-        now = time.monotonic()
-        capabilities = self._model_capabilities
-        if (
-            capabilities is None
-            or now - self._model_capabilities_fetched_at >= _MODEL_CAPABILITIES_TTL_S
-        ):
-            try:
-                capabilities = await _fetch_xai_model_capabilities(
-                    DEFAULT_XAI_GROK_MODELS_URL,
-                    _build_model_headers(token),
-                    proxy=self.proxy,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "xAI model capability lookup failed; hosted X Search disabled for model {}: "
-                    "type={} error={}",
-                    model,
-                    type(exc).__name__,
-                    str(exc).strip() or "unexpected error",
-                )
-                capabilities = {}
-                self._model_capabilities = capabilities
-                self._model_capabilities_fetched_at = now
-            else:
-                self._model_capabilities = capabilities
-                self._model_capabilities_fetched_at = now
-        return capabilities.get(model, False)
+    async def _supports_backend_search(self, model: str) -> bool:
+        catalog = await asyncio.to_thread(
+            get_oauth_model_catalog,
+            "xai_grok",
+            proxy=self.proxy,
+        )
+        if catalog.message:
+            logger.warning(
+                "xAI model catalog unavailable; hosted X Search disabled unless cached: {}",
+                catalog.message,
+            )
+        info = catalog.find(model)
+        return bool(info and info.supports_backend_search)
 
     async def _call_xai(
         self,
@@ -138,7 +119,7 @@ class XAIGrokProvider(LLMProvider):
             supports_backend_search = False
             if not tools_are_explicit:
                 stage = "model_capabilities"
-                supports_backend_search = await self._supports_backend_search(token, wire_model)
+                supports_backend_search = await self._supports_backend_search(wire_model)
             converted_tools = convert_tools(tools or [])
             if isinstance(configured_tools, list):
                 converted_tools.extend(cast(list[dict[str, Any]], configured_tools))
@@ -308,44 +289,6 @@ def _build_headers(token: str, model: str) -> dict[str, str]:
     }
 
 
-def _build_model_headers(token: XAIToken) -> dict[str, str]:
-    headers = {
-        "Authorization": f"Bearer {token.access}",
-        "X-XAI-Token-Auth": "xai-grok-cli",
-        "x-grok-client-version": XAI_CLIENT_VERSION,
-        "x-grok-client-identifier": "nanobot",
-        "x-grok-client-mode": "headless",
-        "User-Agent": f"nanobot/{__version__} (python)",
-        "accept": "application/json",
-    }
-    claims = _decode_access_token_claims(token.access)
-    user_id = claims.get("sub")
-    if claims.get("principal_type") == "Team":
-        user_id = claims.get("principal_id") or user_id
-    if isinstance(user_id, str) and user_id:
-        headers["x-userid"] = user_id
-    email = claims.get("email")
-    if not isinstance(email, str) or "@" not in email:
-        email = token.account_id if token.account_id and "@" in token.account_id else None
-    if email:
-        headers["x-email"] = email
-    return headers
-
-
-def _decode_access_token_claims(token: str) -> dict[str, Any]:
-    """Read identity hints from the signed token; the server still authenticates it."""
-    parts = token.split(".")
-    if len(parts) < 2 or not parts[1]:
-        return {}
-    payload = parts[1]
-    try:
-        decoded = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
-        claims = json.loads(decoded)
-    except (ValueError, TypeError):
-        return {}
-    return cast(dict[str, Any], claims) if isinstance(claims, dict) else {}
-
-
 class _XAIHTTPError(RuntimeError):
     def __init__(
         self,
@@ -365,67 +308,6 @@ class _XAIHTTPError(RuntimeError):
         self.error_code = error_code
         self.should_retry = should_retry
         self.response_body = response_body
-
-
-async def _fetch_xai_model_capabilities(
-    url: str,
-    headers: dict[str, str],
-    *,
-    proxy: str | None = None,
-) -> dict[str, bool]:
-    client_kwargs: dict[str, Any] = {"timeout": 10.0, "follow_redirects": False}
-    if proxy:
-        client_kwargs.update(proxy=proxy, trust_env=False)
-    async with httpx.AsyncClient(**client_kwargs) as client:
-        response = await client.get(url, headers=headers)
-    if response.status_code != 200:
-        raw = response.content.decode("utf-8", "ignore")
-        raise _build_xai_http_error(response.status_code, response.headers, raw)
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RuntimeError("xAI model catalog returned invalid JSON.") from exc
-    return _parse_xai_model_capabilities(payload)
-
-
-def _parse_xai_model_capabilities(payload: Any) -> dict[str, bool]:
-    if isinstance(payload, dict):
-        payload = cast(dict[str, Any], payload)
-        rows: object = payload.get("data")
-        if not isinstance(rows, list):
-            rows = payload.get("models")
-    else:
-        rows = payload
-    if not isinstance(rows, list):
-        return {}
-
-    capabilities: dict[str, bool] = {}
-    for row_value in cast(list[object], rows):
-        if not isinstance(row_value, dict):
-            continue
-        row = cast(dict[str, Any], row_value)
-        meta_value = row.get("_meta")
-        meta = cast(dict[str, Any], meta_value) if isinstance(meta_value, dict) else {}
-        support_value = row.get("supportsBackendSearch")
-        if not isinstance(support_value, bool):
-            support_value = row.get("supports_backend_search")
-        if not isinstance(support_value, bool):
-            support_value = meta.get("supportsBackendSearch")
-        if not isinstance(support_value, bool):
-            support_value = meta.get("supports_backend_search")
-        supports_backend_search = support_value if isinstance(support_value, bool) else False
-
-        identifiers = (
-            row.get("model"),
-            row.get("modelId"),
-            row.get("id"),
-            meta.get("model"),
-            meta.get("modelId"),
-        )
-        for identifier in identifiers:
-            if isinstance(identifier, str) and identifier.strip():
-                capabilities[_strip_model_prefix(identifier.strip())] = supports_backend_search
-    return capabilities
 
 
 async def _request_xai(

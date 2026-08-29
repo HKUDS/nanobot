@@ -765,10 +765,13 @@ nanobot agent -m "Hello from Grok."
 ```
 
 The default model is `xai-grok/grok-4.6` with a 500,000-token context window.
-The provider reads xAI's model catalog and includes the server-hosted `x_search`
-tool only when the selected model advertises `supportsBackendSearch`. Models
-without that capability continue normally without hosted X Search. When enabled,
-searches run inside xAI's Responses API and citations arrive as inline links.
+The provider reads and caches xAI's online model catalog for both WebUI model
+selection and runtime capabilities. Newly available models appear automatically;
+when discovery fails, the last successful catalog or built-in fallback remains
+available. The server-hosted `x_search` tool is included only when the selected
+model advertises support. Models without that capability continue normally
+without hosted X Search. When enabled, searches run inside xAI's Responses API
+and citations arrive as inline links.
 Hosted X Search is on by default to preserve this behavior. It can be turned off in the
 WebUI provider settings or with `providers.xaiGrok.extraBody.tools: []`.
 

@@ -13,6 +13,7 @@ from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfi
 from nanobot.llm_usage import get_llm_usage_store
 from nanobot.llm_usage.models import LLMCallRecord
 from nanobot.providers.base import LLMUsage
+from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot, OAuthModelInfo
 from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
@@ -2015,25 +2016,60 @@ def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
     ]
 
 
-def test_provider_models_payload_returns_xai_grok_models() -> None:
+def test_provider_models_payload_returns_online_xai_grok_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models.get_oauth_model_catalog",
+        lambda *_args, **_kwargs: OAuthModelCatalogSnapshot(
+            models=(
+                OAuthModelInfo(
+                    id="xai-grok/grok-4.6",
+                    label="Grok 4.6",
+                    description="Latest frontier model",
+                    owned_by="xAI",
+                    context_window=500_000,
+                    reasoning_efforts=("xhigh", "high", "medium", "low"),
+                    supports_backend_search=True,
+                ),
+                OAuthModelInfo(
+                    id="xai-grok/grok-4.5",
+                    label="Grok 4.5",
+                    owned_by="xAI",
+                    context_window=500_000,
+                    reasoning_efforts=("high", "medium", "low"),
+                    supports_backend_search=True,
+                ),
+            ),
+            source="remote",
+            fetched_at=123,
+        ),
+    )
+
     payload = provider_models_payload({"provider": ["xai_grok"]})
 
     assert payload["status"] == "available"
-    assert payload["catalog_kind"] == "builtin"
+    assert payload["catalog_kind"] == "hybrid"
+    assert payload["source"] == "remote"
+    assert payload["fetched_at"] == 123
     assert payload["models"] == [
         {
             "id": "xai-grok/grok-4.6",
             "label": "Grok 4.6",
-            "description": "Grok via xAI subscription; X Search is enabled when supported.",
-            "owned_by": "xAI Grok",
+            "description": "Latest frontier model",
+            "owned_by": "xAI",
             "context_window": 500000,
+            "reasoning_efforts": ["xhigh", "high", "medium", "low"],
+            "supports_backend_search": True,
         },
         {
             "id": "xai-grok/grok-4.5",
             "label": "Grok 4.5",
-            "description": "Grok via xAI subscription; X Search is enabled when supported.",
-            "owned_by": "xAI Grok",
+            "description": None,
+            "owned_by": "xAI",
             "context_window": 500000,
+            "reasoning_efforts": ["high", "medium", "low"],
+            "supports_backend_search": True,
         }
     ]
 
@@ -2168,6 +2204,7 @@ def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
     assert _model_catalog_kind(find_by_name("orcarouter")) == "catalog"
     assert _model_catalog_kind(find_by_name("openai_codex")) == "builtin"
+    assert _model_catalog_kind(find_by_name("xai_grok")) == "hybrid"
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(
