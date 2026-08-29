@@ -949,6 +949,7 @@ class AgentRunner:
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
         native_reasoning_open = False
+        native_reasoning_close_task: asyncio.Task[None] | None = None
         request_started_at = 0.0
         first_output_at: float | None = None
         generation_started_at: float | None = None
@@ -972,11 +973,29 @@ class AgentRunner:
             generation_started_at = None
 
         async def _close_native_reasoning() -> None:
-            nonlocal native_reasoning_open
-            if not native_reasoning_open:
-                return
-            native_reasoning_open = False
-            await hook.emit_reasoning_end()
+            nonlocal native_reasoning_open, native_reasoning_close_task
+            if native_reasoning_close_task is None:
+                if not native_reasoning_open:
+                    return
+                native_reasoning_open = False
+                native_reasoning_close_task = asyncio.create_task(
+                    hook.emit_reasoning_end()
+                )
+
+            close_task = native_reasoning_close_task
+            cancellation: asyncio.CancelledError | None = None
+            while not close_task.done():
+                try:
+                    await asyncio.shield(close_task)
+                except asyncio.CancelledError as exc:
+                    cancellation = cancellation or exc
+            try:
+                close_task.result()
+            finally:
+                if native_reasoning_close_task is close_task:
+                    native_reasoning_close_task = None
+            if cancellation is not None:
+                raise cancellation
 
         async def _provider_tool_event(event: dict[str, Any]) -> None:
             if event.get("kind") != "hosted_tool":
