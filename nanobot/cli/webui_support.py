@@ -1,12 +1,14 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
+import os
 import subprocess
 import sys
 import time
 import webbrowser
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 import typer
 from pydantic import ValidationError
@@ -462,17 +464,70 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
     )
 
 
-def _read_new_gateway_logs(log_path: Path, offset: int) -> tuple[list[str], int]:
-    """Read gateway log lines appended after *offset*."""
+_LOG_ANCHOR_BYTES = 64
+
+
+@dataclass
+class _GatewayLogCursor:
+    offset: int = 0
+    identity: tuple[int, int] | None = None
+    anchor: bytes = b""
+    pending: bytes = b""
+
+
+def _log_anchor(handle: BinaryIO, offset: int) -> bytes:
+    size = min(offset, _LOG_ANCHOR_BYTES)
+    handle.seek(offset - size)
+    return handle.read(size)
+
+
+def _start_gateway_log_cursor(log_path: Path) -> _GatewayLogCursor:
+    """Start following at the current end of *log_path*."""
     try:
-        if log_path.stat().st_size < offset:
-            offset = 0
-        with log_path.open("r", encoding="utf-8", errors="replace") as handle:
-            handle.seek(offset)
-            lines = [line.rstrip("\r\n") for line in handle]
-            return lines, handle.tell()
+        with log_path.open("rb") as handle:
+            stat = os.fstat(handle.fileno())
+            offset = stat.st_size
+            return _GatewayLogCursor(
+                offset=offset,
+                identity=(stat.st_dev, stat.st_ino),
+                anchor=_log_anchor(handle, offset),
+            )
     except OSError:
-        return [], offset
+        return _GatewayLogCursor()
+
+
+def _read_new_gateway_logs(
+    log_path: Path,
+    cursor: _GatewayLogCursor,
+    *,
+    flush: bool = False,
+) -> list[str]:
+    """Read complete gateway log lines appended after *cursor*."""
+    try:
+        with log_path.open("rb") as handle:
+            stat = os.fstat(handle.fileno())
+            identity = (stat.st_dev, stat.st_ino)
+            reset = cursor.identity != identity or stat.st_size < cursor.offset
+            if not reset and cursor.offset:
+                reset = _log_anchor(handle, cursor.offset) != cursor.anchor
+            if reset:
+                cursor.offset = 0
+                cursor.pending = b""
+
+            handle.seek(cursor.offset)
+            chunk = handle.read()
+            cursor.offset = handle.tell()
+            cursor.identity = identity
+            cursor.anchor = _log_anchor(handle, cursor.offset)
+    except OSError:
+        return []
+
+    parts = (cursor.pending + chunk).split(b"\n")
+    cursor.pending = parts.pop()
+    if flush and cursor.pending:
+        parts.append(cursor.pending)
+        cursor.pending = b""
+    return [part.removesuffix(b"\r").decode("utf-8", errors="replace") for part in parts]
 
 
 def _attach_to_background_gateway(
@@ -482,28 +537,25 @@ def _attach_to_background_gateway(
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Keep the launcher attached and mirror this gateway's new log output."""
-    _print_webui_foreground_lifecycle(attached=True)
     status = runtime.status()
     log_path = status.log_path
-    try:
-        log_offset = log_path.stat().st_size
-    except OSError:
-        log_offset = 0
+    cursor = _start_gateway_log_cursor(log_path)
+    _print_webui_foreground_lifecycle(attached=True)
     try:
         while status.running:
-            lines, log_offset = _read_new_gateway_logs(log_path, log_offset)
-            for line in lines:
+            for line in _read_new_gateway_logs(log_path, cursor):
                 console.print(line, markup=False, highlight=False)
             if poll_hook is not None:
                 poll_hook()
             sleep(0.5)
             status = runtime.status()
     except KeyboardInterrupt:
+        for line in _read_new_gateway_logs(log_path, cursor, flush=True):
+            console.print(line, markup=False, highlight=False)
         console.print("\n[yellow]WebUI launcher detached.[/yellow]")
         return
 
-    lines, _ = _read_new_gateway_logs(log_path, log_offset)
-    for line in lines:
+    for line in _read_new_gateway_logs(log_path, cursor, flush=True):
         console.print(line, markup=False, highlight=False)
     console.print("[yellow]Gateway stopped.[/yellow]")
 

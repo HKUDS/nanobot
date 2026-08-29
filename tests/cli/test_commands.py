@@ -2712,23 +2712,48 @@ def test_attach_to_background_gateway_follows_only_new_logs(capsys, tmp_path: Pa
 def test_read_new_gateway_logs_recovers_after_truncation(tmp_path: Path) -> None:
     log_path = tmp_path / "gateway.log"
     log_path.write_text("a much longer historical log line\n", encoding="utf-8")
-    offset = log_path.stat().st_size
+    cursor = cli_webui_support._start_gateway_log_cursor(log_path)
     log_path.write_text("fresh log\n", encoding="utf-8")
 
-    lines, next_offset = cli_webui_support._read_new_gateway_logs(log_path, offset)
+    lines = cli_webui_support._read_new_gateway_logs(log_path, cursor)
 
     assert lines == ["fresh log"]
-    assert next_offset == log_path.stat().st_size
+    assert cursor.offset == log_path.stat().st_size
+
+
+def test_read_new_gateway_logs_detects_fast_rewrite_past_offset(tmp_path: Path) -> None:
+    log_path = tmp_path / "gateway.log"
+    log_path.write_text("historical log\n", encoding="utf-8")
+    cursor = cli_webui_support._start_gateway_log_cursor(log_path)
+    log_path.write_text("first fresh log\nsecond fresh log\n", encoding="utf-8")
+
+    lines = cli_webui_support._read_new_gateway_logs(log_path, cursor)
+
+    assert lines == ["first fresh log", "second fresh log"]
+
+
+def test_read_new_gateway_logs_waits_for_complete_utf8_line(tmp_path: Path) -> None:
+    log_path = tmp_path / "gateway.log"
+    log_path.touch()
+    cursor = cli_webui_support._start_gateway_log_cursor(log_path)
+    encoded = "模型 ready\n".encode()
+    log_path.write_bytes(encoded[:2])
+
+    assert cli_webui_support._read_new_gateway_logs(log_path, cursor) == []
+
+    with log_path.open("ab") as handle:
+        handle.write(encoded[2:])
+
+    assert cli_webui_support._read_new_gateway_logs(log_path, cursor) == ["模型 ready"]
 
 
 def test_read_new_gateway_logs_tolerates_missing_file(tmp_path: Path) -> None:
-    lines, offset = cli_webui_support._read_new_gateway_logs(
-        tmp_path / "missing.log",
-        0,
-    )
+    log_path = tmp_path / "missing.log"
+    cursor = cli_webui_support._start_gateway_log_cursor(log_path)
+    lines = cli_webui_support._read_new_gateway_logs(log_path, cursor)
 
     assert lines == []
-    assert offset == 0
+    assert cursor.offset == 0
 
 
 def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> None:
