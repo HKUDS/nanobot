@@ -2531,7 +2531,7 @@ describe("App layout", () => {
     ).toBe(true);
     await user.click(screen.getByRole("button", { name: "Select model" }));
     await user.click(await screen.findByRole("option", { name: /openai\/gpt-4o-mini/ }));
-    expect(screen.getByRole("button", { name: "Save preset" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Up to date.")).not.toBeInTheDocument();
     fireEvent.click(

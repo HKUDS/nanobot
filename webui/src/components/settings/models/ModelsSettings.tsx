@@ -546,7 +546,7 @@ export function ModelsSettings({
           >
             {saving || creatingSaving
               ? tx("settings.actions.saving", "Saving...")
-              : tx("settings.actions.savePreset", "Save preset")}
+              : tx("settings.actions.savePreset", "Save")}
           </Button>
         </div>
       </div>

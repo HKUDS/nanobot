@@ -141,7 +141,7 @@ describe("Settings models", () => {
     fireEvent.change(screen.getByLabelText("Temperature"), {
       target: { value: "0.4" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -173,7 +173,7 @@ describe("Settings models", () => {
 
     const nameInput = screen.getByRole("textbox", { name: "Preset name" });
     fireEvent.change(nameInput, { target: { value: "Codex" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -196,7 +196,7 @@ describe("Settings models", () => {
 
     const nameInput = screen.getByRole("textbox", { name: "Preset name" });
     fireEvent.change(nameInput, { target: { value: "Codex" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "A preset with this name already exists.",
@@ -368,7 +368,7 @@ describe("Settings models", () => {
 
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Temperature")).toHaveValue(0.4);
-    expect(screen.getByRole("button", { name: "Save preset" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
   it("keeps repeated fallback preset rows stable when changing the primary preset", async () => {
@@ -604,7 +604,7 @@ describe("Settings models", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save preset" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(
       screen.queryByText("Complete the preset before saving."),
     ).not.toBeInTheDocument();
@@ -619,7 +619,7 @@ describe("Settings models", () => {
       target: { value: "openai/gpt-4o-mini" },
     });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
-    const saveButton = screen.getByRole("button", { name: "Save preset" });
+    const saveButton = screen.getByRole("button", { name: "Save" });
     expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
 
@@ -656,7 +656,7 @@ describe("Settings models", () => {
     });
     fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(requestMutationMock).not.toHaveBeenCalled();
     expect(nameInput).toHaveAttribute("aria-invalid", "true");
@@ -1499,7 +1499,7 @@ describe("Settings models", () => {
     fireEvent.change(screen.getByLabelText("Reasoning effort"), {
       target: { value: "provider-native-mode" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
