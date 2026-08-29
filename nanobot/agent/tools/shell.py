@@ -489,14 +489,21 @@ class ExecTool(Tool):
                 )
             else:
                 workspace = workspace_root or cwd
-                wrapped = wrap_command(
-                    self.sandbox,
-                    shlex.join(command) if isinstance(command, list) else command,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                )
+                try:
+                    wrapped = wrap_command(
+                        self.sandbox,
+                        shlex.join(command) if isinstance(command, list) else command,
+                        workspace,
+                        cwd,
+                        resolve_launcher=True,
+                        sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                        sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                    )
+                except (FileNotFoundError, OSError, ValueError) as exc:
+                    return ToolResult.error(
+                        f"Error: {exc}. Restricted shell execution remains disabled."
+                        + _WORKSPACE_BOUNDARY_NOTE
+                    )
                 command = shlex.split(wrapped) if isinstance(command, list) else wrapped
                 cwd = str(Path(workspace).resolve())
 
