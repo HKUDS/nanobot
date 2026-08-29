@@ -26,4 +26,7 @@ HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs 
 
 `tools/sandbox.py` provides optional command wrapping. The only backend currently shipped is `bwrap` (bubblewrap), intended for containerized deployments. On Windows and bare-metal Linux without `bwrap`, restricted commands fail closed instead of falling back to a native shell. Commands running with full workspace access can still use the native shell, but that mode is an explicit trust decision.
 
+Sandbox launchers are resolved to an absolute path before applying `tools.exec.pathPrepend` or
+`pathAppend`; command-specific PATH configuration must never select the process boundary itself.
+
 **Rule**: If adding a new sandbox backend, implement `_wrap_<name>(command, workspace, cwd) -> str` and register it in `_BACKENDS`.

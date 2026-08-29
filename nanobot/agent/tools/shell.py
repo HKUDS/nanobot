@@ -481,14 +481,21 @@ class ExecTool(Tool):
                 )
             else:
                 workspace = workspace_root or cwd
-                command = wrap_command(
-                    self.sandbox,
-                    command,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                )
+                try:
+                    command = wrap_command(
+                        self.sandbox,
+                        command,
+                        workspace,
+                        cwd,
+                        resolve_launcher=True,
+                        sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                        sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                    )
+                except (FileNotFoundError, OSError, ValueError) as exc:
+                    return ToolResult.error(
+                        f"Error: {exc}. Restricted shell execution remains disabled."
+                        + _WORKSPACE_BOUNDARY_NOTE
+                    )
                 cwd = str(Path(workspace).resolve())
 
         effective_timeout = self._resolve_timeout(timeout)

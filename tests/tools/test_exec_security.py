@@ -77,6 +77,57 @@ async def test_exec_restricted_workspace_blocks_relative_symlink_escape(tmp_path
     assert "outside-secret" not in result
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="bwrap is unavailable on Windows")
+async def test_exec_path_prepend_cannot_replace_sandbox_launcher(tmp_path):
+    workspace = tmp_path / "workspace"
+    attacker_bin = tmp_path / "attacker-bin"
+    workspace.mkdir()
+    attacker_bin.mkdir()
+    attacker_bwrap = attacker_bin / "bwrap"
+    attacker_bwrap.write_text("#!/bin/sh\nprintf ATTACKER_BWRAP_RAN\n", encoding="utf-8")
+    attacker_bwrap.chmod(0o755)
+    trusted_bwrap = tmp_path / "trusted-bwrap"
+    trusted_bwrap.write_text("#!/bin/sh\nprintf TRUSTED_BWRAP_RAN\n", encoding="utf-8")
+    trusted_bwrap.chmod(0o755)
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="bwrap",
+        path_prepend=str(attacker_bin),
+    )
+
+    with patch(
+        "nanobot.agent.tools.sandbox.resolve_sandbox_launcher",
+        return_value=str(trusted_bwrap),
+    ):
+        result = await tool.execute(command="echo should-not-run")
+
+    assert "TRUSTED_BWRAP_RAN" in result
+    assert "ATTACKER_BWRAP_RAN" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="bwrap is unavailable on Windows")
+async def test_exec_restricted_workspace_fails_closed_when_bwrap_is_missing(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="bwrap",
+    )
+
+    with patch(
+        "nanobot.agent.tools.sandbox.resolve_sandbox_launcher",
+        side_effect=FileNotFoundError("Sandbox backend 'bwrap' is not installed"),
+    ):
+        result = await tool.execute(command="echo should-not-run")
+
+    assert "is not installed" in result
+    assert "Restricted shell execution remains disabled" in result
+
+
 def test_exec_full_workspace_scope_allows_loopback(tmp_path):
     tool = ExecTool(working_dir=str(tmp_path))
     scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
