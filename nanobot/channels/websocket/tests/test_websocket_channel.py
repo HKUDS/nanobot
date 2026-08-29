@@ -4676,6 +4676,65 @@ async def test_rejected_message_rolls_back_side_effects_when_hydration_fails(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_session_mention_normalization_rolls_back_side_effects(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=SessionManager(tmp_path / "sessions"),
+            workspace_path=tmp_path,
+        ),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50127)
+    channel._webui_connections.add(conn)
+    session_access = channel._commands._session_access
+    assert session_access is not None
+
+    def cancel_normalization(
+        _raw: object,
+        *,
+        exclude_session_key: str | None = None,
+    ) -> list[dict[str, str]]:
+        _ = exclude_session_key
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(session_access, "normalize_mentions", cancel_normalization)
+
+    with pytest.raises(asyncio.CancelledError):
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": "chat-mention-cancel",
+                "content": "hello",
+                "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+                "session_mentions": [{"session_key": "telegram:other"}],
+                "webui": True,
+            },
+        )
+
+    bus.publish_inbound.assert_not_awaited()
+    assert conn not in channel._subs.get("chat-mention-cancel", set())
+    assert "chat-mention-cancel" not in channel._conn_chats.get(conn, set())
+    assert list((media_root / "websocket").iterdir()) == []
+
+
+@pytest.mark.asyncio
 async def test_rejected_message_rolls_back_side_effects_when_dispatch_fails(
     bus: MagicMock,
     tmp_path,

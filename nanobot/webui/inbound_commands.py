@@ -587,6 +587,10 @@ class WebUICommandRouter:
         attached_before = chat_id in self._transport.webui_connection_chats(connection)
 
         def rollback_side_effects() -> None:
+            nonlocal rolled_back
+            if rolled_back:
+                return
+            rolled_back = True
             self._rollback_message_side_effects(
                 connection,
                 chat_id,
@@ -595,15 +599,15 @@ class WebUICommandRouter:
                 temporary_policy=temporary_policy,
             )
 
-        self._transport.webui_attach(connection, chat_id)
+        queued_owner = None
+        accepted = False
+        dispatched = False
+        rolled_back = False
         try:
+            self._transport.webui_attach(connection, chat_id)
             if temporary_policy is None or temporary_policy.hydrate_transcript:
                 await self._transport.webui_hydrate(chat_id)
-        except BaseException:
-            rollback_side_effects()
-            raise
 
-        try:
             scope = await self.workspace_scope_or_error(
                 connection,
                 lambda: (
@@ -619,69 +623,62 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
             )
-        except BaseException:
-            rollback_side_effects()
-            raise
-        if scope is None:
-            rollback_side_effects()
-            return
+            if scope is None:
+                rollback_side_effects()
+                return
 
-        if not self._transport.is_allowed(client_id):
-            rollback_side_effects()
-            await self._transport.webui_send_event(
-                connection,
-                "error",
-                detail="access_denied",
-                **rejection_fields,
+            if not self._transport.is_allowed(client_id):
+                rollback_side_effects()
+                await self._transport.webui_send_event(
+                    connection,
+                    "error",
+                    detail="access_denied",
+                    **rejection_fields,
+                )
+                return
+
+            metadata: dict[str, Any] = {
+                "remote": getattr(connection, "remote_address", None)
+            }
+            if envelope.get("webui") is True:
+                metadata["webui"] = True
+                metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
+            trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
+            is_user_shell = (
+                trusted_webui
+                and envelope.get("user_shell") is True
+                and content.startswith("!")
             )
-            return
-
-        metadata: dict[str, Any] = {
-            "remote": getattr(connection, "remote_address", None)
-        }
-        if envelope.get("webui") is True:
-            metadata["webui"] = True
-            metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
-        trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
-        is_user_shell = (
-            trusted_webui
-            and envelope.get("user_shell") is True
-            and content.startswith("!")
-        )
-        if is_user_shell:
-            metadata[INBOUND_META_USER_SHELL] = True
-        dispatch_content = (
-            f"{USER_SHELL_COMMAND} {content[1:].lstrip()}" if is_user_shell else content
-        )
-        cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
-        if cli_apps:
-            metadata["cli_apps"] = cli_apps
-        mcp_presets = normalize_mcp_preset_mentions(
-            envelope.get("mcp_presets"),
-            config_path=self.gateway.settings.config.path,
-        )
-        if mcp_presets:
-            metadata["mcp_presets"] = mcp_presets
-        session_mentions: list[SessionMention] = []
-        if trusted_webui and self._session_access is not None:
-            session_mentions = await asyncio.to_thread(
-                self._session_access.normalize_mentions,
-                envelope.get("session_mentions"),
-                exclude_session_key=webui_session_key(chat_id),
+            if is_user_shell:
+                metadata[INBOUND_META_USER_SHELL] = True
+            dispatch_content = (
+                f"{USER_SHELL_COMMAND} {content[1:].lstrip()}" if is_user_shell else content
             )
-            if session_mentions:
-                metadata["session_mentions"] = session_mentions
-        metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
-        is_webui = metadata.get("webui") is True
-        queued_owner = None
-        if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
-            queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
-            if queued_owner is not None:
-                metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
+            cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
+            if cli_apps:
+                metadata["cli_apps"] = cli_apps
+            mcp_presets = normalize_mcp_preset_mentions(
+                envelope.get("mcp_presets"),
+                config_path=self.gateway.settings.config.path,
+            )
+            if mcp_presets:
+                metadata["mcp_presets"] = mcp_presets
+            session_mentions: list[SessionMention] = []
+            if trusted_webui and self._session_access is not None:
+                session_mentions = await asyncio.to_thread(
+                    self._session_access.normalize_mentions,
+                    envelope.get("session_mentions"),
+                    exclude_session_key=webui_session_key(chat_id),
+                )
+                if session_mentions:
+                    metadata["session_mentions"] = session_mentions
+            metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
+            is_webui = metadata.get("webui") is True
+            if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
+                queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
+                if queued_owner is not None:
+                    metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
-        accepted = False
-        dispatched = False
-        try:
             if temporary_policy is not None:
                 self._temporary_chats.register_media(connection, chat_id, media_paths)
             if is_webui and (
