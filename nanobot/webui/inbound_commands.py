@@ -47,7 +47,7 @@ from nanobot.webui.session_access import (
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
 from nanobot.webui.sidebar_state import write_webui_sidebar_state
-from nanobot.webui.temporary_chats import TemporaryChatError
+from nanobot.webui.temporary_chats import TemporaryChatError, TemporaryChatMessagePolicy
 from nanobot.webui.transcription_ws import webui_transcription_event
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
@@ -277,6 +277,22 @@ class WebUICommandRouter:
                 **({"turn_id": turn_id} if turn_id else {}),
             )
             return None
+
+    def _rollback_message_side_effects(
+        self,
+        connection: ServerConnection,
+        chat_id: str,
+        media_paths: list[str],
+        *,
+        detach_connection: bool,
+        temporary_policy: TemporaryChatMessagePolicy | None = None,
+    ) -> None:
+        """Undo resources created before a message was rejected."""
+        self._media.discard_inbound_attachments(media_paths)
+        if temporary_policy is not None:
+            self._temporary_chats.discard_registered_media(chat_id, media_paths)
+        if detach_connection:
+            self._transport.webui_detach(connection, chat_id)
 
     async def dispatch(
         self,
@@ -555,8 +571,6 @@ class WebUICommandRouter:
                 attachment = cast(dict[str, Any], item) if isinstance(item, dict) else {}
                 name = attachment.get("name")
                 media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
-            if temporary_policy is not None:
-                self._temporary_chats.register_media(connection, chat_id, media_paths)
 
         if not content.strip() and not media_paths:
             await self._transport.webui_send_event(
@@ -566,29 +580,54 @@ class WebUICommandRouter:
                 **rejection_fields,
             )
             return
-        self._transport.webui_attach(connection, chat_id)
-        if temporary_policy is None or temporary_policy.hydrate_transcript:
-            await self._transport.webui_hydrate(chat_id)
+        # The same connection processes envelopes serially (the recv loop
+        # awaits dispatch inline), and attached_before is per connection, so
+        # the detach below only ever removes the subscription this message
+        # added.
+        attached_before = chat_id in self._transport.webui_connection_chats(connection)
 
-        scope = await self.workspace_scope_or_error(
-            connection,
-            lambda: (
-                temporary_policy.workspace_scope
-                if temporary_policy is not None
-                else self._workspaces.scope_for_message(
-                    envelope,
-                    chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
-                    controls_available=self.workspace_controls_available(connection),
-                )
-            ),
-            chat_id=chat_id,
-            turn_id=turn_id,
-        )
+        def rollback_side_effects() -> None:
+            self._rollback_message_side_effects(
+                connection,
+                chat_id,
+                media_paths,
+                detach_connection=not attached_before,
+                temporary_policy=temporary_policy,
+            )
+
+        self._transport.webui_attach(connection, chat_id)
+        try:
+            if temporary_policy is None or temporary_policy.hydrate_transcript:
+                await self._transport.webui_hydrate(chat_id)
+        except BaseException:
+            rollback_side_effects()
+            raise
+
+        try:
+            scope = await self.workspace_scope_or_error(
+                connection,
+                lambda: (
+                    temporary_policy.workspace_scope
+                    if temporary_policy is not None
+                    else self._workspaces.scope_for_message(
+                        envelope,
+                        chat_id=chat_id,
+                        chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                        controls_available=self.workspace_controls_available(connection),
+                    )
+                ),
+                chat_id=chat_id,
+                turn_id=turn_id,
+            )
+        except BaseException:
+            rollback_side_effects()
+            raise
         if scope is None:
+            rollback_side_effects()
             return
 
         if not self._transport.is_allowed(client_id):
+            rollback_side_effects()
             await self._transport.webui_send_event(
                 connection,
                 "error",
@@ -641,7 +680,10 @@ class WebUICommandRouter:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
         accepted = False
+        dispatched = False
         try:
+            if temporary_policy is not None:
+                self._temporary_chats.register_media(connection, chat_id, media_paths)
             if is_webui and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):
@@ -682,9 +724,12 @@ class WebUICommandRouter:
                     else False
                 ),
             )
+            dispatched = True
             self._workspaces.persist_scope(chat_id, scope)
             accepted = True
         finally:
+            if not dispatched:
+                rollback_side_effects()
             if not accepted and queued_owner is not None:
                 clear_websocket_turn_if_current(chat_id, queued_owner)
 
