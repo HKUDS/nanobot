@@ -4744,6 +4744,10 @@ async def test_rejected_temporary_chat_message_discards_registered_media(
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50126)
     chat_id = await _new_temporary_chat(channel, conn)
+    retained_path = media_root / "websocket" / "retained.txt"
+    retained_path.parent.mkdir(parents=True, exist_ok=True)
+    retained_path.write_text("keep", encoding="utf-8")
+    channel.gateway.temporary_chats.register_media(conn, chat_id, [str(retained_path)])
     monkeypatch.setattr(
         channel,
         "webui_dispatch_message",
@@ -4764,8 +4768,8 @@ async def test_rejected_temporary_chat_message_discards_registered_media(
         )
 
     bus.publish_inbound.assert_not_awaited()
-    assert list((media_root / "websocket").iterdir()) == []
-    assert not channel.gateway.temporary_chats._media_paths.get(chat_id)
+    assert list((media_root / "websocket").iterdir()) == [retained_path]
+    assert channel.gateway.temporary_chats._media_paths.get(chat_id) == {str(retained_path)}
     assert conn in channel._subs.get(chat_id, set())
 
 
