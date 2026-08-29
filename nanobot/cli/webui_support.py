@@ -457,8 +457,22 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
         console.print("[green]WebUI is attached to the shared gateway.[/green]")
     console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
     console.print(
-        "[dim]Press Ctrl+C to detach; the gateway stops only when the last local client exits.[/dim]"
+        "[dim]Following live gateway logs. Press Ctrl+C to detach; the gateway stops "
+        "only when the last local client exits.[/dim]"
     )
+
+
+def _read_new_gateway_logs(log_path: Path, offset: int) -> tuple[list[str], int]:
+    """Read gateway log lines appended after *offset*."""
+    try:
+        if log_path.stat().st_size < offset:
+            offset = 0
+        with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            handle.seek(offset)
+            lines = [line.rstrip("\r\n") for line in handle]
+            return lines, handle.tell()
+    except OSError:
+        return [], offset
 
 
 def _attach_to_background_gateway(
@@ -467,17 +481,30 @@ def _attach_to_background_gateway(
     poll_hook: Callable[[], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Keep a WebUI launcher attached without taking ownership of the gateway."""
+    """Keep the launcher attached and mirror this gateway's new log output."""
     _print_webui_foreground_lifecycle(attached=True)
+    status = runtime.status()
+    log_path = status.log_path
     try:
-        while runtime.status().running:
+        log_offset = log_path.stat().st_size
+    except OSError:
+        log_offset = 0
+    try:
+        while status.running:
+            lines, log_offset = _read_new_gateway_logs(log_path, log_offset)
+            for line in lines:
+                console.print(line, markup=False, highlight=False)
             if poll_hook is not None:
                 poll_hook()
             sleep(0.5)
+            status = runtime.status()
     except KeyboardInterrupt:
         console.print("\n[yellow]WebUI launcher detached.[/yellow]")
         return
 
+    lines, _ = _read_new_gateway_logs(log_path, log_offset)
+    for line in lines:
+        console.print(line, markup=False, highlight=False)
     console.print("[yellow]Gateway stopped.[/yellow]")
 
 

@@ -139,7 +139,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 | Command | Description |
 |---|---|
-| `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, and open `http://127.0.0.1:8765` |
+| `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, open `http://127.0.0.1:8765`, and follow new gateway logs |
 | `nanobot webui --background` | Deprecated; prints the equivalent explicit `nanobot gateway --background` command and exits |
 | `nanobot webui --dev` | Start the gateway and Vite together at `http://127.0.0.1:5173`, with live frontend updates |
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |

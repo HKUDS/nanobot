@@ -23,7 +23,9 @@ one is missing, starts or joins the same on-demand gateway used by the native
 TUI, and opens the browser. With a fresh config,
 it can open before a model is configured so you can finish setup in **Settings
 → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so
-it is not available from other devices on your LAN.
+it is not available from other devices on your LAN. While the launcher remains
+attached, it mirrors new log output from that exact gateway instance in the
+terminal without replaying older logs.
 
 After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
 

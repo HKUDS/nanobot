@@ -2654,12 +2654,14 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
     assert seen["lease_release_wait_for_stop"] is False
 
 
-def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys) -> None:
+def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys, tmp_path: Path) -> None:
     stopped = False
+    log_path = tmp_path / "gateway.log"
+    log_path.touch()
 
     class _FakeRuntime:
         def status(self):
-            return SimpleNamespace(running=True)
+            return SimpleNamespace(running=True, log_path=log_path)
 
         def stop(self):
             nonlocal stopped
@@ -2679,10 +2681,63 @@ def test_attach_to_background_gateway_detaches_on_ctrl_c(capsys) -> None:
     assert "WebUI launcher detached" in rendered
 
 
-def test_attach_to_background_gateway_checks_owned_sidecar() -> None:
+def test_attach_to_background_gateway_follows_only_new_logs(capsys, tmp_path: Path) -> None:
+    log_path = tmp_path / "gateway.log"
+    log_path.write_text("historical log\n", encoding="utf-8")
+    polls = 0
+
     class _FakeRuntime:
         def status(self):
-            return SimpleNamespace(running=True)
+            return SimpleNamespace(running=True, log_path=log_path)
+
+    def _append_then_interrupt(_seconds: float) -> None:
+        nonlocal polls
+        if polls == 0:
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write("[websocket] live log\n")
+            polls += 1
+            return
+        raise KeyboardInterrupt
+
+    cli_webui_support._attach_to_background_gateway(
+        _FakeRuntime(),
+        sleep=_append_then_interrupt,
+    )
+
+    output = capsys.readouterr().out
+    assert "[websocket] live log" in output
+    assert "historical log" not in output
+
+
+def test_read_new_gateway_logs_recovers_after_truncation(tmp_path: Path) -> None:
+    log_path = tmp_path / "gateway.log"
+    log_path.write_text("a much longer historical log line\n", encoding="utf-8")
+    offset = log_path.stat().st_size
+    log_path.write_text("fresh log\n", encoding="utf-8")
+
+    lines, next_offset = cli_webui_support._read_new_gateway_logs(log_path, offset)
+
+    assert lines == ["fresh log"]
+    assert next_offset == log_path.stat().st_size
+
+
+def test_read_new_gateway_logs_tolerates_missing_file(tmp_path: Path) -> None:
+    lines, offset = cli_webui_support._read_new_gateway_logs(
+        tmp_path / "missing.log",
+        0,
+    )
+
+    assert lines == []
+    assert offset == 0
+
+
+def test_attach_to_background_gateway_checks_owned_sidecar(tmp_path: Path) -> None:
+    log_path = tmp_path / "gateway.log"
+    log_path.touch()
+
+    class _FakeRuntime:
+        def status(self):
+            return SimpleNamespace(running=True, log_path=log_path)
 
     def sidecar_exited() -> None:
         raise WebUIDevError("WebUI development server exited unexpectedly (code 23)")
