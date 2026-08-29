@@ -2154,9 +2154,16 @@ function Shell({
     const hasAutomations = (pendingDelete.automations?.length ?? 0) > 0;
     const deletingActive = activeKey !== null && deletingKeys.has(activeKey);
     const currentIndex = topicSessions.findIndex((s) => s.key === activeKey);
+    const availableKeys = new Set(topicSessions.map((session) => session.key));
+    const siblingFallbackKey = deletingActive
+      ? activeTabState?.paneKeys.find((key) => (
+          !deletingKeys.has(key) && availableKeys.has(key)
+        )) ?? null
+      : null;
     const fallbackKey = deletingActive
       ? (
-          topicSessions.slice(currentIndex + 1).find((session) => (
+          siblingFallbackKey
+          ?? topicSessions.slice(currentIndex + 1).find((session) => (
             !deletingKeys.has(session.key)
           ))?.key
           ?? topicSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => (
@@ -2191,7 +2198,7 @@ function Shell({
     } catch (e) {
       console.error("Failed to delete session", e);
     }
-  }, [pendingDelete, deleteChat, activeKey, navigate, topicSessions]);
+  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());

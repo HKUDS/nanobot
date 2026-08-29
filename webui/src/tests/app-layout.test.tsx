@@ -3414,6 +3414,23 @@ describe("App layout", () => {
       expect(restoredGrid).toHaveAttribute("data-layout", "rows");
     });
 
+    const alphaGroupButton = within(sidebar).getByRole("button", {
+      name: "Group: Alpha",
+    });
+    const alphaGroup = alphaGroupButton.closest("[data-sidebar-tab-group]") as HTMLElement;
+    fireEvent.pointerDown(within(alphaGroup).getByLabelText("Topic actions for Alpha"), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const renameDialog = await screen.findByRole("dialog", { name: "Rename group" });
+    fireEvent.change(within(renameDialog).getByPlaceholderText("Group name"), {
+      target: { value: "Research" },
+    });
+    fireEvent.click(within(renameDialog).getByRole("button", { name: "Save" }));
+    expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+
     fireEvent.pointerDown(within(sidebar).getByRole("button", {
       name: "New topic pane actions",
     }), { button: 0, ctrlKey: false });
@@ -3421,8 +3438,92 @@ describe("App layout", () => {
       name: "Remove",
     }));
     await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(1));
+    const researchGroup = within(sidebar).getByRole("button", {
+      name: "Group: Research",
+    }).closest("[data-sidebar-tab-group]") as HTMLElement;
+    expect(within(researchGroup).getByRole("list", { name: "Panes in Research" }))
+      .toBeInTheDocument();
+    expect(within(researchGroup).getByRole("button", { name: "Alpha" }))
+      .toBeInTheDocument();
     expect(within(sidebar).getAllByRole("button", { name: "New topic" })).toHaveLength(2);
   });
+
+  it("keeps a named group and its remaining pane active after deleting a pane", async () => {
+    mockSessions = [
+      {
+        key: "websocket:new-pane",
+        channel: "websocket",
+        chatId: "new-pane",
+        createdAt: "2026-08-05T12:00:00Z",
+        updatedAt: "2026-08-05T12:00:00Z",
+        title: "New topic",
+        preview: "",
+      },
+      {
+        key: "websocket:unrelated",
+        channel: "websocket",
+        chatId: "unrelated",
+        createdAt: "2026-08-05T11:00:00Z",
+        updatedAt: "2026-08-05T11:00:00Z",
+        title: "Unrelated",
+        preview: "",
+      },
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Alpha",
+        preview: "",
+      },
+    ];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Anew-pane");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => ({
+            workbench: {
+              version: 1,
+              tabs: {
+                "tab:websocket:alpha": {
+                  explicit: false,
+                  title: "Research",
+                  paneKeys: ["websocket:alpha", "websocket:new-pane"],
+                  layoutPaneKeys: ["websocket:alpha", "websocket:new-pane"],
+                  layout: "columns",
+                  splitRatios: [],
+                },
+              },
+            },
+          }),
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "New topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(await screen.findByText("Delete this topic?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledWith("websocket:new-pane"));
+    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Aalpha"));
+    expect(within(sidebar).getByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
+    expect(screen.getByTestId("pane-grid").firstElementChild)
+      .toHaveAttribute("aria-label", "Alpha");
+  }, 15_000);
 
   it("opens search from the keyboard shortcut", async () => {
     mockSessions = [
