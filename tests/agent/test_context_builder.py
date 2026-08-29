@@ -7,10 +7,10 @@ import pytest
 from nanobot.agent.context import ContextBuilder
 from nanobot.runtime_context import RuntimeContextBlock
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 def _builder(tmp_path: Path, **kw) -> ContextBuilder:
     return ContextBuilder(workspace=tmp_path, **kw)
 
