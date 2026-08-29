@@ -943,6 +943,61 @@ class LLMProvider(ABC):
         """
         pass
 
+    @staticmethod
+    def _error_response_from_exception(exc: Exception) -> LLMResponse:
+        """Convert an unexpected exception while retaining retry metadata."""
+        error_names = tuple(cls.__name__.lower() for cls in type(exc).__mro__)
+        error_kind: str | None = None
+        error_should_retry: bool | None = None
+        if any("timeout" in name for name in error_names):
+            error_kind = "timeout"
+            error_should_retry = True
+        elif any(
+            token in name
+            for name in error_names
+            for token in ("connect", "connection", "network", "protocol", "transport")
+        ):
+            error_kind = "connection"
+            error_should_retry = True
+        elif any(
+            "ratelimit" in name or "throttl" in name
+            for name in error_names
+        ):
+            error_kind = "rate_limit"
+            error_should_retry = True
+        elif any(
+            "server" in name or "internal" in name
+            for name in error_names
+        ):
+            error_kind = "server_error"
+            error_should_retry = True
+        elif any(
+            token in name
+            for name in error_names
+            for token in ("auth", "credential", "permissiondenied", "unauthor")
+        ):
+            error_kind = "authentication"
+
+        response = getattr(exc, "response", None)
+        raw_status = getattr(exc, "status_code", None)
+        if raw_status is None and response is not None:
+            raw_status = getattr(response, "status_code", None)
+        try:
+            error_status_code = int(raw_status) if raw_status is not None else None
+        except (TypeError, ValueError):
+            error_status_code = None
+
+        detail = str(exc).strip() or type(exc).__name__
+        return LLMResponse(
+            content=f"Error calling LLM: {detail}",
+            finish_reason="error",
+            error_status_code=error_status_code,
+            error_kind=error_kind,
+            error_type=getattr(exc, "error_type", None),
+            error_code=getattr(exc, "error_code", None),
+            error_should_retry=error_should_retry,
+        )
+
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()
@@ -1226,7 +1281,7 @@ class LLMProvider(ABC):
             )
             raise
         except Exception as exc:
-            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = self._error_response_from_exception(exc)
         return self._observe_llm_call(
             response,
             kwargs,
@@ -1368,7 +1423,7 @@ class LLMProvider(ABC):
             )
             raise
         except Exception as exc:
-            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            response = self._error_response_from_exception(exc)
         return self._observe_llm_call(
             _attach_stream_timing(response),
             kwargs,

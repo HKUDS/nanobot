@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
-import httpx
 from loguru import logger
 
 from nanobot.providers.base import (
@@ -622,45 +621,13 @@ class FallbackProvider(LLMProvider):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            error_name = type(exc).__name__.lower()
-            detail = str(exc).strip() or type(exc).__name__
-            detail_lower = detail.lower()
-            error_kind: str | None = None
-            error_should_retry: bool | None = None
-            if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-                error_kind = "timeout"
-                error_should_retry = True
-            elif isinstance(exc, (httpx.NetworkError, httpx.TransportError, ConnectionError)):
-                error_kind = "connection"
-                error_should_retry = True
-            elif any(
-                token in error_name
-                for token in ("auth", "credential", "permissiondenied", "unauthor")
-            ) or any(token in detail_lower for token in _AUTHENTICATION_ERROR_TOKENS):
-                error_kind = "authentication"
-            elif "ratelimit" in error_name or "throttl" in error_name:
-                error_kind = "rate_limit"
-                error_should_retry = True
-            elif "server" in error_name or "internal" in error_name:
-                error_kind = "server_error"
-                error_should_retry = True
-
-            response = getattr(exc, "response", None)
-            raw_status = getattr(exc, "status_code", None)
-            if raw_status is None and response is not None:
-                raw_status = getattr(response, "status_code", None)
-            try:
-                error_status_code = int(raw_status) if raw_status is not None else None
-            except (TypeError, ValueError):
-                error_status_code = None
-
-            return LLMResponse(
-                content=f"Error calling LLM: {detail}",
-                finish_reason="error",
-                error_status_code=error_status_code,
-                error_kind=error_kind,
-                error_should_retry=error_should_retry,
-            ), exc
+            response = LLMProvider._error_response_from_exception(exc)
+            if response.error_kind is None and any(
+                token in (str(exc).strip() or type(exc).__name__).lower()
+                for token in _AUTHENTICATION_ERROR_TOKENS
+            ):
+                response.error_kind = "authentication"
+            return response, exc
 
     async def _notify_fallback_model(self, model: str) -> None:
         if self._fallback_model_observer is None:

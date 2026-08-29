@@ -353,7 +353,7 @@ class _RaisingProvider(LLMProvider):
     """Provider whose chat/chat_stream raise, like an auth/setup failure."""
 
     def __init__(self, name: str = "raiser", exc: BaseException | None = None):
-        super().__init__()
+        super().__init__(provider_name=name)
         self.name = name
         self._exc = exc if exc is not None else RuntimeError("GitHub Copilot is not logged in.")
 
@@ -378,8 +378,8 @@ class _StreamingThenRaisingProvider(_RaisingProvider):
 class TestFallbackWhenPrimaryRaises:
     @pytest.mark.parametrize(
         "exc",
-        [TimeoutError(), httpx.ReadTimeout(""), httpx.ConnectError("")],
-        ids=["asyncio-timeout", "httpx-timeout", "connection"],
+        [TimeoutError(), httpx.ReadTimeout(""), httpx.ConnectError(""), httpx.ReadError("")],
+        ids=["asyncio-timeout", "httpx-timeout", "connection", "httpx-network-error"],
     )
     @pytest.mark.asyncio
     async def test_transient_exception_triggers_fallback(self, exc: Exception) -> None:
@@ -419,6 +419,30 @@ class TestFallbackWhenPrimaryRaises:
         )
 
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True], ids=["chat", "stream"])
+    async def test_retry_entry_point_preserves_transient_exception_metadata(
+        self,
+        stream: bool,
+    ) -> None:
+        """A retry wrapper must not hide an empty transient exception from failover."""
+        primary = _RaisingProvider("primary", TimeoutError())
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        retry = fb.chat_stream_with_retry if stream else fb.chat_with_retry
+        result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
