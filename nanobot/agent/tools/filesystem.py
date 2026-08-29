@@ -904,9 +904,10 @@ class EditFileTool(_FsTool):
             "old_text and new_text must be different. Use this for narrow text substitutions "
             "with old_text copied from read_file. For multi-file, structural, "
             "or generated code edits, prefer apply_patch. If old_text matches "
-            "multiple times, provide more context or set occurrence, line_hint, "
-            "replace_all, and expected_replacements. When editing from numbered "
-            "read_file output, set line_hint to the exact target line. "
+            "multiple times, provide more context or choose one selector: occurrence, "
+            "line_hint, or replace_all=true. These selectors are mutually exclusive; "
+            "expected_replacements can independently verify the match count. When editing "
+            "from numbered read_file output, set line_hint to the exact target line. "
             "Shows closest-match diagnostics on failure."
         )
 
