@@ -12,14 +12,16 @@ import httpx
 import pytest
 
 from nanobot.providers.oauth_model_catalog import (
-    DEFAULT_OPENAI_CODEX_MODELS_URL,
-    DEFAULT_XAI_GROK_MODELS_URL,
-    OPENAI_CODEX_CATALOG_CLIENT_VERSION,
     OAuthModelCatalog,
-    OAuthModelInfo,
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
 )
+from nanobot.providers.openai_codex_provider import (
+    DEFAULT_OPENAI_CODEX_MODELS_URL,
+    OPENAI_CODEX_CATALOG_CLIENT_VERSION,
+)
+from nanobot.providers.registry import ProviderModelSpec
+from nanobot.providers.xai_grok_provider import DEFAULT_XAI_GROK_MODELS_URL
 from nanobot.providers.xai_oauth import XAIToken
 
 
@@ -32,8 +34,8 @@ def _clear_oauth_catalogs() -> None:
         invalidate_oauth_model_catalog(provider)
 
 
-def _fallback_model() -> OAuthModelInfo:
-    return OAuthModelInfo(id="provider/fallback", label="Fallback")
+def _fallback_model() -> ProviderModelSpec:
+    return ProviderModelSpec(id="provider/fallback", label="Fallback")
 
 
 def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
@@ -42,9 +44,13 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
 ) -> None:
     original_client = httpx.Client
     captured: dict[str, object] = {}
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"sub": "user-42", "email": "user@example.com"}).encode()
-    ).decode().rstrip("=")
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps({"sub": "user-42", "email": "user@example.com"}).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
     token = XAIToken(
         access=f"header.{payload}.signature",
         refresh="refresh-token",
@@ -93,14 +99,18 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
         )
 
     monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._xai_oauth_storage_path",
+        "nanobot.providers.xai_grok_provider.get_xai_oauth_storage_path",
         lambda: tmp_path / "auth" / "xai.json",
     )
     monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._xai_oauth_token",
-        lambda _proxy: token,
+        "nanobot.providers.xai_grok_provider.get_xai_oauth_login_status",
+        lambda: token,
     )
-    monkeypatch.setattr("nanobot.providers.oauth_model_catalog.httpx.Client", fake_client)
+    monkeypatch.setattr(
+        "nanobot.providers.xai_grok_provider.get_xai_oauth_token",
+        lambda **_kwargs: token,
+    )
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider.httpx.Client", fake_client)
 
     catalog = get_oauth_model_catalog("xai_grok")
 
@@ -181,19 +191,22 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
             follow_redirects=kwargs["follow_redirects"],
         )
 
+    class Storage:
+        def load(self) -> SimpleNamespace:
+            return SimpleNamespace(access="secret", account_id="account-42")
+
+        def get_token_path(self) -> Path:
+            return tmp_path / "auth" / "openai-codex.json"
+
     monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._openai_codex_storage_path",
-        lambda: tmp_path / "auth" / "openai-codex.json",
+        "nanobot.providers.openai_codex_provider.FileTokenStorage",
+        lambda **_kwargs: Storage(),
     )
     monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._openai_codex_account_key",
-        lambda: "account-key",
-    )
-    monkeypatch.setattr(
-        "oauth_cli_kit.get_token",
+        "nanobot.providers.openai_codex_provider.get_codex_token",
         lambda **_kwargs: SimpleNamespace(access="secret", account_id="account-42"),
     )
-    monkeypatch.setattr("nanobot.providers.oauth_model_catalog.httpx.Client", fake_client)
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.httpx.Client", fake_client)
 
     catalog = get_oauth_model_catalog("openai_codex")
 
@@ -277,22 +290,10 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
             return tmp_path / "auth" / "github-copilot.json"
 
     monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._github_copilot_storage_path",
-        lambda: tmp_path / "auth" / "github-copilot.json",
-    )
-    monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._github_copilot_account_key",
-        lambda: "account-key",
-    )
-    monkeypatch.setattr(
-        "nanobot.providers.oauth_model_catalog._github_copilot_models_url",
-        lambda: "https://api.githubcopilot.com/models",
-    )
-    monkeypatch.setattr(
         "nanobot.providers.github_copilot_provider.get_storage",
         lambda: Storage(),
     )
-    monkeypatch.setattr("nanobot.providers.oauth_model_catalog.httpx.Client", fake_client)
+    monkeypatch.setattr("nanobot.providers.github_copilot_provider.httpx.Client", fake_client)
 
     catalog = get_oauth_model_catalog("github_copilot")
 
@@ -311,12 +312,12 @@ def test_catalog_single_flights_concurrent_refreshes() -> None:
     calls_lock = threading.Lock()
     barrier = threading.Barrier(8)
 
-    def fetch(_proxy: str | None) -> tuple[OAuthModelInfo, ...]:
+    def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
         nonlocal calls
         with calls_lock:
             calls += 1
         time.sleep(0.05)
-        return (OAuthModelInfo(id="provider/remote", label="Remote"),)
+        return (ProviderModelSpec(id="provider/remote", label="Remote"),)
 
     catalog = OAuthModelCatalog(fallback_models=(_fallback_model(),), fetch=fetch)
 
@@ -338,14 +339,14 @@ def test_catalog_invalidation_discards_an_inflight_account_refresh() -> None:
     release = threading.Event()
     calls = 0
 
-    def fetch(_proxy: str | None) -> tuple[OAuthModelInfo, ...]:
+    def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
         nonlocal calls
         calls += 1
         if calls == 1:
             started.set()
             assert release.wait(timeout=2)
-            return (OAuthModelInfo(id="provider/old-account", label="Old"),)
-        return (OAuthModelInfo(id="provider/new-account", label="New"),)
+            return (ProviderModelSpec(id="provider/old-account", label="Old"),)
+        return (ProviderModelSpec(id="provider/new-account", label="New"),)
 
     catalog = OAuthModelCatalog(fallback_models=(_fallback_model(),), fetch=fetch)
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -364,12 +365,12 @@ def test_catalog_returns_stale_then_negative_caches_refresh_failure() -> None:
     now = [0.0]
     calls = 0
 
-    def fetch(_proxy: str | None) -> tuple[OAuthModelInfo, ...]:
+    def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
         nonlocal calls
         calls += 1
         if calls > 1:
             raise httpx.ConnectError("offline")
-        return (OAuthModelInfo(id="provider/remote", label="Remote"),)
+        return (ProviderModelSpec(id="provider/remote", label="Remote"),)
 
     catalog = OAuthModelCatalog(
         fallback_models=(_fallback_model(),),
@@ -421,7 +422,7 @@ def test_catalog_returns_stale_then_negative_caches_refresh_failure() -> None:
 def test_catalog_falls_back_for_remote_failures(failure: Exception) -> None:
     calls = 0
 
-    def fetch(_proxy: str | None) -> tuple[OAuthModelInfo, ...]:
+    def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
         nonlocal calls
         calls += 1
         raise failure
@@ -444,10 +445,10 @@ def test_catalog_falls_back_for_remote_failures(failure: Exception) -> None:
 def test_catalog_treats_empty_remote_list_as_failure_and_can_be_invalidated() -> None:
     calls = 0
 
-    def fetch(_proxy: str | None) -> tuple[OAuthModelInfo, ...]:
+    def fetch(_proxy: str | None) -> tuple[ProviderModelSpec, ...]:
         nonlocal calls
         calls += 1
-        return () if calls == 1 else (OAuthModelInfo(id="provider/new", label="New"),)
+        return () if calls == 1 else (ProviderModelSpec(id="provider/new", label="New"),)
 
     catalog = OAuthModelCatalog(
         fallback_models=(_fallback_model(),),

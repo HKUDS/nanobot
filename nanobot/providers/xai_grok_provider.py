@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import re
 import uuid
@@ -20,21 +22,23 @@ from nanobot.providers.base import (
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
-from nanobot.providers.oauth_model_catalog import (
-    DEFAULT_XAI_GROK_MODEL,
-    get_oauth_model_catalog,
-)
+from nanobot.providers.oauth_model_catalog import OAuthModelCatalog, OAuthModelCatalogSnapshot
 from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
     convert_tools,
 )
+from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.xai_oauth import (
     XAI_CLIENT_VERSION,
+    get_xai_oauth_login_status,
+    get_xai_oauth_storage_path,
     get_xai_oauth_token,
 )
 
+DEFAULT_XAI_GROK_MODEL = "xai-grok/grok-4.6"
 DEFAULT_XAI_GROK_URL = "https://cli-chat-proxy.grok.com/v1/responses"
+DEFAULT_XAI_GROK_MODELS_URL = "https://cli-chat-proxy.grok.com/v1/models"
 _HOSTED_SEARCH_MAX_TURNS = 5
 _MAX_ERROR_BODY_CHARS = 1000
 _SENSITIVE_ERROR_KEYS = {
@@ -81,9 +85,8 @@ class XAIGrokProvider(LLMProvider):
 
     async def _supports_backend_search(self, model: str) -> bool:
         catalog = await asyncio.to_thread(
-            get_oauth_model_catalog,
-            "xai_grok",
-            proxy=self.proxy,
+            get_xai_grok_model_catalog,
+            self.proxy,
         )
         if catalog.message:
             logger.warning(
@@ -115,12 +118,8 @@ class XAIGrokProvider(LLMProvider):
             token = await asyncio.to_thread(get_xai_oauth_token, proxy=self.proxy)
             configured_tools = self._extra_body.get("tools")
             tools_are_explicit = "tools" in self._extra_body
-            configured_hosted_search = (
-                isinstance(configured_tools, list)
-                and any(
-                    _is_hosted_x_search_tool(tool)
-                    for tool in cast(list[object], configured_tools)
-                )
+            configured_hosted_search = isinstance(configured_tools, list) and any(
+                _is_hosted_x_search_tool(tool) for tool in cast(list[object], configured_tools)
             )
             supports_backend_search = False
             if not tools_are_explicit:
@@ -159,11 +158,9 @@ class XAIGrokProvider(LLMProvider):
                 # stopping after a single unsuccessful lookup.
                 body["max_turns"] = _HOSTED_SEARCH_MAX_TURNS
             if self._extra_body:
-                body.update({
-                    key: value
-                    for key, value in self._extra_body.items()
-                    if key != "tools"
-                })
+                body.update(
+                    {key: value for key, value in self._extra_body.items() if key != "tools"}
+                )
                 if tools_are_explicit and not isinstance(configured_tools, list):
                     body["tools"] = configured_tools
 
@@ -198,18 +195,14 @@ class XAIGrokProvider(LLMProvider):
                     stage = "xai_request_after_oauth_refresh"
                 except _XAIIncompleteHostedToolError as exc:
                     retry_usage = _combine_usage(retry_usage, exc.usage)
-                    cannot_recover_stream = (
-                        exc.stream_output_emitted
-                        and on_stream_recover is None
-                    )
+                    cannot_recover_stream = exc.stream_output_emitted and on_stream_recover is None
                     if hosted_tool_retried or cannot_recover_stream:
                         exc.usage = retry_usage
                         raise
                     hosted_tool_retried = True
                     stage = "hosted_tool_recovery"
                     logger.warning(
-                        "xAI response ended with unfinished hosted tool(s): {}; "
-                        "retrying once",
+                        "xAI response ended with unfinished hosted tool(s): {}; retrying once",
                         ", ".join(exc.tool_names),
                     )
                     if on_stream_recover is not None:
@@ -359,13 +352,9 @@ class _XAIIncompleteHostedToolError(RuntimeError):
         usage: LLMUsage | None,
         stream_output_emitted: bool = False,
     ) -> None:
-        names = [
-            str(event.get("name") or "hosted_tool")
-            for event in active_tools
-        ]
+        names = [str(event.get("name") or "hosted_tool") for event in active_tools]
         super().__init__(
-            "xAI ended the response before its hosted tool completed: "
-            + ", ".join(names)
+            "xAI ended the response before its hosted tool completed: " + ", ".join(names)
         )
         self.tool_names = tuple(names)
         self.usage = usage
@@ -427,9 +416,7 @@ async def _request_xai(
                 raise _build_xai_http_error(response.status_code, response.headers, raw)
             result = await consume_sse_with_reasoning(
                 response,
-                on_content_delta=(
-                    _forward_content_delta if on_content_delta is not None else None
-                ),
+                on_content_delta=(_forward_content_delta if on_content_delta is not None else None),
                 # Always observe tool events so protocol validation also works for
                 # non-streaming callers that did not request UI progress callbacks.
                 on_tool_call_delta=_track_and_forward_tool_event,
@@ -441,12 +428,14 @@ async def _request_xai(
             if result[2] != "error" and active_hosted_tools:
                 active = list(active_hosted_tools.values())
                 for event in active:
-                    await _track_and_forward_tool_event({
-                        **event,
-                        "phase": "error",
-                        "result": None,
-                        "error": "xAI ended the response before this hosted tool completed.",
-                    })
+                    await _track_and_forward_tool_event(
+                        {
+                            **event,
+                            "phase": "error",
+                            "result": None,
+                            "error": "xAI ended the response before this hosted tool completed.",
+                        }
+                    )
                 raise _XAIIncompleteHostedToolError(
                     active,
                     usage=result[3],
@@ -466,9 +455,7 @@ def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
             "phase": "start",
             "call_id": str(call_id),
             "name": "x_search",
-            "arguments": _xai_hosted_tool_arguments(
-                event.get("input", event.get("arguments"))
-            ),
+            "arguments": _xai_hosted_tool_arguments(event.get("input", event.get("arguments"))),
             "result": None,
         }
 
@@ -491,9 +478,7 @@ def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
             "name": "x_search",
             "arguments": _xai_hosted_tool_arguments(item.get("action")),
             "result": (
-                {"status": str(item.get("status") or "completed")}
-                if phase == "end"
-                else None
+                {"status": str(item.get("status") or "completed")} if phase == "end" else None
             ),
         }
     if event_type != "response.output_item.done" or item_type != "custom_tool_call":
@@ -509,9 +494,7 @@ def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
         "phase": "end",
         "call_id": str(call_id),
         "name": "x_search",
-        "arguments": _xai_hosted_tool_arguments(
-            item.get("input", item.get("arguments"))
-        ),
+        "arguments": _xai_hosted_tool_arguments(item.get("input", item.get("arguments"))),
         # Keep the useful search subtype, but do not persist large hosted results
         # in WebUI activity messages. The model answer already carries citations.
         "result": {"name": tool_name},
@@ -662,3 +645,209 @@ def _should_retry_status(
             )
         )
     return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500  # pyright: ignore[reportPrivateUsage]
+
+
+def get_xai_grok_model_catalog(proxy: str | None = None) -> OAuthModelCatalogSnapshot:
+    token = get_xai_oauth_login_status()
+    account_key = _catalog_account_key(getattr(token, "account_id", None))
+    cache_key = f"{get_xai_oauth_storage_path()}\0{account_key}\0{proxy or ''}"
+    return _XAI_GROK_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
+
+
+def invalidate_xai_grok_model_catalog() -> None:
+    _XAI_GROK_MODEL_CATALOG.invalidate()
+
+
+def _fetch_xai_grok_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
+    token = get_xai_oauth_token(proxy=proxy)
+    client_kwargs: dict[str, Any] = {"timeout": 10.0, "follow_redirects": False}
+    if proxy:
+        client_kwargs.update(proxy=proxy, trust_env=False)
+    with httpx.Client(**client_kwargs) as client:
+        response = client.get(
+            DEFAULT_XAI_GROK_MODELS_URL,
+            headers=_build_xai_model_headers(token.access, token.account_id),
+        )
+    response.raise_for_status()
+    return _parse_xai_grok_models(response.json())
+
+
+def _parse_xai_grok_models(payload: Any) -> tuple[ProviderModelSpec, ...]:
+    if isinstance(payload, dict):
+        payload_mapping = cast(dict[str, Any], payload)
+        rows: object = payload_mapping.get("data")
+        if not isinstance(rows, list):
+            rows = payload_mapping.get("models")
+    else:
+        rows = payload
+    if not isinstance(rows, list):
+        return ()
+
+    fallback_models = _oauth_fallback_models("xai_grok")
+    fallback_by_id = {model.id.split("/", 1)[-1]: model for model in fallback_models}
+    models: list[ProviderModelSpec] = []
+    seen: set[str] = set()
+    for value in cast(list[object], rows):
+        if not isinstance(value, dict):
+            continue
+        row = cast(dict[str, Any], value)
+        meta = _catalog_mapping(row.get("_meta"))
+        raw_id = next(
+            (
+                candidate.strip()
+                for candidate in (
+                    row.get("id"),
+                    row.get("model"),
+                    row.get("modelId"),
+                    row.get("name"),
+                    meta.get("id"),
+                    meta.get("model"),
+                    meta.get("modelId"),
+                )
+                if isinstance(candidate, str) and candidate.strip()
+            ),
+            None,
+        )
+        if raw_id is None:
+            continue
+        wire_id = raw_id.split("/", 1)[-1]
+        if wire_id in seen:
+            continue
+        seen.add(wire_id)
+        fallback = fallback_by_id.get(wire_id)
+        label = _catalog_first_text(row, "display_name", "label", "name") or _catalog_first_text(
+            meta,
+            "display_name",
+            "label",
+            "name",
+        )
+        if not label or label == raw_id:
+            label = fallback.label if fallback is not None else wire_id
+        models.append(
+            ProviderModelSpec(
+                id=f"xai-grok/{wire_id}",
+                label=label,
+                description=(
+                    _catalog_first_text(row, "description")
+                    or _catalog_first_text(meta, "description")
+                    or (fallback.description if fallback is not None else "")
+                ),
+                owned_by=(
+                    _catalog_first_text(row, "owned_by", "owner", "organization")
+                    or _catalog_first_text(meta, "owned_by", "owner", "organization")
+                    or (fallback.owned_by if fallback is not None else "xAI")
+                ),
+                context_window=(
+                    _catalog_positive_int(row, "context_window", "context_length")
+                    or _catalog_positive_int(meta, "context_window", "context_length")
+                    or (fallback.context_window if fallback is not None else None)
+                ),
+                reasoning_efforts=_catalog_reasoning_efforts(
+                    row.get("reasoning_efforts", meta.get("reasoning_efforts"))
+                ),
+                supports_backend_search=_catalog_bool_field(
+                    row,
+                    "supports_backend_search",
+                    "supportsBackendSearch",
+                ),
+            )
+        )
+    return tuple(models)
+
+
+def _build_xai_model_headers(access_token: str, account_id: str | None) -> dict[str, str]:
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-grok-client-version": XAI_CLIENT_VERSION,
+        "x-grok-client-identifier": "nanobot",
+        "x-grok-client-mode": "headless",
+        "User-Agent": f"nanobot/{__version__} (python)",
+        "accept": "application/json",
+    }
+    claims = _decode_access_token_claims(access_token)
+    user_id = claims.get("sub")
+    if claims.get("principal_type") == "Team":
+        user_id = claims.get("principal_id") or user_id
+    if isinstance(user_id, str) and user_id:
+        headers["x-userid"] = user_id
+    email = claims.get("email")
+    if not isinstance(email, str) or "@" not in email:
+        email = account_id if account_id and "@" in account_id else None
+    if email:
+        headers["x-email"] = email
+    return headers
+
+
+def _decode_access_token_claims(token: str) -> dict[str, Any]:
+    parts = token.split(".")
+    if len(parts) < 2 or not parts[1]:
+        return {}
+    try:
+        decoded = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        claims = json.loads(decoded)
+    except (ValueError, TypeError):
+        return {}
+    return cast(dict[str, Any], claims) if isinstance(claims, dict) else {}
+
+
+def _oauth_fallback_models(provider_name: str) -> tuple[ProviderModelSpec, ...]:
+    spec = find_by_name(provider_name)
+    assert spec is not None
+    return spec.builtin_models
+
+
+def _catalog_account_key(account_id: object) -> str:
+    value = account_id if isinstance(account_id, str) else ""
+    return hashlib.sha256(value.encode()).hexdigest()[:16] if value else "anonymous"
+
+
+def _catalog_mapping(value: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
+def _catalog_first_text(row: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _catalog_positive_int(row: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return int(value)
+    return None
+
+
+def _catalog_bool_field(row: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, bool):
+            return value
+    meta = row.get("_meta")
+    return _catalog_bool_field(_catalog_mapping(meta), *keys) if isinstance(meta, dict) else False
+
+
+def _catalog_reasoning_efforts(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    efforts: list[str] = []
+    for item in cast(list[object], value):
+        if isinstance(item, str):
+            effort = item.strip()
+        elif isinstance(item, dict):
+            effort = _catalog_first_text(cast(dict[str, Any], item), "effort", "value", "id")
+        else:
+            effort = ""
+        if effort and effort not in efforts:
+            efforts.append(effort)
+    return tuple(efforts)
+
+
+_XAI_GROK_MODEL_CATALOG = OAuthModelCatalog(
+    fallback_models=_oauth_fallback_models("xai_grok"),
+    fetch=_fetch_xai_grok_models,
+)

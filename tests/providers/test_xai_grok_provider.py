@@ -11,8 +11,8 @@ import pytest
 from nanobot.config.schema import Config
 from nanobot.providers.base import LLMUsage
 from nanobot.providers.factory import make_provider
-from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot, OAuthModelInfo
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
+from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.xai_grok_provider import (
     DEFAULT_XAI_GROK_MODEL,
     XAIGrokProvider,
@@ -51,12 +51,12 @@ def _mock_model_capabilities(
     def fake_catalog(*_args, **_kwargs):
         return OAuthModelCatalogSnapshot(
             models=(
-                OAuthModelInfo(
+                ProviderModelSpec(
                     id="xai-grok/grok-4.5",
                     label="Grok 4.5",
                     supports_backend_search=supports_backend_search,
                 ),
-                OAuthModelInfo(
+                ProviderModelSpec(
                     id="xai-grok/grok-4.6",
                     label="Grok 4.6",
                     supports_backend_search=supports_backend_search,
@@ -67,7 +67,7 @@ def _mock_model_capabilities(
         )
 
     monkeypatch.setattr(
-        "nanobot.providers.xai_grok_provider.get_oauth_model_catalog",
+        "nanobot.providers.xai_grok_provider.get_xai_grok_model_catalog",
         fake_catalog,
     )
 
@@ -172,7 +172,7 @@ async def test_explicit_parameterized_x_search_is_preserved_without_catalog_look
         return "ok", [], "stop", {}, None
 
     monkeypatch.setattr(
-        "nanobot.providers.xai_grok_provider.get_oauth_model_catalog",
+        "nanobot.providers.xai_grok_provider.get_xai_grok_model_catalog",
         unexpected_catalog_lookup,
     )
     monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
@@ -181,10 +181,12 @@ async def test_explicit_parameterized_x_search_is_preserved_without_catalog_look
         "allowed_x_handles": ["nanobot_ai"],
         "from_date": "2026-01-01",
     }
-    provider = XAIGrokProvider(extra_body={
-        "parallel_tool_calls": False,
-        "tools": [hosted_tool, {"type": "code_interpreter", "container": "auto"}],
-    })
+    provider = XAIGrokProvider(
+        extra_body={
+            "parallel_tool_calls": False,
+            "tools": [hosted_tool, {"type": "code_interpreter", "container": "auto"}],
+        }
+    )
 
     response = await provider.chat(
         [{"role": "user", "content": "search"}],
@@ -235,7 +237,7 @@ async def test_explicit_empty_tools_disables_catalog_lookup_and_hosted_tool(monk
         return "ok", [], "stop", {}, None
 
     monkeypatch.setattr(
-        "nanobot.providers.xai_grok_provider.get_oauth_model_catalog",
+        "nanobot.providers.xai_grok_provider.get_xai_grok_model_catalog",
         unexpected_catalog_lookup,
     )
     monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
@@ -243,23 +245,27 @@ async def test_explicit_empty_tools_disables_catalog_lookup_and_hosted_tool(monk
 
     response = await provider.chat(
         [{"role": "user", "content": "hello"}],
-        tools=[{
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read a file",
-                "parameters": {"type": "object"},
-            },
-        }],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
     )
 
     assert response.content == "ok"
-    assert bodies[0]["tools"] == [{
-        "type": "function",
-        "name": "read_file",
-        "description": "Read a file",
-        "parameters": {"type": "object"},
-    }]
+    assert bodies[0]["tools"] == [
+        {
+            "type": "function",
+            "name": "read_file",
+            "description": "Read a file",
+            "parameters": {"type": "object"},
+        }
+    ]
     assert "max_turns" not in bodies[0]
 
 

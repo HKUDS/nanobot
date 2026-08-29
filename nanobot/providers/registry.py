@@ -17,8 +17,6 @@ from typing import Any
 
 from pydantic.alias_generators import to_snake
 
-from nanobot.providers.oauth_model_catalog import curated_oauth_models
-
 
 @dataclass(frozen=True)
 class ProviderModelSpec:
@@ -27,7 +25,10 @@ class ProviderModelSpec:
     id: str
     label: str = ""
     description: str = ""
+    owned_by: str = ""
     context_window: int | None = None
+    reasoning_efforts: tuple[str, ...] = ()
+    supports_backend_search: bool = False
 
 
 @dataclass(frozen=True)
@@ -152,7 +153,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         is_direct=True,
     ),
-
     # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
     ProviderSpec(
         name="azure_openai",
@@ -315,7 +315,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="siliconflow",
         default_api_base="https://api.siliconflow.cn/v1",
     ),
-
     # Novita AI: OpenAI-compatible gateway for hosted model APIs.
     ProviderSpec(
         name="novita",
@@ -327,7 +326,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="novita",
         default_api_base="https://api.novita.ai/openai",
     ),
-
     # VolcEngine (火山引擎): OpenAI-compatible gateway, pay-per-use models
     ProviderSpec(
         name="volcengine",
@@ -341,7 +339,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
         supports_max_completion_tokens=True,
     ),
-
     # VolcEngine Coding Plan (火山引擎 Coding Plan): same key as volcengine
     ProviderSpec(
         name="volcengine_coding_plan",
@@ -355,7 +352,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
         supports_max_completion_tokens=True,
     ),
-
     # BytePlus: VolcEngine international, pay-per-use models
     ProviderSpec(
         name="byteplus",
@@ -369,7 +365,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
         thinking_style="thinking_type",
     ),
-
     # BytePlus Coding Plan: same key as byteplus
     ProviderSpec(
         name="byteplus_coding_plan",
@@ -382,8 +377,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
         thinking_style="thinking_type",
     ),
-
-
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: native Anthropic SDK
     ProviderSpec(
@@ -410,14 +403,56 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="",
         display_name="OpenAI Codex",
         model_catalog="hybrid",
-        builtin_models=tuple(
+        builtin_models=(
             ProviderModelSpec(
-                id=model.id,
-                label=model.label,
-                description=model.description,
-                context_window=model.context_window,
-            )
-            for model in curated_oauth_models("openai_codex")
+                id="openai-codex/gpt-5.6-sol",
+                label="GPT-5.6-Sol",
+                description="Latest frontier agentic coding model.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-terra",
+                label="GPT-5.6-Terra",
+                description="Balanced agentic coding model for everyday work.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-luna",
+                label="GPT-5.6-Luna",
+                description="Fast and affordable agentic coding model.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.5",
+                label="GPT-5.5",
+                description="Frontier model for complex coding, research, and real-world work.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.4",
+                label="GPT-5.4",
+                description="Strong model for everyday coding.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.4-mini",
+                label="GPT-5.4-Mini",
+                description="Small, fast, and cost-efficient model for simpler coding tasks.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.3-codex-spark",
+                label="GPT-5.3-Codex-Spark",
+                description="Ultra-fast coding model.",
+                context_window=128_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
+            ),
         ),
         backend="openai_codex",
         detect_by_base_keyword="codex",
@@ -431,14 +466,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="",
         display_name="xAI Grok",
         model_catalog="hybrid",
-        builtin_models=tuple(
+        builtin_models=(
             ProviderModelSpec(
-                id=model.id,
-                label=model.label,
-                description=model.description,
-                context_window=model.context_window,
-            )
-            for model in curated_oauth_models("xai_grok")
+                id="xai-grok/grok-4.6",
+                label="Grok 4.6",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500_000,
+            ),
+            ProviderModelSpec(
+                id="xai-grok/grok-4.5",
+                label="Grok 4.5",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500_000,
+            ),
         ),
         backend="xai_grok",
         default_api_base="https://cli-chat-proxy.grok.com/v1",
@@ -451,14 +491,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="",
         display_name="Github Copilot",
         model_catalog="hybrid",
-        builtin_models=tuple(
+        builtin_models=(
             ProviderModelSpec(
-                id=model.id,
-                label=model.label,
-                description=model.description,
-                context_window=model.context_window,
-            )
-            for model in curated_oauth_models("github_copilot")
+                id="github-copilot/gpt-4.1",
+                label="GPT-4.1",
+                description="GitHub Copilot chat model.",
+            ),
         ),
         backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
@@ -730,7 +768,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="QIANFAN_API_KEY",
         display_name="Qianfan",
         backend="openai_compat",
-        default_api_base="https://qianfan.baidubce.com/v2"
+        default_api_base="https://qianfan.baidubce.com/v2",
     ),
 )
 
