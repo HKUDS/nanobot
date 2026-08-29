@@ -1051,6 +1051,10 @@ class AgentRunner:
                 await coro if outer_timeout_s is None
                 else await asyncio.wait_for(coro, timeout=outer_timeout_s)
             )
+        except asyncio.CancelledError:
+            _pause_generation()
+            await _close_native_reasoning()
+            raise
         except asyncio.TimeoutError:
             if outer_timeout_s is None:
                 response = LLMResponse(

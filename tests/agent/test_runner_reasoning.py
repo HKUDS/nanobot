@@ -9,6 +9,7 @@ channels, gated by ``context.streamed_reasoning`` rather than
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -552,6 +553,46 @@ async def test_runner_closes_native_reasoning_before_hosted_tool_event():
         "content:done",
         "stream_end:False",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_native_reasoning_when_stream_is_cancelled():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    reasoning_started = asyncio.Event()
+    release_provider = asyncio.Event()
+
+    async def chat_stream_with_retry(
+        *, on_thinking_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("inspect")
+        reasoning_started.set()
+        await release_provider.wait()
+        raise AssertionError("the cancelled provider call should not complete")
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    hook = _LifecycleRecordingHook()
+
+    task = asyncio.create_task(AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "inspect"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    )))
+    await reasoning_started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert hook.events == ["reasoning:inspect", "reasoning_end"]
 
 
 @pytest.mark.asyncio
