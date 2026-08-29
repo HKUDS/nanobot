@@ -35,6 +35,7 @@ from nanobot.providers.xai_oauth import (
 )
 
 DEFAULT_XAI_GROK_URL = "https://cli-chat-proxy.grok.com/v1/responses"
+_HOSTED_SEARCH_MAX_TURNS = 5
 _MAX_ERROR_BODY_CHARS = 1000
 _SENSITIVE_ERROR_KEYS = {
     "accesstoken",
@@ -60,6 +61,10 @@ def _is_named_x_search_tool(value: object) -> bool:
 
 class XAIGrokProvider(LLMProvider):
     """Call xAI's subscription proxy and expose supported hosted tools."""
+
+    # An incomplete hosted-tool stream can already have emitted answer text. Let the
+    # provider close that stream segment before its one bounded recovery attempt.
+    supports_stream_recover_callback = True
 
     def __init__(
         self,
@@ -100,6 +105,7 @@ class XAIGrokProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         wire_model = _strip_model_prefix(model or self.default_model)
         system_prompt, input_items = convert_messages(messages)
@@ -130,6 +136,8 @@ class XAIGrokProvider(LLMProvider):
             if supports_backend_search:
                 converted_tools.append({"type": "x_search"})
 
+            hosted_search_enabled = supports_backend_search or configured_hosted_search
+
             body: dict[str, Any] = {
                 "model": wire_model,
                 "store": False,
@@ -145,6 +153,11 @@ class XAIGrokProvider(LLMProvider):
                 "temperature": temperature,
                 "reasoning": _build_reasoning_options(reasoning_effort),
             }
+            if hosted_search_enabled:
+                # xAI's global default is intentionally unspecified. Five turns is
+                # their documented balanced setting and prevents a search from
+                # stopping after a single unsuccessful lookup.
+                body["max_turns"] = _HOSTED_SEARCH_MAX_TURNS
             if self._extra_body:
                 body.update({
                     key: value
@@ -156,40 +169,54 @@ class XAIGrokProvider(LLMProvider):
 
             headers = _build_headers(token.access, wire_model)
             stage = "xai_request"
-            try:
-                result = await _request_xai(
-                    DEFAULT_XAI_GROK_URL,
-                    headers,
-                    body,
-                    proxy=self.proxy,
-                    on_content_delta=on_content_delta,
-                    on_thinking_delta=on_thinking_delta,
-                    on_tool_call_delta=on_tool_call_delta,
-                )
-            except _XAIHTTPError as exc:
-                if exc.status_code != 401:
-                    raise
-                stage = "oauth_refresh"
-                token = await asyncio.to_thread(
-                    get_xai_oauth_token,
-                    proxy=self.proxy,
-                    force_refresh=True,
-                )
-                self._model_capabilities = None
-                self._model_capabilities_fetched_at = 0.0
-                headers = _build_headers(token.access, wire_model)
-                stage = "xai_request_retry"
-                result = await _request_xai(
-                    DEFAULT_XAI_GROK_URL,
-                    headers,
-                    body,
-                    proxy=self.proxy,
-                    on_content_delta=on_content_delta,
-                    on_thinking_delta=on_thinking_delta,
-                    on_tool_call_delta=on_tool_call_delta,
-                )
+            auth_retried = False
+            hosted_tool_retried = False
+            retry_usage: LLMUsage | None = None
+            while True:
+                try:
+                    result = await _request_xai(
+                        DEFAULT_XAI_GROK_URL,
+                        headers,
+                        body,
+                        proxy=self.proxy,
+                        on_content_delta=on_content_delta,
+                        on_thinking_delta=on_thinking_delta,
+                        on_tool_call_delta=on_tool_call_delta,
+                    )
+                    break
+                except _XAIHTTPError as exc:
+                    if exc.status_code != 401 or auth_retried:
+                        raise
+                    auth_retried = True
+                    stage = "oauth_refresh"
+                    token = await asyncio.to_thread(
+                        get_xai_oauth_token,
+                        proxy=self.proxy,
+                        force_refresh=True,
+                    )
+                    headers = _build_headers(token.access, wire_model)
+                    stage = "xai_request_after_oauth_refresh"
+                except _XAIIncompleteHostedToolError as exc:
+                    retry_usage = _combine_usage(retry_usage, exc.usage)
+                    cannot_recover_stream = (
+                        exc.stream_output_emitted
+                        and on_stream_recover is None
+                    )
+                    if hosted_tool_retried or cannot_recover_stream:
+                        exc.usage = retry_usage
+                        raise
+                    hosted_tool_retried = True
+                    stage = "hosted_tool_recovery"
+                    logger.warning(
+                        "xAI response ended with unfinished hosted tool(s): {}; "
+                        "retrying once",
+                        ", ".join(exc.tool_names),
+                    )
+                    if on_stream_recover is not None:
+                        await on_stream_recover()
 
             content, tool_calls, finish_reason, usage, reasoning_content = result
+            usage = _combine_usage(retry_usage, usage)
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
@@ -238,6 +265,7 @@ class XAIGrokProvider(LLMProvider):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         return await self._call_xai(
             messages,
@@ -250,6 +278,7 @@ class XAIGrokProvider(LLMProvider):
             on_content_delta,
             on_thinking_delta,
             on_tool_call_delta,
+            on_stream_recover,
         )
 
     def get_default_model(self) -> str:
@@ -267,6 +296,14 @@ def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str]:
     if reasoning_effort and reasoning_effort.lower() != "none":
         options["effort"] = reasoning_effort
     return options
+
+
+def _combine_usage(left: LLMUsage | None, right: LLMUsage | None) -> LLMUsage | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left + right
 
 
 def _build_headers(token: str, model: str) -> dict[str, str]:
@@ -310,6 +347,31 @@ class _XAIHTTPError(RuntimeError):
         self.response_body = response_body
 
 
+class _XAIIncompleteHostedToolError(RuntimeError):
+    """A nominally successful xAI stream ended before a hosted tool did."""
+
+    should_retry = False  # _call_xai already performs the one safe recovery attempt.
+
+    def __init__(
+        self,
+        active_tools: list[dict[str, Any]],
+        *,
+        usage: LLMUsage | None,
+        stream_output_emitted: bool = False,
+    ) -> None:
+        names = [
+            str(event.get("name") or "hosted_tool")
+            for event in active_tools
+        ]
+        super().__init__(
+            "xAI ended the response before its hosted tool completed: "
+            + ", ".join(names)
+        )
+        self.tool_names = tuple(names)
+        self.usage = usage
+        self.stream_output_emitted = stream_output_emitted
+
+
 async def _request_xai(
     url: str,
     headers: dict[str, str],
@@ -320,10 +382,39 @@ async def _request_xai(
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
+    active_hosted_tools: dict[str, dict[str, Any]] = {}
+    stream_output_emitted = False
+
+    async def _forward_content_delta(delta: str) -> None:
+        nonlocal stream_output_emitted
+        if delta:
+            stream_output_emitted = True
+        if on_content_delta is not None:
+            await on_content_delta(delta)
+
+    async def _forward_thinking_delta(delta: str) -> None:
+        nonlocal stream_output_emitted
+        if delta:
+            stream_output_emitted = True
+        if on_thinking_delta is not None:
+            await on_thinking_delta(delta)
+
+    async def _track_and_forward_tool_event(event: dict[str, Any]) -> None:
+        if event.get("kind") == "hosted_tool":
+            call_id = event.get("call_id")
+            if call_id:
+                call_id = str(call_id)
+                if event.get("phase") == "start":
+                    active_hosted_tools[call_id] = dict(event)
+                elif event.get("phase") in {"end", "error"}:
+                    active_hosted_tools.pop(call_id, None)
+        if on_tool_call_delta is not None:
+            await on_tool_call_delta(event)
+
     async def _on_response_event(event: dict[str, Any]) -> None:
         hosted_event = _xai_hosted_tool_event(event)
-        if hosted_event is not None and on_tool_call_delta is not None:
-            await on_tool_call_delta(hosted_event)
+        if hosted_event is not None:
+            await _track_and_forward_tool_event(hosted_event)
 
     client_kwargs: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
     if proxy:
@@ -334,13 +425,34 @@ async def _request_xai(
                 content = await response.aread()
                 raw = content.decode("utf-8", "ignore")
                 raise _build_xai_http_error(response.status_code, response.headers, raw)
-            return await consume_sse_with_reasoning(
+            result = await consume_sse_with_reasoning(
                 response,
-                on_content_delta=on_content_delta,
-                on_tool_call_delta=on_tool_call_delta,
-                on_reasoning_delta=on_thinking_delta,
-                on_response_event=_on_response_event if on_tool_call_delta else None,
+                on_content_delta=(
+                    _forward_content_delta if on_content_delta is not None else None
+                ),
+                # Always observe tool events so protocol validation also works for
+                # non-streaming callers that did not request UI progress callbacks.
+                on_tool_call_delta=_track_and_forward_tool_event,
+                on_reasoning_delta=(
+                    _forward_thinking_delta if on_thinking_delta is not None else None
+                ),
+                on_response_event=_on_response_event,
             )
+            if result[2] != "error" and active_hosted_tools:
+                active = list(active_hosted_tools.values())
+                for event in active:
+                    await _track_and_forward_tool_event({
+                        **event,
+                        "phase": "error",
+                        "result": None,
+                        "error": "xAI ended the response before this hosted tool completed.",
+                    })
+                raise _XAIIncompleteHostedToolError(
+                    active,
+                    usage=result[3],
+                    stream_output_emitted=stream_output_emitted,
+                )
+            return result
 
 
 def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -360,13 +472,31 @@ def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
             "result": None,
         }
 
-    if event_type != "response.output_item.done":
+    if event_type not in {"response.output_item.added", "response.output_item.done"}:
         return None
     item = event.get("item")
     if not isinstance(item, dict):
         return None
     item = cast(dict[str, Any], item)
-    if item.get("type") != "custom_tool_call":
+    item_type = item.get("type")
+    if item_type == "x_search_call":
+        call_id = item.get("id") or item.get("call_id") or event.get("item_id")
+        if not call_id:
+            return None
+        phase = "start" if event_type == "response.output_item.added" else "end"
+        return {
+            "kind": "hosted_tool",
+            "phase": phase,
+            "call_id": str(call_id),
+            "name": "x_search",
+            "arguments": _xai_hosted_tool_arguments(item.get("action")),
+            "result": (
+                {"status": str(item.get("status") or "completed")}
+                if phase == "end"
+                else None
+            ),
+        }
+    if event_type != "response.output_item.done" or item_type != "custom_tool_call":
         return None
     tool_name = item.get("name")
     if not isinstance(tool_name, str) or not tool_name.startswith("x_"):
@@ -490,6 +620,8 @@ def _xai_error_response(exc: Exception) -> LLMResponse:
         should_retry = True if should_retry is None else should_retry
     elif isinstance(exc, _XAIHTTPError):
         error_kind = "http"
+    elif isinstance(exc, _XAIIncompleteHostedToolError):
+        error_kind = "provider"
     if status_code is not None and should_retry is None:
         should_retry = _should_retry_status(
             int(status_code),
@@ -502,6 +634,7 @@ def _xai_error_response(exc: Exception) -> LLMResponse:
     return LLMResponse(
         content=f"Error calling xAI ({type(exc).__name__}): {message}",
         finish_reason="error",
+        usage=getattr(exc, "usage", None),
         retry_after=retry_after,
         error_status_code=int(status_code) if status_code is not None else None,
         error_kind=error_kind,
