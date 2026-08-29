@@ -764,7 +764,7 @@ nanobot provider login xai-grok --set-main
 nanobot agent -m "Hello from Grok."
 ```
 
-The default model is `xai-grok/grok-4.5` with a 500,000-token context window.
+The default model is `xai-grok/grok-4.6` with a 500,000-token context window.
 The provider reads xAI's model catalog and includes the server-hosted `x_search`
 tool only when the selected model advertises `supportsBackendSearch`. Models
 without that capability continue normally without hosted X Search. When enabled,

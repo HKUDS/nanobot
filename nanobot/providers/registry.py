@@ -462,6 +462,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_catalog="builtin",
         builtin_models=(
             ProviderModelSpec(
+                id="xai-grok/grok-4.6",
+                label="Grok 4.6",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500000,
+            ),
+            ProviderModelSpec(
                 id="xai-grok/grok-4.5",
                 label="Grok 4.5",
                 description="Grok via xAI subscription; X Search is enabled when supported.",

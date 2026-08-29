@@ -578,7 +578,7 @@ For an eligible X Premium / Grok subscription:
 nanobot provider login xai-grok --set-main
 ```
 
-This selects `xai-grok/grok-4.5`. The provider reads xAI's model catalog and
+This selects `xai-grok/grok-4.6`. The provider reads xAI's model catalog and
 exposes the hosted `x_search` tool only when the selected model advertises
 `supportsBackendSearch`; otherwise the model runs without hosted X Search.
 When enabled, Grok can search current X posts and return inline source links

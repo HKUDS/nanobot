@@ -344,7 +344,7 @@ remain accepted as no-op compatibility aliases.
 | Command | Description |
 |---|---|
 | `nanobot provider login openai-codex --set-main` | Authenticate Codex and select its current default model |
-| `nanobot provider login xai-grok --set-main` | Authenticate an eligible X Premium / Grok subscription and select Grok 4.5; hosted X Search is enabled for models that advertise support |
+| `nanobot provider login xai-grok --set-main` | Authenticate an eligible X Premium / Grok subscription and select Grok 4.6; hosted X Search is enabled for models that advertise support |
 | `nanobot provider login github-copilot --set-main` | Authenticate GitHub Copilot and select its current default model |
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |
 | `nanobot provider logout xai-grok --config <path>` | Remove the selected nanobot instance's xAI OAuth state |

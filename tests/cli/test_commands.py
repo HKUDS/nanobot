@@ -799,7 +799,7 @@ def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
     assert saved.agents.defaults.provider == "xai_grok"
-    assert saved.agents.defaults.model == "xai-grok/grok-4.5"
+    assert saved.agents.defaults.model == "xai-grok/grok-4.6"
     assert saved.agents.defaults.context_window_tokens == 500_000
     assert saved.agents.defaults.model_preset is None
     assert make_provider(saved).__class__.__name__ == "XAIGrokProvider"

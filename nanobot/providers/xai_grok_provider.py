@@ -35,7 +35,7 @@ from nanobot.providers.xai_oauth import (
 
 DEFAULT_XAI_GROK_URL = "https://cli-chat-proxy.grok.com/v1/responses"
 DEFAULT_XAI_GROK_MODELS_URL = "https://cli-chat-proxy.grok.com/v1/models"
-DEFAULT_XAI_GROK_MODEL = "xai-grok/grok-4.5"
+DEFAULT_XAI_GROK_MODEL = "xai-grok/grok-4.6"
 _MODEL_CAPABILITIES_TTL_S = 5 * 60
 _MAX_ERROR_BODY_CHARS = 1000
 _SENSITIVE_ERROR_KEYS = {

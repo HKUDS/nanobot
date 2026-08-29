@@ -2015,12 +2015,19 @@ def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
     ]
 
 
-def test_provider_models_payload_returns_xai_grok_model() -> None:
+def test_provider_models_payload_returns_xai_grok_models() -> None:
     payload = provider_models_payload({"provider": ["xai_grok"]})
 
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "builtin"
     assert payload["models"] == [
+        {
+            "id": "xai-grok/grok-4.6",
+            "label": "Grok 4.6",
+            "description": "Grok via xAI subscription; X Search is enabled when supported.",
+            "owned_by": "xAI Grok",
+            "context_window": 500000,
+        },
         {
             "id": "xai-grok/grok-4.5",
             "label": "Grok 4.5",

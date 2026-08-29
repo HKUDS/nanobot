@@ -52,7 +52,10 @@ def _mock_model_capabilities(
     supports_backend_search: bool,
 ) -> None:
     async def fake_fetch(*_args, **_kwargs):
-        return {"grok-4.5": supports_backend_search}
+        return {
+            "grok-4.5": supports_backend_search,
+            "grok-4.6": supports_backend_search,
+        }
 
     monkeypatch.setattr(
         "nanobot.providers.xai_grok_provider._fetch_xai_model_capabilities",
@@ -60,13 +63,17 @@ def _mock_model_capabilities(
     )
 
 
-def test_xai_grok_registry_exposes_curated_x_search_model() -> None:
+def test_xai_grok_registry_exposes_curated_x_search_models() -> None:
     spec = find_by_name("xai_grok")
 
     assert spec is not None
     assert spec.is_oauth is True
     assert spec.backend == "xai_grok"
     assert spec.builtin_models[0].id == DEFAULT_XAI_GROK_MODEL
+    assert [model.id for model in spec.builtin_models] == [
+        "xai-grok/grok-4.6",
+        "xai-grok/grok-4.5",
+    ]
     assert spec.builtin_models[0].context_window == 500000
     assert "when supported" in spec.builtin_models[0].description
 
@@ -117,7 +124,7 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
     assert response.content == "answer [[1]](https://x.com/example/status/1)"
     url, headers, body = calls[0]
     assert url == "https://cli-chat-proxy.grok.com/v1/responses"
-    assert body["model"] == "grok-4.5"
+    assert body["model"] == "grok-4.6"
     assert body["tools"] == [
         {
             "type": "function",
@@ -137,7 +144,7 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
     assert headers["x-authenticateresponse"] == "authenticate-response"
     assert headers["x-grok-client-identifier"] == "nanobot"
     assert headers["x-grok-client-mode"] == "headless"
-    assert headers["x-grok-model-override"] == "grok-4.5"
+    assert headers["x-grok-model-override"] == "grok-4.6"
 
 
 @pytest.mark.asyncio
