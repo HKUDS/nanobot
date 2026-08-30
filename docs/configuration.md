@@ -2268,16 +2268,12 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
-3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
-4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
+2. **Background checkpoint**: Unprocessed turns are merged with the previous summary into a cumulative checkpoint; failures fall back to a bounded checkpoint that represents both.
+3. **Transcript preservation**: The complete session transcript remains stored, while future model requests receive the latest checkpoint alongside the retained recent suffix.
+4. **Restart-safe resume**: The latest checkpoint is mirrored into session metadata so it can still be recovered after a process restart. `memory/history.jsonl` remains the ingestion journal for Dream and is not injected entry-by-entry into ordinary requests.
 
 > [!NOTE]
-> Mental model: "summarize older context, keep the freshest live turns, **and overwrite the session file with the compact form.**" It is not a full `session.clear()`, but it is a write — not a soft cursor move.
->
-> Concretely, auto compact rewrites `sessions/<key>.jsonl` in place: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the session file.
->
-> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
+> Auto compact does not remove structured messages from `sessions/<key>.jsonl`; it advances the checkpoint watermark only after the replacement checkpoint has been durably recorded.
 
 ## Timezone
 

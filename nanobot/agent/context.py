@@ -30,11 +30,7 @@ from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.session.keys import last_channel_from_metadata
 from nanobot.session.manager import Session
 from nanobot.session.summary import SessionSummary
-from nanobot.utils.helpers import (
-    detect_image_mime,
-    load_bundled_template,
-    truncate_text_to_tokens,
-)
+from nanobot.utils.helpers import detect_image_mime, load_bundled_template
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -98,8 +94,6 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
     _SKIPPABLE_DEFAULTS = {"AGENTS.md", "USER.md"}
     _RUNTIME_CONTEXT_TAG = RUNTIME_CONTEXT_TAG
-    _MAX_RECENT_HISTORY = 50
-    _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = RUNTIME_CONTEXT_END
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
@@ -115,9 +109,6 @@ class ContextBuilder:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        include_memory_recent_history: bool = True,
-        session_key: str | None = None,
-        unified_session: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -155,29 +146,6 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        if include_memory_recent_history:
-            entries = self.memory.read_recent_history_for_prompt(
-                since_cursor=self.memory.get_last_dream_cursor(),
-                session_key=session_key,
-                unified_session=unified_session,
-            )
-            if entries:
-                capped = entries[-self._MAX_RECENT_HISTORY:]
-                capped = self._without_duplicate_session_summary(
-                    capped,
-                    session_key=session_key,
-                    session_summary=session_summary,
-                )
-                if capped:
-                    history_text = "\n".join(
-                        f"- [{e['timestamp']}] {e['content']}" for e in capped
-                    )
-                    history_text = truncate_text_to_tokens(
-                        history_text,
-                        self._MAX_HISTORY_TOKENS,
-                    )
-                    parts.append("# Recent History\n\n" + history_text)
-
         if session_summary:
             parts.append(
                 "[Archived Context Summary]\n\n"
@@ -186,25 +154,6 @@ class ContextBuilder:
             )
 
         return "\n\n---\n\n".join(parts)
-
-    @staticmethod
-    def _without_duplicate_session_summary(
-        entries: list[dict[str, Any]],
-        *,
-        session_key: str | None,
-        session_summary: SessionSummary | None,
-    ) -> list[dict[str, Any]]:
-        """Drop the history entry already represented by the session summary."""
-        if not session_summary:
-            return entries
-        for index in range(len(entries) - 1, -1, -1):
-            entry = entries[index]
-            if (
-                entry.get("session_key") == session_key
-                and entry.get("content") == session_summary["text"]
-            ):
-                return [*entries[:index], *entries[index + 1:]]
-        return entries
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""
@@ -295,9 +244,6 @@ class ContextBuilder:
         runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        include_memory_recent_history: bool = True,
-        session_key: str | None = None,
-        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Compatibility wrapper for callers that need merged adjacent roles."""
         messages = self.build_transcript(
@@ -312,9 +258,6 @@ class ContextBuilder:
             channel=channel,
             workspace=workspace,
             include_memory=include_memory,
-            include_memory_recent_history=include_memory_recent_history,
-            session_key=session_key,
-            unified_session=unified_session,
         )
         current = messages[-1]
         if len(messages) < 2 or messages[-2].get("role") != current.get("role"):
@@ -339,9 +282,6 @@ class ContextBuilder:
         channel: str | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        include_memory_recent_history: bool = True,
-        session_key: str | None = None,
-        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
@@ -353,9 +293,6 @@ class ContextBuilder:
                     session_summary=transcript.session_summary,
                     workspace=root,
                     include_memory=include_memory,
-                    include_memory_recent_history=include_memory_recent_history,
-                    session_key=session_key,
-                    unified_session=unified_session,
                 ),
             },
             *transcript.history,

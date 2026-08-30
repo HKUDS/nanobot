@@ -35,6 +35,7 @@ from nanobot.utils.helpers import (
     estimate_prompt_tokens_chain,
     strip_think,
     truncate_text,
+    truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.workspace_prompts import (
@@ -65,8 +66,6 @@ class MemoryStore:
     # durable files are tiny in practice (~5 KB total), but a runaway file must
     # not unbounded the prompt.
     _DREAM_FILE_EMBED_CAP = 8000
-    _INTERNAL_HISTORY_SESSION_PREFIXES = ("cron:", "dream:")
-    _INTERNAL_HISTORY_SESSION_KEYS = {"heartbeat"}
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
     _LEGACY_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*")
     _LEGACY_RAW_MESSAGE_RE = re.compile(
@@ -392,36 +391,6 @@ class MemoryStore:
         """Return history entries with a valid cursor > *since_cursor*."""
         return [e for e, c in self._iter_valid_entries() if c > since_cursor]
 
-    @classmethod
-    def _is_internal_history_session(cls, session_key: str | None) -> bool:
-        if not session_key:
-            return False
-        return (
-            session_key in cls._INTERNAL_HISTORY_SESSION_KEYS
-            or session_key.startswith(cls._INTERNAL_HISTORY_SESSION_PREFIXES)
-        )
-
-    def read_recent_history_for_prompt(
-        self,
-        since_cursor: int,
-        *,
-        session_key: str | None,
-        unified_session: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Return unprocessed history entries safe to inject into a turn prompt."""
-        entries = self.read_unprocessed_history(since_cursor=since_cursor)
-        if session_key is None:
-            return entries
-        if not unified_session:
-            return [e for e in entries if e.get("session_key") == session_key]
-
-        return [
-            entry
-            for entry in entries
-            if (entry_session := entry.get("session_key")) == session_key
-            or not self._is_internal_history_session(entry_session)
-        ]
-
     def compact_history(self) -> None:
         """Drop oldest processed entries without discarding pending Dream input."""
         if self.max_history_entries <= 0:
@@ -718,21 +687,19 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
         session_key: str | None = None,
-    ) -> None:
-        """Fallback: dump raw messages to history.jsonl without LLM summarization."""
+    ) -> str:
+        """Persist and return a bounded raw checkpoint when summarization degrades."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
         formatted = truncate_text(
             self._format_messages(public_history_messages(messages)),
             limit,
         )
-        self.append_history(
-            f"[RAW] {len(messages)} messages\n"
-            f"{formatted}",
-            session_key=session_key,
-        )
+        checkpoint = f"[RAW] {len(messages)} messages\n{formatted}"
+        self.append_history(checkpoint, session_key=session_key)
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
+        return checkpoint
 
     # ------------------------------------------------------------------
     # Dream helpers
@@ -787,12 +754,11 @@ class MemoryStore:
 # Memory ingestion and legacy context-pressure coordination
 # ---------------------------------------------------------------------------
 
-# Individual history.jsonl writers cap their own payloads tightly; the
-# _HISTORY_ENTRY_HARD_CAP at append_history() is a belt-and-suspenders default
-# that catches any new caller that forgot to set its own cap.
-_RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
-_ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
-_HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
+# Raw fallbacks use a tighter cap. Completed model summaries may scale with the
+# configured generation budget, while append_history() still enforces the
+# emergency hard cap against pathological provider output.
+_RAW_ARCHIVE_MAX_CHARS = 16_000   # fallback dump (LLM failed)
+_HISTORY_ENTRY_HARD_CAP = 64_000  # emergency cap in append_history
 
 
 class MemoryArchiver:
@@ -809,13 +775,45 @@ class MemoryArchiver:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
-        unified_session: bool = False,
     ) -> None:
         self.store = store
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._resolve_prompt_context = resolve_prompt_context
-        self.unified_session = unified_session
+
+    def _raw_checkpoint(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        session_key: str,
+        previous_summary: str | None,
+        max_tokens: int,
+    ) -> str:
+        """Persist the failed chunk and return a bounded replacement checkpoint."""
+        raw = self.store.raw_archive(messages, session_key=session_key)
+        token_limit = max(1, max_tokens)
+        if not previous_summary:
+            return truncate_text_to_tokens(raw, token_limit)
+
+        combined = (
+            "[Previous archived context]\n"
+            f"{previous_summary}\n\n"
+            "[Newly archived raw context]\n"
+            f"{raw}"
+        )
+        bounded = truncate_text_to_tokens(combined, token_limit)
+        if bounded == combined:
+            return combined
+
+        # Keep evidence from both sides when their full concatenation cannot fit.
+        section_limit = max(1, (token_limit - 32) // 2)
+        return truncate_text_to_tokens(
+            "[Previous archived context]\n"
+            f"{truncate_text_to_tokens(previous_summary, section_limit)}\n\n"
+            "[Newly archived raw context]\n"
+            f"{truncate_text_to_tokens(raw, section_limit)}",
+            token_limit,
+        )
 
     async def archive(
         self,
@@ -825,10 +823,20 @@ class MemoryArchiver:
         session_key: str,
         request_messages: list[dict[str, Any]],
         request_tools: list[dict[str, Any]],
+        previous_summary: str | None = None,
     ) -> str | None:
         """Execute a prepared archive request and persist its result."""
         if not messages:
             return None
+
+        def raw_fallback() -> str:
+            return self._raw_checkpoint(
+                messages,
+                session_key=session_key,
+                previous_summary=previous_summary,
+                max_tokens=runtime.generation.max_tokens,
+            )
+
         try:
             with llm_usage_source("dream"):
                 response = await runtime.provider.chat_with_retry(
@@ -842,31 +850,23 @@ class MemoryArchiver:
                 )
         except Exception:
             logger.warning("Memory archive provider call failed, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
-            return None
+            return raw_fallback()
         if response.finish_reason in {"error", "length"}:
             logger.warning(
                 "Memory archive provider did not complete ({}), raw-dumping to history",
                 response.finish_reason,
             )
-            self.store.raw_archive(messages, session_key=session_key)
-            return None
+            return raw_fallback()
         if response.has_tool_calls is True:
             logger.warning("Memory archive provider returned tool calls, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
-            return None
+            return raw_fallback()
         summary = response.content
         if not summary or not summary.strip():
             logger.warning("Memory archive provider returned no summary, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
-            return None
+            return raw_fallback()
         if summary.strip() == "(nothing)":
             return "(nothing)"
-        self.store.append_history(
-            summary,
-            max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
-            session_key=session_key,
-        )
+        self.store.append_history(summary, session_key=session_key)
         return summary
 
     async def archive_session(
@@ -881,13 +881,26 @@ class MemoryArchiver:
         messages = list(session.messages[session.last_archived:archive_end])
         if not messages:
             return None
+        session_summary = session_summary_from_metadata(
+            session.metadata,
+            fallback_last_active=session.updated_at,
+        )
+        previous_summary = session_summary["text"] if session_summary else None
+
+        def raw_fallback() -> str:
+            return self._raw_checkpoint(
+                messages,
+                session_key=session.key,
+                previous_summary=previous_summary,
+                max_tokens=runtime.generation.max_tokens,
+            )
+
         if input_token_budget <= 0:
             logger.debug(
                 "Memory archive has no safe input budget for {}; raw-dumping",
                 session.key,
             )
-            self.store.raw_archive(messages, session_key=session.key)
-            return None
+            return raw_fallback()
         prefix = Session(
             key=session.key,
             messages=list(session.messages[:archive_end]),
@@ -903,8 +916,7 @@ class MemoryArchiver:
                 "Memory archive cannot replay the full chunk for {}; raw-dumping",
                 session.key,
             )
-            self.store.raw_archive(messages, session_key=session.key)
-            return None
+            return raw_fallback()
         prompt = render_template(
             "agent/consolidator_archive.md",
             strip=True,
@@ -918,13 +930,8 @@ class MemoryArchiver:
             history=history,
             current_message=prompt,
             channel=channel,
-            session_summary=session_summary_from_metadata(
-                session.metadata,
-                fallback_last_active=session.updated_at,
-            ),
+            session_summary=session_summary,
             workspace=workspace,
-            session_key=session.key,
-            unified_session=self.unified_session,
         )
         tools = self._get_tool_definitions()
         estimated, source = estimate_prompt_tokens_chain(
@@ -941,14 +948,14 @@ class MemoryArchiver:
                 input_token_budget,
                 source,
             )
-            self.store.raw_archive(messages, session_key=session.key)
-            return None
+            return raw_fallback()
         return await self.archive(
             messages,
             runtime=runtime,
             session_key=session.key,
             request_messages=request_messages,
             request_tools=tools,
+            previous_summary=previous_summary,
         )
 
 
@@ -964,20 +971,16 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         resolve_prompt_context: Callable[[Session], tuple[str | None, Path | None]] | None = None,
-        unified_session: bool = False,
     ):
         self.store = store
         self.sessions = sessions
-        self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
-        self._resolve_prompt_context = resolve_prompt_context
         self.archiver = MemoryArchiver(
             store=store,
             build_messages=build_messages,
             get_tool_definitions=get_tool_definitions,
             resolve_prompt_context=resolve_prompt_context,
-            unified_session=unified_session,
         )
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
@@ -1013,13 +1016,18 @@ class Consolidator:
             return []
         return session.get_history()
 
-    def _persist_last_summary(self, session: Session, summary: str | None) -> None:
-        if summary and summary != "(nothing)":
+    @staticmethod
+    def _set_last_summary(
+        session: Session,
+        summary: str,
+        *,
+        last_active: datetime | None = None,
+    ) -> None:
+        if summary != "(nothing)":
             session.metadata["_last_summary"] = {
                 "text": summary,
-                "last_active": session.updated_at.isoformat(),
+                "last_active": (last_active or session.updated_at).isoformat(),
             }
-            self.sessions.save(session)
 
     def estimate_session_prompt_tokens(
         self,
@@ -1039,8 +1047,6 @@ class Consolidator:
             current_message="[token-probe]",
             channel=channel,
             session_summary=summary,
-            session_key=session.key,
-            unified_session=self.unified_session,
         )
         return estimate_prompt_tokens_chain(
             runtime.provider,
@@ -1055,24 +1061,6 @@ class Consolidator:
             runtime.context_window_tokens
             - runtime.generation.max_tokens
             - self._SAFETY_BUFFER
-        )
-
-    async def archive(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        runtime: LLMRuntime,
-        session_key: str,
-        request_messages: list[dict[str, Any]],
-        request_tools: list[dict[str, Any]],
-    ) -> str | None:
-        """Compatibility wrapper for the extracted MemoryArchiver."""
-        return await self.archiver.archive(
-            messages,
-            runtime=runtime,
-            session_key=session_key,
-            request_messages=request_messages,
-            request_tools=request_tools,
         )
 
     async def archive_session(
@@ -1114,13 +1102,11 @@ class Consolidator:
                 return
 
             budget = self._input_token_budget(runtime)
-            last_summary: str | None = None
             estimated, source = self.estimate_session_prompt_tokens(
                 session,
                 runtime=runtime,
             )
             if estimated <= 0:
-                self._persist_last_summary(session, last_summary)
                 return
             if estimated < budget:
                 unarchived_count = len(session.messages) - session.last_archived
@@ -1132,7 +1118,6 @@ class Consolidator:
                     source,
                     unarchived_count,
                 )
-                self._persist_last_summary(session, last_summary)
                 return
 
             end_idx = self.pick_consolidation_boundary(session)
@@ -1160,17 +1145,11 @@ class Consolidator:
                 archive_end=end_idx,
                 runtime=runtime,
             )
-            # Advance either way: archive_session raw-archives on degradation,
-            # and replaying the same chunk would duplicate Memory material.
-            if summary:
-                last_summary = summary
+            if summary is None:
+                return
+            self._set_last_summary(session, summary)
             session.last_archived = end_idx
             self.sessions.save(session)
-
-            # Persist the last summary to session metadata so it can be injected
-            # into the runtime context on the next prepare_session() call, aligning
-            # the summary injection strategy with AutoCompact._archive().
-            self._persist_last_summary(session, last_summary)
 
     async def compact_idle_session(
         self,
@@ -1209,12 +1188,10 @@ class Consolidator:
                 archive_end=archive_end,
                 runtime=runtime,
             )
+            if summary is None:
+                return None
 
-            if summary and summary != "(nothing)":
-                session.metadata["_last_summary"] = {
-                    "text": summary,
-                    "last_active": last_active.isoformat(),
-                }
+            self._set_last_summary(session, summary, last_active=last_active)
 
             # A turn can append while the provider call is in flight. Advance only
             # through the captured batch so new messages remain eligible next time.

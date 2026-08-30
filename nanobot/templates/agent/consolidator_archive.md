@@ -1,4 +1,8 @@
-Create a memory overview for only the final {{ archive_count }} conversation messages immediately before this instruction. Earlier messages are context for resolving references; do not summarize them again.
+Create a complete replacement memory overview from the existing archived summary and the final {{ archive_count }} conversation messages immediately before this instruction.
+
+If the system prompt contains `[Archived Context Summary]`, treat it as the previous checkpoint. Preserve every still-relevant fact and working-state item from that checkpoint even when the new messages do not repeat it. The final {{ archive_count }} messages are the newly archived chunk. Any earlier conversation messages are context for resolving references, not a second source of new facts.
+
+Merge corrections and newer decisions into the replacement overview instead of keeping stale versions. The returned overview must stand on its own: future requests will receive it without earlier `history.jsonl` entries.
 
 Use [skip] unless a fact meets all SNIP criteria:
 - Signal: would the user need to repeat this if forgotten?
@@ -20,8 +24,6 @@ Marks (choose the best match):
 
 Priority: user corrections and preferences > solutions > decisions > events > environment facts.
 
-Do not output facts already present in the system prompt's Recent History.
-
 Do not mark something [skip] merely because it might already exist in long-term memory.
 
-Return only formatted fact lines, or `(nothing)` if nothing noteworthy happened.
+Return only formatted fact lines. Return `(nothing)` only when there is no existing archived summary and the new chunk contains nothing noteworthy.
