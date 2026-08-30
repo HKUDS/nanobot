@@ -152,9 +152,9 @@ async def test_memory_archiver_raw_fallback_uses_configured_backend(tmp_path) ->
         request_tools=[],
     )
 
-    assert result is None
     backend.ingest.assert_called_once()
-    assert backend.ingest.call_args.args[0].startswith("[RAW] 1 messages")
+    assert result == backend.ingest.call_args.args[0]
+    assert result.startswith("[RAW] 1 messages")
     assert backend.ingest.call_args.kwargs == {
         "session_key": "cli:test",
         "max_chars": 16_000,
