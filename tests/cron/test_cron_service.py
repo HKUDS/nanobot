@@ -293,7 +293,12 @@ def test_load_store_migrates_legacy_delivery_context(tmp_path) -> None:
                             "deliver": True,
                             "channel": "telegram",
                             "to": "user-1",
-                            "channelMeta": {"message_thread_id": 42},
+                            "channelMeta": {
+                                "message_thread_id": 42,
+                                RUNTIME_CONTEXT_INPUT_META: [
+                                    {"source": "webui_quote", "content": "stale quote"}
+                                ],
+                            },
                             "sessionKey": "telegram:user-1:topic:42",
                         },
                         "state": {},

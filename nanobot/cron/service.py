@@ -153,7 +153,7 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     payload.origin_channel = payload.origin_channel or payload.channel
     payload.origin_chat_id = payload.origin_chat_id or payload.to
     if not payload.origin_metadata:
-        payload.origin_metadata = dict(payload.channel_meta or {})
+        payload.origin_metadata = _persistable_origin_metadata(payload.channel_meta or {})
 
     payload.deliver = False
     payload.channel = None
