@@ -753,6 +753,99 @@ def test_email_config_normalizes_trusted_authserv_ids() -> None:
         _make_config(trusted_authserv_ids=["*"])
 
 
+def _make_oauth_config(**overrides) -> EmailConfig:
+    return _make_config(
+        imap_password="",
+        smtp_password="",
+        oauth_tenant_id="tenant-1",
+        oauth_client_id="client-1",
+        oauth_client_secret="secret-1",
+        **overrides,
+    )
+
+
+def test_validate_config_oauth_requires_signin(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_login_status",
+        lambda *_a, **_kw: None,
+    )
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    assert channel._validate_config() is False
+
+
+def test_validate_config_oauth_passes_without_passwords_when_signed_in(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_login_status",
+        lambda *_a, **_kw: object(),
+    )
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    assert channel._validate_config() is True
+
+
+def test_xoauth2_string_format() -> None:
+    assert EmailChannel._xoauth2_string("bot@example.com", "tok123") == (
+        "user=bot@example.com\x01auth=Bearer tok123\x01\x01"
+    )
+
+
+def test_open_imap_client_uses_xoauth2_when_oauth_configured(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.authenticate_calls: list[tuple[str, bytes]] = []
+
+        def authenticate(self, mechanism, authobject):
+            response = authobject(b"")
+            self.authenticate_calls.append((mechanism, response))
+            return "OK", [b"done"]
+
+        def select(self, _mailbox):
+            return "OK", [b"1"]
+
+        def logout(self):
+            return "BYE", [b"bye"]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_token",
+        lambda **_kw: type("T", (), {"access": "tok123"})(),
+    )
+
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    client = channel._open_imap_client(mailbox="INBOX")
+
+    assert client is fake
+    assert fake.authenticate_calls == [
+        ("XOAUTH2", b"user=bot@example.com\x01auth=Bearer tok123\x01\x01")
+    ]
+
+
+def test_smtp_authenticate_uses_xoauth2_when_oauth_configured(monkeypatch) -> None:
+    class FakeSMTP:
+        def __init__(self) -> None:
+            self.auth_calls: list[tuple[str, str]] = []
+            self.ehlo_calls = 0
+
+        def ehlo_or_helo_if_needed(self):
+            self.ehlo_calls += 1
+
+        def auth(self, mechanism, authobject, initial_response_ok=True):
+            self.auth_calls.append((mechanism, authobject()))
+            return 235, b"OK"
+
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_token",
+        lambda **_kw: type("T", (), {"access": "tok123"})(),
+    )
+
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    smtp = FakeSMTP()
+    channel._smtp_authenticate(smtp, use_oauth=True)
+
+    assert smtp.ehlo_calls == 1
+    assert smtp.auth_calls == [("XOAUTH2", "user=bot@example.com\x01auth=Bearer tok123\x01\x01")]
+
+
 def test_extract_text_body_falls_back_to_html() -> None:
     msg = EmailMessage()
     msg["From"] = "alice@example.com"
@@ -2284,3 +2377,58 @@ async def test_revocation_between_fetch_and_delivery_does_not_acknowledge(monkey
     assert not channel._pending_seen
     assert not channel._deferred_post_actions
     assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls)
+
+
+async def test_login_returns_true_when_oauth_not_configured() -> None:
+    channel = EmailChannel(_make_config(), MessageBus())
+    assert await channel.login() is True
+
+
+async def test_login_returns_true_without_reauth_when_already_signed_in(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_login_status",
+        lambda *_a, **_kw: object(),
+    )
+
+    def fail_login(**_kw):
+        raise AssertionError("should not re-run the login flow")
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.email_oauth.login_email_oauth", fail_login)
+
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    assert await channel.login() is True
+
+
+async def test_login_runs_flow_and_returns_true_on_success(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_login_status",
+        lambda *_a, **_kw: None,
+    )
+    calls: list[str] = []
+
+    def fake_login(**kwargs):
+        calls.append(kwargs["mailbox"])
+        return object()
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.email_oauth.login_email_oauth", fake_login)
+
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    assert await channel.login() is True
+    assert calls == ["bot@example.com"]
+
+
+async def test_login_returns_false_on_oauth_error(monkeypatch) -> None:
+    from nanobot.channels.email import ms_oauth as email_oauth_module
+
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.email_oauth.get_email_oauth_login_status",
+        lambda *_a, **_kw: None,
+    )
+
+    def fake_login(**_kw):
+        raise email_oauth_module.MicrosoftOAuthError("boom")
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.email_oauth.login_email_oauth", fake_login)
+
+    channel = EmailChannel(_make_oauth_config(), MessageBus())
+    assert await channel.login() is False
