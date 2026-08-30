@@ -1,4 +1,4 @@
-"""Memory storage, transcript archiving, and legacy consolidation coordination."""
+"""Memory storage, transcript archiving, and session checkpoint consolidation."""
 
 # Tool schemas are installed by the ``@tool_parameters`` class decorator at
 # runtime; static analyzers cannot observe that it clears ``parameters`` from
@@ -776,7 +776,7 @@ class MemoryStore:
 
 
 # ---------------------------------------------------------------------------
-# Memory ingestion and legacy context-pressure coordination
+# Memory ingestion and context-pressure coordination
 # ---------------------------------------------------------------------------
 
 # Raw fallbacks use a tighter cap. Completed model summaries may scale with the
@@ -989,7 +989,7 @@ class MemoryArchiver:
 
 
 class Consolidator:
-    """Legacy context-pressure coordinator backed by a MemoryArchiver."""
+    """Coordinate session Memory checkpoints through ``MemoryArchiver``."""
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -1018,6 +1018,70 @@ class Consolidator:
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    async def summarize_transcript(
+        self,
+        accepted_messages: list[dict[str, Any]],
+        previous_summary: str | None,
+        *,
+        runtime: LLMRuntime,
+        session_key: str,
+        tools: list[dict[str, Any]],
+    ) -> str | None:
+        """Summarize the exact transcript prefix already accepted by the model."""
+        source_messages = [
+            dict(message)
+            for message in accepted_messages
+            if message.get("role") != "system"
+        ]
+        if not source_messages:
+            return None
+
+        max_output_tokens = max(0, runtime.generation.max_tokens)
+        input_token_budget = runtime.context_window_tokens - max_output_tokens
+        prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+            archive_count=len(source_messages),
+        )
+        request_messages = [
+            *[dict(message) for message in accepted_messages],
+            {"role": "user", "content": prompt},
+        ]
+        estimated, source = estimate_prompt_tokens_chain(
+            runtime.provider,
+            runtime.model,
+            request_messages,
+            tools,
+        )
+        if input_token_budget <= 0 or estimated > input_token_budget:
+            logger.warning(
+                "Turn consolidation input does not fit for {}: {}/{} via {}",
+                session_key,
+                estimated,
+                input_token_budget,
+                source,
+            )
+            return None
+
+        summary = await self.archiver.archive(
+            source_messages,
+            runtime=runtime,
+            session_key=session_key,
+            request_messages=request_messages,
+            request_tools=tools,
+            previous_summary=previous_summary,
+        )
+        if summary == "(nothing)":
+            summary = self.archiver._raw_checkpoint(
+                source_messages,
+                session_key=session_key,
+                previous_summary=previous_summary,
+                max_tokens=max_output_tokens,
+            )
+        if summary is None:
+            return None
+        return truncate_text_to_tokens(summary, max(1, max_output_tokens))
 
     def pick_consolidation_boundary(
         self,
@@ -1089,6 +1153,19 @@ class Consolidator:
             session.key,
             session.last_archived,
         )
+
+    async def migrate_legacy_checkpoint(
+        self,
+        session: Session,
+        *,
+        runtime: LLMRuntime,
+    ) -> Session:
+        """Upgrade pre-checkpoint archive state without performing consolidation."""
+        lock = self.get_lock(session.key)
+        async with lock:
+            fresh = self.sessions.get_or_create(session.key)
+            self._ensure_cumulative_checkpoint(fresh, runtime=runtime)
+            return fresh
 
     def estimate_session_prompt_tokens(
         self,

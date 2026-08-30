@@ -27,8 +27,12 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-from nanobot.session.summary import MEMORY_CHECKPOINT_VERSION_KEY
+from nanobot.session.summary import (
+    MEMORY_CHECKPOINT_VERSION_KEY,
+    SUMMARY_CONTINUATION_TEXT,
+)
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -287,9 +291,7 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    # Legacy storage name for the Memory ingestion watermark. New code should
-    # use ``last_archived`` so this progress is not confused with model-context
-    # compaction. Keep the field while persisted sessions and SDK callers migrate.
+    # Keep the legacy storage name while persisted sessions and SDK callers migrate.
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
@@ -310,7 +312,7 @@ class Session:
 
     @property
     def last_archived(self) -> int:
-        """Number of transcript messages already written to the Memory journal."""
+        """End of the latest committed Memory checkpoint."""
         return self.last_consolidated
 
     @last_archived.setter
@@ -338,14 +340,17 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        A positive ``max_messages`` applies an explicit caller-owned count
-        limit. The normal model path relies on ``max_tokens`` instead.
+        A committed in-turn checkpoint replaces its old prefix with the stored
+        summary and resumes replay at a hidden continuation marker. A positive
+        ``max_messages`` applies an additional caller-owned count limit.
         """
         replay_start = self.last_archived
-        if replay_start:
-            # ``last_archived`` is archive progress, not a replay boundary.
-            # Keep a small raw suffix for continuity, extending back to the user
-            # that started an assistant/tool sequence when necessary.
+        resumes_from_checkpoint = (
+            replay_start < len(self.messages)
+            and is_hidden_history_message(self.messages[replay_start])
+            and self.messages[replay_start].get("content") == SUMMARY_CONTINUATION_TEXT
+        )
+        if replay_start and not resumes_from_checkpoint:
             recent_start = recent_message_start_index(
                 self.messages,
                 MIN_COMPACTED_REPLAY_MESSAGES,

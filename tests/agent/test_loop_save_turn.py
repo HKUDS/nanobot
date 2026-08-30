@@ -45,6 +45,10 @@ from nanobot.session.recovery import (
     RUNTIME_CHECKPOINT_KEY,
     restore_runtime_checkpoint,
 )
+from nanobot.session.summary import (
+    SUMMARY_CONTINUATION_TEXT,
+    SessionSummaryCheckpoint,
+)
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
@@ -504,6 +508,60 @@ def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
         {"type": "text", "text": "provider context"}
     ]
     assert public_history_message(session.messages[0])["content"] == []
+
+
+def test_save_turn_commits_summary_boundary_without_rewriting_raw_history() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:summary-checkpoint")
+    session.add_message("user", "inspect the project")
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "inspect the project"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "inspect", "arguments": "{}"},
+            }],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "inspect",
+            "content": "full current result",
+        },
+        {"role": "assistant", "content": "done"},
+    ]
+
+    loop._save_turn(
+        session,
+        messages,
+        skip=2,
+        summary_checkpoint=SessionSummaryCheckpoint(
+            summary="Current working-memory checkpoint.",
+            transcript_boundary=2,
+        ),
+        input_persisted_early=True,
+    )
+
+    assert [message["role"] for message in session.messages] == [
+        "user", "user", "assistant", "tool", "assistant",
+    ]
+    assert session.messages[0]["content"] == "inspect the project"
+    assert session.messages[1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert session.messages[1]["_hidden_history"] is True
+    assert session.last_archived == 1
+    assert session.metadata["_last_summary"]["text"] == (
+        "Current working-memory checkpoint."
+    )
+    assert [message["content"] for message in session.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT,
+        "",
+        "full current result",
+        "done",
+    ]
 
 
 def test_save_turn_acknowledges_every_merged_recovery_followup() -> None:
@@ -1946,7 +2004,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     assert request.metadata == {"subagent_task_id": "sub-1"}
     assert request.turn_id
     record_runtime.assert_called_once_with("cli:test", runtime)
-    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
+    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 1
     assert all(
         call.kwargs["runtime"] is runtime
         for call in loop.consolidator.maybe_consolidate_by_tokens.call_args_list
