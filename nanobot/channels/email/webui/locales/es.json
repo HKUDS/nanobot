@@ -68,6 +68,11 @@
         "label": "Intervalo de consulta",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "Dirección de alias",
+        "placeholder": "assistant@example.com",
+        "help": "Solo procesa correo dirigido realmente a este alias (Para/CC/Delivered-To). Déjalo vacío para procesar todo lo que reciba el buzón."
+      },
       "allowFrom": {
         "label": "Remitentes permitidos",
         "placeholder": "Correos separados por comas",

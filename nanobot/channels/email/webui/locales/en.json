@@ -68,6 +68,11 @@
         "label": "Poll interval",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "Alias address",
+        "placeholder": "assistant@example.com",
+        "help": "Only process mail actually addressed to this alias (To/Cc/Delivered-To). Leave blank to process anything the mailbox receives."
+      },
       "allowFrom": {
         "label": "Allowed senders",
         "placeholder": "Email addresses, comma separated",

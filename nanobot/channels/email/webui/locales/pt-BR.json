@@ -68,6 +68,11 @@
         "label": "Intervalo de consulta",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "Endereço do alias",
+        "placeholder": "assistant@example.com",
+        "help": "Processa apenas e-mails realmente endereçados a este alias (Para/Cc/Delivered-To). Deixe em branco para processar tudo que a caixa receber."
+      },
       "allowFrom": {
         "label": "Remetentes permitidos",
         "placeholder": "E-mails separados por vírgulas",

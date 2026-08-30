@@ -38,14 +38,21 @@ def _make_raw_email(
     subject: str = "Hello",
     body: str = "This is the body.",
     auth_results: str | None = None,
+    to_addr: str = "bot@example.com",
+    cc_addr: str | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> bytes:
     msg = EmailMessage()
     msg["From"] = from_addr
-    msg["To"] = "bot@example.com"
+    msg["To"] = to_addr
+    if cc_addr:
+        msg["Cc"] = cc_addr
     msg["Subject"] = subject
     msg["Message-ID"] = "<m1@example.com>"
     if auth_results:
         msg["Authentication-Results"] = auth_results
+    for name, value in (extra_headers or {}).items():
+        msg[name] = value
     msg.set_content(body)
     return msg.as_bytes()
 
@@ -672,6 +679,82 @@ def test_fetch_new_messages_skips_self_sent_across_identity_sources(
 
     assert items == []
     assert not any(call[0] == "STORE" for call in fake.uid_calls)
+
+
+def test_fetch_new_messages_accepts_mail_addressed_to_configured_alias(monkeypatch) -> None:
+    raw = _make_raw_email(to_addr="Assistant <assistant@example.com>", subject="For the alias")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(alias_address="assistant@example.com"), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["subject"] == "For the alias"
+    assert skipped_uids == set()
+
+
+def test_fetch_new_messages_rejects_mail_not_addressed_to_configured_alias(monkeypatch) -> None:
+    raw = _make_raw_email(to_addr="someone-else@example.com", subject="Not for us")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(alias_address="assistant@example.com"), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert items == []
+    assert skipped_uids == {"500"}
+    # Rejected mail must never be marked \Seen — only genuinely delivered mail is.
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
+
+
+def test_fetch_new_messages_matches_alias_in_cc(monkeypatch) -> None:
+    raw = _make_raw_email(
+        to_addr="someone-else@example.com", cc_addr="assistant@example.com", subject="CC'd"
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(alias_address="assistant@example.com"), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+
+
+def test_fetch_new_messages_matches_alias_case_insensitively(monkeypatch) -> None:
+    raw = _make_raw_email(to_addr="ASSISTANT@EXAMPLE.COM")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(alias_address="assistant@example.com"), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+
+
+def test_fetch_new_messages_matches_alias_via_delivered_to(monkeypatch) -> None:
+    raw = _make_raw_email(
+        to_addr="mailing-list@example.com",
+        extra_headers={"Delivered-To": "assistant@example.com"},
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(alias_address="assistant@example.com"), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+
+
+def test_fetch_new_messages_ignores_alias_filter_when_unset(monkeypatch) -> None:
+    raw = _make_raw_email(to_addr="whoever@example.com")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(alias_address=""), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
 
 
 def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeypatch) -> None:

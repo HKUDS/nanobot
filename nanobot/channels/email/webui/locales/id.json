@@ -68,6 +68,11 @@
         "label": "Interval pemeriksaan",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "Alamat alias",
+        "placeholder": "assistant@example.com",
+        "help": "Hanya proses email yang benar-benar dialamatkan ke alias ini (To/Cc/Delivered-To). Kosongkan untuk memproses semua yang diterima kotak surat."
+      },
       "allowFrom": {
         "label": "Pengirim yang diizinkan",
         "placeholder": "Alamat email, dipisahkan koma",

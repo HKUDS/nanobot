@@ -68,6 +68,11 @@
         "label": "輪詢間隔",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "別名地址",
+        "placeholder": "assistant@example.com",
+        "help": "僅處理實際寄至此別名的郵件(收件者/副本/Delivered-To)。留空則處理郵箱收到的所有郵件。"
+      },
       "allowFrom": {
         "label": "允許的寄件者",
         "placeholder": "電子郵件地址，以逗號分隔",

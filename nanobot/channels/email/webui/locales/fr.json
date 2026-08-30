@@ -68,6 +68,11 @@
         "label": "Intervalle de relève",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "Adresse d'alias",
+        "placeholder": "assistant@example.com",
+        "help": "Traite uniquement le courrier réellement adressé à cet alias (À/Cc/Delivered-To). Laissez vide pour traiter tout ce que la boîte reçoit."
+      },
       "allowFrom": {
         "label": "Expéditeurs autorisés",
         "placeholder": "Adresses séparées par des virgules",
