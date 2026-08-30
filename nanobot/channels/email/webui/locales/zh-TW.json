@@ -64,6 +64,19 @@
         "label": "寄件地址",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "Microsoft 租用戶 ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "僅適用於 Office365/Outlook。作為 IMAP/SMTP 密碼的替代方案 — 若使用密碼請留空。儲存這三個欄位後執行 `nanobot channels login email`。"
+      },
+      "oauthClientId": {
+        "label": "Microsoft 應用程式(用戶端) ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Microsoft 用戶端密碼",
+        "placeholder": "應用程式註冊的密碼值"
+      },
       "pollIntervalSeconds": {
         "label": "輪詢間隔",
         "placeholder": "30"

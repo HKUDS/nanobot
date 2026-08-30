@@ -64,6 +64,19 @@
         "label": "送信元アドレス",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "Microsoft テナント ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "Office365/Outlook 専用です。IMAP/SMTP パスワードの代替です — パスワードを使う場合は空欄のままにしてください。この3項目を保存した後に `nanobot channels login email` を実行してください。"
+      },
+      "oauthClientId": {
+        "label": "Microsoft アプリ (クライアント) ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Microsoft クライアントシークレット",
+        "placeholder": "アプリ登録のシークレット値"
+      },
       "pollIntervalSeconds": {
         "label": "確認間隔",
         "placeholder": "30"
