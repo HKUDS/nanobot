@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
-from nanobot.agent.context import ContextBuilder
+from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext, request_context
@@ -77,6 +77,13 @@ def _agent_run_result(
         had_injections=had_injections,
         usage=usage,
     )
+
+
+def _assembled_messages(
+    builder: ContextBuilder,
+    transcript_input: TranscriptInput,
+) -> list[dict]:
+    return builder.build_transcript(transcript_input, include_memory=False)
 
 
 def _mk_loop() -> AgentLoop:
@@ -930,10 +937,13 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
     session = loop.sessions.get_or_create("cli:private-checkpoint")
 
     await loop._run_agent_loop(
-        [
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "question"},
-        ],
+        TranscriptInput(
+            history=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "question"},
+            ],
+            current_message=None,
+        ),
         runtime=loop.llm_runtime(),
         session=session,
     )
@@ -1008,7 +1018,7 @@ async def test_subagent_followup_state_is_durable_before_prompt_assembly(
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     loop.provider.can_resume_conversation_state.return_value = True
-    loop._build_initial_messages = MagicMock(  # type: ignore[method-assign]
+    loop.context.build_system_prompt = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("prompt boom"),
     )
     session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
@@ -1041,8 +1051,8 @@ async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     loop.provider.can_resume_conversation_state.return_value = True
-    build_initial_messages = loop._build_initial_messages
-    loop._build_initial_messages = MagicMock(  # type: ignore[method-assign]
+    build_system_prompt = loop.context.build_system_prompt
+    loop.context.build_system_prompt = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("prompt boom"),
     )
     session = loop.sessions.get_or_create("cli:subagent-redelivery")
@@ -1066,7 +1076,7 @@ async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
         message.get("content")
         for message in persisted.provider_state.pending_messages
     ].count("subagent result") == 1
-    loop._build_initial_messages = build_initial_messages  # type: ignore[method-assign]
+    loop.context.build_system_prompt = build_system_prompt  # type: ignore[method-assign]
     loop._run_agent_loop = AsyncMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("provider boom"),
     )
@@ -1319,7 +1329,8 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
 
     calls: list[dict] = []
 
-    async def fake_run_agent_loop(initial_messages, *, metadata=None, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, *, metadata=None, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         calls.append({"initial_messages": initial_messages, "metadata": metadata})
         if len(calls) == 1:
             return _agent_run_result(
@@ -1387,8 +1398,9 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
 
     calls = 0
 
-    async def fake_run_agent_loop(initial_messages, *, on_stream=None, on_stream_end=None, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, *, on_stream=None, on_stream_end=None, **_kwargs):
         nonlocal calls
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         calls += 1
         if calls == 1:
             return _agent_run_result(
@@ -1460,8 +1472,9 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 
     calls = 0
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
         nonlocal calls
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         calls += 1
         if calls == 1:
             return _agent_run_result(
@@ -1623,7 +1636,7 @@ async def test_run_agent_loop_continuation_reads_latest_goal_metadata(
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=runtime,
         session=session,
         request_context=RequestContext(
@@ -1753,7 +1766,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
 
     checkpoint_saved = asyncio.Event()
 
-    async def interrupted_run_agent_loop(_initial_messages, *, session=None, **_kwargs):
+    async def interrupted_run_agent_loop(_transcript_input, *, session=None, **_kwargs):
         assert session is not None
         loop._set_runtime_checkpoint(
             session,
@@ -1813,7 +1826,8 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     assert interrupted.metadata.get(AgentLoop._PENDING_USER_TURN_KEY) is True
     assert interrupted.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is not None
 
-    async def resumed_run_agent_loop(initial_messages, **_kwargs):
+    async def resumed_run_agent_loop(transcript_input, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         return _agent_run_result(
             "next answer",
             [*initial_messages, {"role": "assistant", "content": "next answer"}],
@@ -1864,7 +1878,8 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     record_runtime = MagicMock(wraps=loop.runtime_event_publisher.record_turn_runtime)
     loop.runtime_event_publisher.record_turn_runtime = record_runtime
 
-    async def fake_run_agent_loop(initial_messages, **kwargs):
+    async def fake_run_agent_loop(transcript_input, **kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         seen["initial_messages"] = initial_messages
         seen["runtime"] = kwargs["runtime"]
         seen["request_context"] = kwargs["request_context"]
@@ -1940,7 +1955,8 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     turn_usage = LLMUsage.reported(input_tokens=64, output_tokens=9)
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         return _agent_run_result(
             "done",
             [*initial_messages, {"role": "assistant", "content": "done"}],
@@ -1966,7 +1982,8 @@ async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> 
         return_value=False
     )
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         return _agent_run_result(
             "done",
             [*initial_messages, {"role": "assistant", "content": "done"}],
@@ -2022,7 +2039,8 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
 
         setattr(loop, name, record)
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         return _agent_run_result(
             "done",
             [*initial_messages, {"role": "assistant", "content": "done"}],
@@ -2065,7 +2083,8 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         return _agent_run_result(
             "ack",
             [*initial_messages, {"role": "assistant", "content": "ack"}],
@@ -2196,7 +2215,8 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
 
     seen: dict[str, object] = {}
 
-    async def fake_run_agent_loop(initial_messages, **kwargs):
+    async def fake_run_agent_loop(transcript_input, **kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
         seen["initial_messages"] = initial_messages
         seen["request_context"] = kwargs["request_context"]
         return _agent_run_result(
@@ -2252,8 +2272,11 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
     session.add_message("user", "earlier question that never got an answer")
     loop.sessions.save(session)
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
-        assert [m["role"] for m in initial_messages] == ["system", "user"]
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
+        initial_messages = _assembled_messages(loop.context, transcript_input)
+        assert [m["role"] for m in initial_messages] == ["system", "user", "user"]
+        assert initial_messages[-2]["content"] == "earlier question that never got an answer"
+        assert initial_messages[-1]["content"] == "and another thing"
         return _agent_run_result(
             "done",
             [

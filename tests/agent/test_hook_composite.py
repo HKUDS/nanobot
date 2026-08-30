@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hook import (
     AgentHook,
     AgentHookContext,
@@ -459,7 +460,7 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}],
+        TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
         runtime=loop.llm_runtime(),
     )
 
@@ -504,7 +505,7 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}],
+        TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
         runtime=runtime,
         on_progress=on_progress,
         request_context=RequestContext(
@@ -551,7 +552,7 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}],
+        TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
         runtime=loop.llm_runtime(),
     )
 
@@ -577,7 +578,9 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
 
     with pytest.raises(RuntimeError, match="progress failed"):
         await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=bad_progress
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=bad_progress,
         )
 
 
@@ -596,7 +599,8 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     loop.max_iterations = 2
 
     result = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime()
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
     )
     assert result.final_content == (
         "I reached the maximum number of tool call iterations (2) "

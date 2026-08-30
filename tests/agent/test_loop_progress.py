@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
@@ -84,7 +85,9 @@ class TestToolEventProgress:
             progress.append((content, tool_hint, tool_events))
 
         result = await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=on_progress
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=on_progress,
         )
 
         assert result.final_content == "Done"
@@ -155,7 +158,9 @@ class TestToolEventProgress:
                 file_events.extend(file_edit_events)
 
         result = await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=on_progress
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=on_progress,
         )
 
         assert result.final_content == "Done"
@@ -225,7 +230,9 @@ class TestToolEventProgress:
         )
 
         result = await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=on_progress
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=on_progress,
         )
 
         assert result.final_content == "Done"
@@ -263,7 +270,9 @@ class TestToolEventProgress:
                 file_events.extend(file_edit_events)
 
         await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=on_progress
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=on_progress,
         )
 
         assert file_events == []
@@ -1019,7 +1028,7 @@ class TestToolEventProgress:
             progress.append((content, tool_hint, tool_events))
 
         result = await loop._run_agent_loop(
-            [],
+            TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
             on_progress=on_progress,
             on_stream=on_stream,

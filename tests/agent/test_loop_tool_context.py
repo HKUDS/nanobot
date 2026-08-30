@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -133,7 +134,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=runtime,
         request_context=RequestContext(
             channel="slack",
@@ -234,7 +235,7 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
     try:
         with pytest.raises(RuntimeError, match="runner failed"):
             await loop._run_agent_loop(
-                [],
+                TranscriptInput(history=[], current_message=None),
                 runtime=runtime,
                 request_context=RequestContext(
                     channel="slack",

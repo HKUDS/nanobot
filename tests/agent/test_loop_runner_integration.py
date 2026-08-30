@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.outbound_events import StreamedResponseEvent
@@ -55,7 +56,7 @@ async def test_ephemeral_runner_enters_and_restores_turn_scopes(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
         ephemeral=True,
         turn_scopes=[goal_mutation_permission(True)],
@@ -340,7 +341,8 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop.max_iterations = 2
 
     result = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime()
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
     )
 
     assert result.final_content == (
@@ -362,7 +364,7 @@ async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
 
     runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=runtime,
         request_context=RequestContext(
             channel="cli",
@@ -401,7 +403,7 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
         endings.append(resuming)
 
     result = await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
         on_stream=on_stream,
         on_stream_end=on_stream_end,
@@ -428,7 +430,9 @@ async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
         deltas.append(delta)
 
     result = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime(), on_stream=on_stream
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+        on_stream=on_stream,
     )
 
     assert result.final_content == "Hello World"
@@ -451,7 +455,9 @@ async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
         deltas.append(delta)
 
     result = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime(), on_stream=on_stream
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+        on_stream=on_stream,
     )
 
     assert result.final_content == "Hello World"
@@ -472,7 +478,8 @@ async def test_loop_retries_think_only_final_response(tmp_path):
     loop.provider.chat_with_retry = chat_with_retry
 
     result = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime()
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
     )
 
     assert result.final_content == "Recovered answer"

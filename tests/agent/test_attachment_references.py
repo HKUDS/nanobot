@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind
 from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.filesystem import ReadFileTool
@@ -148,7 +149,10 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
 
     runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "hello"}],
+        TranscriptInput(
+            history=[{"role": "user", "content": "hello"}],
+            current_message=None,
+        ),
         runtime=runtime,
         request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runner_helpers import make_run_spec
+from nanobot.agent.context import TranscriptInput
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import (
     LLMProvider,
@@ -32,6 +33,35 @@ def _make_usage_spec(provider, tools):
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
+
+
+def test_initial_transcript_is_built_from_structured_turn_input() -> None:
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    transcript_input = TranscriptInput(
+        history=[{"role": "user", "content": "earlier"}],
+        current_message="fresh",
+    )
+    expected = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "earlier"},
+        {"role": "user", "content": "fresh"},
+    ]
+    transcript_builder = MagicMock(return_value=expected)
+    spec = make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=transcript_input,
+        transcript_builder=transcript_builder,
+        tools=MagicMock(),
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    assert AgentRunner._initial_transcript(spec) == expected
+    transcript_builder.assert_called_once_with(transcript_input)
 
 
 def test_usage_or_estimate_replaces_reported_zero_for_content(monkeypatch) -> None:

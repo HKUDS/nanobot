@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
+from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.runtime_context import RuntimeContextBlock
 
 # ---------------------------------------------------------------------------
@@ -403,6 +403,15 @@ class TestBuildMessages:
         assert "user-only runtime context" not in messages[-1]["content"]
         assert "_meta" not in messages[-1]
 
+    def test_compatibility_builder_merges_system_role_without_history(self, tmp_path):
+        builder = _builder(tmp_path)
+
+        messages = builder.build_messages([], "system event", current_role="system")
+
+        assert len(messages) == 1
+        assert messages[0]["role"] == "system"
+        assert str(messages[0]["content"]).endswith("system event")
+
     def test_explicit_skill_reference_loads_full_instructions_for_this_turn(self, tmp_path):
         skill_dir = tmp_path / "skills" / "review"
         skill_dir.mkdir(parents=True)
@@ -471,6 +480,20 @@ class TestBuildMessages:
         assert len(messages) == 2  # system + merged user
         assert "previous user message" in str(messages[1]["content"])
         assert "new message" in str(messages[1]["content"])
+
+    def test_structured_transcript_preserves_fresh_turn_boundary(self, tmp_path):
+        builder = _builder(tmp_path)
+        transcript = TranscriptInput(
+            history=[{"role": "user", "content": "previous user message"}],
+            current_message="new message",
+        )
+
+        messages = builder.build_transcript(transcript)
+
+        assert [message["role"] for message in messages] == ["system", "user", "user"]
+        assert messages[-2]["content"] == "previous user message"
+        assert messages[-1]["content"] == "new message"
+        assert transcript.message_count == 3
 
     def test_current_message_can_be_built_without_history_merge(self, tmp_path):
         builder = _builder(tmp_path)

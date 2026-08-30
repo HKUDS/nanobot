@@ -10,6 +10,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.automation_turns import publish_next_deferred_turn
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -617,7 +618,7 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
     runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "hello"}],
+        TranscriptInput(history=[{"role": "user", "content": "hello"}], current_message=None),
         runtime=runtime,
         request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
@@ -711,7 +712,10 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
 
     runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "initial message from user A"}],
+        TranscriptInput(
+            history=[{"role": "user", "content": "initial message from user A"}],
+            current_message=None,
+        ),
         runtime=runtime,
         session=session,
         request_context=RequestContext(
@@ -812,7 +816,7 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
 
     runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "hello"}],
+        TranscriptInput(history=[{"role": "user", "content": "hello"}], current_message=None),
         runtime=runtime,
         request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
@@ -1476,7 +1480,7 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
 
     runtime = loop.llm_runtime()
     result = await loop._run_agent_loop(
-        [{"role": "user", "content": "hello"}],
+        TranscriptInput(history=[{"role": "user", "content": "hello"}], current_message=None),
         runtime=runtime,
         request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
