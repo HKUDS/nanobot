@@ -1030,6 +1030,20 @@ class LLMProvider(ABC):
         return True
 
     @staticmethod
+    def _content_as_blocks(content: Any) -> list[dict[str, Any]]:
+        """Convert message content to blocks so mixed user content can be merged."""
+        if isinstance(content, list):
+            return [
+                dict(cast(dict[str, Any], item))
+                if isinstance(item, dict)
+                else {"type": "text", "text": str(item)}
+                for item in cast(list[object], content)
+            ]
+        if content is None:
+            return []
+        return [{"type": "text", "text": str(content)}]
+
+    @staticmethod
     def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge consecutive same-role messages and drop trailing assistant messages.
 
@@ -1063,6 +1077,13 @@ class LLMProvider(ABC):
                 curr_content = msg.get("content") or ""
                 if isinstance(prev_content, str) and isinstance(curr_content, str):
                     prev["content"] = (prev_content + "\n\n" + curr_content).strip()
+                elif role == "user":
+                    combined = dict(msg)
+                    combined["content"] = [
+                        *LLMProvider._content_as_blocks(prev_content),
+                        *LLMProvider._content_as_blocks(curr_content),
+                    ]
+                    merged[-1] = combined
                 else:
                     merged[-1] = dict(msg)
             else:
