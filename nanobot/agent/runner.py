@@ -113,6 +113,7 @@ class AgentRunSpec:
     provider_retry_mode: str = "standard"
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
+    previous_usage: LLMUsage | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
@@ -500,7 +501,6 @@ class AgentRunner:
         length_recovery_parts: list[str] = []
         had_injections = False
         injection_cycles = 0
-        compacted_tool_call_ids: set[str] = set()
         pending_stream_content: str | None = None
         conversation_state = ProviderConversationStateController(
             provider=spec.runtime.provider,
@@ -519,8 +519,9 @@ class AgentRunner:
             context_window_tokens=spec.runtime.context_window_tokens,
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
-            inflight_start_index=len(messages),
         )
+        latest_usage = spec.previous_usage
+        latest_usage_matches_messages = False
 
         for iteration in range(spec.max_iterations):
             # Keep the persisted conversation untouched. Context governance
@@ -531,8 +532,18 @@ class AgentRunner:
             messages_for_model = self.context_governor.prepare_for_model(
                 governance_config,
                 messages,
-                compacted_tool_call_ids,
             )
+            pressure_usage = self.context_governor.pressure_usage(
+                governance_config,
+                messages_for_model,
+                latest_usage,
+                usage_matches_messages=latest_usage_matches_messages,
+            )
+            if pressure_usage is not None:
+                messages_for_model = self.context_governor.fit_to_budget(
+                    governance_config,
+                    messages_for_model,
+                )
             context = AgentHookContext(
                 iteration=iteration,
                 messages=messages,
@@ -566,6 +577,8 @@ class AgentRunner:
             raw_usage = self._usage_or_estimate(spec, messages_for_model, response)
             context.usage = raw_usage
             usage = self._merge_usage(usage, raw_usage)
+            latest_usage = raw_usage
+            latest_usage_matches_messages = False
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
                 await hook.emit_reasoning_end()
@@ -637,7 +650,6 @@ class AgentRunner:
                     self.context_governor.prepare_for_model(
                         governance_config,
                         messages,
-                        compacted_tool_call_ids,
                     )
                     if response.provider_state is not None
                     else None
@@ -694,6 +706,7 @@ class AgentRunner:
                     if hook.wants_streaming():
                         await hook.on_stream_end(context, resuming=False)
                     await hook.after_iteration(context)
+                    latest_usage_matches_messages = messages_for_model is messages
                     continue
                 logger.warning(
                     "Empty response on turn {} for {} after {} retries; attempting finalization",
