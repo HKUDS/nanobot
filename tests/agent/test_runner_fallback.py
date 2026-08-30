@@ -460,6 +460,28 @@ class TestFallbackWhenPrimaryRaises:
         assert exception is primary._exc
         assert response.error_kind == "authentication"
 
+    @pytest.mark.asyncio
+    async def test_non_string_exception_metadata_is_normalized_before_fallback(self) -> None:
+        """Provider exception metadata must be string-like before fallback consumes it."""
+
+        class NumericMetadataError(Exception):
+            error_type = 429
+            error_code = 429
+            status_code = 429
+
+        primary = _RaisingProvider("primary", NumericMetadataError("rate limited"))
+
+        response, exception = await FallbackProvider._call_provider(
+            lambda provider, kwargs: provider.chat(**kwargs),
+            primary,
+            {},
+        )
+
+        assert exception is primary._exc
+        assert response.error_type == "429"
+        assert response.error_code == "429"
+        assert FallbackProvider._should_fallback(response) is True
+
     @pytest.mark.parametrize(
         "exc",
         [

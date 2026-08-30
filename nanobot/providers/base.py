@@ -987,14 +987,16 @@ class LLMProvider(ABC):
         except (TypeError, ValueError):
             error_status_code = None
 
+        raw_error_type = getattr(exc, "error_type", None)
+        raw_error_code = getattr(exc, "error_code", None)
         detail = str(exc).strip() or type(exc).__name__
         return LLMResponse(
             content=f"Error calling LLM: {detail}",
             finish_reason="error",
             error_status_code=error_status_code,
             error_kind=error_kind,
-            error_type=getattr(exc, "error_type", None),
-            error_code=getattr(exc, "error_code", None),
+            error_type=str(raw_error_type) if raw_error_type is not None else None,
+            error_code=str(raw_error_code) if raw_error_code is not None else None,
             error_should_retry=error_should_retry,
         )
 
