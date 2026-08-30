@@ -133,10 +133,7 @@ class TestLoadBootstrapFiles:
         (project / "SOUL.md").write_text("project soul collision", encoding="utf-8")
         (project / "USER.md").write_text("project user collision", encoding="utf-8")
 
-        result = ContextBuilder(agent_home).build_system_prompt(
-            workspace=project,
-            include_memory_recent_history=False,
-        )
+        result = ContextBuilder(agent_home).build_system_prompt(workspace=project)
 
         assert "selected project rules" in result
         assert "global project rules" not in result
@@ -152,10 +149,7 @@ class TestLoadBootstrapFiles:
         project.mkdir()
         (agent_home / "AGENTS.md").write_text("default workspace rules", encoding="utf-8")
 
-        result = ContextBuilder(agent_home).build_system_prompt(
-            workspace=project,
-            include_memory_recent_history=False,
-        )
+        result = ContextBuilder(agent_home).build_system_prompt(workspace=project)
 
         assert "default workspace rules" not in result
 
