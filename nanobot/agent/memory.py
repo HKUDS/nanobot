@@ -318,7 +318,9 @@ class MemoryStore:
         for entry, cursor in self._iter_valid_entries():
             if session_key is not None and entry.get("session_key") != session_key:
                 continue
-            content = cast(str, entry["content"])
+            content = strip_think(cast(str, entry["content"]))
+            if not content.strip():
+                continue
             score = self._recall_score(content, needle, terms)
             if score is None:
                 continue

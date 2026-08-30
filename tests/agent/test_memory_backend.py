@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -63,6 +64,24 @@ def test_memory_store_recall_keeps_session_history_isolated(tmp_path) -> None:
     records = store.recall("Apollo", limit=5, session_key="telegram:alpha")
 
     assert [record.session_key for record in records] == ["telegram:alpha"]
+
+
+def test_memory_store_recall_sanitizes_legacy_history(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.history_file.write_text(
+        json.dumps({
+            "cursor": 1,
+            "timestamp": "2026-01-01",
+            "content": "<think>PRIVATE_REASONING</think>Apollo is public",
+            "session_key": "cli:test",
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    records = store.recall("Apollo", limit=5, session_key="cli:test")
+
+    assert [record.content for record in records] == ["Apollo is public"]
+    assert store.recall("PRIVATE_REASONING", limit=5, session_key="cli:test") == []
 
 
 def test_memory_store_recall_skips_corrupt_and_malformed_history(tmp_path) -> None:
