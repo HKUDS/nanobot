@@ -29,6 +29,7 @@ import {
 import type { UIMessageTurnFields } from "@/lib/thread-event-projection";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { readLocalPreferences } from "@/lib/local-preferences";
+import { playTurnCompleteSound } from "@/lib/notification-sound";
 import type {
   InboundEvent,
   OutboundCliAppMention,
@@ -866,6 +867,7 @@ export function useNanobotStream(
         });
         suppressStreamUntilTurnEndRef.current = false;
         notifyInBackground(t("recovery.completed", { defaultValue: "Task completed" }));
+        playTurnCompleteSound();
         onTurnEnd?.();
         return;
       }

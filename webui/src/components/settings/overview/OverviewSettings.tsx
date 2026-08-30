@@ -452,6 +452,23 @@ export function AppearanceSettings({
                 : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.notificationSound", "Completion sound")}
+            description={tx(
+              "settings.help.notificationSound",
+              "Play a short chime when a turn finishes while this page is in the foreground. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.notificationSound}
+              onChange={(notificationSound) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
+              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
+              label={localPrefs.notificationSound
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>
