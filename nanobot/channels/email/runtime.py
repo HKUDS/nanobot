@@ -64,6 +64,11 @@ class EmailConfig(Base):
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)
 
+    # When set, only process messages actually addressed (To/Cc/Delivered-To/
+    # X-Original-To) to this alias — lets the bot share a mailbox that also
+    # receives mail for other aliases without acting on it.
+    alias_address: str = ""
+
     # Email authentication verification (anti-spoofing)
     verify_dkim: bool = True   # Require Authentication-Results with dkim=pass
     verify_spf: bool = True    # Require Authentication-Results with spf=pass
@@ -531,6 +536,16 @@ class EmailChannel(BaseChannel):
                     skipped_uids.add(uid)
                     continue
 
+                if self.config.alias_address and not self._addressed_to_alias(parsed):
+                    self.logger.info(
+                        "From {} ignored: not addressed to configured alias {}",
+                        sender,
+                        self.config.alias_address,
+                    )
+                    self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    skipped_uids.add(uid)
+                    continue
+
                 # --- Anti-spoofing: verify Authentication-Results ---
                 spf_pass, dkim_pass = self._check_authentication_results(parsed, sender)
                 if self.config.verify_spf and not spf_pass:
@@ -706,6 +721,31 @@ class EmailChannel(BaseChannel):
         """Return True when an inbound sender belongs to the bot itself."""
         normalized_sender = self._normalize_address(sender)
         return bool(normalized_sender) and normalized_sender in self._self_addresses
+
+    def _addressed_to_alias(self, parsed_msg: Any) -> bool:
+        """Return True when the configured alias appears among the message's
+        actual recipients (To/Cc, plus Delivered-To/X-Original-To when present)."""
+        alias = self._normalize_address(self.config.alias_address)
+        if not alias:
+            return True
+        return alias in self._extract_recipient_addresses(parsed_msg)
+
+    @staticmethod
+    def _extract_recipient_addresses(parsed_msg: Any) -> set[str]:
+        """Collect every normalized recipient address a message was sent to."""
+        addresses: set[str] = set()
+        for header in ("To", "Cc"):
+            raw_values = cast(list[str], parsed_msg.get_all(header) or [])
+            for _name, addr in getaddresses(raw_values):
+                normalized = EmailChannel._normalize_address(addr)
+                if normalized:
+                    addresses.add(normalized)
+        for header in ("Delivered-To", "X-Original-To", "Envelope-To"):
+            for raw_value in cast(list[str], parsed_msg.get_all(header) or []):
+                normalized = EmailChannel._normalize_address(str(raw_value))
+                if normalized:
+                    addresses.add(normalized)
+        return addresses
 
     def _remember_processed_uid(self, uid: str, dedupe: bool, cycle_uids: set[str]) -> None:
         """Track a fetched UID so skipped messages are not reprocessed forever."""
