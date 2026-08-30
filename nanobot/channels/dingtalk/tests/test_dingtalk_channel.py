@@ -506,6 +506,72 @@ async def test_handler_processes_file_message(monkeypatch) -> None:
     assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
 
 
+@pytest.mark.asyncio
+async def test_handler_does_not_spawn_message_task_after_stop_during_download(
+    monkeypatch,
+) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        MessageBus(),
+    )
+    handler = NanobotDingTalkHandler(channel)
+    download_started = asyncio.Event()
+    release_download = asyncio.Event()
+    message_task_started = asyncio.Event()
+
+    class _FakeFileChatbotMessage:
+        text = None
+        extensions = {}
+        image_content = None
+        rich_text_content = None
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "file"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeFileChatbotMessage()
+
+    async def delayed_download(*_args):
+        download_started.set()
+        await release_download.wait()
+        return "/tmp/nanobot_dingtalk/user1/report.xlsx"
+
+    async def block_message(*_args) -> None:
+        message_task_started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeFileChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_download_dingtalk_file", delayed_download)
+    monkeypatch.setattr(channel, "_on_message", block_message)
+
+    process_task = asyncio.create_task(handler.process(SimpleNamespace(data={
+        "conversationType": "1",
+        "content": {"downloadCode": "abc123", "fileName": "report.xlsx"},
+        "text": {"content": ""},
+    })))
+    await download_started.wait()
+
+    try:
+        await channel.stop()
+        release_download.set()
+        assert await process_task == ("OK", "OK")
+        await asyncio.sleep(0)
+
+        assert not message_task_started.is_set()
+        assert not channel._background_tasks
+    finally:
+        release_download.set()
+        if not process_task.done():
+            process_task.cancel()
+        pending = tuple(channel._background_tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(process_task, *pending, return_exceptions=True)
+
+
 def _rich_text_message(rich_text_list):
     class _FakeRichTextChatbotMessage:
         text = None

@@ -182,6 +182,12 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 )
             )
 
+            if not self.channel._accepting_inbound_tasks:
+                self.channel.logger.debug(
+                    "Skipping DingTalk inbound dispatch during channel shutdown"
+                )
+                return AckMessage.STATUS_OK, "OK"
+
             self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
@@ -256,6 +262,7 @@ class DingTalkChannel(BaseChannel):
 
         # Hold references to background tasks to prevent GC
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._accepting_inbound_tasks = True
 
     def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
         self._background_tasks.discard(task)
@@ -282,6 +289,7 @@ class DingTalkChannel(BaseChannel):
                 self.logger.error("client_id and client_secret not configured")
                 return
 
+            self._accepting_inbound_tasks = True
             self._running = True
             self._http = httpx.AsyncClient(
                 timeout=httpx.Timeout(10.0, connect=10.0, read=30.0, write=30.0, pool=10.0)
@@ -319,6 +327,7 @@ class DingTalkChannel(BaseChannel):
 
     async def stop(self) -> None:
         """Stop the DingTalk bot."""
+        self._accepting_inbound_tasks = False
         self._running = False
         await self._close_stream_client()
         start_task = self._start_task
