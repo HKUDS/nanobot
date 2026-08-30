@@ -23,8 +23,8 @@ run it?", "I could write a script" -- claim nothing and are ignored.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Sequence
+from typing import cast
 
 # First-person assertions that an action is under way or finished. The reported
 # case is Chinese and the framework is used in both languages, so both are
@@ -61,26 +61,31 @@ _OFFER_RE = tuple(re.compile(p, re.IGNORECASE) for p in _OFFER_PATTERNS)
 _OFFER_WINDOW = 40  # characters either side of a claim to look for a hedge
 
 
-def _text_of(content: Any) -> str:
-    """Flatten assistant content, which may be a string or a list of blocks."""
+def _text_of(content: object) -> str:
+    """Flatten assistant content, which may be a string or a list of blocks.
+
+    Narrowed explicitly rather than by duck typing: a bare Iterable leaves the
+    element type unknown, which basedpyright rejects, and a str is itself
+    iterable so it has to be handled before the sequence branch.
+    """
     if isinstance(content, str):
         return content
-    if isinstance(content, Iterable):
-        parts: list[str] = []
-        for block in content:  # type: ignore[union-attr]
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict):
-                value = block.get("text")
-                if isinstance(value, str):
-                    parts.append(value)
-        return "\n".join(parts)
-    return ""
+    if not isinstance(content, (list, tuple)):
+        return ""
+    parts: list[str] = []
+    for block in cast("Sequence[object]", content):
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            value = cast("dict[str, object]", block).get("text")
+            if isinstance(value, str):
+                parts.append(value)
+    return "\n".join(parts)
 
 
 def unsupported_action_claims(
-    content: Any,
-    tool_calls: Sequence[Any] | None,
+    content: object,
+    tool_calls: Sequence[object] | None,
 ) -> list[str]:
     """Return the action claims this message makes without having acted.
 
