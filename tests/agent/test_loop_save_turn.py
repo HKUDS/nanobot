@@ -1651,6 +1651,39 @@ async def test_run_agent_loop_continuation_reads_latest_goal_metadata(
 
 
 @pytest.mark.asyncio
+async def test_run_agent_loop_passes_last_usage_to_runner(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:usage-pressure")
+    previous_usage = LLMUsage.reported(input_tokens=900, output_tokens=25)
+    session.metadata["_last_usage"] = previous_usage.to_dict()
+    seen: dict[str, LLMUsage | None] = {}
+
+    async def fake_run(spec):
+        seen["previous_usage"] = spec.previous_usage
+        return AgentRunResult(
+            final_content="ok",
+            messages=[{"role": "assistant", "content": "ok"}],
+        )
+
+    loop.runner.run = fake_run  # type: ignore[method-assign]
+
+    runtime = loop.llm_runtime()
+    await loop._run_agent_loop(
+        [],
+        runtime=runtime,
+        session=session,
+        request_context=RequestContext(
+            channel="websocket",
+            chat_id="usage-pressure",
+            session_key=session.key,
+            runtime=runtime,
+        ),
+    )
+
+    assert seen["previous_usage"] == previous_usage
+
+
+@pytest.mark.asyncio
 async def test_process_direct_rejects_reserved_system_channel(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop._process_message = AsyncMock(return_value=None)  # type: ignore[method-assign]

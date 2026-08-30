@@ -11,6 +11,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.context_governance import ContextWindowExceededError
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import (
     LLMProvider,
@@ -366,14 +367,12 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
 
 
 @pytest.mark.asyncio
-async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
+async def test_runner_preserves_tool_result_before_rejecting_unfit_followup():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
-    provider.supports_native_compaction.return_value = False
     calls = 0
-    captured_context: ProviderCallContext | None = None
     checkpoints: list[dict] = []
     state = ProviderConversationState(
         kind="openai_responses",
@@ -384,7 +383,7 @@ async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
     )
 
     async def chat_with_retry(**kwargs):
-        nonlocal calls, captured_context
+        nonlocal calls
         calls += 1
         if calls == 1:
             return LLMResponse(
@@ -398,7 +397,6 @@ async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
                 ],
                 provider_state=state,
             )
-        captured_context = kwargs["provider_context"]
         return LLMResponse(content="done")
 
     provider.chat_with_retry = chat_with_retry
@@ -409,37 +407,36 @@ async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
     async def checkpoint(payload: dict) -> None:
         checkpoints.append(payload)
 
-    await AgentRunner().run(make_run_spec(
-        provider,
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "read the file"},
-        ],
-        tools=tools,
-        model="gpt-5.6",
-        context_window_tokens=3_000,
-        context_block_limit=200,
-        max_tokens=1_000,
-        max_iterations=3,
-        max_tool_result_chars=10_000,
-        checkpoint_callback=checkpoint,
-    ))
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "read the file"},
+            ],
+            tools=tools,
+            model="gpt-5.6",
+            context_window_tokens=3_000,
+            context_block_limit=200,
+            max_tokens=1_000,
+            max_iterations=3,
+            max_tool_result_chars=10_000,
+            checkpoint_callback=checkpoint,
+        ))
 
-    assert captured_context is not None
-    assert captured_context.conversation_state is not None
-    pending = captured_context.conversation_state.pending_messages
-    assert len(pending) == 1
-    assert pending[0]["role"] == "tool"
-    assert "compacted to fit context" in pending[0]["content"]
-    assert pending[0]["content"] != "x" * 5_000
+    assert calls == 1
     completed_checkpoint = next(
         checkpoint
         for checkpoint in checkpoints
         if checkpoint["phase"] == "tools_completed"
     )
     checkpoint_pending = completed_checkpoint["provider_state"].pending_messages
-    assert "compacted to fit context" in checkpoint_pending[0]["content"]
-    assert checkpoint_pending[0]["content"] != "x" * 5_000
+    assert checkpoint_pending == [{
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "name": "read_file",
+        "content": "x" * 5_000,
+    }]
 
 
 @pytest.mark.asyncio

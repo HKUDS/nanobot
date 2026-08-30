@@ -29,6 +29,9 @@ def _make_loop(
         workspace=tmp_path,
         model="test-model",
         context_window_tokens=context_window_tokens,
+        # These tests isolate Memory consolidation; Runner request fitting is
+        # covered separately with realistic context windows.
+        context_block_limit=10_000,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
