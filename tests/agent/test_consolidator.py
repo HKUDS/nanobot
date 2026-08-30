@@ -309,7 +309,6 @@ class TestConsolidatorPromptContract:
         assert "Preserve every still-relevant fact" in prompt
         assert "without earlier `history.jsonl` entries" in prompt
         assert "check context below" not in prompt.lower()
-        assert "Do not output duplicate facts from the conversation chunk" in prompt
         assert "Do not mark something [skip] merely because it might already exist" in prompt
 
 
@@ -439,18 +438,21 @@ class TestConsolidatorTokenBudget:
         for i in range(160):
             session.add_message("user", f"msg-{i}")
 
-        captured: dict[str, list[dict]] = {}
+        captured: dict[str, object] = {}
 
         def build_messages(**kwargs):
-            captured["history"] = kwargs["history"]
+            captured.update(kwargs)
             return kwargs["history"]
 
         consolidator._build_messages = build_messages
 
         consolidator.estimate_session_prompt_tokens(session, runtime=runtime)
 
-        assert len(captured["history"]) == 160
-        assert captured["history"][0]["content"].endswith("msg-0")
+        history = captured["history"]
+        assert isinstance(history, list)
+        assert len(history) == 160
+        assert history[0]["content"].endswith("msg-0")
+        assert captured["session_key"] == session.key
 
     async def test_estimate_includes_recent_archived_replay(self, consolidator, runtime):
         session = Session(key="test:archived-replay")
@@ -738,6 +740,8 @@ class TestCompactIdleSession:
         assert mock_provider.chat_with_retry.await_count == 2
         latest_build = real_consolidator.archiver._build_messages.call_args_list[-1].kwargs
         assert latest_build["session_summary"]["text"] == "First replacement checkpoint."
+        assert latest_build["session_key"] == session.key
+        assert latest_build["include_memory_recent_history"] is False
         latest_messages = mock_provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
         assert [message["content"] for message in latest_messages[1:5]] == [
             "first user",

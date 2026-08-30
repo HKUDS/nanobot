@@ -24,8 +24,6 @@ Marks (choose the best match):
 
 Priority: user corrections and preferences > solutions > decisions > events > environment facts.
 
-Do not output duplicate facts from the conversation chunk being archived.
-
 Do not mark something [skip] merely because it might already exist in long-term memory.
 
 Return only formatted fact lines. Return `(nothing)` only when there is no existing archived summary and the new chunk contains nothing noteworthy.

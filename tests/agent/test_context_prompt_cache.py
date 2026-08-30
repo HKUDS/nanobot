@@ -159,6 +159,38 @@ def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
     assert "legacy entry without session" not in prompt
 
 
+def test_legacy_history_is_not_injected_when_memory_is_disabled(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = _legacy_builder(workspace)
+    builder.memory.append_history("private persisted history", session_key="cli:test")
+
+    prompt = builder.build_system_prompt(
+        include_memory=False,
+        session_key="cli:test",
+    )
+
+    assert "# Recent History" not in prompt
+    assert "private persisted history" not in prompt
+
+
+def test_legacy_history_replay_sanitizes_existing_entries(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = _legacy_builder(workspace)
+    builder.memory._write_entries([
+        {
+            "cursor": 1,
+            "timestamp": "2026-08-31 12:00",
+            "content": "<think>PRIVATE_REASONING</think>visible result",
+            "session_key": "cli:test",
+        }
+    ])
+
+    prompt = builder.build_system_prompt(session_key="cli:test")
+
+    assert "visible result" in prompt
+    assert "PRIVATE_REASONING" not in prompt
+
+
 def test_session_summary_replaces_interleaved_recent_history_entry(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = _legacy_builder(workspace)

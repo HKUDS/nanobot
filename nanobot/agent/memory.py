@@ -551,16 +551,23 @@ class MemoryStore:
     ) -> list[dict[str, Any]]:
         """Return legacy prompt rows scoped to the active session."""
         entries = self.read_unprocessed_history(since_cursor=since_cursor)
-        if session_key is None:
-            return entries
-        if not unified_session:
-            return [entry for entry in entries if entry.get("session_key") == session_key]
-        return [
-            entry
-            for entry in entries
-            if (entry_session := entry.get("session_key")) == session_key
-            or not self._is_internal_history_session(entry_session)
-        ]
+        if session_key is not None:
+            if not unified_session:
+                entries = [entry for entry in entries if entry.get("session_key") == session_key]
+            else:
+                entries = [
+                    entry
+                    for entry in entries
+                    if (entry_session := entry.get("session_key")) == session_key
+                    or not self._is_internal_history_session(entry_session)
+                ]
+
+        sanitized: list[dict[str, Any]] = []
+        for entry in entries:
+            content = strip_think(cast(str, entry["content"]))
+            if content.strip():
+                sanitized.append({**entry, "content": content})
+        return sanitized
 
     def compact_history(self) -> None:
         """Drop oldest processed entries without discarding pending Dream input."""
@@ -1164,6 +1171,8 @@ class MemoryArchiver:
             channel=channel,
             session_summary=session_summary,
             workspace=workspace,
+            session_key=session.key,
+            include_memory_recent_history=False,
         )
         tools = self._get_tool_definitions()
         estimated, source = estimate_prompt_tokens_chain(
@@ -1390,6 +1399,7 @@ class Consolidator:
             current_message="[token-probe]",
             channel=channel,
             session_summary=summary,
+            session_key=session.key,
         )
         return estimate_prompt_tokens_chain(
             runtime.provider,

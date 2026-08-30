@@ -456,7 +456,10 @@ class AgentLoop:
         self.consolidator = Consolidator(
             store=self.context.memory,
             sessions=self.sessions,
-            build_messages=self.context.build_messages,
+            build_messages=partial(
+                self.context.build_messages,
+                unified_session=unified_session,
+            ),
             get_tool_definitions=self.tools.get_definitions,
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
@@ -1116,6 +1119,8 @@ class AgentLoop:
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
+            session_key=active_session_key,
+            unified_session=self._unified_session,
         )
         if request_context is None:
             request_ctx = dataclasses.replace(
