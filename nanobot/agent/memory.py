@@ -108,7 +108,7 @@ class MemoryStore:
     @staticmethod
     def read_file(path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8", errors="replace")
         except FileNotFoundError:
             return ""
 
@@ -994,11 +994,7 @@ class MemoryArchiver:
                 messages,
                 session_key=session_key,
             )
-        formatted = truncate_text(
-            self.store._format_messages(public_history_messages(messages)),
-            _RAW_ARCHIVE_MAX_CHARS,
-        )
-        checkpoint = f"[RAW] {len(messages)} messages\n{formatted}"
+        checkpoint = self.store._build_raw_checkpoint(messages)
         await self._ingest(
             checkpoint,
             session_key=session_key,

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.memory import MemoryArchiver, MemoryStore
+from nanobot.agent.memory import _RAW_ARCHIVE_MAX_CHARS, MemoryArchiver, MemoryStore
 from nanobot.agent.memory_backend import MemoryBackend
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -145,7 +145,10 @@ async def test_memory_archiver_raw_fallback_uses_configured_backend(tmp_path) ->
     )
 
     result = await archiver.archive(
-        [{"role": "user", "content": "remember this"}],
+        [{
+            "role": "user",
+            "content": "<think>PRIVATE_REASONING</think>remember this " + "x" * 20_000,
+        }],
         runtime=runtime,
         session_key="cli:test",
         request_messages=[{"role": "user", "content": "summarize"}],
@@ -153,8 +156,13 @@ async def test_memory_archiver_raw_fallback_uses_configured_backend(tmp_path) ->
     )
 
     backend.ingest.assert_called_once()
-    assert result == backend.ingest.call_args.args[0]
+    ingested = backend.ingest.call_args.args[0]
+    assert result is not None
     assert result.startswith("[RAW] 1 messages")
+    assert ingested.startswith("[RAW] 1 messages")
+    assert len(ingested) <= _RAW_ARCHIVE_MAX_CHARS + 50
+    assert "PRIVATE_REASONING" not in ingested
+    assert "PRIVATE_REASONING" not in result
     assert backend.ingest.call_args.kwargs == {
         "session_key": "cli:test",
         "max_chars": 16_000,
