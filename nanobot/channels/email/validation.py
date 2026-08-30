@@ -7,6 +7,7 @@ from contextlib import suppress
 from typing import Any
 
 from nanobot.channels.contracts import ChannelValidationContext
+from nanobot.channels.email import ms_oauth as email_oauth
 from nanobot.channels.validation import (
     check,
     int_value,
@@ -104,7 +105,9 @@ def validate(
 
     checks, missing = required_checks("email", values)
     if truthy(values.get("consentGranted")):
-        checks.append(check("consent", "Mailbox consent", "pass", "Consent is enabled for this mailbox."))
+        checks.append(
+            check("consent", "Mailbox consent", "pass", "Consent is enabled for this mailbox.")
+        )
     else:
         checks.append(
             check(
@@ -119,16 +122,24 @@ def validate(
     verify_spf = _bool_value(values, "verifySpf", default=True)
     trusted_authserv_ids = values.get("trustedAuthservIds")
     if isinstance(trusted_authserv_ids, str):
-        trusted_authserv_ids = [item.strip() for item in trusted_authserv_ids.split(",") if item.strip()]
+        trusted_authserv_ids = [
+            item.strip() for item in trusted_authserv_ids.split(",") if item.strip()
+        ]
     try:
-        auth_config = EmailConfig.model_validate({
-            "trustedAuthservIds": [] if trusted_authserv_ids is None else trusted_authserv_ids,
-        })
+        auth_config = EmailConfig.model_validate(
+            {
+                "trustedAuthservIds": [] if trusted_authserv_ids is None else trusted_authserv_ids,
+            }
+        )
     except ValueError:
-        checks.append(check(
-            "trusted_authserv_ids", "Trusted mail authentication service", "fail",
-            "Use exact authserv-id values, not wildcards, URLs, or empty entries.",
-        ))
+        checks.append(
+            check(
+                "trusted_authserv_ids",
+                "Trusted mail authentication service",
+                "fail",
+                "Use exact authserv-id values, not wildcards, URLs, or empty entries.",
+            )
+        )
     else:
         if verify_dkim or verify_spf:
             if auth_config.trusted_authserv_ids:
@@ -150,6 +161,55 @@ def validate(
                         "Set trustedAuthservIds when SPF or DKIM verification is enabled.",
                     )
                 )
+
+    imap_password = string_value(values.get("imapPassword"))
+    smtp_password = string_value(values.get("smtpPassword"))
+    oauth_tenant_id = string_value(values.get("oauthTenantId"))
+    oauth_client_id = string_value(values.get("oauthClientId"))
+    oauth_client_secret = string_value(values.get("oauthClientSecret"))
+    use_oauth = bool(oauth_tenant_id and oauth_client_id and oauth_client_secret)
+    use_password = bool(imap_password and smtp_password)
+
+    if use_password:
+        checks.append(
+            check("auth_method", "Authentication", "pass", "IMAP/SMTP password is configured.")
+        )
+    elif use_oauth:
+        checks.append(
+            check("auth_method", "Authentication", "pass", "Microsoft OAuth is configured.")
+        )
+    else:
+        missing.append("imapPassword_smtpPassword_or_oauth")
+        checks.append(
+            check(
+                "auth_method",
+                "Authentication",
+                "fail",
+                "Add an IMAP/SMTP password, or a Microsoft tenant ID/client ID/client secret.",
+            )
+        )
+
+    if use_oauth:
+        mailbox = string_value(
+            values.get("fromAddress") or values.get("imapUsername") or values.get("smtpUsername")
+        )
+        signed_in = bool(
+            mailbox
+            and email_oauth.get_email_oauth_login_status(oauth_tenant_id, oauth_client_id, mailbox)
+        )
+        checks.append(
+            check(
+                "oauth_signin",
+                "Microsoft sign-in",
+                # "warn", not "fail": a "fail" check forces can_enable=False,
+                # which stops the WebUI from ever saving these credentials —
+                # but signing in requires them to already be saved first.
+                "pass" if signed_in else "warn",
+                "Signed in."
+                if signed_in
+                else "Save, then run `nanobot channels login email` to sign in with this mailbox.",
+            )
+        )
 
     for prefix, default_port in (("imap", 993), ("smtp", 587)):
         label = prefix.upper()
