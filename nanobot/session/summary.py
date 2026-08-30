@@ -6,6 +6,9 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import TypedDict, cast
 
+MEMORY_CHECKPOINT_VERSION_KEY = "_memory_checkpoint_version"
+MEMORY_CHECKPOINT_VERSION = 1
+
 
 class SessionSummary(TypedDict):
     text: str

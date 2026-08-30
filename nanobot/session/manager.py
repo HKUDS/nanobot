@@ -28,6 +28,7 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.summary import MEMORY_CHECKPOINT_VERSION_KEY
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -484,6 +485,7 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop(MEMORY_CHECKPOINT_VERSION_KEY, None)
 
     def retain_recent_legal_suffix(
         self,
@@ -2028,6 +2030,7 @@ class SessionManager:
         last_consolidated = min(source.last_archived, len(copied))
         if source.last_archived > len(copied):
             metadata.pop("_last_summary", None)
+            metadata.pop(MEMORY_CHECKPOINT_VERSION_KEY, None)
             last_consolidated = 0
 
         now = datetime.now()

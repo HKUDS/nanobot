@@ -622,6 +622,7 @@ class TestCompactIdleSession:
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
         assert "last_active" in meta
+        assert reloaded.metadata["_memory_checkpoint_version"] == 1
         assert reloaded.updated_at == old_ts
 
     @pytest.mark.asyncio
@@ -647,6 +648,30 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:short")
         assert reloaded.last_archived == 2
         assert [message["content"] for message in reloaded.get_history()] == ["hello", "hi"]
+
+    @pytest.mark.asyncio
+    async def test_idle_compaction_repairs_legacy_watermark_without_summary(
+        self, real_consolidator, mock_provider, store, runtime
+    ):
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:legacy-idle")
+        session.add_message("user", "LEGACY_IDLE_MARKER")
+        session.add_message("assistant", "old answer")
+        session.last_archived = 2
+        sessions.save(session)
+        sessions.invalidate("cli:legacy-idle")
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:legacy-idle",
+            runtime=runtime,
+        )
+
+        assert result == ""
+        mock_provider.chat_with_retry.assert_not_awaited()
+        reloaded = sessions.get_or_create("cli:legacy-idle")
+        assert reloaded.last_archived == 2
+        assert "LEGACY_IDLE_MARKER" in reloaded.metadata["_last_summary"]["text"]
+        assert store.read_unprocessed_history(since_cursor=0) == []
 
     @pytest.mark.asyncio
     async def test_new_messages_advance_existing_archive_progress(
@@ -921,11 +946,17 @@ class TestCompactIdleSession:
         result = await real_consolidator.compact_idle_session(
             "cli:nothing", runtime=runtime, max_suffix=4
         )
+        second = await real_consolidator.compact_idle_session(
+            "cli:nothing", runtime=runtime, max_suffix=4
+        )
         assert result == "(nothing)"
+        assert second == ""
 
         reloaded = sessions.get_or_create("cli:nothing")
         assert "_last_summary" not in reloaded.metadata
+        assert reloaded.metadata["_memory_checkpoint_version"] == 1
         assert real_consolidator.store.read_unprocessed_history(0) == []
+        mock_provider.chat_with_retry.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_llm_failure_preserves_history_but_advances_replay_boundary(
@@ -1439,6 +1470,21 @@ class TestRawArchiveTruncation:
         assert len(entries) == 1
         assert "hello" in entries[0]["content"]
 
+    def test_raw_archive_returns_the_sanitized_persisted_checkpoint(self, store):
+        messages = [
+            {
+                "role": "user",
+                "content": "<think>PRIVATE_REASONING</think>visible result",
+            }
+        ]
+
+        checkpoint = store.raw_archive(messages, session_key="cli:test")
+
+        persisted = store.read_unprocessed_history(since_cursor=0)[0]["content"]
+        assert checkpoint == persisted
+        assert "PRIVATE_REASONING" not in checkpoint
+        assert "visible result" in checkpoint
+
     def test_raw_archive_excludes_model_only_runtime_context(self, store):
         content, marker = append_runtime_context(
             "ship the feature",
@@ -1470,6 +1516,24 @@ class TestRawArchiveTruncation:
 
 
 class TestArchivePersistence:
+    async def test_archive_returns_the_sanitized_persisted_summary(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="<think>PRIVATE_REASONING</think>safe summary",
+            finish_reason="stop",
+            has_tool_calls=False,
+        )
+
+        summary = await _archive(
+            consolidator,
+            [{"role": "user", "content": "hi"}],
+            runtime,
+        )
+
+        persisted = store.read_unprocessed_history(since_cursor=0)[0]["content"]
+        assert summary == persisted == "safe summary"
+
     async def test_oversized_summary_uses_history_emergency_cap(
         self, consolidator, mock_provider, store, runtime
     ):
@@ -1480,7 +1544,7 @@ class TestArchivePersistence:
             content="S" * (_HISTORY_ENTRY_HARD_CAP * 2),
             finish_reason="stop",
         )
-        await _archive(
+        summary = await _archive(
             consolidator,
             [{"role": "user", "content": "hi"}],
             runtime,
@@ -1488,3 +1552,4 @@ class TestArchivePersistence:
 
         entry = store.read_unprocessed_history(since_cursor=0)[0]
         assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
+        assert summary == entry["content"]

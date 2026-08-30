@@ -1879,6 +1879,13 @@ class AgentLoop:
                 session,
                 runtime=runtime,
             )
+            # Token consolidation may have committed a replacement checkpoint
+            # after the compact stage captured its summary for this request.
+            ctx.session, ctx.pending_summary = self.auto_compact.prepare_session(
+                session,
+                ctx.session_key,
+            )
+            session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
         _hist_kwargs: dict[str, Any] = {

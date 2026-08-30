@@ -27,7 +27,11 @@ from nanobot.session.manager import (
     Session,
     SessionManager,
 )
-from nanobot.session.summary import session_summary_from_metadata
+from nanobot.session.summary import (
+    MEMORY_CHECKPOINT_VERSION,
+    MEMORY_CHECKPOINT_VERSION_KEY,
+    session_summary_from_metadata,
+)
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -259,6 +263,29 @@ class MemoryStore:
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
+    def _normalize_history_entry(
+        self,
+        entry: str,
+        *,
+        max_chars: int | None = None,
+    ) -> str:
+        """Return the exact bounded, model-safe text accepted by the journal."""
+        limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
+        raw = entry.rstrip()
+        content = strip_think(raw)
+        if len(content) > limit:
+            if not self._oversize_logged:
+                self._oversize_logged = True
+                logger.warning(
+                    "history entry exceeds {} chars ({}); truncating. "
+                    "Usually means a caller forgot its own cap; "
+                    "further occurrences suppressed.",
+                    limit,
+                    len(content),
+                )
+            content = truncate_text(content, limit)
+        return content
+
     def append_history(
         self,
         entry: str,
@@ -280,20 +307,9 @@ class MemoryStore:
         content more tightly; this default only exists to catch unintentional
         large writes (e.g. an LLM echoing its input back as a "summary").
         """
-        limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         raw = entry.rstrip()
-        if len(raw) > limit:
-            if not self._oversize_logged:
-                self._oversize_logged = True
-                logger.warning(
-                    "history entry exceeds {} chars ({}); truncating. "
-                    "Usually means a caller forgot its own cap; "
-                    "further occurrences suppressed.",
-                    limit, len(raw),
-                )
-            raw = truncate_text(raw, limit)
-        content = strip_think(raw)
+        content = self._normalize_history_entry(entry, max_chars=max_chars)
         # Cursor allocation and the append must be atomic: concurrent writers
         # could otherwise read the same current cursor and emit duplicates.
         with self._append_lock:
@@ -689,17 +705,26 @@ class MemoryStore:
         session_key: str | None = None,
     ) -> str:
         """Persist and return a bounded raw checkpoint when summarization degrades."""
-        limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
-        formatted = truncate_text(
-            self._format_messages(public_history_messages(messages)),
-            limit,
-        )
-        checkpoint = f"[RAW] {len(messages)} messages\n{formatted}"
+        checkpoint = self._build_raw_checkpoint(messages, max_chars=max_chars)
         self.append_history(checkpoint, session_key=session_key)
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
         return checkpoint
+
+    def _build_raw_checkpoint(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_chars: int | None = None,
+    ) -> str:
+        """Build the same bounded checkpoint as :meth:`raw_archive` without writing it."""
+        limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
+        checkpoint = (
+            f"[RAW] {len(messages)} messages\n"
+            f"{self._format_messages(public_history_messages(messages))}"
+        )
+        return self._normalize_history_entry(checkpoint, max_chars=limit)
 
     # ------------------------------------------------------------------
     # Dream helpers
@@ -864,7 +889,11 @@ class MemoryArchiver:
         if not summary or not summary.strip():
             logger.warning("Memory archive provider returned no summary, raw-dumping to history")
             return raw_fallback()
-        if summary.strip() == "(nothing)":
+        summary = self.store._normalize_history_entry(summary)
+        if not summary:
+            logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
+            return raw_fallback()
+        if summary == "(nothing)":
             return "(nothing)"
         self.store.append_history(summary, session_key=session_key)
         return summary
@@ -1029,6 +1058,38 @@ class Consolidator:
                 "last_active": (last_active or session.updated_at).isoformat(),
             }
 
+    def _ensure_cumulative_checkpoint(
+        self,
+        session: Session,
+        *,
+        runtime: LLMRuntime,
+    ) -> None:
+        """Migrate pre-checkpoint archive state without changing its watermark."""
+        if session.last_archived <= 0:
+            return
+        if (
+            cast(object, session.metadata.get(MEMORY_CHECKPOINT_VERSION_KEY))
+            == MEMORY_CHECKPOINT_VERSION
+        ):
+            return
+
+        archived_prefix = session.messages[:session.last_archived]
+        if not archived_prefix:
+            return
+        checkpoint = self.store._build_raw_checkpoint(archived_prefix)
+        checkpoint = truncate_text_to_tokens(
+            checkpoint,
+            max(1, runtime.generation.max_tokens),
+        )
+        self._set_last_summary(session, checkpoint)
+        session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
+        self.sessions.save(session)
+        logger.info(
+            "Migrated cumulative Memory checkpoint for {} at archive watermark {}",
+            session.key,
+            session.last_archived,
+        )
+
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -1089,15 +1150,15 @@ class Consolidator:
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
         """
-        if runtime.context_window_tokens <= 0:
-            return
-
         lock = self.get_lock(session.key)
         async with lock:
             # Refresh session reference: AutoCompact may have replaced it.
             fresh = self.sessions.get_or_create(session.key)
             if fresh is not session:
                 session = fresh
+            self._ensure_cumulative_checkpoint(session, runtime=runtime)
+            if runtime.context_window_tokens <= 0:
+                return
             if not session.messages:
                 return
 
@@ -1149,6 +1210,7 @@ class Consolidator:
                 return
             self._set_last_summary(session, summary)
             session.last_archived = end_idx
+            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
             self.sessions.save(session)
 
     async def compact_idle_session(
@@ -1175,6 +1237,7 @@ class Consolidator:
         async with lock:
             self.sessions.invalidate(session_key)
             session = self.sessions.get_or_create(session_key)
+            self._ensure_cumulative_checkpoint(session, runtime=runtime)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1196,6 +1259,7 @@ class Consolidator:
             # A turn can append while the provider call is in flight. Advance only
             # through the captured batch so new messages remain eligible next time.
             session.last_archived = archive_end
+            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
             self.sessions.save(session)
 
             visible = session.get_history(

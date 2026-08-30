@@ -646,6 +646,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tm
     ]
     source.last_archived = 4
     source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
+    source.metadata["_memory_checkpoint_version"] = 1
     manager.save(source)
 
     forked = manager.fork_session_before_user_index(
@@ -658,6 +659,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tm
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
     assert forked.last_archived == 0
     assert "_last_summary" not in forked.metadata
+    assert "_memory_checkpoint_version" not in forked.metadata
 
 
 def test_get_history_ignores_media_kwarg_on_non_user_rows():

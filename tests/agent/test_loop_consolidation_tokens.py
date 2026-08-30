@@ -7,11 +7,17 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 
 
-def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -> AgentLoop:
+def _make_loop(
+    tmp_path,
+    *,
+    estimated_tokens: int,
+    context_window_tokens: int,
+    max_tokens: int = 0,
+) -> AgentLoop:
     from nanobot.providers.base import GenerationSettings
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings(max_tokens=0)
+    provider.generation = GenerationSettings(max_tokens=max_tokens)
     provider.estimate_prompt_tokens.return_value = (estimated_tokens, "test-counter")
     _response = LLMResponse(content="ok", tool_calls=[])
     provider.chat_with_retry = AsyncMock(return_value=_response)
@@ -54,6 +60,118 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path) -> None:
     await loop.process_direct("hello", session_key="cli:test")
 
     assert loop.consolidator.archive_session.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_token_consolidation_refreshes_summary_for_current_request(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop.consolidator.archive_session = AsyncMock(  # type: ignore[method-assign]
+        return_value="FRESH_CHECKPOINT"
+    )
+    loop.consolidator.estimate_session_prompt_tokens = MagicMock(  # type: ignore[method-assign]
+        return_value=(1000, "test")
+    )
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.messages = [
+        {"role": role, "content": f"{role[0]}{turn}"}
+        for turn in range(10)
+        for role in ("user", "assistant")
+    ]
+    loop.sessions.save(session)
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    request_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    system_prompt = request_messages[0]["content"]
+    assert "FRESH_CHECKPOINT" in system_prompt
+    assert all(message.get("content") != "u0" for message in request_messages)
+    assert loop.sessions.get_or_create("cli:test").last_archived == 12
+
+
+@pytest.mark.asyncio
+async def test_legacy_archive_watermark_without_summary_is_repaired_before_request(
+    tmp_path,
+) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=100,
+        context_window_tokens=1000,
+        max_tokens=256,
+    )
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:legacy")
+    session.messages = [
+        {
+            "role": role,
+            "content": (
+                "LEGACY_ARCHIVED_MARKER"
+                if turn == 0 and role == "user"
+                else f"{role[0]}{turn}"
+            ),
+        }
+        for turn in range(10)
+        for role in ("user", "assistant")
+    ]
+    session.last_archived = 12
+    loop.sessions.save(session)
+    loop.sessions.invalidate("cli:legacy")
+
+    await loop.process_direct("hello", session_key="cli:legacy")
+
+    request_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    system_prompt = request_messages[0]["content"]
+    assert "LEGACY_ARCHIVED_MARKER" in system_prompt
+    reloaded = loop.sessions.get_or_create("cli:legacy")
+    assert reloaded.last_archived == 12
+    assert reloaded.metadata["_last_summary"]["text"] in system_prompt
+    assert reloaded.metadata["_memory_checkpoint_version"] == 1
+    assert reloaded.messages[0]["content"] == "LEGACY_ARCHIVED_MARKER"
+    assert loop.context.memory.read_unprocessed_history(since_cursor=0) == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_incremental_summary_is_replaced_before_request(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=100,
+        context_window_tokens=1000,
+        max_tokens=256,
+    )
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:legacy-incremental")
+    session.messages = [
+        {
+            "role": role,
+            "content": (
+                "EARLY_ARCHIVED_MARKER"
+                if turn == 0 and role == "user"
+                else f"{role[0]}{turn}"
+            ),
+        }
+        for turn in range(10)
+        for role in ("user", "assistant")
+    ]
+    session.last_archived = 12
+    session.metadata["_last_summary"] = {
+        "text": "LEGACY_LAST_CHUNK_ONLY",
+        "last_active": session.updated_at.isoformat(),
+    }
+    loop.sessions.save(session)
+    loop.sessions.invalidate("cli:legacy-incremental")
+
+    await loop.process_direct("hello", session_key="cli:legacy-incremental")
+
+    request_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    system_prompt = request_messages[0]["content"]
+    assert "EARLY_ARCHIVED_MARKER" in system_prompt
+    assert "LEGACY_LAST_CHUNK_ONLY" not in system_prompt
+    reloaded = loop.sessions.get_or_create("cli:legacy-incremental")
+    assert reloaded.last_archived == 12
+    assert reloaded.metadata["_memory_checkpoint_version"] == 1
 
 
 @pytest.mark.asyncio
