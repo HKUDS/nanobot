@@ -407,6 +407,9 @@ class TestEphemeralDirect:
             patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_consolidator_cls.return_value.migrate_legacy_checkpoint = AsyncMock(
+                side_effect=lambda session, **_kwargs: session
+            )
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
@@ -704,6 +707,9 @@ class TestEphemeralHooks:
             patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_consolidator_cls.return_value.migrate_legacy_checkpoint = AsyncMock(
+                side_effect=lambda session, **_kwargs: session
+            )
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,

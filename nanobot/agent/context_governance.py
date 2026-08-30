@@ -115,23 +115,73 @@ class ContextGovernor:
         )
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
+        return self.ensure_request_fits(
+            config,
+            updated,
+            tool_definitions=tool_definitions,
+        )
+
+    def ensure_request_fits(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Validate an exact model request without dropping any messages."""
         if not config.context_window_tokens:
-            return updated
+            return messages
         budget = self.input_budget(config)
         estimated, source = estimate_prompt_tokens_chain(
             config.provider,
             config.model,
-            updated,
+            messages,
             tool_definitions,
         )
         if budget > 0 and estimated <= budget:
-            return updated
+            return messages
         raise ContextWindowExceededError(
             session_key=config.session_key,
             estimated_tokens=estimated,
             input_budget=budget,
             source=source,
         )
+
+    def request_pressure(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        usage: LLMUsage | None,
+        *,
+        usage_matches_messages: bool,
+        tool_definitions: list[dict[str, Any]] | None,
+        request_context_tokens: int | None = None,
+    ) -> tuple[int, str] | None:
+        """Return the authoritative measurement when a request is pressured."""
+        if not config.context_window_tokens:
+            return None
+        budget = self.input_budget(config)
+        if (
+            request_context_tokens is None
+            and usage_matches_messages
+            and usage is not None
+            and usage.context_tokens is not None
+        ):
+            measured = usage.context_tokens
+            source = "matching provider usage"
+        else:
+            measured, source = estimate_prompt_tokens_chain(
+                config.provider,
+                config.model,
+                messages,
+                tool_definitions,
+            )
+            if request_context_tokens is not None and request_context_tokens > measured:
+                measured = request_context_tokens
+                source = "resumed provider state plus pending messages"
+        if budget > 0 and measured < budget:
+            return None
+        return measured, source
 
     def fit_request(
         self,
@@ -144,27 +194,15 @@ class ContextGovernor:
         request_context_tokens: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Fit the request when its measured or estimated input is pressured."""
-        if not config.context_window_tokens:
-            return messages, False
-        budget = self.input_budget(config)
-        if (
-            request_context_tokens is None
-            and usage_matches_messages
-            and usage is not None
-            and usage.context_tokens is not None
-        ):
-            pressured = budget <= 0 or usage.context_tokens >= budget
-        else:
-            estimated, _ = estimate_prompt_tokens_chain(
-                config.provider,
-                config.model,
-                messages,
-                tool_definitions,
-            )
-            if request_context_tokens is not None:
-                estimated = max(estimated, request_context_tokens)
-            pressured = budget <= 0 or estimated >= budget
-        if not pressured:
+        pressure = self.request_pressure(
+            config,
+            messages,
+            usage,
+            usage_matches_messages=usage_matches_messages,
+            tool_definitions=tool_definitions,
+            request_context_tokens=request_context_tokens,
+        )
+        if pressure is None:
             return messages, False
         return self.fit_to_budget(
             config,

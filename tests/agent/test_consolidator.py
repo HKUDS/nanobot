@@ -121,6 +121,37 @@ async def _archive(
     )
 
 
+class TestTurnTranscriptSummary:
+    async def test_uses_exact_accepted_prefix_and_existing_archiver(
+        self,
+        consolidator,
+        runtime,
+    ):
+        accepted = [
+            {"role": "system", "content": "stable system"},
+            {"role": "user", "content": "accepted history"},
+        ]
+        tools = [{"type": "function", "function": {"name": "inspect"}}]
+        consolidator.archiver.archive = AsyncMock(return_value="replacement checkpoint")
+
+        summary = await consolidator.summarize_transcript(
+            accepted,
+            "previous checkpoint",
+            runtime=runtime,
+            session_key="test:turn",
+            tools=tools,
+        )
+
+        assert summary == "replacement checkpoint"
+        call = consolidator.archiver.archive.await_args
+        assert call.args[0] == [{"role": "user", "content": "accepted history"}]
+        assert call.kwargs["request_messages"][:-1] == accepted
+        assert call.kwargs["request_messages"][-1]["role"] == "user"
+        assert "SNIP" in call.kwargs["request_messages"][-1]["content"]
+        assert call.kwargs["request_tools"] == tools
+        assert call.kwargs["previous_summary"] == "previous checkpoint"
+
+
 class TestConsolidatorSummarize:
     def test_format_messages_keeps_media_only_user_turn(self):
         path = "/home/user/.nanobot/media/websocket/clip.mp4"

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -228,36 +227,6 @@ class TestAgentLoopTTLParam:
         """AutoCompact default TTL should be 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
-
-    @pytest.mark.asyncio
-    async def test_process_message_reads_history_with_token_budget(self, tmp_path):
-        """_process_message should pass an auto-derived token budget to get_history."""
-        loop = _make_loop(tmp_path)
-        session = loop.sessions.get_or_create("cli:direct")
-        session.get_history = MagicMock(return_value=[])
-        loop.context.build_messages = MagicMock(return_value=[])
-        loop._run_agent_loop = AsyncMock(
-            return_value=AgentRunResult(
-                final_content="ok",
-                messages=[],
-                stop_reason="stop",
-            )
-        )
-        loop._save_turn = MagicMock()
-
-        msg = InboundMessage(
-            channel="cli",
-            sender_id="u1",
-            chat_id="direct",
-            content="hello",
-        )
-        await loop._process_message(msg)
-        session.get_history.assert_called_once()
-        kwargs = session.get_history.call_args.kwargs
-        assert isinstance(kwargs.get("max_tokens"), int)
-        assert kwargs["max_tokens"] > 0
-        assert set(kwargs) == {"max_tokens", "extend_to_user"}
-
 
 class TestAutoCompact:
     """Test the _archive method."""

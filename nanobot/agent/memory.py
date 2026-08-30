@@ -1,4 +1,4 @@
-"""Memory storage, transcript archiving, and legacy consolidation coordination."""
+"""Memory storage, transcript archiving, and session checkpoint consolidation."""
 
 # Tool schemas are installed by the ``@tool_parameters`` class decorator at
 # runtime; static analyzers cannot observe that it clears ``parameters`` from
@@ -27,7 +27,11 @@ from nanobot.session.manager import (
     Session,
     SessionManager,
 )
-from nanobot.session.summary import session_summary_from_metadata
+from nanobot.session.summary import (
+    MEMORY_CHECKPOINT_VERSION,
+    MEMORY_CHECKPOINT_VERSION_KEY,
+    session_summary_from_metadata,
+)
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -740,7 +744,7 @@ class MemoryStore:
 
 
 # ---------------------------------------------------------------------------
-# Memory ingestion and legacy context-pressure coordination
+# Memory ingestion and context-pressure coordination
 # ---------------------------------------------------------------------------
 
 # Raw fallbacks use a tighter cap. Completed model summaries may scale with the
@@ -948,7 +952,7 @@ class MemoryArchiver:
 
 
 class Consolidator:
-    """Legacy context-pressure coordinator backed by a MemoryArchiver."""
+    """Coordinate session Memory checkpoints through ``MemoryArchiver``."""
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -977,6 +981,80 @@ class Consolidator:
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    async def summarize_transcript(
+        self,
+        accepted_messages: list[dict[str, Any]],
+        previous_summary: str | None,
+        *,
+        runtime: LLMRuntime,
+        session_key: str,
+        tools: list[dict[str, Any]],
+    ) -> str | None:
+        """Summarize the exact transcript prefix already accepted by the model."""
+        source_messages = [
+            dict(message)
+            for message in accepted_messages
+            if message.get("role") != "system"
+        ]
+        if not source_messages:
+            return None
+
+        max_output_tokens = max(0, runtime.generation.max_tokens)
+        input_token_budget = runtime.context_window_tokens - max_output_tokens
+        prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+            archive_count=len(source_messages),
+        )
+        request_messages = [
+            *[dict(message) for message in accepted_messages],
+            {"role": "user", "content": prompt},
+        ]
+        estimated, source = estimate_prompt_tokens_chain(
+            runtime.provider,
+            runtime.model,
+            request_messages,
+            tools,
+        )
+        if input_token_budget <= 0 or estimated > input_token_budget:
+            logger.warning(
+                "Turn consolidation input does not fit for {}: {}/{} via {}; "
+                "using a bounded raw checkpoint",
+                session_key,
+                estimated,
+                input_token_budget,
+                source,
+            )
+            checkpoint_tokens = min(
+                max_output_tokens,
+                max(1, (input_token_budget - self._SAFETY_BUFFER) // 2),
+            )
+            return self.archiver._raw_checkpoint(
+                source_messages,
+                session_key=session_key,
+                previous_summary=previous_summary,
+                max_tokens=max(1, checkpoint_tokens),
+            )
+
+        summary = await self.archiver.archive(
+            source_messages,
+            runtime=runtime,
+            session_key=session_key,
+            request_messages=request_messages,
+            request_tools=tools,
+            previous_summary=previous_summary,
+        )
+        if summary == "(nothing)":
+            summary = self.archiver._raw_checkpoint(
+                source_messages,
+                session_key=session_key,
+                previous_summary=previous_summary,
+                max_tokens=max_output_tokens,
+            )
+        if summary is None:
+            return None
+        return truncate_text_to_tokens(summary, max(1, max_output_tokens))
 
     def pick_consolidation_boundary(
         self,
@@ -1016,6 +1094,51 @@ class Consolidator:
                 "text": summary,
                 "last_active": (last_active or session.updated_at).isoformat(),
             }
+
+    def _ensure_cumulative_checkpoint(
+        self,
+        session: Session,
+        *,
+        runtime: LLMRuntime,
+    ) -> None:
+        """Migrate pre-checkpoint archive state without changing its watermark."""
+        if session.last_archived <= 0:
+            return
+        if (
+            cast(object, session.metadata.get(MEMORY_CHECKPOINT_VERSION_KEY))
+            == MEMORY_CHECKPOINT_VERSION
+        ):
+            return
+
+        archived_prefix = session.messages[:session.last_archived]
+        if not archived_prefix:
+            return
+        checkpoint = self.store._build_raw_checkpoint(archived_prefix)
+        checkpoint = truncate_text_to_tokens(
+            checkpoint,
+            max(1, runtime.generation.max_tokens),
+        )
+        self._set_last_summary(session, checkpoint)
+        session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
+        self.sessions.save(session)
+        logger.info(
+            "Migrated cumulative Memory checkpoint for {} at archive watermark {}",
+            session.key,
+            session.last_archived,
+        )
+
+    async def migrate_legacy_checkpoint(
+        self,
+        session: Session,
+        *,
+        runtime: LLMRuntime,
+    ) -> Session:
+        """Upgrade pre-checkpoint archive state without performing consolidation."""
+        lock = self.get_lock(session.key)
+        async with lock:
+            fresh = self.sessions.get_or_create(session.key)
+            self._ensure_cumulative_checkpoint(fresh, runtime=runtime)
+            return fresh
 
     def estimate_session_prompt_tokens(
         self,
@@ -1135,6 +1258,7 @@ class Consolidator:
             if summary is None:
                 return
             self._set_last_summary(session, summary)
+            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
             session.last_archived = end_idx
             self.sessions.save(session)
 
@@ -1179,6 +1303,7 @@ class Consolidator:
                 return None
 
             self._set_last_summary(session, summary, last_active=last_active)
+            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
 
             # A turn can append while the provider call is in flight. Advance only
             # through the captured batch so new messages remain eligible next time.
