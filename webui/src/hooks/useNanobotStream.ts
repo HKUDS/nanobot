@@ -32,6 +32,7 @@ import {
 import type { UIMessageTurnFields } from "@/lib/thread-event-projection";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { readLocalPreferences } from "@/lib/local-preferences";
+import { playTurnCompleteSound } from "@/lib/notification-sound";
 import type {
   InboundEvent,
   OutboundCliAppMention,
@@ -1043,6 +1044,7 @@ export function useNanobotStream(
               ? ev.failure_message || "This turn failed and has ended."
             : t("recovery.completed", { defaultValue: "Task completed" }),
         );
+        playTurnCompleteSound();
         onTurnEnd?.();
         return;
       }
