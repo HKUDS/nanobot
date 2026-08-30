@@ -16,6 +16,7 @@ def convert_messages(
     messages: list[dict[str, Any]],
     *,
     preserve_reasoning: bool = False,
+    include_item_ids: bool = True,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Convert Chat Completions messages to Responses API input items.
 
@@ -48,26 +49,32 @@ def convert_messages(
                         "content": [{"type": "output_text", "text": reasoning}],
                     })
             if isinstance(content, str) and content:
-                message_id = _unique_item_id(f"msg_{idx}", used_item_ids)
-                input_items.append({
+                message_item: dict[str, Any] = {
                     "type": "message", "role": "assistant",
                     "content": [{"type": "output_text", "text": content}],
-                    "status": "completed", "id": message_id,
-                })
+                    "status": "completed",
+                }
+                if include_item_ids:
+                    message_item["id"] = _unique_item_id(f"msg_{idx}", used_item_ids)
+                input_items.append(message_item)
             for raw_tool_call in cast(list[object], msg.get("tool_calls", []) or []):
                 tool_call = _as_json_object(raw_tool_call)
                 if tool_call is None:
                     continue
                 fn = _as_json_object(tool_call.get("function")) or {}
                 call_id, item_id = split_tool_call_id(tool_call.get("id"))
-                response_item_id = _unique_item_id(item_id or f"fc_{idx}", used_item_ids)
-                input_items.append({
+                function_call_item: dict[str, Any] = {
                     "type": "function_call",
-                    "id": response_item_id,
                     "call_id": call_id or f"call_{idx}",
                     "name": fn.get("name"),
                     "arguments": tool_arguments_json_for_replay(fn.get("arguments")),
-                })
+                }
+                if include_item_ids:
+                    function_call_item["id"] = _unique_item_id(
+                        item_id or f"fc_{idx}",
+                        used_item_ids,
+                    )
+                input_items.append(function_call_item)
             continue
 
         if role == "tool":
