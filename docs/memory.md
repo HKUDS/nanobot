@@ -29,9 +29,14 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large, the `Consolidator` summarizes older turns and appends the result to `memory/history.jsonl`, while keeping recent conversation available. Each summary preserves useful long-term facts and a short handoff for active work.
+When a conversation grows large, the `Consolidator` merges newly archived turns into a cumulative checkpoint and appends the result to `memory/history.jsonl`, while keeping recent conversation available. The latest per-session checkpoint is supplied to future requests; journal entries remain Dream input rather than being injected alongside it.
 
-This file is:
+The active checkpoint is working context: it replaces an archived transcript
+prefix and therefore remains in the system prompt. Durable `MEMORY.md` content
+and individual journal entries are not loaded by default; the agent retrieves
+relevant records through the read-only `recall_memory` tool.
+
+The built-in history file is:
 
 - append-only
 - cursor-based
@@ -106,7 +111,8 @@ The old `HISTORY.md` format was pleasant for casual reading, but it was too frag
 - cleaner migration and compaction
 - a better boundary between raw history and curated knowledge
 
-You can still search it with familiar tools:
+The agent searches durable records through `recall_memory`. Operators can still
+inspect the built-in backend directly with familiar tools:
 
 ```bash
 # grep
@@ -203,12 +209,26 @@ In practical terms:
 - `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
 - `modelOverride` selects a named entry from `model_presets` for Dream. It accepts preset names only; raw model identifiers are not supported. If omitted, Dream uses the main agent's selected runtime.
 
+## Prompt Recall
+
+By default, durable `MEMORY.md` content and individual `history.jsonl` entries
+enter a conversation only through `recall_memory`. Recalled records are
+untrusted data, not instructions. The active session checkpoint remains in the
+prompt because it replaces earlier raw conversation, rather than acting as a
+durable-memory lookup.
+
+For compatibility with deployments that depend on the previous prompt layout,
+set `agents.defaults.legacyMemoryPromptInjection` to `true`. This restores the
+automatic `MEMORY.md` and recent-history sections; it does not control the
+active session checkpoint.
+
 ## In Practice
 
 What this means in daily use is simple:
 
 - conversations can stay fast without carrying infinite context
 - durable facts can become clearer over time instead of noisier
+- relevant past facts can be recalled without loading the whole memory store
 - the user can inspect and restore memory when needed
 
 Memory should not feel like a dump. It should feel like continuity.

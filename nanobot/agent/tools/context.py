@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from nanobot.agent.memory_backend import MemoryBackend
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.exec_session import ExecSessionManager
     from nanobot.agent.tools.file_state import FileStates
@@ -92,3 +93,4 @@ class ToolContext:
     workspace_sandbox: WorkspaceSandboxStatus | None = None
     runtime_events: RuntimeEventBus | None = None
     runtime_control: RuntimeControl | None = None
+    memory: MemoryBackend | None = None

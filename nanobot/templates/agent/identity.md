@@ -5,13 +5,11 @@
 {% if agent_workspace_path != workspace_path %}
 Nanobot's agent workspace is at: {{ agent_workspace_path }}
 - Agent profile: {{ agent_workspace_path }}/SOUL.md and {{ agent_workspace_path }}/USER.md (automatically managed by Dream — do not edit directly)
-- Long-term memory: {{ agent_workspace_path }}/memory/MEMORY.md (automatically managed by Dream — do not edit directly)
-- History log: {{ agent_workspace_path }}/memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).
+- Durable memory: use the read-only `recall_memory` tool to retrieve relevant past facts and events; Dream manages its storage.
 - Custom skills: {{ agent_workspace_path }}/skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
 {% else %}
 - Agent profile: SOUL.md and USER.md (automatically managed by Dream — do not edit directly)
-- Long-term memory: memory/MEMORY.md (automatically managed by Dream — do not edit directly)
-- History log: memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).
+- Durable memory: use the read-only `recall_memory` tool to retrieve relevant past facts and events; Dream manages its storage.
 - Custom skills: skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
 {% endif %}
 

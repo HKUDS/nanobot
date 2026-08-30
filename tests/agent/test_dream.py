@@ -421,12 +421,15 @@ class TestEphemeralDirect:
             patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_consolidator_cls.return_value.migrate_legacy_checkpoint = AsyncMock(
+                side_effect=lambda session, **_kwargs: session
+            )
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
             )
 
         return loop, store
@@ -606,7 +609,7 @@ class TestEphemeralDirect:
             bus=MessageBus(),
             provider=provider,
             workspace=tmp_path,
-            context_window_tokens=8000,
+            context_window_tokens=32_000,
         )
 
         await loop.process_direct(
@@ -661,12 +664,15 @@ class TestEphemeralHooks:
             patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_consolidator_cls.return_value.migrate_legacy_checkpoint = AsyncMock(
+                side_effect=lambda session, **_kwargs: session
+            )
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
                 hooks=[spy],
             )
 

@@ -40,6 +40,10 @@ Inspect recent memory changes:
 /dream-log
 ```
 
+When earlier context would help, ask the agent to recall it. The agent uses the
+read-only `recall_memory` tool; durable memory is not preloaded into every system
+prompt.
+
 The exact files live in the active workspace, usually under
 `~/.nanobot/workspace/`.
 
@@ -47,6 +51,8 @@ The exact files live in the active workspace, usually under
 
 - Use one workspace per project or personal context.
 - Keep durable facts concise; old session details belong in `history.jsonl`.
+- Use explicit recall for relevant past context instead of injecting the entire
+  memory store into each request.
 - Use `/dream-prompt init` when a workspace needs custom memory guidance.
 - Review Git-backed memory changes when memory affects important workflows.
 
@@ -62,7 +68,8 @@ The exact files live in the active workspace, usually under
 - If memory feels stale, run `/dream` and inspect `/dream-log`.
 - If memory changed incorrectly, use `/dream-restore` to inspect and restore
   previous versions.
-- If a new session lacks context, confirm it uses the same workspace.
+- If recall returns no context, confirm the session uses the same agent workspace
+  and that Dream or background archival has ingested the relevant facts.
 
 ## Related nanobot docs
 

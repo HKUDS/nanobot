@@ -105,6 +105,67 @@ def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
     assert loop.tools.has("read_file")
 
 
+def test_loop_from_config_wires_legacy_memory_prompt_switch(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "workspace": str(tmp_path),
+                "legacyMemoryPromptInjection": True,
+            }
+        }
+    })
+
+    loop = AgentLoop.from_config(
+        config,
+        tool_registry=registry,
+        provider=_provider_for_loop(),
+    )
+
+    assert loop.context.legacy_memory_prompt_injection is True
+
+
+@pytest.mark.asyncio
+async def test_loop_scopes_legacy_history_to_active_session(tmp_path: Path) -> None:
+    provider = _provider_for_loop()
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[])
+    )
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        legacy_memory_prompt_injection=True,
+    )
+    loop.context.memory.append_history(
+        "active session history",
+        session_key="telegram:active",
+    )
+    loop.context.memory.append_history(
+        "other session history",
+        session_key="slack:other",
+    )
+    session = loop.sessions.get_or_create("telegram:active")
+    runtime = loop.llm_runtime()
+
+    await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message="current request"),
+        runtime=runtime,
+        session=session,
+        request_context=RequestContext(
+            channel="telegram",
+            chat_id="active",
+            session_key=session.key,
+            runtime=runtime,
+        ),
+    )
+
+    system_prompt = provider.chat_with_retry.await_args.kwargs["messages"][0]["content"]
+    assert "active session history" in system_prompt
+    assert "other session history" not in system_prompt
+
+
 @pytest.mark.asyncio
 async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()

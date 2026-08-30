@@ -168,11 +168,11 @@ a WebUI chat may select a separate project:
 | Project `AGENTS.md`, relative tool paths, and shell working directory | Effective project workspace |
 | Workspace access mode and project metadata | Session workspace scope |
 
-`ContextBuilder` combines project instructions with agent-owned profile and
-memory. Filesystem and search tools use the project as their ordinary boundary
-and receive only capability-specific read access to built-in/agent skills and
-the exact agent history file. Keep those cross-root capabilities read-only and
-explicit; do not treat the entire agent workspace as an allowed root.
+`ContextBuilder` combines project instructions with the agent-owned profile.
+By default, durable Memory backend content is retrieved through `recall_memory`.
+Filesystem and search tools use the project as their ordinary boundary and
+receive only capability-specific read access to built-in and agent-owned skills.
+Do not treat the entire agent workspace as an allowed root.
 
 ## Memory and Sessions
 

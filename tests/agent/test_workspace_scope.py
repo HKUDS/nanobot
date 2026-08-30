@@ -170,7 +170,7 @@ async def test_filesystem_tool_uses_current_restricted_workspace_scope(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_path: Path) -> None:
+async def test_restricted_project_can_read_agent_skills_but_not_memory(tmp_path: Path) -> None:
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
     skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
@@ -218,7 +218,7 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
 
     assert "project" in project_result
     assert "global skill" in skill_result
-    assert "global history" in history_result
+    assert "outside allowed directory" in history_result
     assert "outside allowed directory" in private_memory_result
     assert "outside allowed directory" in private_result
     assert "outside allowed directory" in write_result
@@ -228,7 +228,7 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_restricted_project_reads_history_from_linked_agent_workspace(
+async def test_restricted_project_blocks_history_from_linked_agent_workspace(
     tmp_path: Path,
 ) -> None:
     real_agent_workspace = tmp_path / "real-agent"
@@ -261,7 +261,7 @@ async def test_restricted_project_reads_history_from_linked_agent_workspace(
     finally:
         reset_workspace_scope(token)
 
-    assert "linked history" in result
+    assert "outside allowed directory" in result
 
 
 @pytest.mark.asyncio

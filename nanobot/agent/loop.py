@@ -28,6 +28,7 @@ from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
+from nanobot.agent.memory_backend import MemoryBackend
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import (
     _MAX_INJECTIONS_PER_TURN,
@@ -93,7 +94,13 @@ from nanobot.session.recovery import (
     restore_pending_interruption,
     restore_runtime_checkpoint,
 )
-from nanobot.session.summary import SessionSummary
+from nanobot.session.summary import (
+    MEMORY_CHECKPOINT_VERSION,
+    MEMORY_CHECKPOINT_VERSION_KEY,
+    SUMMARY_CONTINUATION_TEXT,
+    SessionSummary,
+    SessionSummaryCheckpoint,
+)
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
@@ -161,6 +168,7 @@ class TurnContext:
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
     pending_summary: SessionSummary | None = None
+    summary_checkpoint: SessionSummaryCheckpoint | None = None
 
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
@@ -295,6 +303,8 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        memory_backend: MemoryBackend | None = None,
+        legacy_memory_prompt_injection: bool = False,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -375,7 +385,15 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            legacy_memory_prompt_injection=legacy_memory_prompt_injection,
+        )
+        self.memory_backend = (
+            memory_backend if memory_backend is not None else self.context.memory
+        )
         self.sessions = session_manager or SessionManager(workspace)
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -438,13 +456,16 @@ class AgentLoop:
         self.consolidator = Consolidator(
             store=self.context.memory,
             sessions=self.sessions,
-            build_messages=self.context.build_messages,
+            build_messages=partial(
+                self.context.build_messages,
+                unified_session=unified_session,
+            ),
             get_tool_definitions=self.tools.get_definitions,
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
                 unified_session=unified_session,
             ),
-            unified_session=unified_session,
+            backend=self.memory_backend,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -514,6 +535,7 @@ class AgentLoop:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
+            legacy_memory_prompt_injection=defaults.legacy_memory_prompt_injection,
             session_ttl_minutes=defaults.session_ttl_minutes,
             idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
             tools_config=config.tools,
@@ -641,6 +663,7 @@ class AgentLoop:
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_events=self.runtime_events,
             runtime_control=AgentRuntimeControl(self),
+            memory=self.memory_backend,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
@@ -908,19 +931,6 @@ class AgentLoop:
             return
         remember_last_channel(session.metadata, msg.channel, msg.chat_id)
 
-    @staticmethod
-    def _replay_token_budget(runtime: LLMRuntime) -> int:
-        """Derive a token budget for session history replay from the context window."""
-        if runtime.context_window_tokens <= 0:
-            return 0
-        max_output = runtime.generation.max_tokens
-        try:
-            reserved_output = int(max_output)
-        except (TypeError, ValueError):
-            reserved_output = 4096
-        budget = runtime.context_window_tokens - max(1, reserved_output) - 1024
-        return budget if budget > 0 else max(128, runtime.context_window_tokens // 2)
-
     async def _run_agent_loop(
         self,
         transcript_input: TranscriptInput,
@@ -1109,8 +1119,7 @@ class AgentLoop:
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
-            include_memory_recent_history=not ephemeral,
-            session_key=session.key if session is not None else request_ctx.session_key,
+            session_key=active_session_key,
             unified_session=self._unified_session,
         )
         if request_context is None:
@@ -1158,6 +1167,11 @@ class AgentLoop:
                 ephemeral=ephemeral,
                 run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
             ))
+            previous_usage = (
+                LLMUsage.from_dict(session.metadata.get("_last_usage"))
+                if session is not None
+                else None
+            )
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=None,
                 tools=effective_tools,
@@ -1174,6 +1188,17 @@ class AgentLoop:
                 provider_retry_mode=self.provider_retry_mode,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
+                consolidate_history=(
+                    partial(
+                        self.consolidator.summarize_transcript,
+                        runtime=runtime,
+                        session_key=session.key,
+                        tools=effective_tools.get_definitions(),
+                    )
+                    if session is not None and not ephemeral
+                    else None
+                ),
+                previous_usage=previous_usage,
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
@@ -1879,17 +1904,20 @@ class AgentLoop:
         if ctx.on_runtime_admitted is not None:
             await ctx.on_runtime_admitted(runtime)
         if not ctx.ephemeral:
-            await self.consolidator.maybe_consolidate_by_tokens(
+            # Compatibility migration only. Runner owns all live request-pressure
+            # consolidation after this point.
+            session = await self.consolidator.migrate_legacy_checkpoint(
                 session,
                 runtime=runtime,
             )
+            ctx.session, ctx.pending_summary = self.auto_compact.prepare_session(
+                session,
+                ctx.session_key,
+            )
+            session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
-        _hist_kwargs: dict[str, Any] = {
-            "max_tokens": self._replay_token_budget(runtime),
-            "extend_to_user": is_subagent,
-        }
-        ctx.history = session.get_history(**_hist_kwargs)
+        ctx.history = session.get_history(extend_to_user=is_subagent)
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:
@@ -2007,6 +2035,7 @@ class AgentLoop:
             )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages
+        ctx.summary_checkpoint = result.summary_checkpoint
         ctx.stop_reason = result.stop_reason
         if (
             ctx.kind is TurnKind.USER
@@ -2046,6 +2075,8 @@ class AgentLoop:
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
+            summary_checkpoint=ctx.summary_checkpoint,
+            input_persisted_early=ctx.input_persisted_early,
         )
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         if not ctx.ephemeral:
@@ -2135,6 +2166,8 @@ class AgentLoop:
         skip: int,
         *,
         turn_latency_ms: int | None = None,
+        summary_checkpoint: SessionSummaryCheckpoint | None = None,
+        input_persisted_early: bool = False,
     ) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
@@ -2155,7 +2188,51 @@ class AgentLoop:
         }
         last_assistant_idx: int | None = None
         saved_followup_ids: set[str] = set()
-        for m in messages[skip:]:
+        checkpoint_index = (
+            summary_checkpoint.transcript_boundary
+            if summary_checkpoint is not None
+            and skip - 1 <= summary_checkpoint.transcript_boundary <= len(messages)
+            else None
+        )
+        if summary_checkpoint is not None and checkpoint_index is None:
+            logger.warning(
+                "Ignoring invalid summary boundary {} outside [{}, {}] for {}",
+                summary_checkpoint.transcript_boundary,
+                skip - 1,
+                len(messages),
+                session.key,
+            )
+
+        summary_last_active = session.updated_at.isoformat()
+
+        def save_summary_checkpoint(*, insert_at: int | None = None) -> None:
+            assert summary_checkpoint is not None
+            hint = {
+                "role": "user",
+                "content": SUMMARY_CONTINUATION_TEXT,
+                HIDDEN_HISTORY_META: True,
+                "timestamp": datetime.now().isoformat(),
+            }
+            if insert_at is None:
+                session.messages.append(hint)
+                checkpoint_session_index = len(session.messages) - 1
+            else:
+                session.messages.insert(insert_at, hint)
+                checkpoint_session_index = insert_at
+            session.metadata["_last_summary"] = {
+                "text": summary_checkpoint.summary,
+                "last_active": summary_last_active,
+            }
+            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
+            session.last_archived = checkpoint_session_index
+
+        if checkpoint_index == skip - 1:
+            insert_at = len(session.messages) - (1 if input_persisted_early else 0)
+            save_summary_checkpoint(insert_at=insert_at)
+
+        for message_index, m in enumerate(messages[skip:], start=skip):
+            if checkpoint_index == message_index:
+                save_summary_checkpoint()
             entry = dict(m)
             followup_id_value = cast(object, entry.pop(PENDING_FOLLOWUP_ID_KEY, None))
             followup_ids = (
@@ -2235,6 +2312,8 @@ class AgentLoop:
                     for tc in (cast(dict[str, Any], tc_value),)
                     if tc.get("id")
                 )
+        if checkpoint_index == len(messages):
+            save_summary_checkpoint()
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         if saved_followup_ids:

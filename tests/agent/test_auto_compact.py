@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -228,36 +227,6 @@ class TestAgentLoopTTLParam:
         """AutoCompact default TTL should be 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
-
-    @pytest.mark.asyncio
-    async def test_process_message_reads_history_with_token_budget(self, tmp_path):
-        """_process_message should pass an auto-derived token budget to get_history."""
-        loop = _make_loop(tmp_path)
-        session = loop.sessions.get_or_create("cli:direct")
-        session.get_history = MagicMock(return_value=[])
-        loop.context.build_messages = MagicMock(return_value=[])
-        loop._run_agent_loop = AsyncMock(
-            return_value=AgentRunResult(
-                final_content="ok",
-                messages=[],
-                stop_reason="stop",
-            )
-        )
-        loop._save_turn = MagicMock()
-
-        msg = InboundMessage(
-            channel="cli",
-            sender_id="u1",
-            chat_id="direct",
-            content="hello",
-        )
-        await loop._process_message(msg)
-        session.get_history.assert_called_once()
-        kwargs = session.get_history.call_args.kwargs
-        assert isinstance(kwargs.get("max_tokens"), int)
-        assert kwargs["max_tokens"] > 0
-        assert set(kwargs) == {"max_tokens", "extend_to_user"}
-
 
 class TestAutoCompact:
     """Test the _archive method."""
@@ -731,7 +700,8 @@ class TestAutoCompactIntegration:
             for m in session_after.get_history(max_messages=len(session_after.messages))
         )
 
-        # Summary should NOT be persisted in session (ephemeral, one-shot)
+        # The checkpoint stays in metadata, not as a synthetic transcript message,
+        # and is injected exactly once into the next model-facing system prompt.
         assert not any(
             "[Resumed Session]" in str(m.get("content", "")) for m in session_after.messages
         )
@@ -741,7 +711,7 @@ class TestAutoCompactIntegration:
             "[/Runtime Context]" in str(m.get("content", "")) for m in session_after.messages
         )
 
-        # Pending summary should be consumed (one-shot)
+        # The in-memory handoff is one-shot; persisted metadata remains authoritative.
         assert "cli:test" not in loop.auto_compact._summaries
 
         # The new message should be processed (response exists)
@@ -1300,13 +1270,15 @@ class TestSummaryPersistence:
         # Verify summary exists before /new
         reloaded = loop.sessions.get_or_create("cli:test")
         assert "_last_summary" in reloaded.metadata
+        reloaded.metadata["_memory_checkpoint_version"] = 1
 
         # Simulate /new command
-        session.clear()
-        loop.sessions.save(session)
-        loop.sessions.invalidate(session.key)
+        reloaded.clear()
+        loop.sessions.save(reloaded)
+        loop.sessions.invalidate(reloaded.key)
 
         # After /new, metadata should no longer contain _last_summary
         fresh = loop.sessions.get_or_create("cli:test")
         assert "_last_summary" not in fresh.metadata
+        assert "_memory_checkpoint_version" not in fresh.metadata
         await loop.aclose()

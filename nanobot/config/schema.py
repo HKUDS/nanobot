@@ -145,6 +145,7 @@ class AgentDefaults(Base):
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
+    legacy_memory_prompt_injection: bool = False  # Restore automatic MEMORY/history prompt sections
     session_ttl_minutes: int = Field(
         default=15,
         ge=0,

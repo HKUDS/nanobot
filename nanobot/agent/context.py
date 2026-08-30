@@ -91,6 +91,11 @@ class TranscriptInput:
         """Number of boundary-preserving messages in the assembled transcript."""
         return 1 + len(self.history) + (self.current_message is not None)
 
+    @property
+    def history_message_count(self) -> int:
+        """Boundary after system + history and before the fresh turn input."""
+        return 1 + len(self.history)
+
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
@@ -99,12 +104,19 @@ class ContextBuilder:
     _SKIPPABLE_DEFAULTS = {"AGENTS.md", "USER.md"}
     _RUNTIME_CONTEXT_TAG = RUNTIME_CONTEXT_TAG
     _MAX_RECENT_HISTORY = 50
-    _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
+    _MAX_HISTORY_TOKENS = 8_000
     _RUNTIME_CONTEXT_END = RUNTIME_CONTEXT_END
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        legacy_memory_prompt_injection: bool = False,
+    ):
         self.workspace = workspace
         self.timezone = timezone
+        self.legacy_memory_prompt_injection = legacy_memory_prompt_injection
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -119,7 +131,11 @@ class ContextBuilder:
         session_key: str | None = None,
         unified_session: bool = False,
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        """Build the system prompt from identity, bootstrap files, and skills.
+
+        Persisted memory is available only through ``recall_memory`` unless the
+        legacy compatibility switch is enabled.
+        """
         root = workspace or self.workspace
         parts = [self._get_identity(channel=channel, workspace=root)]
 
@@ -137,7 +153,7 @@ class ContextBuilder:
                 "Use it as the default root for project files and relative tool paths."
             )
 
-        if include_memory:
+        if self.legacy_memory_prompt_injection and include_memory:
             memory = self.memory.read_memory()
             if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
                 parts.append(f"# Memory\n\n## Long-term Memory\n{memory}")
@@ -155,7 +171,11 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        if include_memory_recent_history:
+        if (
+            self.legacy_memory_prompt_injection
+            and include_memory
+            and include_memory_recent_history
+        ):
             entries = self.memory.read_recent_history_for_prompt(
                 since_cursor=self.memory.get_last_dream_cursor(),
                 session_key=session_key,
@@ -178,6 +198,9 @@ class ContextBuilder:
                     )
                     parts.append("# Recent History\n\n" + history_text)
 
+        # Session summaries are active working-memory checkpoints, not durable
+        # Memory recall. They must remain in the prompt after old raw history is
+        # replaced by the checkpoint boundary.
         if session_summary:
             parts.append(
                 "[Archived Context Summary]\n\n"
@@ -194,7 +217,7 @@ class ContextBuilder:
         session_key: str | None,
         session_summary: SessionSummary | None,
     ) -> list[dict[str, Any]]:
-        """Drop the history entry already represented by the session summary."""
+        """Drop the journal row already represented by the active checkpoint."""
         if not session_summary:
             return entries
         for index in range(len(entries) - 1, -1, -1):

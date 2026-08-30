@@ -9,7 +9,6 @@ Stay focused on the assigned task. Your final response will be reported back to 
 {% if agent_workspace != workspace %}
 Nanobot's agent workspace: {{ agent_workspace }}
 {% endif %}
-History log: {{ history_log }}
 {% if skills_summary %}
 
 ## Skills

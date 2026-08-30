@@ -162,11 +162,10 @@ available to the current topic.
 
 In Restricted mode, ordinary file and shell work stays inside the selected
 project. To preserve agent continuity, filesystem/search tools receive narrow,
-read-only access to built-in skills, custom skills in the agent workspace, and
-the exact agent `memory/history.jsonl` file. This does not grant access to
-neighboring memory or profile files, and it does not allow writes outside the
-selected project. These tool exceptions do not broaden the browser's file
-preview boundary.
+read-only access to built-in skills and custom skills in the agent workspace.
+Durable memory is retrieved through `recall_memory`; it is not exposed through a
+cross-workspace filesystem exception. These tool exceptions do not broaden the
+browser's file preview boundary or allow writes outside the selected project.
 
 Remote WebUI connections may reduce access for the current workspace. Selecting a
 different workspace or enabling Full Access remains limited to local and native

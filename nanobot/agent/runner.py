@@ -8,7 +8,8 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -46,6 +47,10 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
+from nanobot.session.summary import (
+    SUMMARY_CONTINUATION_TEXT,
+    SessionSummaryCheckpoint,
+)
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -68,6 +73,10 @@ RetryWaitCallback = Callable[[str], Awaitable[None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[..., Awaitable[Iterable[Any] | None]]
 TranscriptBuilder = Callable[[TranscriptInput], list[dict[str, Any]]]
+HistoryConsolidator = Callable[
+    [list[dict[str, Any]], str | None],
+    Awaitable[str | None],
+]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -113,6 +122,8 @@ class AgentRunSpec:
     provider_retry_mode: str = "standard"
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
+    consolidate_history: HistoryConsolidator | None = None
+    previous_usage: LLMUsage | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
@@ -137,6 +148,7 @@ class AgentRunResult:
     # Terminal tail to emit when the preceding final-content prefix was already streamed.
     pending_stream_content: str | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
 
 
 class AgentRunner:
@@ -477,7 +489,31 @@ class AgentRunner:
             return list(spec.transcript_builder(spec.transcript_input))
         if spec.initial_messages is None:
             raise ValueError("initial_messages is required without transcript_input")
+        if spec.consolidate_history is not None:
+            raise ValueError("consolidate_history requires transcript_input")
         return list(spec.initial_messages)
+
+    @staticmethod
+    def _summary_transcript(
+        spec: AgentRunSpec,
+        summary: str,
+    ) -> list[dict[str, Any]]:
+        """Rebuild only the stable system prefix around a replacement summary."""
+        if spec.transcript_input is None or spec.transcript_builder is None:
+            raise ValueError("consolidate_history requires transcript_builder")
+        return spec.transcript_builder(
+            replace(
+                spec.transcript_input,
+                history=[],
+                current_message=None,
+                media=None,
+                session_summary={
+                    "text": summary,
+                    "last_active": datetime.now().astimezone().isoformat(),
+                },
+                runtime_context_blocks=None,
+            )
+        )
 
     async def _run_core(
         self,
@@ -500,7 +536,6 @@ class AgentRunner:
         length_recovery_parts: list[str] = []
         had_injections = False
         injection_cycles = 0
-        compacted_tool_call_ids: set[str] = set()
         pending_stream_content: str | None = None
         conversation_state = ProviderConversationStateController(
             provider=spec.runtime.provider,
@@ -519,8 +554,29 @@ class AgentRunner:
             context_window_tokens=spec.runtime.context_window_tokens,
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
-            inflight_start_index=len(messages),
         )
+        latest_usage = spec.previous_usage
+        accepted_messages = (
+            [
+                dict(message)
+                for message in messages[:spec.transcript_input.history_message_count]
+            ]
+            if spec.transcript_input is not None
+            else None
+        )
+        raw_accepted_boundary = (
+            spec.transcript_input.history_message_count
+            if spec.transcript_input is not None
+            else len(messages)
+        )
+        accepted_covers_raw_prefix = True
+        active_summary = (
+            spec.transcript_input.session_summary["text"]
+            if spec.transcript_input is not None
+            and spec.transcript_input.session_summary is not None
+            else None
+        )
+        summary_checkpoint: SessionSummaryCheckpoint | None = None
 
         for iteration in range(spec.max_iterations):
             # Keep the persisted conversation untouched. Context governance
@@ -528,17 +584,80 @@ class AgentRunner:
             # those synthetic edits must not shift the append boundary used
             # later when the caller saves only the new turn. A governance
             # failure must stop the run instead of sending an ungoverned copy.
+            delta_messages = (
+                messages[raw_accepted_boundary:]
+                if accepted_messages is not None
+                else []
+            )
+            request_messages = (
+                messages
+                if accepted_messages is None
+                else [*accepted_messages, *delta_messages]
+            )
             messages_for_model = self.context_governor.prepare_for_model(
                 governance_config,
-                messages,
-                compacted_tool_call_ids,
+                request_messages,
             )
+            pressure_usage = self.context_governor.pressure_usage(
+                governance_config,
+                messages_for_model,
+                latest_usage,
+                usage_matches_messages=(
+                    accepted_messages is not None and not delta_messages
+                ),
+            )
+            if (
+                pressure_usage is not None
+                and spec.consolidate_history is not None
+                and accepted_messages is not None
+            ):
+                consolidation_prefix = self.context_governor.prepare_for_model(
+                    governance_config,
+                    accepted_messages,
+                )
+                summary = await spec.consolidate_history(
+                    [dict(message) for message in consolidation_prefix],
+                    active_summary,
+                )
+                if summary:
+                    active_summary = summary
+                    request_messages = [
+                        *self._summary_transcript(spec, summary),
+                        {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
+                        *[dict(message) for message in delta_messages],
+                    ]
+                    messages_for_model = self.context_governor.prepare_for_model(
+                        governance_config,
+                        request_messages,
+                    )
+                    # Responses-style state is append-only. A summary replaces
+                    # its prefix, so the next request must start fresh.
+                    conversation_state.replace_transcript(messages)
+                    if accepted_covers_raw_prefix:
+                        summary_checkpoint = SessionSummaryCheckpoint(
+                            summary=summary,
+                            transcript_boundary=raw_accepted_boundary,
+                        )
+                    latest_usage = None
+                    pressure_usage = self.context_governor.pressure_usage(
+                        governance_config,
+                        messages_for_model,
+                        None,
+                        usage_matches_messages=False,
+                    )
+            local_request_fit = pressure_usage is not None
+            if pressure_usage is not None:
+                messages_for_model = self.context_governor.fit_to_budget(
+                    governance_config,
+                    messages_for_model,
+                )
             context = AgentHookContext(
                 iteration=iteration,
                 messages=messages,
                 session_key=spec.session_key,
             )
             await hook.before_iteration(context)
+            request_message_count = len(messages)
             provider_context = conversation_state.prepare_request(
                 messages,
                 context_window_tokens=spec.runtime.context_window_tokens,
@@ -553,6 +672,12 @@ class AgentRunner:
                 provider_context=provider_context,
             )
             conversation_state.observe_response(response, messages)
+            if accepted_messages is not None:
+                accepted_messages = [dict(message) for message in messages_for_model]
+                raw_accepted_boundary = request_message_count
+                accepted_covers_raw_prefix = (
+                    accepted_covers_raw_prefix and not local_request_fit
+                )
             context.response = response
             context.tool_calls = list(response.tool_calls)
 
@@ -566,6 +691,7 @@ class AgentRunner:
             raw_usage = self._usage_or_estimate(spec, messages_for_model, response)
             context.usage = raw_usage
             usage = self._merge_usage(usage, raw_usage)
+            latest_usage = raw_usage
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
                 await hook.emit_reasoning_end()
@@ -637,7 +763,6 @@ class AgentRunner:
                     self.context_governor.prepare_for_model(
                         governance_config,
                         messages,
-                        compacted_tool_call_ids,
                     )
                     if response.provider_state is not None
                     else None
@@ -922,6 +1047,7 @@ class AgentRunner:
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
+            summary_checkpoint=summary_checkpoint,
         )
 
     def _build_request_kwargs(

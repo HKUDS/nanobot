@@ -54,7 +54,6 @@ class _FsTool(Tool):
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
-        extra_read_allowed_files: list[Path] | None = None,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
@@ -64,7 +63,6 @@ class _FsTool(Tool):
             *(extra_allowed_dirs or []),
             *(extra_read_allowed_dirs or []),
         ]
-        self._extra_read_allowed_files = list(extra_read_allowed_files or [])
         self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
         self._extra_write_allowed_files = list(extra_write_allowed_files or [])
         self._restrict_to_workspace = (
@@ -91,13 +89,12 @@ class _FsTool(Tool):
         )
         sandbox_restricts = bool(ctx.config.exec.sandbox)
         allowed_dir = agent_workspace if restrict else None
-        # Agent-owned skills stay available from project scopes. History is a narrower
-        # capability: expose only the append-only log, not the surrounding memory directory.
+        # Agent-owned skills stay available from project scopes. Durable memory
+        # is retrieved through the configured recall backend instead of file tools.
         return cls(
             workspace=agent_workspace,
             allowed_dir=allowed_dir,
             extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
-            extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
             file_states=ctx.file_state_store,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             sandbox_restricts_workspace=sandbox_restricts,
@@ -173,7 +170,7 @@ class _FsTool(Tool):
         return self._resolve_with_extra(
             path,
             [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
-            self._extra_read_allowed_files,
+            None,
             include_media_dir=True,
             extra_files_require_allowed_root=True,
         )
