@@ -236,6 +236,7 @@ class TestAgentLoopTTLParam:
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
 
+
 class TestAutoCompact:
     """Test the _archive method."""
 
