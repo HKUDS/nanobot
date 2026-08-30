@@ -155,6 +155,9 @@ class AgentDefaults(Base):
         default=60,
         ge=0,
     )  # Minimum interval in seconds between scans for idle sessions
+    replay_reasoning: Literal["recent", "all", "none"] = Field(
+        default="recent",
+    )  # How much past-turn reasoning is replayed to the provider: "recent" = only the latest assistant turn, "all" = every turn, "none" = never
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
     @model_validator(mode="before")

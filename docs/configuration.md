@@ -47,7 +47,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
 | Review shell, workspace, and SSRF controls | [Security](#security) |
 | Control access and pairing | [Pairing](#pairing) |
-| Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
+| Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length), [Reasoning Replay](#reasoning-replay) |
 
 ## Where a Setting Lives
 
@@ -2380,3 +2380,26 @@ Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.toolHintMaxLength` | `40` | Maximum characters for tool hint display. Range: 20–500. Higher values show more of the command or path; lower values keep hints compact. |
+
+## Reasoning Replay
+
+When a provider returns reasoning (`reasoning_content` / `thinking_blocks`), nanobot persists it in the session so the current tool loop can replay it and the transcript stays auditable. By default, only the **latest** assistant turn's reasoning is replayed to the provider — past-turn reasoning is token-heavy, is not needed once its turn completes, and on small context windows it would otherwise evict genuine dialogue turns earlier than necessary.
+
+Set `agents.defaults.replayReasoning` to control this:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "replayReasoning": "all"
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.replayReasoning` | `recent` | How much past-turn reasoning reaches the provider at replay time. `recent` replays reasoning only for the turn after the last user message (an unfinished tool loop stays intact, as providers that require thinking blocks expect). `all` replays reasoning for every turn — the behavior before this option existed. `none` never replays reasoning; only use it with providers that tolerate a missing thinking trail. |
+
+Replay-time stripping never modifies the persisted session file, so display, consolidation, and turn recovery still see the full record.
+
