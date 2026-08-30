@@ -64,12 +64,17 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     assert items[0]["subject"] == "Invoice"
     assert "Please pay" in items[0]["content"]
     assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
+        ("FETCH", "123", "(BODY.PEEK[HEADER])"),
+        ("FETCH", "123", "(BODY.PEEK[])"),
+    ]
     assert skipped_uids == set()
 
     # Same UID should be deduped in-process.
     items_again, skipped_again = channel._fetch_new_messages()
     assert items_again == []
     assert skipped_again == set()
+    assert len([call for call in fake.uid_calls if call[0] == "FETCH"]) == 2
 
 
 def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> None:
@@ -1192,6 +1197,9 @@ def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monke
 
     assert channel._fetch_new_messages() == ([], {"500"})
     assert called["attachments"] is False
+    assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
+        ("FETCH", "500", "(BODY.PEEK[HEADER])")
+    ]
     assert ("STORE", "500", "+FLAGS", "(\\Seen)") in fake.uid_calls
 
 
