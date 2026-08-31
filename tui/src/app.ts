@@ -442,7 +442,6 @@ export class NanobotTui {
   private readonly client: ChatClient
   private readonly shell: BoxRenderable
   private readonly title: BoxRenderable
-  private readonly titleText: TextRenderable
   private readonly composerFrame: BoxRenderable
   private readonly composer: TextareaRenderable
   private composerSyntax: SyntaxStyle
@@ -649,28 +648,6 @@ export class NanobotTui {
       alignItems: "center",
       backgroundColor: RGBA.defaultBackground(),
     })
-    this.titleText = new TextRenderable(renderer, {
-      id: "nanobot-tui-title-text",
-      content: "nanobot",
-      height: 1,
-      flexShrink: 0,
-      truncate: true,
-      fg: this.palette.muted,
-      selectable: false,
-      onMouseOver: () => { this.titleText.fg = this.palette.accent },
-      onMouseOut: () => this.renderTitleColor(),
-      onMouseDown: (event) => {
-        if (event.button !== 0) return
-        event.preventDefault()
-        event.stopPropagation()
-        this.renderer.clearSelection()
-        if (this.sessionLoading || this.sessionMenu.visible) {
-          this.closeSessions()
-          return
-        }
-        void this.openSessions()
-      },
-    })
     this.runtimeControls = new RuntimeControls(
       renderer,
       runtimeControlsTheme(this.palette),
@@ -703,7 +680,6 @@ export class NanobotTui {
         },
       },
     )
-    this.title.add(this.titleText)
     this.title.add(this.runtimeControls.modelText)
     this.title.add(this.runtimeControls.accessText)
     this.title.add(this.runtimeControls.contextText)
@@ -1877,7 +1853,6 @@ export class NanobotTui {
     this.composer.syntaxStyle = this.composerSyntax
     this.syncComposerImageHighlights(this.composer.plainText)
     void this.renderer.idle().catch(() => {}).finally(() => previousComposerSyntax.destroy())
-    this.renderTitleColor()
     this.status.fg = this.palette.muted
     this.meta.fg = this.palette.faint
     this.updateMeta()
@@ -1957,9 +1932,6 @@ export class NanobotTui {
   }
 
   private updateTitle(): void {
-    const identity = this.sessionTitle.trim() || "nanobot"
-    this.titleText.maxWidth = Math.max(8, Math.floor(this.renderer.width * 0.38))
-    this.titleText.content = identity
     const context = this.contextTokens === null
       ? ""
       : `     ~${formatTokenCount(this.contextTokens)}${this.contextWindowTokens
@@ -1967,12 +1939,6 @@ export class NanobotTui {
         : ""} ctx`
     this.runtimeControls.updateModel(this.modelName, this.modelPreset)
     this.runtimeControls.updateContext(context)
-  }
-
-  private renderTitleColor(): void {
-    this.titleText.fg = this.sessionLoading || this.sessionMenu.visible
-      ? this.palette.accent
-      : this.palette.muted
   }
 
   private resizeComposer(): void {
@@ -2385,7 +2351,6 @@ export class NanobotTui {
     this.contextPanel.hide()
     this.clearComposer()
     this.sessionLoading = true
-    this.renderTitleColor()
     const loadId = ++this.sessionLoadId
     this.status.content = "Loading sessions…"
     try {
@@ -2412,7 +2377,6 @@ export class NanobotTui {
         this.defaultModelPreset,
       )
       this.startSessionRefresh()
-      this.renderTitleColor()
       this.sessionMenu.update(this.composer.plainText, limit)
       this.syncComposerPlaceholder()
       this.updateMeta()
@@ -2420,7 +2384,6 @@ export class NanobotTui {
     } catch (error) {
       if (loadId !== this.sessionLoadId) return
       this.sessionLoading = false
-      this.renderTitleColor()
       this.status.content = error instanceof Error ? error.message : String(error)
     }
   }
@@ -2579,7 +2542,6 @@ export class NanobotTui {
     this.sessionLoadId += 1
     this.sessionLoading = false
     this.hideSessionMenu()
-    this.renderTitleColor()
     this.clearComposer()
     this.syncComposerPlaceholder()
     this.composer.focus()

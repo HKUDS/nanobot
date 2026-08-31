@@ -205,7 +205,7 @@ describe("NanobotTui layout", () => {
       expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
       expect(occurrences(frame, "Ready")).toBe(0)
       expect(occurrences(frame, "Getting ready…")).toBe(1)
-      expect(occurrences(frame, "nanobot     test/model")).toBe(1)
+      expect(occurrences(frame, "default ▾")).toBe(1)
     }
 
     app.accept({ event: "attached", chat_id: "chat" })
@@ -985,7 +985,6 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean }
-      titleText: { plainText: string }
       runtimeControls: { modelText: { plainText: string } }
     }
 
@@ -999,8 +998,7 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => attached.length === 1)
       expect(attached).toEqual(["other"])
-      expect(ui.titleText.plainText).toContain("Release checklist")
-      expect(ui.runtimeControls.modelText.plainText).toContain("Deep Research")
+      expect(ui.runtimeControls.modelText.plainText).toBe("Deep Research ▾")
       expect(ui.runtimeControls.modelText.plainText).not.toContain("test/model")
 
       app.accept({ event: "attached", chat_id: "other" })
@@ -1009,8 +1007,7 @@ describe("NanobotTui layout", () => {
       ui.composer.submit()
       await waitUntil(() => newChats.length === 1)
       expect(newChats).toEqual(["new"])
-      expect(ui.titleText.plainText).toContain("New chat")
-      expect(ui.runtimeControls.modelText.plainText).toContain("test/model")
+      expect(ui.runtimeControls.modelText.plainText).toBe("default ▾")
     } finally {
       globalThis.fetch = original
     }
@@ -1182,7 +1179,8 @@ describe("NanobotTui layout", () => {
       model_preset: "Codex",
     })
     await setup.flush()
-    expect(ui.runtimeControls.modelText.plainText).toContain("Codex     openai/gpt-5.6")
+    expect(ui.runtimeControls.modelText.plainText).toBe("Codex ▾")
+    expect(ui.runtimeControls.modelText.plainText).not.toContain("openai/gpt-5.6")
 
     app.accept({
       event: "runtime_model_updated",
@@ -1190,7 +1188,7 @@ describe("NanobotTui layout", () => {
       model_preset: "DeepSeek",
     })
     await setup.flush()
-    expect(ui.runtimeControls.modelText.plainText).toContain("Codex     openai/gpt-5.6")
+    expect(ui.runtimeControls.modelText.plainText).toBe("Codex ▾")
     expect(ui.runtimeControls.modelText.plainText).not.toContain("DeepSeek")
   })
 
@@ -1212,8 +1210,8 @@ describe("NanobotTui layout", () => {
     })
     await setup.flush()
 
-    expect(ui.runtimeControls.modelText.plainText).toContain("deepseek/deepseek-chat")
-    expect(ui.runtimeControls.modelText.plainText).not.toContain("Codex")
+    expect(ui.runtimeControls.modelText.plainText).toBe("default ▾")
+    expect(ui.runtimeControls.modelText.plainText).not.toContain("deepseek/deepseek-chat")
   })
 
   test("refreshes the canonical preset after the model command completes", async () => {
@@ -1309,7 +1307,6 @@ describe("NanobotTui layout", () => {
         menuRoot: { getChildren(): unknown[] }
       }
       composer: TextareaRenderable
-      titleText: TextRenderable
       status: TextRenderable
       meta: TextRenderable
     }
@@ -1324,7 +1321,6 @@ describe("NanobotTui layout", () => {
       expect(ui.runtimeControls.modelText.selectable).toBe(false)
       expect(ui.runtimeControls.accessText.selectable).toBe(false)
       expect(ui.runtimeControls.contextText.selectable).toBe(false)
-      expect(ui.titleText.selectable).toBe(false)
       expect(ui.status.selectable).toBe(false)
       expect(ui.meta.selectable).toBe(false)
       app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
@@ -1394,7 +1390,7 @@ describe("NanobotTui layout", () => {
     }
   })
 
-  test("opens and switches sessions from the clickable title", async () => {
+  test("switches sessions only through the sessions command", async () => {
     const original = globalThis.fetch
     globalThis.fetch = ((input: string | URL | Request) => {
       const url = String(input)
@@ -1420,14 +1416,18 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean; root: { getChildren(): unknown[] } }
-      titleText: TextRenderable
-      status: TextRenderable
+      title: { getChildren(): unknown[] }
     }
 
     try {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       await setup.renderOnce()
-      await setup.mockMouse.click(ui.titleText.x + 2, ui.titleText.y)
+      const titleItems = ui.title.getChildren() as TextRenderable[]
+      expect(titleItems.some((item) => item.id === "nanobot-tui-title-text")).toBe(false)
+      expect(ui.sessionMenu.visible).toBe(false)
+
+      ui.composer.setText("/sessions")
+      ui.composer.submit()
       await waitUntil(() => ui.sessionMenu.visible)
       await setup.flush()
       expect(ui.composer.placeholder).toBe("Search sessions")
@@ -1439,15 +1439,6 @@ describe("NanobotTui layout", () => {
       await setup.mockMouse.click(other.x + 2, other.y)
       await waitUntil(() => attached.length === 1)
       expect(attached).toEqual(["other"])
-      expect(ui.sessionMenu.visible).toBe(false)
-      expect(ui.composer.focused).toBe(true)
-      expect(ui.titleText.plainText).toContain("Release checklist")
-
-      app.accept({ event: "attached", chat_id: "other" })
-      await setup.mockMouse.click(ui.titleText.x + 2, ui.titleText.y)
-      await waitUntil(() => ui.sessionMenu.visible)
-      ui.composer.blur()
-      await setup.mockMouse.click(ui.status.x, ui.status.y)
       expect(ui.sessionMenu.visible).toBe(false)
       expect(ui.composer.focused).toBe(true)
     } finally {
@@ -1715,7 +1706,7 @@ describe("NanobotTui layout", () => {
       await setup.flush()
       const frame = setup.captureCharFrame()
       expect(frame).toContain("Release checklist")
-      expect(occurrences(frame, "Current chat")).toBe(1)
+      expect(occurrences(frame, "Current chat")).toBe(0)
     } finally {
       globalThis.fetch = original
     }
@@ -1959,7 +1950,7 @@ describe("NanobotTui layout", () => {
       } else if (width >= 28 && height >= 9) {
         expect(occurrences(frame, "Enter now · Tab next")).toBe(1)
       }
-      expect(occurrences(frame, "nanobot     test/model")).toBe(height >= 14 ? 1 : 0)
+      expect(occurrences(frame, "default ▾")).toBe(height >= 14 ? 1 : 0)
     }
   })
 
@@ -3122,7 +3113,7 @@ describe("NanobotTui with a Herdr pane title reporter", () => {
     await setup.flush()
     const activeFrame = setup.captureCharFrame()
     expect(activeFrame).toContain(">_  nanobot")
-    expect(activeFrame).toContain("test/model")
+    expect(activeFrame).toContain("default ▾")
     expect(occurrences(activeFrame, "› Ship the Herdr integration")).toBe(1)
     expect(occurrences(activeFrame, "app.ts")).toBe(1)
     expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
