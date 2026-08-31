@@ -271,7 +271,8 @@ your agent.
 Automations are agent turns that run later in a linked topic. Create them from
 the topic or channel where they are supposed to run so nanobot keeps the
 correct target context. When an automation runs, it normally delivers the
-result back to that topic.
+result back to that topic. Scheduled automations can also keep that original
+session context while sending the visible result to another configured channel.
 
 For the full automation model, creation flow, trigger CLI usage, and delivery
 semantics, see [`automations.md`](./automations.md).
@@ -289,13 +290,19 @@ instead of creating a chat automation.
 
 Use the Automations view to:
 
-- Filter by all, active, paused, needs-attention, or system jobs.
+- Filter by all, active, paused, needs-attention, system, or archived jobs.
 - Search by task name, message, trigger command, linked topic, schedule, or status.
 - Sort by next run, last run, updated time, or name.
 - Run scheduled automations now.
 - Pause or resume, rename, or delete user-created automations.
+- Set or clear a scheduled automation's result delivery channel and chat ID.
+- Select and archive multiple scheduled automations while retaining run history.
 - Copy the CLI command for local triggers.
 - Inspect protected system automations without changing them.
+
+Archived scheduled automations are read-only in the first archive workflow:
+you can inspect or permanently delete them, but cannot run, resume, or edit
+them. Local triggers and protected system jobs are not selectable for archive.
 
 Search accepts plain text and field filters such as `name:backup`,
 `chat:WeChat`, `schedule:09:30`, `cron:"0 23 * * *"`, `trigger`, and
