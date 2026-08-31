@@ -18,6 +18,7 @@ from loguru import logger
 
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import (
+    CronArchiveResult,
     CronJob,
     CronJobState,
     CronPayload,
@@ -116,7 +117,34 @@ def _disable_malformed_legacy_job(job: CronJob) -> None:
     logger.warning("Cron: disabled malformed legacy job '{}' ({}): {}", job.name, job.id, reason)
 
 
-def _persistable_origin_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+def _validate_delivery_pair(channel: str | None, chat_id: str | None) -> None:
+    if channel is None and chat_id is None:
+        return
+    if (
+        not isinstance(channel, str)
+        or not channel.strip()
+        or not isinstance(chat_id, str)
+        or not chat_id.strip()
+    ):
+        raise ValueError(
+            "cron delivery target requires both 'delivery_channel' and 'delivery_chat_id'"
+        )
+
+
+def _validate_delivery_target(payload: CronPayload) -> None:
+    _validate_delivery_pair(payload.delivery_channel, payload.delivery_chat_id)
+
+
+def _disable_malformed_delivery_job(job: CronJob, reason: str) -> None:
+    job.enabled = False
+    job.state.next_run_at_ms = None
+    job.state.last_status = "error"
+    job.state.last_error = reason
+    job.updated_at_ms = max(job.updated_at_ms, _now_ms())
+    logger.warning("Cron: disabled malformed delivery for job '{}' ({}): {}", job.name, job.id, reason)
+
+
+def _persistable_route_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """Return a detached JSON-safe routing snapshot for a cron payload."""
     snapshot: dict[str, Any] = {}
     for key, value in metadata.items():
@@ -138,30 +166,65 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     a runtime legacy execution path.
     """
     payload = job.payload
-    origin_metadata = _persistable_origin_metadata(payload.origin_metadata)
-    changed = origin_metadata != payload.origin_metadata
+    origin_metadata = _persistable_route_metadata(payload.origin_metadata)
+    delivery_metadata = _persistable_route_metadata(payload.delivery_metadata)
+    changed = (
+        origin_metadata != payload.origin_metadata
+        or delivery_metadata != payload.delivery_metadata
+    )
     payload.origin_metadata = origin_metadata
+    payload.delivery_metadata = delivery_metadata
 
-    if payload.kind != "agent_turn" or not _has_legacy_delivery_context(payload):
+    if job.archived_at_ms is not None:
+        if job.enabled or job.state.next_run_at_ms is not None:
+            changed = True
+        job.enabled = False
+        job.state.next_run_at_ms = None
+
+    if payload.kind != "agent_turn":
         return changed
 
-    if not payload.channel or not payload.to:
-        _disable_malformed_legacy_job(job)
-        return True
+    if _has_legacy_delivery_context(payload):
+        if not payload.channel or not payload.to:
+            _disable_malformed_legacy_job(job)
+            changed = True
+        else:
+            payload.session_key = _legacy_session_key(payload)
+            payload.origin_channel = payload.origin_channel or payload.channel
+            payload.origin_chat_id = payload.origin_chat_id or payload.to
+            if not payload.origin_metadata:
+                payload.origin_metadata = _persistable_route_metadata(payload.channel_meta or {})
 
-    payload.session_key = _legacy_session_key(payload)
-    payload.origin_channel = payload.origin_channel or payload.channel
-    payload.origin_chat_id = payload.origin_chat_id or payload.to
-    if not payload.origin_metadata:
-        payload.origin_metadata = _persistable_origin_metadata(payload.channel_meta or {})
+            payload.deliver = False
+            payload.channel = None
+            payload.to = None
+            payload.channel_meta = {}
+            job.updated_at_ms = max(job.updated_at_ms, _now_ms())
+            logger.info(
+                "Cron: migrated legacy job '{}' ({}) to session-bound payload",
+                job.name,
+                job.id,
+            )
+            changed = True
 
-    payload.deliver = False
-    payload.channel = None
-    payload.to = None
-    payload.channel_meta = {}
-    job.updated_at_ms = max(job.updated_at_ms, _now_ms())
-    logger.info("Cron: migrated legacy job '{}' ({}) to session-bound payload", job.name, job.id)
-    return True
+    try:
+        _validate_delivery_target(payload)
+    except ValueError as exc:
+        _disable_malformed_delivery_job(job, str(exc))
+        changed = True
+
+    return changed
+
+
+def _is_archived(job: CronJob) -> bool:
+    return job.archived_at_ms is not None
+
+
+def _archive_job_in_place(job: CronJob, *, now_ms: int) -> None:
+    job.archived_at_ms = now_ms
+    job.enabled = False
+    job.state.next_run_at_ms = None
+    job.updated_at_ms = now_ms
 
 
 class CronService:
@@ -200,6 +263,8 @@ class CronService:
 
     def _enforce_agent_binding(self, job: CronJob) -> bool:
         """Disable user cron jobs that cannot be routed to a concrete session."""
+        if _is_archived(job):
+            return False
         if not self._is_unbound_agent_job(job):
             return False
         if (
@@ -401,6 +466,9 @@ class CronService:
                         "originChannel": j.payload.origin_channel,
                         "originChatId": j.payload.origin_chat_id,
                         "originMetadata": j.payload.origin_metadata,
+                        "deliveryChannel": j.payload.delivery_channel,
+                        "deliveryChatId": j.payload.delivery_chat_id,
+                        "deliveryMetadata": j.payload.delivery_metadata,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -420,6 +488,7 @@ class CronService:
                     "createdAtMs": j.created_at_ms,
                     "updatedAtMs": j.updated_at_ms,
                     "deleteAfterRun": j.delete_after_run,
+                    "archivedAtMs": j.archived_at_ms,
                 }
                 for j in self._store.jobs
             ]
@@ -502,17 +571,26 @@ class CronService:
             return
         now = _now_ms()
         for job in self._store.jobs:
+            if _is_archived(job):
+                job.enabled = False
+                job.state.next_run_at_ms = None
+                continue
             if self._enforce_agent_binding(job):
                 continue
             if job.enabled:
                 job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
+            else:
+                job.state.next_run_at_ms = None
 
     def _get_next_wake_ms(self) -> int | None:
         """Get the earliest next run time across all jobs."""
         if not self._store:
             return None
-        times = [j.state.next_run_at_ms for j in self._store.jobs
-                 if j.enabled and j.state.next_run_at_ms]
+        times = [
+            j.state.next_run_at_ms
+            for j in self._store.jobs
+            if j.enabled and not _is_archived(j) and j.state.next_run_at_ms
+        ]
         return min(times) if times else None
 
     def _arm_timer(self) -> None:
@@ -559,7 +637,12 @@ class CronService:
             now = _now_ms()
             due_jobs = [
                 j for j in store.jobs
-                if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
+                if (
+                    j.enabled
+                    and not _is_archived(j)
+                    and j.state.next_run_at_ms
+                    and now >= j.state.next_run_at_ms
+                )
             ]
 
             for job in due_jobs:
@@ -635,35 +718,71 @@ class CronService:
             # Compute next run
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
+    def _append_actions(
+        self,
+        actions: list[tuple[Literal["add", "del", "update"], dict[str, Any]]],
+    ) -> None:
+        if not actions:
+            return
+        self.store_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            with open(self._action_path, "a", encoding="utf-8") as f:
+                for action, params in actions:
+                    f.write(
+                        json.dumps(
+                            {"action": action, "params": params}, ensure_ascii=False
+                        )
+                        + "\n"
+                    )
+
     def _append_action(
         self,
         action: Literal["add", "del", "update"],
         params: dict[str, Any],
     ) -> None:
-        self.store_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock:
-            with open(self._action_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"action": action, "params": params}, ensure_ascii=False) + "\n")
+        self._append_actions([(action, params)])
 
 
     # ========== Public API ==========
 
-    def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
+    def list_jobs(
+        self,
+        include_disabled: bool = False,
+        *,
+        include_archived: bool = False,
+    ) -> list[CronJob]:
         """List all jobs."""
         store = self._require_store()
-        jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
+        jobs = list(store.jobs)
+        if not include_archived:
+            jobs = [job for job in jobs if not _is_archived(job)]
+        if not include_disabled:
+            jobs = [job for job in jobs if job.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
+
+    def list_archived_jobs(self) -> list[CronJob]:
+        """List archived jobs with the most recently archived first."""
+        store = self._require_store()
+        return sorted(
+            [job for job in store.jobs if _is_archived(job)],
+            key=lambda job: job.archived_at_ms or 0,
+            reverse=True,
+        )
 
     def list_bound_cron_jobs_for_session(
         self,
         session_key: str,
         *,
         include_disabled: bool = True,
+        include_archived: bool = False,
     ) -> list[CronJob]:
         """Return user-created bound cron jobs owned by *session_key*."""
         return [
             job
-            for job in self.list_jobs(include_disabled=include_disabled)
+            for job in self.list_jobs(
+                include_disabled=include_disabled,
+                include_archived=include_archived,
+            )
             if is_bound_cron_job(job)
             and job.payload.session_key == session_key
         ]
@@ -682,6 +801,9 @@ class CronService:
         origin_channel: str | None = None,
         origin_chat_id: str | None = None,
         origin_metadata: dict[str, Any] | None = None,
+        delivery_channel: str | None = None,
+        delivery_chat_id: str | None = None,
+        delivery_metadata: dict[str, Any] | None = None,
     ) -> CronJob:
         """Add a new job."""
         _validate_schedule_for_add(schedule)
@@ -703,6 +825,9 @@ class CronService:
                 origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
                 origin_metadata=origin_metadata or {},
+                delivery_channel=delivery_channel,
+                delivery_chat_id=delivery_chat_id,
+                delivery_metadata=delivery_metadata or {},
             ),
             state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
             created_at_ms=now,
@@ -710,6 +835,7 @@ class CronService:
             delete_after_run=delete_after_run,
         )
         _normalize_agent_turn_job(job)
+        _validate_delivery_target(job.payload)
         self._enforce_agent_binding(job)
         if self._should_persist_store():
             store = self._require_store()
@@ -729,6 +855,7 @@ class CronService:
         job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
         job.created_at_ms = now
         job.updated_at_ms = now
+        job.archived_at_ms = None
         store.jobs = [j for j in store.jobs if j.id != job.id]
         store.jobs.append(job)
         self._save_store()
@@ -778,6 +905,17 @@ class CronService:
         store = self._require_store()
         for job in store.jobs:
             if job.id == job_id:
+                if _is_archived(job):
+                    changed = job.enabled or job.state.next_run_at_ms is not None
+                    job.enabled = False
+                    job.state.next_run_at_ms = None
+                    if changed:
+                        if self._should_persist_store():
+                            self._save_store()
+                            self._arm_timer()
+                        else:
+                            self._append_action("update", asdict(job))
+                    return job
                 job.enabled = enabled
                 job.updated_at_ms = _now_ms()
                 self._enforce_agent_binding(job)
@@ -804,7 +942,10 @@ class CronService:
         channel: str | None | EllipsisType = ...,
         to: str | None | EllipsisType = ...,
         delete_after_run: bool | None = None,
-    ) -> CronJob | Literal["not_found", "protected"]:
+        delivery_channel: str | None | EllipsisType = ...,
+        delivery_chat_id: str | None | EllipsisType = ...,
+        delivery_metadata: dict[str, Any] | None | EllipsisType = ...,
+    ) -> CronJob | Literal["not_found", "protected", "archived"]:
         """Update mutable fields of an existing job. System jobs cannot be updated.
 
         For ``channel`` and ``to``, pass an explicit value (including ``None``)
@@ -816,6 +957,23 @@ class CronService:
             return "not_found"
         if job.payload.kind == "system_event":
             return "protected"
+        if _is_archived(job):
+            return "archived"
+
+        candidate_delivery_channel = (
+            job.payload.delivery_channel
+            if delivery_channel is ...
+            else delivery_channel
+        )
+        candidate_delivery_chat_id = (
+            job.payload.delivery_chat_id
+            if delivery_chat_id is ...
+            else delivery_chat_id
+        )
+        _validate_delivery_pair(
+            candidate_delivery_channel,
+            candidate_delivery_chat_id,
+        )
 
         if schedule is not None:
             _validate_schedule_for_add(schedule)
@@ -832,7 +990,14 @@ class CronService:
             job.payload.to = to
         if delete_after_run is not None:
             job.delete_after_run = delete_after_run
+        if delivery_channel is not ...:
+            job.payload.delivery_channel = delivery_channel
+        if delivery_chat_id is not ...:
+            job.payload.delivery_chat_id = delivery_chat_id
+        if delivery_metadata is not ...:
+            job.payload.delivery_metadata = dict(delivery_metadata or {})
         _normalize_agent_turn_job(job)
+        _validate_delivery_target(job.payload)
         self._enforce_agent_binding(job)
 
         job.updated_at_ms = _now_ms()
@@ -863,6 +1028,8 @@ class CronService:
             store = self._require_store(reload_during_execution=reload_store)
             for job in store.jobs:
                 if job.id == job_id:
+                    if _is_archived(job):
+                        return False
                     if self._is_unbound_agent_job(job):
                         self._enforce_agent_binding(job)
                         self._save_store()
@@ -877,6 +1044,43 @@ class CronService:
             self._active_executions -= 1
             if self._running and self._active_executions == 0:
                 self._arm_timer()
+
+    def archive_jobs(self, job_ids: list[str]) -> CronArchiveResult:
+        """Archive user cron jobs in one mutation while retaining their history."""
+        store = self._require_store()
+        now = _now_ms()
+        result = CronArchiveResult()
+        jobs_by_id = {job.id: job for job in store.jobs}
+        updated_jobs: list[CronJob] = []
+
+        for job_id in dict.fromkeys(job_ids):
+            job = jobs_by_id.get(job_id)
+            if job is None:
+                result.not_found.append(job_id)
+                continue
+            if job.payload.kind == "system_event":
+                result.protected.append(job_id)
+                continue
+            if _is_archived(job):
+                result.already_archived.append(job_id)
+                continue
+
+            _archive_job_in_place(job, now_ms=now)
+            updated_jobs.append(job)
+            result.archived.append(job_id)
+
+        if not updated_jobs:
+            return result
+
+        if self._should_persist_store():
+            self._save_store()
+            self._arm_timer()
+        else:
+            self._append_actions(
+                [("update", asdict(job)) for job in updated_jobs]
+            )
+
+        return result
 
     def get_job(self, job_id: str) -> CronJob | None:
         """Get a job by ID."""

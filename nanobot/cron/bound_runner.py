@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.cron.session_delivery import origin_delivery_context
+from nanobot.cron.session_delivery import configured_delivery_context
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
@@ -46,7 +46,7 @@ def _bound_session_delivery_context(
     turn_seed: str,
     source_label: str | None,
 ) -> tuple[str, str, dict[str, Any]]:
-    channel, chat_id, metadata = origin_delivery_context(job)
+    channel, chat_id, metadata = configured_delivery_context(job)
 
     if channel == "websocket":
         metadata["webui"] = True
@@ -102,6 +102,10 @@ async def run_bound_cron_job(
         "prompt_ref": prompt_ref,
         "prompt_vars": {"message": job.payload.message},
         "rendered_prompt": prompt,
+        "delivery": {
+            "channel": channel,
+            "chat_id": chat_id,
+        },
     }
 
     cron.write_run_record(

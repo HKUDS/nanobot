@@ -102,3 +102,11 @@ class TestSchemaSelfDescribesRequirements:
         # accidentally introduced).
         tool = CronTool(_SvcStub())
         assert tool.parameters["required"] == ["action"]
+
+    def test_archive_and_delivery_fields_are_advertised(self) -> None:
+        tool = CronTool(_SvcStub())
+        properties = tool.parameters["properties"]
+        assert "archive" in properties["action"]["enum"]
+        assert "job_ids" in properties
+        assert "delivery_channel" in properties
+        assert "delivery_chat_id" in properties

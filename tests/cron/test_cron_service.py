@@ -631,6 +631,37 @@ async def test_run_history_persisted_to_disk(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("delete_after_run", [True, False])
+async def test_one_shot_retention_respects_delete_after_run(
+    tmp_path,
+    delete_after_run: bool,
+) -> None:
+    service = CronService(
+        tmp_path / "cron" / "jobs.json",
+        on_job=lambda _: asyncio.sleep(0),
+    )
+    job = service.add_job(
+        name="one-shot",
+        schedule=CronSchedule(kind="at", at_ms=int(time.time() * 1000) + 60_000),
+        message="hello",
+        delete_after_run=delete_after_run,
+        **_bound_chat(),
+    )
+
+    assert await service.run_job(job.id) is True
+
+    completed = service.get_job(job.id)
+    if delete_after_run:
+        assert completed is None
+    else:
+        assert completed is not None
+        assert completed.enabled is False
+        assert completed.state.next_run_at_ms is None
+        assert completed.state.last_status == "ok"
+        assert len(completed.state.run_history) == 1
+
+
+@pytest.mark.asyncio
 async def test_run_job_disabled_does_not_flip_running_state(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
@@ -1427,3 +1458,285 @@ def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
     assert len(jobs[0].state.run_history) == 1
     assert jobs[0].state.run_history[0].run_at_ms == 1
     assert jobs[0].state.run_history[0].status == "ok"
+
+
+def _add_archivable_job(
+    service: CronService,
+    *,
+    name: str = "job",
+    delivery_channel: str | None = None,
+    delivery_chat_id: str | None = None,
+) -> CronJob:
+    return service.add_job(
+        name=name,
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        delivery_channel=delivery_channel,
+        delivery_chat_id=delivery_chat_id,
+        **_bound_chat(name),
+    )
+
+
+def test_delivery_target_round_trips_through_jobs_json(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+    service._active_executions = 1
+    job = service.add_job(
+        name="ops",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="check",
+        delivery_channel="slack",
+        delivery_chat_id="C123",
+        delivery_metadata={"thread_ts": "1.2", RUNTIME_CONTEXT_INPUT_META: object()},
+        **_bound_chat("origin"),
+    )
+
+    loaded = CronService(store_path).get_job(job.id)
+
+    assert loaded is not None
+    assert loaded.payload.delivery_channel == "slack"
+    assert loaded.payload.delivery_chat_id == "C123"
+    assert loaded.payload.delivery_metadata == {"thread_ts": "1.2"}
+
+
+@pytest.mark.parametrize(
+    ("channel", "chat_id"),
+    [("slack", None), (None, "C123"), ("", "C123"), ("slack", "")],
+)
+def test_add_job_rejects_partial_delivery_target(
+    tmp_path,
+    channel: str | None,
+    chat_id: str | None,
+) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires both"):
+        _add_archivable_job(
+            service,
+            delivery_channel=channel,
+            delivery_chat_id=chat_id,
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+def test_update_delivery_target_is_atomic_and_can_be_cleared(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = _add_archivable_job(
+        service,
+        delivery_channel="slack",
+        delivery_chat_id="C123",
+    )
+
+    with pytest.raises(ValueError, match="requires both"):
+        service.update_job(job.id, delivery_channel=None)
+
+    current = service.get_job(job.id)
+    assert current is not None
+    assert current.payload.delivery_channel == "slack"
+    assert current.payload.delivery_chat_id == "C123"
+
+    cleared = service.update_job(
+        job.id,
+        delivery_channel=None,
+        delivery_chat_id=None,
+    )
+    assert isinstance(cleared, CronJob)
+    assert cleared.payload.delivery_channel is None
+    assert cleared.payload.delivery_chat_id is None
+
+
+def test_malformed_delivery_in_store_is_disabled_without_corrupting_store(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "bad-route",
+                        "name": "bad-route",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "message": "hello",
+                            "sessionKey": "websocket:origin",
+                            "originChannel": "websocket",
+                            "originChatId": "origin",
+                            "deliveryChannel": "slack",
+                        },
+                        "state": {"nextRunAtMs": 1},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = CronService(store_path).get_job("bad-route")
+
+    assert loaded is not None
+    assert loaded.enabled is False
+    assert loaded.state.next_run_at_ms is None
+    assert loaded.state.last_status == "error"
+    assert "requires both" in (loaded.state.last_error or "")
+    assert store_path.exists()
+    assert list(store_path.parent.glob("jobs.json.corrupt-*")) == []
+
+
+def test_non_string_delivery_in_store_is_disabled_without_corrupting_store(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "bad-route-type",
+                        "name": "bad-route-type",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "message": "hello",
+                            "sessionKey": "websocket:origin",
+                            "originChannel": "websocket",
+                            "originChatId": "origin",
+                            "deliveryChannel": 7,
+                            "deliveryChatId": "C123",
+                        },
+                        "state": {"nextRunAtMs": 1},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = CronService(store_path).get_job("bad-route-type")
+
+    assert loaded is not None
+    assert loaded.enabled is False
+    assert loaded.state.last_status == "error"
+    assert "requires both" in (loaded.state.last_error or "")
+    assert list(store_path.parent.glob("jobs.json.corrupt-*")) == []
+
+
+def test_archive_jobs_is_idempotent_deduplicated_and_preserves_history(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    service._active_executions = 1
+    first = _add_archivable_job(service, name="first")
+    second = _add_archivable_job(service, name="second")
+    first.state.last_status = "ok"
+
+    result = service.archive_jobs([first.id, first.id, second.id, "missing"])
+    repeated = service.archive_jobs([first.id])
+
+    assert result.archived == [first.id, second.id]
+    assert result.already_archived == []
+    assert result.not_found == ["missing"]
+    assert repeated.archived == []
+    assert repeated.already_archived == [first.id]
+    assert service.list_jobs(include_disabled=True) == []
+    archived = service.list_archived_jobs()
+    assert {job.id for job in archived} == {first.id, second.id}
+    archived_first = next(job for job in archived if job.id == first.id)
+    assert archived_first.enabled is False
+    assert archived_first.state.next_run_at_ms is None
+    assert archived_first.state.last_status == "ok"
+    reloaded = CronService(service.store_path).get_job(first.id)
+    assert reloaded is not None
+    assert reloaded.archived_at_ms is not None
+    assert reloaded.state.last_status == "ok"
+    service._active_executions = 0
+
+
+def test_archive_jobs_protects_system_jobs_and_allows_hard_delete(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    user_job = _add_archivable_job(service)
+    system_job = CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        payload=CronPayload(kind="system_event"),
+    )
+    service.register_system_job(system_job)
+
+    result = service.archive_jobs([system_job.id, user_job.id])
+
+    assert result.protected == [system_job.id]
+    assert result.archived == [user_job.id]
+    assert service.remove_job(user_job.id) == "removed"
+    assert service.get_job(user_job.id) is None
+
+
+@pytest.mark.asyncio
+async def test_archived_jobs_cannot_be_enabled_updated_or_force_run(tmp_path) -> None:
+    calls: list[str] = []
+
+    async def on_job(job: CronJob) -> None:
+        calls.append(job.id)
+
+    service = CronService(tmp_path / "cron" / "jobs.json", on_job=on_job)
+    service._running = True
+    job = _add_archivable_job(service)
+    service.archive_jobs([job.id])
+
+    enabled = service.enable_job(job.id, enabled=True)
+    updated = service.update_job(job.id, name="changed")
+    ran = await service.run_job(job.id, force=True)
+
+    assert enabled is not None
+    assert enabled.enabled is False
+    assert updated == "archived"
+    assert ran is False
+    assert calls == []
+    service.stop()
+
+
+@pytest.mark.asyncio
+async def test_timer_defensively_skips_archived_job(tmp_path) -> None:
+    calls: list[str] = []
+
+    async def on_job(job: CronJob) -> None:
+        calls.append(job.id)
+
+    service = CronService(tmp_path / "cron" / "jobs.json", on_job=on_job)
+    service._running = True
+    job = _add_archivable_job(service)
+    service.archive_jobs([job.id])
+    current = service.get_job(job.id)
+    assert current is not None
+    current.enabled = True
+    current.state.next_run_at_ms = 1
+
+    await service._on_timer()
+
+    assert calls == []
+    service.stop()
+
+
+def test_non_owner_batch_archive_writes_full_update_actions(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    owner = CronService(store_path)
+    owner._active_executions = 1
+    first = _add_archivable_job(owner, name="first")
+    second = _add_archivable_job(owner, name="second")
+    client = CronService(store_path)
+
+    result = client.archive_jobs([first.id, second.id])
+    lines = [
+        json.loads(line)
+        for line in client._action_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert result.archived == [first.id, second.id]
+    assert [line["action"] for line in lines] == ["update", "update"]
+    assert {line["params"]["id"] for line in lines} == {first.id, second.id}
+    assert all(line["params"]["archived_at_ms"] is not None for line in lines)
+
+    owner._load_store(reload_during_execution=True)
+    assert {job.id for job in owner.list_archived_jobs()} == {first.id, second.id}
+    owner._active_executions = 0

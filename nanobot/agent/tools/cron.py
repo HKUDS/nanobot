@@ -20,7 +20,7 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
-    action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
+    action=StringSchema("Action to perform", enum=["add", "list", "remove", "archive"]),
     name=StringSchema(
         "Optional short human-readable label for the job "
         "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
@@ -41,10 +41,26 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "Naive values use the tool's default timezone."
     ),
     job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+    job_ids=StringSchema(
+        "REQUIRED when action='archive'. Comma-separated job IDs to archive."
+    ),
+    delivery_channel=StringSchema(
+        "Optional result delivery channel for action='add'. "
+        "Must be provided with delivery_chat_id."
+    ),
+    delivery_chat_id=StringSchema(
+        "Optional destination chat/channel ID for action='add'. "
+        "Must be provided with delivery_channel."
+    ),
+    view=StringSchema(
+        "List view for action='list'.",
+        enum=["active", "archived", "all"],
+    ),
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
-        "(every_seconds, cron_expr, or at); remove requires job_id; list only needs action. "
+        "(every_seconds, cron_expr, or at); remove requires job_id; archive requires job_ids; "
+        "list only needs action. "
         "Per-action requirements are enforced at runtime (see field descriptions) so the "
         "top-level schema stays compatible with providers (e.g. OpenAI Codex/Responses) that "
         "reject oneOf/anyOf/allOf/enum/not at the root of function parameters."
@@ -120,7 +136,7 @@ class CronTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            "Schedule reminders and recurring tasks. Actions: add, list, remove, archive. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 
@@ -131,6 +147,15 @@ class CronTool(Tool):
             errors.append("message is required when action='add'")
         if action == "remove" and not str(params.get("job_id") or "").strip():
             errors.append("job_id is required when action='remove'")
+        if action == "archive" and not str(params.get("job_ids") or "").strip():
+            errors.append("job_ids is required when action='archive'")
+        if action == "add":
+            delivery_channel = str(params.get("delivery_channel") or "").strip()
+            delivery_chat_id = str(params.get("delivery_chat_id") or "").strip()
+            if bool(delivery_channel) != bool(delivery_chat_id):
+                errors.append(
+                    "delivery_channel and delivery_chat_id must be provided together"
+                )
         return errors
 
     async def execute(
@@ -143,15 +168,30 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        job_ids: str | None = None,
+        delivery_channel: str | None = None,
+        delivery_chat_id: str | None = None,
+        view: str | None = None,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return ToolResult.error("Error: cannot schedule new jobs from within a cron job execution")
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at)
+            return self._add_job(
+                name,
+                message,
+                every_seconds,
+                cron_expr,
+                tz,
+                at,
+                delivery_channel,
+                delivery_chat_id,
+            )
         elif action == "list":
-            return self._list_jobs()
+            return self._list_jobs(view=view or "active")
         elif action == "remove":
             return self._remove_job(job_id)
+        elif action == "archive":
+            return self._archive_jobs(job_ids)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -162,6 +202,8 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        delivery_channel: str | None = None,
+        delivery_chat_id: str | None = None,
     ) -> str:
         if not message:
             return ToolResult.error(
@@ -174,6 +216,12 @@ class CronTool(Tool):
             return ToolResult.error("Error: scheduled cron jobs must be created from a chat session")
         if not origin_channel or not origin_chat_id:
             return ToolResult.error("Error: scheduled cron jobs must be created from a chat session")
+        delivery_channel = (delivery_channel or "").strip() or None
+        delivery_chat_id = (delivery_chat_id or "").strip() or None
+        if bool(delivery_channel) != bool(delivery_chat_id):
+            return ToolResult.error(
+                "Error: delivery_channel and delivery_chat_id must be provided together"
+            )
         if tz and not cron_expr:
             return ToolResult.error("Error: tz can only be used with cron_expr")
         if tz:
@@ -202,7 +250,6 @@ class CronTool(Tool):
                 dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
-            delete_after = True
         else:
             return ToolResult.error("Error: either every_seconds, cron_expr, or at is required")
 
@@ -215,6 +262,8 @@ class CronTool(Tool):
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             origin_metadata=origin_metadata,
+            delivery_channel=delivery_channel,
+            delivery_chat_id=delivery_chat_id,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
@@ -258,10 +307,20 @@ class CronTool(Tool):
             return "Dream memory consolidation for long-term memory."
         return "System-managed internal job."
 
-    def _list_jobs(self) -> str:
-        jobs = self._cron.list_jobs()
+    def _list_jobs(self, *, view: str = "active") -> str:
+        if view == "active":
+            jobs = self._cron.list_jobs()
+        elif view == "archived":
+            jobs = self._cron.list_archived_jobs()
+        elif view == "all":
+            jobs = self._cron.list_jobs(
+                include_disabled=True,
+                include_archived=True,
+            )
+        else:
+            return ToolResult.error(f"Error: unsupported list view '{view}'")
         if not jobs:
-            return "No scheduled jobs."
+            return "No scheduled jobs." if view == "active" else f"No {view} scheduled jobs."
         lines: list[str] = []
         for j in jobs:
             timing = self._format_timing(j.schedule)
@@ -269,9 +328,44 @@ class CronTool(Tool):
             if j.payload.kind == "system_event":
                 parts.append(f"  Purpose: {self._system_job_purpose(j)}")
                 parts.append("  Protected: visible for inspection, but cannot be removed.")
+            else:
+                if j.payload.delivery_channel and j.payload.delivery_chat_id:
+                    parts.append(
+                        "  Delivery: "
+                        f"{j.payload.delivery_channel}:{j.payload.delivery_chat_id}"
+                    )
+                else:
+                    parts.append("  Delivery: origin session")
+                if j.archived_at_ms is not None:
+                    parts.append(
+                        "  Archived: "
+                        + self._format_timestamp(
+                            j.archived_at_ms,
+                            self._display_timezone(j.schedule),
+                        )
+                    )
             parts.extend(self._format_state(j.state, j.schedule))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
+
+    def _archive_jobs(self, raw_job_ids: str | None) -> str:
+        if not raw_job_ids:
+            return ToolResult.error("Error: job_ids is required for archive")
+        job_ids = [part.strip() for part in raw_job_ids.split(",") if part.strip()]
+        if not job_ids:
+            return ToolResult.error("Error: job_ids is required for archive")
+
+        result = self._cron.archive_jobs(job_ids)
+        lines: list[str] = []
+        if result.archived:
+            lines.append("Archived: " + ", ".join(result.archived))
+        if result.already_archived:
+            lines.append("Already archived: " + ", ".join(result.already_archived))
+        if result.protected:
+            lines.append("Protected system jobs: " + ", ".join(result.protected))
+        if result.not_found:
+            lines.append("Not found: " + ", ".join(result.not_found))
+        return "\n".join(lines) or "No jobs changed."
 
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:

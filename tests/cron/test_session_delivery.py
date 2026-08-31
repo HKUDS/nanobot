@@ -1,6 +1,6 @@
 import pytest
 
-from nanobot.cron.session_delivery import origin_delivery_context
+from nanobot.cron.session_delivery import configured_delivery_context, origin_delivery_context
 from nanobot.cron.types import CronJob, CronPayload
 
 
@@ -42,3 +42,68 @@ def test_origin_delivery_context_rejects_missing_origin_fields() -> None:
 
     with pytest.raises(ValueError, match="missing origin delivery context"):
         origin_delivery_context(job)
+
+
+def test_configured_delivery_context_falls_back_to_origin() -> None:
+    job = CronJob(
+        id="job1",
+        name="health",
+        payload=CronPayload(
+            session_key="websocket:topic-1",
+            origin_channel="websocket",
+            origin_chat_id="topic-1",
+            origin_metadata={"webui": True},
+        ),
+    )
+
+    assert configured_delivery_context(job) == (
+        "websocket",
+        "topic-1",
+        {"webui": True},
+    )
+
+
+def test_configured_delivery_context_uses_explicit_target_without_origin_metadata() -> None:
+    job = CronJob(
+        id="job1",
+        name="health",
+        payload=CronPayload(
+            session_key="websocket:topic-1",
+            origin_channel="websocket",
+            origin_chat_id="topic-1",
+            origin_metadata={"webui": True},
+            delivery_channel="slack",
+            delivery_chat_id="C123",
+            delivery_metadata={"thread_ts": "123.456"},
+        ),
+    )
+
+    assert configured_delivery_context(job) == (
+        "slack",
+        "C123",
+        {"thread_ts": "123.456"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("delivery_channel", "delivery_chat_id"),
+    [("slack", None), (None, "C123"), ("", "C123"), ("slack", "")],
+)
+def test_configured_delivery_context_rejects_partial_target(
+    delivery_channel: str | None,
+    delivery_chat_id: str | None,
+) -> None:
+    job = CronJob(
+        id="job1",
+        name="health",
+        payload=CronPayload(
+            session_key="websocket:topic-1",
+            origin_channel="websocket",
+            origin_chat_id="topic-1",
+            delivery_channel=delivery_channel,
+            delivery_chat_id=delivery_chat_id,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="incomplete delivery target"):
+        configured_delivery_context(job)
