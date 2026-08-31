@@ -195,6 +195,63 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert message["cron_prompt_ref"] == prompt_ref
 
 
+def test_persist_user_message_early_drops_ephemeral_runtime_context(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("cli:ephemeral-early")
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="cli",
+            sender_id="user",
+            chat_id="ephemeral-early",
+            content="hello",
+        ),
+        session,
+        runtime_context_blocks=[
+            RuntimeContextBlock(source="goal", content="persistent context"),
+            RuntimeContextBlock(
+                source="voice",
+                content="ephemeral voice contract",
+                ephemeral=True,
+            ),
+        ],
+    )
+
+    assert persisted is True
+    assert len(session.messages) == 1
+    message = session.messages[0]
+    assert message["content"] == "hello\n\npersistent context"
+    assert "ephemeral voice contract" not in message["content"]
+    assert message[RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
+
+
+def test_persist_user_message_early_skips_ephemeral_only_context_without_payload(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("cli:ephemeral-only")
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="cli",
+            sender_id="user",
+            chat_id="ephemeral-only",
+            content="",
+        ),
+        session,
+        runtime_context_blocks=[RuntimeContextBlock(
+            source="voice",
+            content="ephemeral voice contract",
+            ephemeral=True,
+        )],
+    )
+
+    assert persisted is False
+    assert session.messages == []
+
+
 def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:chat")
@@ -592,6 +649,115 @@ def test_save_turn_persists_runtime_context_and_public_view_hides_it() -> None:
     assert session.messages[0]["content"] == "hello world\n\ninternal goal guidance"
     assert session.messages[0][RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
     assert public_history_message(session.messages[0])["content"] == "hello world"
+
+
+def test_save_turn_persists_only_non_ephemeral_runtime_context() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:ephemeral-injection")
+
+    loop._save_turn(
+        session,
+        [_runtime_message(
+            "follow up",
+            [
+                RuntimeContextBlock(
+                    source="goal",
+                    content="persistent injected context",
+                ),
+                RuntimeContextBlock(
+                    source="voice",
+                    content="ephemeral injected context",
+                    ephemeral=True,
+                ),
+            ],
+        )],
+        skip=0,
+    )
+
+    assert len(session.messages) == 1
+    message = session.messages[0]
+    assert message["content"] == "follow up\n\npersistent injected context"
+    assert "ephemeral injected context" not in message["content"]
+    assert message[RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
+    assert public_history_message(message)["content"] == "follow up"
+
+
+def test_save_turn_drops_all_ephemeral_context_but_keeps_visible_user_text() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:all-ephemeral-injection")
+
+    loop._save_turn(
+        session,
+        [_runtime_message(
+            "follow up",
+            [RuntimeContextBlock(
+                source="voice",
+                content="ephemeral injected context",
+                ephemeral=True,
+            )],
+        )],
+        skip=0,
+    )
+
+    assert len(session.messages) == 1
+    assert session.messages[0]["content"] == "follow up"
+    assert RUNTIME_CONTEXT_HISTORY_META not in session.messages[0]
+
+
+def test_save_turn_skips_empty_user_row_with_only_ephemeral_context() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:empty-ephemeral-injection")
+
+    loop._save_turn(
+        session,
+        [_runtime_message(
+            "",
+            [RuntimeContextBlock(
+                source="voice",
+                content="ephemeral injected context",
+                ephemeral=True,
+            )],
+        )],
+        skip=0,
+    )
+
+    assert session.messages == []
+
+
+def test_save_turn_drops_ephemeral_context_from_multimodal_user_message() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:ephemeral-image")
+
+    loop._save_turn(
+        session,
+        [_runtime_message(
+            [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,abc"},
+                    "_meta": {"path": "/media/photo.jpg"},
+                },
+                {"type": "text", "text": "inspect this"},
+            ],
+            [
+                RuntimeContextBlock(source="goal", content="persistent context"),
+                RuntimeContextBlock(
+                    source="voice",
+                    content="ephemeral contract",
+                    ephemeral=True,
+                ),
+            ],
+        )],
+        skip=0,
+    )
+
+    assert session.messages[0]["content"] == [
+        {"type": "text", "text": "[image: /media/photo.jpg]"},
+        {"type": "text", "text": "inspect this"},
+        {"type": "text", "text": "persistent context"},
+    ]
+    assert session.messages[0][RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
+    assert "ephemeral contract" not in str(session.messages[0]["content"])
 
 
 def test_build_and_save_preserves_user_text_containing_goal_guidance_tag(tmp_path: Path) -> None:

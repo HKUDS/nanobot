@@ -963,6 +963,64 @@ def test_runner_merge_preserves_runtime_markers_with_media() -> None:
     ]
 
 
+def test_runner_merge_preserves_ephemeral_runtime_lifecycle_with_media() -> None:
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_MESSAGE_META,
+        RuntimeContextBlock,
+        append_runtime_context,
+        project_runtime_context_for_history,
+    )
+
+    first_visible = [
+        {"type": "text", "text": "first"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]
+    first_content, first_marker = append_runtime_context(
+        first_visible,
+        [RuntimeContextBlock(source="first", content="persistent first context")],
+    )
+    second_content, second_marker = append_runtime_context(
+        "second",
+        [RuntimeContextBlock(
+            source="voice",
+            content="ephemeral second context",
+            ephemeral=True,
+        )],
+    )
+    messages: list[dict] = []
+
+    AgentRunner._append_injected_messages(messages, [
+        {
+            "role": "user",
+            "content": first_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: first_marker},
+        },
+        {
+            "role": "user",
+            "content": second_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: second_marker},
+        },
+    ])
+
+    assert len(messages) == 1
+    merged = messages[0]
+    assert "persistent first context" in str(merged["content"])
+    assert "ephemeral second context" in str(merged["content"])
+
+    history_content, history_marker = project_runtime_context_for_history(
+        merged["content"],
+        merged["_meta"][RUNTIME_CONTEXT_MESSAGE_META],
+    )
+    assert history_content == [
+        *first_visible,
+        {"type": "text", "text": "second"},
+        {"type": "text", "text": "persistent first context"},
+    ]
+    assert history_marker is not None
+    assert history_marker["sources"] == ["first"]
+
+
 @pytest.mark.asyncio
 async def test_injection_cycles_capped_at_max():
     """Injection cycles should be capped at _MAX_INJECTION_CYCLES."""

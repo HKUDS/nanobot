@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.context import RequestContext
 from nanobot.runtime_context import (
     MAX_WEBUI_QUOTE_CHARS,
@@ -13,7 +14,9 @@ from nanobot.runtime_context import (
     WEBUI_QUOTE_SOURCE,
     RuntimeContextBlock,
     append_runtime_context,
+    normalize_runtime_context_blocks,
     normalize_webui_quote,
+    project_runtime_context_for_history,
     public_history_message,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
@@ -47,6 +50,151 @@ async def test_resolve_runtime_context_preserves_provider_order() -> None:
         ("first", "one"),
         ("second", "two"),
     ]
+
+
+def test_normalize_runtime_context_preserves_ephemeral_flag() -> None:
+    normalized = normalize_runtime_context_blocks(RuntimeContextBlock(
+        source=" voice ",
+        content=" keep replies short ",
+        ephemeral=True,
+    ))
+
+    assert normalized == [RuntimeContextBlock(
+        source="voice",
+        content="keep replies short",
+        ephemeral=True,
+    )]
+
+
+def test_ephemeral_runtime_context_is_request_visible_but_not_history_persistent() -> None:
+    request_content, request_marker = append_runtime_context(
+        "hello",
+        [
+            RuntimeContextBlock(source="goal", content="persistent goal context"),
+            RuntimeContextBlock(
+                source="voice",
+                content="speak briefly",
+                ephemeral=True,
+            ),
+        ],
+    )
+
+    assert request_marker is not None
+    assert request_content == "hello\n\npersistent goal context\n\nspeak briefly"
+
+    history_content, history_marker = project_runtime_context_for_history(
+        request_content,
+        request_marker,
+    )
+
+    assert history_content == "hello\n\npersistent goal context"
+    assert history_marker is not None
+    assert history_marker["sources"] == ["goal"]
+    assert "_lifecycle" not in history_marker
+
+
+def test_all_ephemeral_runtime_context_projects_to_visible_user_content_only() -> None:
+    request_content, request_marker = append_runtime_context(
+        "hello",
+        [RuntimeContextBlock(
+            source="voice",
+            content="speak briefly",
+            ephemeral=True,
+        )],
+    )
+
+    assert request_marker is not None
+    assert "speak briefly" in request_content
+    assert project_runtime_context_for_history(request_content, request_marker) == (
+        "hello",
+        None,
+    )
+
+
+def test_multimodal_ephemeral_runtime_context_is_removed_from_history() -> None:
+    visible = [
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,AA=="},
+        },
+        {"type": "text", "text": "what is this?"},
+    ]
+    request_content, request_marker = append_runtime_context(
+        visible,
+        [
+            RuntimeContextBlock(source="goal", content="persistent context"),
+            RuntimeContextBlock(
+                source="voice",
+                content="ephemeral voice contract",
+                ephemeral=True,
+            ),
+        ],
+    )
+
+    assert request_marker is not None
+    history_content, history_marker = project_runtime_context_for_history(
+        request_content,
+        request_marker,
+    )
+
+    assert history_content == [
+        *visible,
+        {"type": "text", "text": "persistent context"},
+    ]
+    assert history_marker is not None
+    assert history_marker["sources"] == ["goal"]
+
+
+def test_ephemeral_projection_handles_internal_blank_lines_and_mixed_order() -> None:
+    request_content, request_marker = append_runtime_context(
+        "hello",
+        [
+            RuntimeContextBlock(source="first", content="first persistent"),
+            RuntimeContextBlock(
+                source="voice",
+                content="line one\n\nline two",
+                ephemeral=True,
+            ),
+            RuntimeContextBlock(source="last", content="last persistent"),
+        ],
+    )
+
+    assert request_marker is not None
+    history_content, history_marker = project_runtime_context_for_history(
+        request_content,
+        request_marker,
+    )
+
+    assert history_content == "hello\n\nfirst persistent\n\nlast persistent"
+    assert history_marker is not None
+    assert history_marker["sources"] == ["first", "last"]
+
+
+def test_persistent_runtime_context_history_projection_is_unchanged() -> None:
+    request_content, request_marker = append_runtime_context(
+        "hello",
+        [RuntimeContextBlock(source="goal", content="persistent context")],
+    )
+
+    assert request_marker is not None
+    assert project_runtime_context_for_history(request_content, request_marker) == (
+        request_content,
+        request_marker,
+    )
+
+
+def test_context_builder_keeps_ephemeral_context_in_current_request(tmp_path) -> None:
+    current = ContextBuilder(tmp_path).build_current_message(
+        "hello",
+        runtime_context_blocks=[RuntimeContextBlock(
+            source="voice",
+            content="ephemeral voice contract",
+            ephemeral=True,
+        )],
+    )
+
+    assert "ephemeral voice contract" in str(current["content"])
+    assert current["_meta"]["runtime_context"]["_lifecycle"][0]["ephemeral"] is True
 
 
 def test_webui_quote_is_bounded_and_projected_as_model_only_context() -> None:
