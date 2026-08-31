@@ -931,7 +931,13 @@ def test_runner_merge_preserves_runtime_markers_with_media() -> None:
     )
     second_content, second_marker = append_runtime_context(
         "second",
-        [RuntimeContextBlock(source="second", content="private second")],
+        [
+            RuntimeContextBlock(
+                source="second",
+                content="private second",
+                ephemeral=True,
+            )
+        ],
     )
     messages: list[dict] = []
 
@@ -952,6 +958,7 @@ def test_runner_merge_preserves_runtime_markers_with_media() -> None:
     merged = messages[0]
     assert "private first" in str(merged["content"])
     assert "private second" in str(merged["content"])
+    assert merged["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["ephemeral"] == [False, True]
     persisted = {
         "role": "user",
         "content": merged["content"],

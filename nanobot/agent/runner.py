@@ -43,6 +43,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     detach_runtime_context,
     reattach_runtime_context,
+    runtime_context_ephemeral_flags,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
@@ -218,6 +219,16 @@ class AgentRunner:
                 if detached_left is not None and detached_right is not None:
                     left_content, left_sources, left_blocks = detached_left
                     right_content, right_sources, right_blocks = detached_right
+                    left_ephemeral = (
+                        runtime_context_ephemeral_flags(left_marker_dict, len(left_blocks))
+                        if left_marker_dict is not None
+                        else []
+                    )
+                    right_ephemeral = (
+                        runtime_context_ephemeral_flags(right_marker_dict, len(right_blocks))
+                        if right_marker_dict is not None
+                        else []
+                    )
                     merged_content = cls._merge_message_content(left_content, right_content)
                     context_blocks = [*left_blocks, *right_blocks]
                     if context_blocks:
@@ -225,6 +236,7 @@ class AgentRunner:
                             merged_content,
                             [*left_sources, *right_sources],
                             context_blocks,
+                            ephemeral=[*left_ephemeral, *right_ephemeral],
                         )
                         internal_meta = dict(left_meta_dict) if left_meta_dict is not None else {}
                         if right_meta_dict is not None:

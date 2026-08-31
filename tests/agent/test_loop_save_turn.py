@@ -594,6 +594,47 @@ def test_save_turn_persists_runtime_context_and_public_view_hides_it() -> None:
     assert public_history_message(session.messages[0])["content"] == "hello world"
 
 
+def test_save_turn_drops_ephemeral_runtime_context() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:ephemeral-context")
+    blocks = [
+        RuntimeContextBlock(source="goal", content="durable goal guidance"),
+        RuntimeContextBlock(
+            source="voice",
+            content="current-turn voice contract",
+            ephemeral=True,
+        ),
+    ]
+
+    loop._save_turn(
+        session,
+        [_runtime_message("hello world", blocks)],
+        skip=0,
+    )
+
+    assert session.messages[0]["content"] == "hello world\n\ndurable goal guidance"
+    assert session.messages[0][RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
+    assert "current-turn voice contract" not in str(session.messages[0])
+
+
+def test_save_turn_drops_ephemeral_only_user_row() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:ephemeral-only-context")
+    block = RuntimeContextBlock(
+        source="voice",
+        content="current-turn voice contract",
+        ephemeral=True,
+    )
+
+    loop._save_turn(
+        session,
+        [_runtime_message("", [block])],
+        skip=0,
+    )
+
+    assert session.messages == []
+
+
 def test_build_and_save_preserves_user_text_containing_goal_guidance_tag(tmp_path: Path) -> None:
     loop = _mk_loop()
     session = Session(key="test:user-guidance-literal")

@@ -65,6 +65,7 @@ from nanobot.runtime_context import (
     append_runtime_context,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
+    runtime_context_for_persistence,
 )
 from nanobot.security.workspace_access import (
     WorkspaceScopeResolver,
@@ -713,6 +714,13 @@ class AgentLoop:
                 text,
                 runtime_context_blocks or (),
             )
+            if runtime_context_meta is not None:
+                text, runtime_context_meta = runtime_context_for_persistence(
+                    text,
+                    runtime_context_meta,
+                )
+            if not text and not media_paths and runtime_context_meta is None:
+                return False
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
             session.add_message("user", text, **extra)
@@ -2178,6 +2186,14 @@ class AgentLoop:
                 else None
             )
             role, content = entry.get("role"), entry.get("content")
+            if role == "user" and isinstance(runtime_context_meta, dict):
+                content, runtime_context_meta = runtime_context_for_persistence(
+                    content,
+                    cast(dict[str, Any], runtime_context_meta),
+                )
+                entry["content"] = content
+                if content in ("", []) and runtime_context_meta is None:
+                    continue
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":

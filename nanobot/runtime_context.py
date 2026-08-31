@@ -1,4 +1,4 @@
-"""Optional, persistent context appended to the current user prompt."""
+"""Optional context appended to the current user prompt."""
 
 from __future__ import annotations
 
@@ -26,10 +26,13 @@ class RuntimeContextBlock:
     """Provider-owned context appended verbatim to the current user content.
 
     Callers must bound and delimit content obtained from untrusted sources.
+    Ephemeral blocks are sent to the model for the current turn but are not
+    persisted in session history.
     """
 
     source: str
     content: str
+    ephemeral: bool = False
 
 
 def normalize_webui_quote(value: Any) -> str | None:
@@ -92,7 +95,13 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
         if not source:
             raise ValueError("runtime context block source must not be empty")
         if content:
-            blocks.append(RuntimeContextBlock(source=source, content=content))
+            blocks.append(
+                RuntimeContextBlock(
+                    source=source,
+                    content=content,
+                    ephemeral=block.ephemeral,
+                )
+            )
     return blocks
 
 
@@ -127,21 +136,26 @@ def append_runtime_context(
 
     rendered = [block.content for block in blocks]
     sources = [block.source for block in blocks]
+    ephemeral = [block.ephemeral for block in blocks]
     if isinstance(content, list):
         context_blocks = [{"type": "text", "text": text} for text in rendered]
         return [*content, *context_blocks], {
             "version": 1,
             "sources": sources,
             "blocks": context_blocks,
+            "ephemeral": ephemeral,
         }
 
     text = "" if content is None else str(content)
     suffix = "\n\n".join(rendered)
     merged = f"{text}\n\n{suffix}" if text else suffix
+    context_blocks = [{"type": "text", "text": block} for block in rendered]
     return merged, {
         "version": 1,
         "sources": sources,
         "suffix": suffix,
+        "blocks": context_blocks,
+        "ephemeral": ephemeral,
     }
 
 
@@ -168,7 +182,18 @@ def detach_runtime_context(
             clean_content = content[: -(len(suffix) + 2)]
         else:
             return None
-        return clean_content, sources, [{"type": "text", "text": suffix}]
+        raw_blocks = marker_data.get("blocks")
+        marker_blocks = (
+            [
+                deepcopy(cast(dict[str, Any], block))
+                for block in cast(list[object], raw_blocks)
+                if isinstance(block, dict)
+            ]
+            if isinstance(raw_blocks, list)
+            else []
+        )
+        rendered_blocks = marker_blocks or [{"type": "text", "text": suffix}]
+        return clean_content, sources, rendered_blocks
 
     expected = marker_data.get("blocks")
     if isinstance(content, list) and isinstance(expected, list) and expected:
@@ -185,9 +210,12 @@ def reattach_runtime_context(
     content: Any,
     sources: Sequence[str],
     blocks: Sequence[Mapping[str, Any]],
+    *,
+    ephemeral: Sequence[bool] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Append detached runtime-context blocks after visible messages are merged."""
     context_blocks = [deepcopy(dict(block)) for block in blocks]
+    ephemeral_flags = list(ephemeral or (False for _ in context_blocks))
     if isinstance(content, str) and all(
         block.get("type") == "text" and isinstance(block.get("text"), str)
         for block in context_blocks
@@ -198,6 +226,8 @@ def reattach_runtime_context(
             "version": 1,
             "sources": list(sources),
             "suffix": suffix,
+            "blocks": context_blocks,
+            "ephemeral": ephemeral_flags,
         }
 
     visible_blocks: list[Any] = (
@@ -209,7 +239,55 @@ def reattach_runtime_context(
         "version": 1,
         "sources": list(sources),
         "blocks": context_blocks,
+        "ephemeral": ephemeral_flags,
     }
+
+
+def runtime_context_ephemeral_flags(
+    marker: Mapping[str, Any],
+    count: int,
+) -> list[bool]:
+    """Return marker flags aligned to its rendered context blocks."""
+    raw_flags = marker.get("ephemeral")
+    if not isinstance(raw_flags, list):
+        return [False] * count
+    flags = cast(list[object], raw_flags)
+    return [
+        flags[index] is True if index < len(flags) else False
+        for index in range(count)
+    ]
+
+
+def runtime_context_for_persistence(
+    content: Any,
+    marker: Mapping[str, Any],
+) -> tuple[Any, dict[str, Any] | None]:
+    """Remove ephemeral blocks while retaining durable runtime context."""
+    raw_flags = marker.get("ephemeral")
+    if not isinstance(raw_flags, list) or not any(
+        flag is True for flag in cast(list[object], raw_flags)
+    ):
+        return content, dict(marker)
+
+    detached = detach_runtime_context(content, marker)
+    if detached is None:
+        return content, dict(marker)
+
+    visible_content, sources, blocks = detached
+    flags = runtime_context_ephemeral_flags(marker, len(blocks))
+    persistent = [
+        (source, block)
+        for source, block, ephemeral in zip(sources, blocks, flags, strict=False)
+        if not ephemeral
+    ]
+    if not persistent:
+        return visible_content, None
+
+    return reattach_runtime_context(
+        visible_content,
+        [source for source, _block in persistent],
+        [block for _source, block in persistent],
+    )
 
 
 def public_history_message(message: Mapping[str, Any]) -> dict[str, Any]:

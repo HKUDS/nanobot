@@ -17,6 +17,7 @@ from nanobot.runtime_context import (
     public_history_message,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
+    runtime_context_for_persistence,
     webui_quote_runtime_context,
 )
 from nanobot.sdk.types import snapshot_from_session
@@ -114,6 +115,29 @@ def test_public_history_removes_only_trusted_exact_suffix() -> None:
         "content": "visible user text\n\nprivate goal context",
     }
     assert public_history_message(user_authored) == user_authored
+
+
+def test_ephemeral_runtime_context_is_removed_before_persistence() -> None:
+    content, marker = append_runtime_context(
+        "visible user text",
+        [
+            RuntimeContextBlock(source="durable", content="durable context"),
+            RuntimeContextBlock(
+                source="voice",
+                content="current-turn voice contract",
+                ephemeral=True,
+            ),
+        ],
+    )
+    assert marker is not None
+    assert "current-turn voice contract" in content
+
+    persisted_content, persisted_marker = runtime_context_for_persistence(content, marker)
+
+    assert persisted_content == "visible user text\n\ndurable context"
+    assert persisted_marker is not None
+    assert persisted_marker["sources"] == ["durable"]
+    assert persisted_marker["ephemeral"] == [False]
 
 
 def test_public_history_keeps_content_when_marker_does_not_match() -> None:

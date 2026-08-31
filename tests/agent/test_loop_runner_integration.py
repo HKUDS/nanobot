@@ -14,6 +14,7 @@ from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
     RuntimeContextBlock,
@@ -207,6 +208,57 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     persisted_first_user = session.messages[0]
     assert persisted_first_user["content"] == first_wire[1]["content"]
     assert public_history_message(persisted_first_user)["content"] == "first turn $review"
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_runtime_context_is_not_replayed_on_later_turns(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first answer", usage=None),
+        LLMResponse(content="second answer", usage=None),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+    session = loop.sessions.get_or_create("cli:direct")
+    provider_calls = 0
+
+    async def provide_context(_request):
+        nonlocal provider_calls
+        provider_calls += 1
+        return RuntimeContextBlock(
+            source="voice",
+            content=f"ephemeral voice contract {provider_calls}",
+            ephemeral=True,
+        )
+
+    loop.register_runtime_context_provider(provide_context)
+
+    await loop._process_message(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="first turn",
+    ))
+    await loop._process_message(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="second turn",
+    ))
+
+    first_request = provider.chat_with_retry.await_args_list[0].kwargs["messages"]
+    second_request = provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+    assert "ephemeral voice contract 1" in str(first_request)
+    assert "ephemeral voice contract 1" not in str(second_request)
+    assert "ephemeral voice contract 2" in str(second_request)
+    assert session.messages[0]["content"] == "first turn"
+    assert RUNTIME_CONTEXT_HISTORY_META not in session.messages[0]
 
 
 @pytest.mark.asyncio
