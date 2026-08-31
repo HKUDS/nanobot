@@ -712,7 +712,6 @@ export interface SettingsPayload {
     heartbeat: {
       enabled: boolean;
       interval_s: number;
-      keep_recent_messages: number;
     };
     dream: {
       schedule: string;

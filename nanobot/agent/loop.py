@@ -1190,6 +1190,15 @@ class AgentLoop:
                     if session is not None and not ephemeral
                     else None
                 ),
+                materialize_provider_checkpoint=(
+                    partial(
+                        self.consolidator.materialize_provider_checkpoint,
+                        runtime=runtime,
+                        session_key=session.key,
+                    )
+                    if session is not None and not ephemeral
+                    else None
+                ),
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall

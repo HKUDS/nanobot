@@ -177,6 +177,7 @@ class ProviderConversationState:
     version: int
     payload: dict[str, Any] = field(default_factory=dict, repr=False)
     pending_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    native_compaction_pending: bool = field(default=False, repr=False)
 
     def with_pending_messages(
         self,
@@ -190,6 +191,22 @@ class ProviderConversationState:
             version=self.version,
             payload=self.payload,
             pending_messages=deepcopy(messages),
+            native_compaction_pending=self.native_compaction_pending,
+        )
+
+    def with_native_compaction_pending(
+        self,
+        pending: bool,
+    ) -> ProviderConversationState:
+        """Return a state copy carrying the checkpoint-materialization marker."""
+        return ProviderConversationState(
+            kind=self.kind,
+            provider=self.provider,
+            model=self.model,
+            version=self.version,
+            payload=self.payload,
+            pending_messages=deepcopy(self.pending_messages),
+            native_compaction_pending=pending,
         )
 
     def to_private_record(self) -> dict[str, Any]:
@@ -201,6 +218,7 @@ class ProviderConversationState:
             "version": self.version,
             "payload": deepcopy(self.payload),
             "pending_messages": deepcopy(self.pending_messages),
+            "native_compaction_pending": self.native_compaction_pending,
         }
 
     @classmethod
@@ -218,6 +236,7 @@ class ProviderConversationState:
         version = data.get("version")
         payload = data.get("payload")
         pending = data.get("pending_messages", [])
+        native_compaction_pending = data.get("native_compaction_pending", False)
         if (
             not isinstance(kind, str)
             or not kind
@@ -229,6 +248,7 @@ class ProviderConversationState:
             or not isinstance(version, int)
             or not isinstance(payload, dict)
             or not isinstance(pending, list)
+            or not isinstance(native_compaction_pending, bool)
             or any(
                 not isinstance(message, dict)
                 for message in cast(list[object], pending)
@@ -242,6 +262,7 @@ class ProviderConversationState:
             version=version,
             payload=deepcopy(cast(dict[str, Any], payload)),
             pending_messages=deepcopy(cast(list[dict[str, Any]], pending)),
+            native_compaction_pending=native_compaction_pending,
         )
 
 
@@ -563,6 +584,9 @@ class LLMResponse:
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    # True only when this response installed a new provider-native compaction
+    # boundary. Replaying an older compaction item does not set this flag.
+    provider_compaction_applied: bool = field(default=False, repr=False)
     # Routing wrappers may preserve or discard an incoming provider-owned
     # continuation independently of the final fallback error's retry policy.
     preserve_provider_state_on_error: bool | None = field(default=None, repr=False)

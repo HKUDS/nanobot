@@ -78,6 +78,10 @@ HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
     Awaitable[str | None],
 ]
+ProviderCheckpointMaterializer = Callable[
+    [ProviderConversationState, str | None],
+    Awaitable[str | None],
+]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -124,6 +128,7 @@ class AgentRunSpec:
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
+    materialize_provider_checkpoint: ProviderCheckpointMaterializer | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
@@ -200,6 +205,7 @@ class _ModelRequestState:
     tool_definitions: list[dict[str, Any]] | None = None
     fitted: bool = False
     compaction: _ContextCompactionState | None = None
+    native_compaction_pending: bool = False
 
 
 class AgentRunner:
@@ -609,6 +615,11 @@ class AgentRunner:
         request_state = _ModelRequestState(
             config=governance_config,
             conversation=conversation_state,
+            native_compaction_pending=(
+                spec.provider_state.native_compaction_pending
+                if spec.provider_state is not None
+                else False
+            ),
             compaction=(
                 _ContextCompactionState(
                     raw_messages=messages,
@@ -649,6 +660,8 @@ class AgentRunner:
                 request_state=request_state,
                 transcript=messages,
             )
+            if response.provider_compaction_applied:
+                request_state.native_compaction_pending = True
             assert request_state.messages is not None
             messages_for_model = request_state.messages
             conversation_state.observe_response(response, messages)
@@ -1013,6 +1026,46 @@ class AgentRunner:
                 final_content = terminal_content
             self._append_final_message(messages, terminal_content)
 
+        final_provider_state = conversation_state.finish(messages)
+        summary_checkpoint = (
+            request_state.compaction.summary_checkpoint
+            if request_state.compaction is not None
+            else None
+        )
+        if (
+            request_state.native_compaction_pending
+            and final_provider_state is not None
+            and spec.materialize_provider_checkpoint is not None
+            and stop_reason != "error"
+        ):
+            previous_summary = (
+                request_state.compaction.active_summary
+                if request_state.compaction is not None
+                else None
+            )
+            try:
+                portable_summary = await spec.materialize_provider_checkpoint(
+                    final_provider_state,
+                    previous_summary,
+                )
+            except Exception:
+                logger.exception(
+                    "Provider checkpoint materialization failed for {}; preserving native state",
+                    spec.session_key or "default",
+                )
+            else:
+                if portable_summary:
+                    summary_checkpoint = SessionSummaryCheckpoint(
+                        summary=portable_summary,
+                        transcript_boundary=len(messages),
+                    )
+                    final_provider_state = None
+
+        if final_provider_state is not None:
+            final_provider_state = final_provider_state.with_native_compaction_pending(
+                request_state.native_compaction_pending
+            )
+
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -1023,12 +1076,8 @@ class AgentRunner:
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
-            provider_state=conversation_state.finish(messages),
-            summary_checkpoint=(
-                request_state.compaction.summary_checkpoint
-                if request_state.compaction is not None
-                else None
-            ),
+            provider_state=final_provider_state,
+            summary_checkpoint=summary_checkpoint,
         )
 
     def _build_request_kwargs(
@@ -1115,6 +1164,7 @@ class AgentRunner:
 
             assert delta_messages is not None
             compaction.active_summary = summary
+            state.native_compaction_pending = False
             prepared = self.context_governor.prepare_for_model(
                 state.config,
                 [

@@ -44,6 +44,7 @@ from nanobot.providers.openai_responses import (
     parse_response_output,
     prepare_responses_input,
     resolve_compact_threshold,
+    responses_items_have_compaction,
     responses_state_matches,
 )
 
@@ -2040,6 +2041,9 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason=finish_reason,
                         usage=usage,
                         reasoning_content=reasoning_content,
+                        provider_compaction_applied=(
+                            responses_items_have_compaction(capture.output_items)
+                        ),
                     )
                     if capture.completed and is_replayable_finish_reason(finish_reason):
                         result.provider_state = build_responses_state(

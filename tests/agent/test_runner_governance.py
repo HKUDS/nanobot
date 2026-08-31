@@ -230,6 +230,165 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_runner_materializes_native_compaction_at_terminal_boundary(monkeypatch):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    compacted_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+    )
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        provider_state=compacted_state,
+        provider_compaction_applied=True,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+    consolidate = AsyncMock()
+    materialize = AsyncMock(return_value="portable checkpoint")
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=[{"role": "user", "content": "old question"}],
+            current_message="continue",
+            session_summary={
+                "text": "existing checkpoint",
+                "last_active": "2026-08-30T00:00:00",
+            },
+        ),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        materialize_provider_checkpoint=materialize,
+        tools=tools,
+        model="test-model",
+        context_window_tokens=2_000,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    materialize.assert_awaited_once_with(compacted_state, "existing checkpoint")
+    consolidate.assert_not_awaited()
+    assert result.provider_state is None
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.summary == "portable checkpoint"
+    assert result.summary_checkpoint.transcript_boundary == len(result.messages)
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_native_state_when_materialization_fails(monkeypatch):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    compacted_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+    )
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        provider_state=compacted_state,
+        provider_compaction_applied=True,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+    materialize = AsyncMock(return_value=None)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="continue"),
+        transcript_builder=_build_transcript,
+        consolidate_history=AsyncMock(),
+        materialize_provider_checkpoint=materialize,
+        tools=tools,
+        model="test-model",
+        context_window_tokens=2_000,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.provider_state == compacted_state.with_native_compaction_pending(True)
+    assert result.summary_checkpoint is None
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_pending_native_checkpoint_without_new_compaction_event(
+    monkeypatch,
+):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    saved_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+        native_compaction_pending=True,
+    )
+    continued_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "message", "content": "continued"}]},
+    )
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        provider_state=continued_state,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+    materialize = AsyncMock(return_value="portable checkpoint")
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="continue"),
+        transcript_builder=_build_transcript,
+        provider_state=saved_state,
+        consolidate_history=AsyncMock(),
+        materialize_provider_checkpoint=materialize,
+        tools=tools,
+        model="test-model",
+        context_window_tokens=2_000,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    materialize.assert_awaited_once_with(continued_state, None)
+    assert result.provider_state is None
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.summary == "portable checkpoint"
+
+
+@pytest.mark.asyncio
 async def test_runner_governs_history_before_summarizing_it(monkeypatch):
     from nanobot.agent.runner import AgentRunner
 

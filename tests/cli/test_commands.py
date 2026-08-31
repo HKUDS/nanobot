@@ -1837,12 +1837,6 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert passed_config.workspace_path == workspace_path
 
 
-def test_heartbeat_retains_recent_messages_by_default():
-    config = Config()
-
-    assert config.gateway.heartbeat.keep_recent_messages == 8
-
-
 @pytest.mark.parametrize(
     "content, expected",
     [
@@ -2101,7 +2095,7 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
 
-def test_heartbeat_empty_response_still_retains_recent_messages(
+def test_heartbeat_empty_response_is_not_evaluated(
     monkeypatch, tmp_path: Path,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
@@ -2119,21 +2113,9 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
 
-    class _FakeSession:
-        def retain_recent_legal_suffix(self, limit: int) -> None:
-            seen["retained_limit"] = limit
-
     class _FakeSessionManager:
         def __init__(self, _workspace: Path) -> None:
-            self.session = _FakeSession()
-            seen["heartbeat_session"] = self.session
-
-        def get_or_create(self, key: str) -> _FakeSession:
-            seen["session_key"] = key
-            return self.session
-
-        def save(self, session: _FakeSession) -> None:
-            seen["saved_session"] = session
+            pass
 
         def list_sessions(self) -> list[dict[str, str]]:
             return [{"key": "telegram:u1"}]
@@ -2199,9 +2181,6 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
     response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
 
     assert response is None
-    assert seen["session_key"] == "heartbeat"
-    assert seen["retained_limit"] == config.gateway.heartbeat.keep_recent_messages
-    assert seen["saved_session"] is seen["heartbeat_session"]
 
 
 def test_webui_yes_creates_config_and_enables_local_websocket(

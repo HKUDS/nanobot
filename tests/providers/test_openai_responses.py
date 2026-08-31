@@ -714,6 +714,38 @@ class TestParseResponseOutput:
 
 
 class TestResponsesConversationState:
+    def test_parse_marks_only_new_server_compaction(self):
+        compacted = parse_response_output(
+            {
+                "output": [
+                    {"type": "compaction", "encrypted_content": "compact"},
+                    {"type": "message", "role": "assistant", "content": []},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"type": "message", "role": "user", "content": "old"}],
+        )
+        replayed = parse_response_output(
+            {
+                "output": [
+                    {"type": "message", "role": "assistant", "content": []},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[
+                {"type": "compaction", "encrypted_content": "compact"},
+            ],
+        )
+
+        assert compacted.provider_compaction_applied is True
+        assert replayed.provider_compaction_applied is False
+
     def test_server_compaction_prunes_superseded_prefix(self):
         state = build_responses_state(
             provider="openai:test",

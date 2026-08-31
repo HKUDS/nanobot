@@ -21,6 +21,11 @@ _COMPACTION_ITEM_TYPES = frozenset({
 })
 
 
+def responses_items_have_compaction(items: list[dict[str, Any]]) -> bool:
+    """Return whether Responses items contain a native compaction checkpoint."""
+    return any(item.get("type") in _COMPACTION_ITEM_TYPES for item in items)
+
+
 def responses_state_matches(
     state: ProviderConversationState,
     *,
