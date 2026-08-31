@@ -141,16 +141,21 @@ class ContextGovernor:
         *,
         usage_matches_messages: bool,
         tool_definitions: list[dict[str, Any]] | None,
+        request_context_tokens: int | None = None,
     ) -> LLMUsage | None:
         """Return the measurement that crossed the request input budget."""
         if not config.context_window_tokens:
             return None
         budget = self.input_budget(config)
-        if usage is not None and usage.context_tokens is not None:
+        if (
+            request_context_tokens is None
+            and usage_matches_messages
+            and usage is not None
+            and usage.context_tokens is not None
+        ):
             if budget <= 0 or usage.context_tokens >= budget:
                 return usage
-            if usage_matches_messages:
-                return None
+            return None
 
         estimated, _ = estimate_prompt_tokens_chain(
             config.provider,
@@ -158,6 +163,8 @@ class ContextGovernor:
             messages,
             tool_definitions,
         )
+        if request_context_tokens is not None:
+            estimated = max(estimated, request_context_tokens)
         if budget > 0 and estimated < budget:
             return None
         return LLMUsage.estimated(input_tokens=estimated, output_tokens=0)

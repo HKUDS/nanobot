@@ -418,9 +418,9 @@ async def test_runner_fits_max_iteration_finalization_before_dispatch(monkeypatc
 
 @pytest.mark.parametrize(
     ("input_tokens", "usage_matches_messages", "expected_context_tokens"),
-    [(500, False, 500), (100, True, None)],
+    [(500, True, 500), (100, True, None)],
 )
-def test_reported_provider_usage_avoids_estimate_when_decisive(
+def test_matching_reported_provider_usage_avoids_local_estimate(
     monkeypatch,
     input_tokens,
     usage_matches_messages,
@@ -483,7 +483,7 @@ def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
     pressure_usage = ContextGovernor().pressure_usage(
         _governance_config(provider, tools, spec),
         spec.initial_messages,
-        LLMUsage.reported(input_tokens=100, output_tokens=10),
+        LLMUsage.reported(input_tokens=900, output_tokens=10),
         usage_matches_messages=False,
         tool_definitions=tools.get_definitions(),
     )
@@ -491,6 +491,65 @@ def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
     assert pressure_usage is not None
     assert pressure_usage.context_tokens == 600
     assert pressure_usage.source == "estimated"
+
+
+@pytest.mark.asyncio
+async def test_runner_counts_resumed_provider_state_before_dispatch(monkeypatch):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    captured_contexts = []
+
+    async def chat_with_retry(*, provider_context=None, **_kwargs):
+        captured_contexts.append(provider_context)
+        return LLMResponse(
+            content="done",
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=10),
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    current_message = {"role": "user", "content": "new delta"}
+    saved_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="local-model",
+        version=1,
+        payload={
+            "items": [{"type": "reasoning", "encrypted_content": "opaque"}],
+            "context_tokens": 450,
+        },
+        pending_messages=[current_message],
+    )
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.conversation_state.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[current_message],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=2_000,
+        context_block_limit=500,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        previous_usage=LLMUsage.reported(input_tokens=450, output_tokens=10),
+        provider_state=saved_state,
+    ))
+
+    assert captured_contexts[0].conversation_state is None
+    assert result.messages == [
+        current_message,
+        {"role": "assistant", "content": "done"},
+    ]
 
 
 @pytest.mark.asyncio

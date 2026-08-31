@@ -965,21 +965,18 @@ class AgentRunner:
         kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
-    def _prepare_model_request(
+    def _fit_model_request(
         self,
         governance_config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
+        prepared: list[dict[str, Any]],
         *,
         tool_definitions: list[dict[str, Any]] | None,
         previous_usage: LLMUsage | None,
         previous_request_messages: list[dict[str, Any]] | None,
         previous_tool_definitions: list[dict[str, Any]] | None,
+        request_context_tokens: int | None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Return the governed request copy and whether fitting was triggered."""
-        prepared = self.context_governor.prepare_for_model(
-            governance_config,
-            messages,
-        )
+        """Fit a governed request copy when its effective payload is pressured."""
         usage_matches_messages = (
             previous_request_messages is not None
             and prepared == previous_request_messages
@@ -991,6 +988,7 @@ class AgentRunner:
             previous_usage,
             usage_matches_messages=usage_matches_messages,
             tool_definitions=tool_definitions,
+            request_context_tokens=request_context_tokens,
         )
         if pressure_usage is None:
             return prepared, False
@@ -1021,13 +1019,27 @@ class AgentRunner:
     ) -> _ModelRequestResult:
         timeout_s = self._resolve_llm_timeout_s(spec)
         tool_definitions = spec.tools.get_definitions()
-        messages, fitted = self._prepare_model_request(
+        messages = self.context_governor.prepare_for_model(
+            governance_config,
+            messages,
+        )
+        request_context_tokens = (
+            conversation_state.estimate_request_context_tokens(
+                transcript,
+                model_messages=messages,
+                tool_definitions=tool_definitions,
+            )
+            if resume_conversation_state
+            else None
+        )
+        messages, fitted = self._fit_model_request(
             governance_config,
             messages,
             tool_definitions=tool_definitions,
             previous_usage=previous_usage,
             previous_request_messages=previous_request_messages,
             previous_tool_definitions=previous_tool_definitions,
+            request_context_tokens=request_context_tokens,
         )
         provider_context = (
             conversation_state.prepare_request(
@@ -1424,13 +1436,27 @@ class AgentRunner:
         transcript: list[dict[str, Any]] | None = None,
         resume_conversation_state: bool = False,
     ) -> _ModelRequestResult:
-        messages, fitted = self._prepare_model_request(
+        messages = self.context_governor.prepare_for_model(
+            governance_config,
+            messages,
+        )
+        request_context_tokens = (
+            conversation_state.estimate_request_context_tokens(
+                transcript,
+                supplemental_messages=[messages[-1]],
+                tool_definitions=None,
+            )
+            if resume_conversation_state and transcript is not None
+            else None
+        )
+        messages, fitted = self._fit_model_request(
             governance_config,
             messages,
             tool_definitions=None,
             previous_usage=previous_usage,
             previous_request_messages=previous_request_messages,
             previous_tool_definitions=previous_tool_definitions,
+            request_context_tokens=request_context_tokens,
         )
         if resume_conversation_state:
             if transcript is None:

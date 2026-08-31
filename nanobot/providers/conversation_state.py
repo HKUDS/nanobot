@@ -11,6 +11,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.utils.helpers import estimate_prompt_tokens_chain
 
 _PROVIDER_STATE_OUTPUT_META = "provider_state_output"
 _PROVIDER_STATE_BOUNDARY_META = "provider_state_boundary"
@@ -25,6 +26,16 @@ def allows_conversation_message_merge(message: dict[str, Any]) -> bool:
             _PROVIDER_STATE_BOUNDARY_META
         ) is True
     )
+
+
+def _state_context_tokens(state: ProviderConversationState | None) -> int | None:
+    """Return the valid token count stored with resumable provider state."""
+    if state is None:
+        return None
+    value = state.payload.get("context_tokens")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 class ProviderConversationStateController:
@@ -68,6 +79,48 @@ class ProviderConversationStateController:
             context_window_tokens=context_window_tokens,
             session_id=self._session_id,
         )
+
+    def estimate_request_context_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model_messages: list[dict[str, Any]] | None = None,
+        supplemental_messages: list[dict[str, Any]] | None = None,
+        tool_definitions: list[dict[str, Any]] | None = None,
+    ) -> int | None:
+        """Estimate resumed state plus the pending delta for the next request."""
+        state = self._state
+        context_tokens = _state_context_tokens(state)
+        if (
+            state is None
+            or not self._provider.can_resume_conversation_state(state, self._model)
+            or context_tokens is None
+        ):
+            return None
+
+        durable_messages = self._messages_after_boundary(messages)
+        governed_messages = (
+            self._model_messages_after_boundary(model_messages)
+            if model_messages is not None and durable_messages
+            else None
+        )
+        request_messages = (
+            governed_messages
+            if governed_messages is not None
+            else durable_messages
+        )
+        pending_messages = [
+            *state.pending_messages,
+            *request_messages,
+            *deepcopy(supplemental_messages or []),
+        ]
+        delta_tokens, _ = estimate_prompt_tokens_chain(
+            self._provider,
+            self._model,
+            pending_messages,
+            tool_definitions,
+        )
+        return context_tokens + max(0, delta_tokens)
 
     def prepare_request(
         self,
