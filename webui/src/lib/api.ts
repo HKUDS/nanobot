@@ -1,5 +1,6 @@
 import type {
   ApiServicePayload,
+  AutomationArchiveResult,
   AutomationsPayload,
   AutomationUpdatePayload,
   ChannelConfigurePayload,
@@ -320,6 +321,15 @@ export async function runAutomationAction(
   id: string,
 ): Promise<AutomationsPayload> {
   return mutation<AutomationsPayload>(transport, `automation.${action}`, { id });
+}
+
+export async function archiveAutomations(
+  transport: WebUIMutationTransport,
+  jobIds: string[],
+): Promise<AutomationArchiveResult> {
+  return mutation<AutomationArchiveResult>(transport, "automation.archive", {
+    job_ids: jobIds,
+  });
 }
 
 export async function updateAutomation(

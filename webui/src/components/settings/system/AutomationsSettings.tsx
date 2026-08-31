@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
+  Archive,
   ArrowUpDown,
   Check,
   ChevronDown,
@@ -44,7 +45,7 @@ import { fmtDateTime, relativeTime } from "@/lib/format";
 import type { AutomationsPayload, AutomationUpdatePayload, SessionAutomationJob } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
+export type AutomationFilter = "all" | "active" | "paused" | "failed" | "system" | "archived";
 export type AutomationSort = "next" | "last" | "updated" | "name";
 export type AutomationAction = "enable" | "disable" | "delete" | "run";
 
@@ -60,6 +61,7 @@ export function AutomationsSettings({
   onFilterChange,
   onSortChange,
   onAction,
+  onArchive,
   onRequestEdit,
   onRequestDelete,
   onBackToChat,
@@ -75,6 +77,7 @@ export function AutomationsSettings({
   onFilterChange: (value: AutomationFilter) => void;
   onSortChange: (value: AutomationSort) => void;
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
+  onArchive: (jobIds: string[]) => Promise<boolean>;
   onRequestEdit: (job: SessionAutomationJob) => void;
   onRequestDelete: (job: SessionAutomationJob) => void;
   onBackToChat: () => void;
@@ -85,6 +88,7 @@ export function AutomationsSettings({
   const jobs = payload?.jobs ?? [];
   const locale = i18n.resolvedLanguage || i18n.language;
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedArchiveIds, setSelectedArchiveIds] = useState<Set<string>>(new Set());
   const filtered = useMemo(() => {
     const searchTokens = parseAutomationSearchQuery(query);
     return sortAutomationJobs(jobs, sort)
@@ -98,12 +102,14 @@ export function AutomationsSettings({
   const pausedCount = jobs.filter((job) => automationStatusKey(job) === "paused").length;
   const failedCount = jobs.filter(automationNeedsAttention).length;
   const systemCount = jobs.filter((job) => job.protected).length;
+  const archivedCount = jobs.filter((job) => job.archived_at_ms != null).length;
   const summaryOptions: Array<{ value: AutomationFilter; label: string; count: number }> = [
     { value: "all", label: tx("settings.automations.filters.all", "All"), count: jobs.length },
     { value: "active", label: tx("settings.automations.filters.active", "Active"), count: activeCount },
     { value: "paused", label: tx("settings.automations.filters.paused", "Paused"), count: pausedCount },
     { value: "failed", label: tx("settings.automations.filters.failed", "Needs attention"), count: failedCount },
     { value: "system", label: tx("settings.automations.filters.system", "System"), count: systemCount },
+    { value: "archived", label: tx("settings.automations.filters.archived", "Archived"), count: archivedCount },
   ];
   const sortLabel = {
     next: tx("settings.automations.sort.next", "Next run"),
@@ -123,13 +129,21 @@ export function AutomationsSettings({
     }
   }, [filtered, selectedJobId]);
 
+  useEffect(() => {
+    const selectableIds = new Set(jobs.filter(automationCanArchive).map((job) => job.id));
+    setSelectedArchiveIds((current) => {
+      const next = new Set([...current].filter((id) => selectableIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [jobs]);
+
   return (
     <div className="space-y-5">
       {jobs.length ? (
         <section className="shrink-0">
           <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
             <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-              <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-floating bg-muted p-1">
+              <div className="grid w-full min-w-[42rem] grid-cols-6 gap-1 rounded-floating bg-muted p-1">
                 {summaryOptions.map((option) => (
                   <button
                     key={option.value}
@@ -171,26 +185,50 @@ export function AutomationsSettings({
                   )}
                 />
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
+              <div className="flex items-center justify-end gap-2">
+                {selectedArchiveIds.size ? (
+                  <Button
                     type="button"
-                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
+                    variant="outline"
+                    className="h-9 rounded-control px-3 text-[12px]"
+                    disabled={actionKey === "archive"}
+                    onClick={() => {
+                      void onArchive([...selectedArchiveIds]).then((ok) => {
+                        if (ok) setSelectedArchiveIds(new Set());
+                      });
+                    }}
                   >
-                    <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
-                    <span>{sortLabel[sort]}</span>
-                    <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-40">
-                  {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
-                    <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
-                      <span>{sortLabel[value]}</span>
-                      {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {actionKey === "archive" ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                    ) : (
+                      <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                    )}
+                    {tx("settings.automations.archiveSelected", "Archive selected ({{count}})", {
+                      count: selectedArchiveIds.size,
+                    })}
+                  </Button>
+                ) : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
+                    >
+                      <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                      <span>{sortLabel[sort]}</span>
+                      <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-40">
+                    {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
+                      <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
+                        <span>{sortLabel[value]}</span>
+                        {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           </div>
         </section>
@@ -230,7 +268,16 @@ export function AutomationsSettings({
                   job={job}
                   locale={locale}
                   selected={job.id === selectedJob.id}
+                  archiveSelected={selectedArchiveIds.has(job.id)}
                   onSelect={() => setSelectedJobId(job.id)}
+                  onArchiveSelect={(selected) => {
+                    setSelectedArchiveIds((current) => {
+                      const next = new Set(current);
+                      if (selected) next.add(job.id);
+                      else next.delete(job.id);
+                      return next;
+                    });
+                  }}
                 />
               ))}
             </div>
@@ -291,12 +338,16 @@ function AutomationListItem({
   job,
   locale,
   selected,
+  archiveSelected,
   onSelect,
+  onArchiveSelect,
 }: {
   job: SessionAutomationJob;
   locale: string;
   selected: boolean;
+  archiveSelected: boolean;
   onSelect: () => void;
+  onArchiveSelect: (selected: boolean) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
@@ -306,8 +357,26 @@ function AutomationListItem({
   const nextRun = formatAutomationNext(job, tx);
   const summary = automationSummary(job, tx);
 
+  const canArchive = automationCanArchive(job);
+
   return (
-    <div role="listitem">
+    <div
+      role="listitem"
+      className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-center"
+    >
+      {canArchive ? (
+        <input
+          type="checkbox"
+          checked={archiveSelected}
+          onChange={(event) => onArchiveSelect(event.target.checked)}
+          aria-label={tx("settings.automations.selectForArchive", "Select {{name}} for archive", {
+            name: job.name || job.id,
+          })}
+          className="h-3.5 w-3.5 justify-self-center rounded border-border accent-primary"
+        />
+      ) : (
+        <span aria-hidden />
+      )}
       <button
         type="button"
         aria-pressed={selected}
@@ -387,6 +456,7 @@ function AutomationDetailPanel({
     : null;
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
+  const archived = job.archived_at_ms ? fmtDateTime(job.archived_at_ms, locale) : null;
   const localTrigger = isLocalTriggerAutomation(job);
   const triggerCommand = automationTriggerCommand(job);
   const message = automationDetailText(job, tx);
@@ -394,6 +464,7 @@ function AutomationDetailPanel({
     ? tx("settings.automations.fields.command", "Command")
     : tx("settings.automations.fields.message", "Message");
   const schedule = formatAutomationSchedule(job, locale, tx);
+  const delivery = automationDeliveryLabel(job, tx);
   const [messageExpanded, setMessageExpanded] = useState(false);
   const [commandCopied, setCommandCopied] = useState(false);
   const messageNeedsExpansion = automationMessageNeedsExpansion(message);
@@ -483,7 +554,7 @@ function AutomationDetailPanel({
             ) : null}
           </section>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <AutomationDetail
               label={tx("settings.automations.labels.next", "Next")}
               title={formatAutomationNextTitle(job, locale, tx)}
@@ -502,6 +573,12 @@ function AutomationDetailPanel({
               ) : (
                 origin
               )}
+            </AutomationDetail>
+            <AutomationDetail
+              label={tx("settings.automations.labels.delivery", "Result delivery")}
+              title={delivery}
+            >
+              {delivery}
             </AutomationDetail>
           </div>
 
@@ -538,6 +615,14 @@ function AutomationDetailPanel({
                     <div className="mt-1.5 text-[12.5px] leading-5 text-foreground/80">{updated}</div>
                   </div>
                 ) : null}
+                {archived ? (
+                  <div>
+                    <div className="text-[11px] leading-none text-muted-foreground/75">
+                      {tx("settings.automations.labels.archived", "Archived")}
+                    </div>
+                    <div className="mt-1.5 text-[12.5px] leading-5 text-foreground/80">{archived}</div>
+                  </div>
+                ) : null}
                 <div>
                   <div className="text-[11px] leading-none text-muted-foreground/75">ID</div>
                   <div className="mt-1.5 break-all font-mono text-[11.5px] leading-5 text-foreground/70">
@@ -570,6 +655,7 @@ function AutomationActionGroup({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const canManage = !job.protected;
+  const archived = job.archived_at_ms != null;
   const hasLinkedChat = Boolean(job.origin);
   const localTrigger = isLocalTriggerAutomation(job);
   const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending && !localTrigger;
@@ -582,6 +668,21 @@ function AutomationActionGroup({
       <span className="inline-flex h-9 items-center rounded-full bg-muted px-3 text-[12px] font-medium text-muted-foreground">
         {tx("settings.automations.protected", "Protected")}
       </span>
+    );
+  }
+
+  if (archived) {
+    return (
+      <div className="flex shrink-0 items-center gap-1 rounded-full bg-background/65 p-1">
+        <AppsActionButton
+          ariaLabel={tx("settings.automations.delete", "Delete")}
+          tone="danger"
+          disabled={Boolean(actionKey)}
+          onClick={() => onRequestDelete(job)}
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+        </AppsActionButton>
+      </div>
     );
   }
 
@@ -701,6 +802,8 @@ type AutomationEditDraft = {
   cronExpr: string;
   tz: string;
   atLocal: string;
+  deliveryChannel: string;
+  deliveryChatId: string;
 };
 type AutomationScheduleUpdate = NonNullable<AutomationUpdatePayload["schedule"]>;
 
@@ -889,6 +992,50 @@ export function AutomationEditDialog({
                 </label>
               ) : null}
 
+              {!localTrigger ? (
+                <div className="space-y-2 rounded-floating bg-muted/45 p-3">
+                  <div>
+                    <div className="text-[12px] font-medium text-muted-foreground">
+                      {tx("settings.automations.fields.delivery", "Result delivery")}
+                    </div>
+                    <div className="mt-1 text-[11.5px] leading-5 text-muted-foreground">
+                      {tx(
+                        "settings.automations.deliveryHint",
+                        "Leave both fields empty to deliver back to the linked chat.",
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="block space-y-1.5">
+                      <span className="text-[12px] font-medium text-muted-foreground">
+                        {tx("settings.automations.fields.deliveryChannel", "Channel")}
+                      </span>
+                      <Input
+                        value={draft.deliveryChannel}
+                        onChange={(event) => setDraft((prev) => ({
+                          ...prev,
+                          deliveryChannel: event.target.value,
+                        }))}
+                        placeholder="slack"
+                      />
+                    </label>
+                    <label className="block space-y-1.5">
+                      <span className="text-[12px] font-medium text-muted-foreground">
+                        {tx("settings.automations.fields.deliveryChatId", "Chat/channel ID")}
+                      </span>
+                      <Input
+                        value={draft.deliveryChatId}
+                        onChange={(event) => setDraft((prev) => ({
+                          ...prev,
+                          deliveryChatId: event.target.value,
+                        }))}
+                        placeholder="C0123456789"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+
               {validation ? (
                 <div className="rounded-control bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
                   {validation}
@@ -997,12 +1144,13 @@ function automationDetailText(
 }
 
 function automationNeedsAttention(job: SessionAutomationJob): boolean {
-  return job.state.last_status === "error";
+  return job.archived_at_ms == null && job.state.last_status === "error";
 }
 
 function automationStatusKey(
   job: SessionAutomationJob,
-): "active" | "running" | "paused" | "failed" | "system" | "completed" | "idle" {
+): "active" | "running" | "paused" | "failed" | "system" | "completed" | "idle" | "archived" {
+  if (job.archived_at_ms != null) return "archived";
   if (job.protected) return "system";
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
@@ -1046,6 +1194,8 @@ function automationDraftFromJob(job: SessionAutomationJob | null): AutomationEdi
     cronExpr: job?.schedule.expr ?? "0 9 * * *",
     tz: job?.schedule.tz ?? "",
     atLocal: formatLocalDateTimeInput(job?.schedule.at_ms ?? Date.now() + 3_600_000),
+    deliveryChannel: job?.payload.delivery_channel ?? "",
+    deliveryChatId: job?.payload.delivery_chat_id ?? "",
   };
 }
 
@@ -1074,6 +1224,12 @@ function automationEditDraftError(
   if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
     return tx("settings.automations.validation.messageRequired", "Message is required.");
+  }
+  if (Boolean(draft.deliveryChannel.trim()) !== Boolean(draft.deliveryChatId.trim())) {
+    return tx(
+      "settings.automations.validation.deliveryPair",
+      "Delivery channel and chat/channel ID must be provided together.",
+    );
   }
   if (draft.scheduleKind === "every") {
     const value = Number(draft.everyValue);
@@ -1108,6 +1264,18 @@ function automationUpdatePayloadFromDraft(
   const message = draft.message.trim();
   if (!name || !message) return "invalid";
   const payload: AutomationUpdatePayload = { name, message };
+  const deliveryChannel = draft.deliveryChannel.trim();
+  const deliveryChatId = draft.deliveryChatId.trim();
+  const currentDeliveryChannel = job?.payload.delivery_channel?.trim() ?? "";
+  const currentDeliveryChatId = job?.payload.delivery_chat_id?.trim() ?? "";
+  if (
+    !job
+    || deliveryChannel !== currentDeliveryChannel
+    || deliveryChatId !== currentDeliveryChatId
+  ) {
+    payload.delivery_channel = deliveryChannel || null;
+    payload.delivery_chat_id = deliveryChatId || null;
+  }
   const schedule = automationSchedulePayloadFromDraft(draft);
   if (typeof schedule === "string") return schedule;
   if (automationScheduleChanged(draft, job, schedule)) {
@@ -1210,7 +1378,13 @@ function automationSearchParts(
   if (field === "id") return [job.id];
   if (field === "name") return [job.name, job.id];
   if (field === "message") return [job.payload.message, job.payload.command, job.trigger?.command];
-  if (field === "chat") return originParts;
+  if (field === "chat") {
+    return [
+      ...originParts,
+      job.payload.delivery_channel,
+      job.payload.delivery_chat_id,
+    ];
+  }
   if (field === "cron" || field === "schedule") return scheduleParts;
   if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
   return [
@@ -1223,6 +1397,8 @@ function automationSearchParts(
     ...scheduleParts,
     automationStatusKey(job),
     ...originParts,
+    job.payload.delivery_channel,
+    job.payload.delivery_chat_id,
   ];
 }
 
@@ -1295,6 +1471,7 @@ function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFi
   if (filter === "paused") return status === "paused";
   if (filter === "failed") return automationNeedsAttention(job);
   if (filter === "system") return Boolean(job.protected);
+  if (filter === "archived") return job.archived_at_ms != null;
   return true;
 }
 
@@ -1321,6 +1498,11 @@ const AUTOMATION_FILTER_TONES: Partial<
     selectedText: "text-sky-700 dark:text-sky-300",
     count: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
   },
+  archived: {
+    text: "text-violet-600 dark:text-violet-400",
+    selectedText: "text-violet-700 dark:text-violet-300",
+    count: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  },
 };
 
 function automationFilterToneClass(value: AutomationFilter, count: number, selected: boolean): string {
@@ -1339,6 +1521,9 @@ function automationStatus(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): { label: string; tone: "neutral" | "success" | "warning" } {
   const status = automationStatusKey(job);
+  if (status === "archived") {
+    return { label: tx("settings.automations.status.archived", "Archived"), tone: "neutral" };
+  }
   if (status === "system") return { label: tx("settings.automations.status.system", "System"), tone: "neutral" };
   if (status === "running") {
     return { label: tx("settings.automations.status.running", "Running now"), tone: "warning" };
@@ -1365,6 +1550,22 @@ function automationOriginLabel(
   if (!origin) return tx("settings.automations.origin.unknown", "No linked chat");
   if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, tx);
   return origin.title || origin.preview || origin.session_key || automationChannelLabel(origin.channel, tx);
+}
+
+function automationDeliveryLabel(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  const channel = job.payload.delivery_channel;
+  const chatId = job.payload.delivery_chat_id;
+  if (!channel || !chatId) {
+    return tx("settings.automations.delivery.origin", "Origin session");
+  }
+  return `${automationChannelLabel(channel, tx)} · ${chatId}`;
+}
+
+function automationCanArchive(job: SessionAutomationJob): boolean {
+  return !job.protected && !isLocalTriggerAutomation(job) && job.archived_at_ms == null;
 }
 
 function automationChannelLabel(
@@ -1470,6 +1671,7 @@ function formatAutomationNext(
   job: SessionAutomationJob,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
+  if (job.archived_at_ms != null) return tx("settings.automations.next.archived", "Archived");
   if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
   if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
   if (isLocalTriggerAutomation(job)) {

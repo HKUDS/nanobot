@@ -164,6 +164,7 @@ export interface SessionAutomationJob {
   name: string;
   enabled: boolean;
   protected?: boolean;
+  archived_at_ms?: number | null;
   delete_after_run?: boolean;
   created_at_ms?: number | null;
   updated_at_ms?: number | null;
@@ -179,6 +180,8 @@ export interface SessionAutomationJob {
     message: string;
     kind?: "agent_turn" | "system_event" | "local_trigger" | string;
     command?: string;
+    delivery_channel?: string | null;
+    delivery_chat_id?: string | null;
   };
   state: {
     next_run_at_ms?: number | null;
@@ -211,6 +214,8 @@ export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
 export interface AutomationUpdatePayload {
   name?: string;
   message?: string;
+  delivery_channel?: string | null;
+  delivery_chat_id?: string | null;
   schedule?: {
     kind: "at" | "every" | "cron";
     at_ms?: number;
@@ -218,6 +223,13 @@ export interface AutomationUpdatePayload {
     expr?: string;
     tz?: string;
   };
+}
+
+export interface AutomationArchiveResult {
+  archived: string[];
+  already_archived: string[];
+  protected: string[];
+  not_found: string[];
 }
 
 export interface SessionDeleteResult {

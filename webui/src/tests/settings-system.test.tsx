@@ -149,6 +149,129 @@ describe("Settings system domains", () => {
     expect(await screen.findByRole("heading", { name: "Daily summary" })).toBeInTheDocument();
   });
 
+  it("filters archived automations and archives selected cron jobs in one request", async () => {
+    const jobs = [
+      {
+        id: "job-a",
+        name: "Daily summary",
+        enabled: true,
+        archived_at_ms: null,
+        schedule: { kind: "cron", expr: "0 9 * * *" },
+        payload: { message: "Summarize the day" },
+        state: { next_run_at_ms: Date.now() + 60_000 },
+        origin: { channel: "websocket", session_key: "websocket:a", title: "Ops" },
+      },
+      {
+        id: "job-b",
+        name: "Weekly report",
+        enabled: false,
+        archived_at_ms: null,
+        schedule: { kind: "every", every_ms: 60_000 },
+        payload: { message: "Write report" },
+        state: {},
+        origin: { channel: "websocket", session_key: "websocket:b", title: "Reports" },
+      },
+      {
+        id: "job-old",
+        name: "Old reminder",
+        enabled: false,
+        archived_at_ms: 1_800_000_000_000,
+        schedule: { kind: "every", every_ms: 60_000 },
+        payload: { message: "Old work" },
+        state: { last_status: "ok" },
+        origin: { channel: "websocket", session_key: "websocket:old", title: "Old" },
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return jsonResponse({ jobs });
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockResolvedValue({
+      archived: ["job-a", "job-b"],
+      already_archived: [],
+      protected: [],
+      not_found: [],
+    });
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    expect(await screen.findByRole("heading", { name: "Daily summary" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Archived 1" }));
+    expect(await screen.findByRole("heading", { name: "Old reminder" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run now" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All 3" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Daily summary for archive" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Weekly report for archive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive selected (2)" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "automation.archive",
+      { job_ids: ["job-a", "job-b"] },
+      20_000,
+    ));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Archive selected (2)" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("edits an automation delivery target as a complete pair", async () => {
+    const jobs = [{
+      id: "job-1",
+      name: "Daily summary",
+      enabled: true,
+      archived_at_ms: null,
+      schedule: { kind: "cron", expr: "0 9 * * *", tz: "UTC" },
+      payload: { message: "Summarize the day" },
+      state: { next_run_at_ms: Date.now() + 60_000 },
+      origin: { channel: "websocket", session_key: "websocket:a", title: "Ops" },
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return jsonResponse({ jobs });
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockResolvedValue({ jobs });
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    expect(await screen.findByRole("heading", { name: "Daily summary" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const channel = screen.getByLabelText("Channel");
+    const chatId = screen.getByLabelText("Chat/channel ID");
+    fireEvent.change(channel, { target: { value: "slack" } });
+    expect(screen.getByText(
+      "Delivery channel and chat/channel ID must be provided together.",
+    )).toBeInTheDocument();
+    fireEvent.change(chatId, { target: { value: "C123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "automation.update",
+      {
+        id: "job-1",
+        values: expect.objectContaining({
+          delivery_channel: "slack",
+          delivery_chat_id: "C123",
+        }),
+      },
+      20_000,
+    ));
+  });
+
   it("coalesces focus refreshes while automations are already loading", async () => {
     let resolveAutomations!: (response: Response) => void;
     const pendingAutomations = new Promise<Response>((resolve) => {

@@ -10,6 +10,7 @@ import type { AutomationAction } from "@/components/settings/system/AutomationsS
 import { DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettings";
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
+  archiveAutomations,
   cancelMcpOAuth,
   completeMcpOAuth,
   disableNanobotFeature,
@@ -266,6 +267,40 @@ export function createSystemSettingsActions({
       setAutomationPendingEdit(null);
     } catch (err) {
       setAutomationsError((err as Error).message);
+    } finally {
+      setAutomationAction(null);
+    }
+  };
+
+  const handleAutomationArchive = async (jobIds: string[]): Promise<boolean> => {
+    if (!jobIds.length) return false;
+    setAutomationAction("archive");
+    setAutomationsError(null);
+    try {
+      const result = await archiveAutomations(client, jobIds);
+      await refreshAutomations(false);
+      const warnings: string[] = [];
+      if (result.protected.length) {
+        warnings.push(
+          t("settings.automations.archiveProtected", {
+            defaultValue: "Protected jobs were not archived: {{ids}}",
+            ids: result.protected.join(", "),
+          }),
+        );
+      }
+      if (result.not_found.length) {
+        warnings.push(
+          t("settings.automations.archiveNotFound", {
+            defaultValue: "Jobs not found: {{ids}}",
+            ids: result.not_found.join(", "),
+          }),
+        );
+      }
+      if (warnings.length) setAutomationsError(warnings.join(" "));
+      return true;
+    } catch (err) {
+      setAutomationsError((err as Error).message);
+      return false;
     } finally {
       setAutomationAction(null);
     }
@@ -640,6 +675,7 @@ export function createSystemSettingsActions({
   return {
     handleApiServiceAction,
     handleAutomationAction,
+    handleAutomationArchive,
     handleAutomationEdit,
     handleCliAppAction,
     handleImportMcpConfig,

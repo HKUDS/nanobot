@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  archiveAutomations,
   cancelMcpOAuth,
   configureChannel,
   completeMcpOAuth,
@@ -266,6 +267,16 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenCalledWith(
       "automation.disable",
       { id: "job 1/2" },
+      20_000,
+    );
+  });
+
+  it("serializes batch automation archive actions", async () => {
+    await archiveAutomations(mutationTransport, ["job-a", "job-b"]);
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "automation.archive",
+      { job_ids: ["job-a", "job-b"] },
       20_000,
     );
   });
