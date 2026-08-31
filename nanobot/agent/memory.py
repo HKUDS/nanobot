@@ -27,11 +27,7 @@ from nanobot.session.manager import (
     Session,
     SessionManager,
 )
-from nanobot.session.summary import (
-    MEMORY_CHECKPOINT_VERSION,
-    MEMORY_CHECKPOINT_VERSION_KEY,
-    session_summary_from_metadata,
-)
+from nanobot.session.summary import session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -1057,38 +1053,6 @@ class Consolidator:
                 "last_active": (last_active or session.updated_at).isoformat(),
             }
 
-    def _ensure_cumulative_checkpoint(
-        self,
-        session: Session,
-        *,
-        runtime: LLMRuntime,
-    ) -> None:
-        """Migrate pre-checkpoint archive state without changing its watermark."""
-        if session.last_archived <= 0:
-            return
-        if (
-            cast(object, session.metadata.get(MEMORY_CHECKPOINT_VERSION_KEY))
-            == MEMORY_CHECKPOINT_VERSION
-        ):
-            return
-
-        archived_prefix = session.messages[:session.last_archived]
-        if not archived_prefix:
-            return
-        checkpoint = self.store._build_raw_checkpoint(archived_prefix)
-        checkpoint = truncate_text_to_tokens(
-            checkpoint,
-            max(1, runtime.generation.max_tokens),
-        )
-        self._set_last_summary(session, checkpoint)
-        session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
-        self.sessions.save(session)
-        logger.info(
-            "Migrated cumulative Memory checkpoint for {} at archive watermark {}",
-            session.key,
-            session.last_archived,
-        )
-
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -1155,7 +1119,6 @@ class Consolidator:
             fresh = self.sessions.get_or_create(session.key)
             if fresh is not session:
                 session = fresh
-            self._ensure_cumulative_checkpoint(session, runtime=runtime)
             if runtime.context_window_tokens <= 0:
                 return
             if not session.messages:
@@ -1209,7 +1172,6 @@ class Consolidator:
                 return
             self._set_last_summary(session, summary)
             session.last_archived = end_idx
-            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
             self.sessions.save(session)
 
     async def compact_idle_session(
@@ -1236,7 +1198,6 @@ class Consolidator:
         async with lock:
             self.sessions.invalidate(session_key)
             session = self.sessions.get_or_create(session_key)
-            self._ensure_cumulative_checkpoint(session, runtime=runtime)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1258,7 +1219,6 @@ class Consolidator:
             # A turn can append while the provider call is in flight. Advance only
             # through the captured batch so new messages remain eligible next time.
             session.last_archived = archive_end
-            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
             self.sessions.save(session)
 
             visible = session.get_history(

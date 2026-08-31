@@ -1300,7 +1300,6 @@ class TestSummaryPersistence:
         # Verify summary exists before /new
         reloaded = loop.sessions.get_or_create("cli:test")
         assert "_last_summary" in reloaded.metadata
-        reloaded.metadata["_memory_checkpoint_version"] = 1
 
         # Simulate /new command
         reloaded.clear()
@@ -1310,5 +1309,4 @@ class TestSummaryPersistence:
         # After /new, metadata should no longer contain _last_summary
         fresh = loop.sessions.get_or_create("cli:test")
         assert "_last_summary" not in fresh.metadata
-        assert "_memory_checkpoint_version" not in fresh.metadata
         await loop.aclose()

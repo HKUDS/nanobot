@@ -624,7 +624,6 @@ class TestCompactIdleSession:
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
         assert "last_active" in meta
-        assert reloaded.metadata["_memory_checkpoint_version"] == 1
         assert reloaded.updated_at == old_ts
 
     @pytest.mark.asyncio
@@ -652,27 +651,27 @@ class TestCompactIdleSession:
         assert [message["content"] for message in reloaded.get_history()] == ["hello", "hi"]
 
     @pytest.mark.asyncio
-    async def test_idle_compaction_repairs_legacy_watermark_without_summary(
+    async def test_idle_compaction_with_no_new_messages_is_noop(
         self, real_consolidator, mock_provider, store, runtime
     ):
         sessions = real_consolidator.sessions
-        session = sessions.get_or_create("cli:legacy-idle")
-        session.add_message("user", "LEGACY_IDLE_MARKER")
+        session = sessions.get_or_create("cli:archived-idle")
+        session.add_message("user", "already archived")
         session.add_message("assistant", "old answer")
         session.last_archived = 2
         sessions.save(session)
-        sessions.invalidate("cli:legacy-idle")
+        sessions.invalidate("cli:archived-idle")
 
         result = await real_consolidator.compact_idle_session(
-            "cli:legacy-idle",
+            "cli:archived-idle",
             runtime=runtime,
         )
 
         assert result == ""
         mock_provider.chat_with_retry.assert_not_awaited()
-        reloaded = sessions.get_or_create("cli:legacy-idle")
+        reloaded = sessions.get_or_create("cli:archived-idle")
         assert reloaded.last_archived == 2
-        assert "LEGACY_IDLE_MARKER" in reloaded.metadata["_last_summary"]["text"]
+        assert "_last_summary" not in reloaded.metadata
         assert store.read_unprocessed_history(since_cursor=0) == []
 
     @pytest.mark.asyncio
@@ -956,7 +955,6 @@ class TestCompactIdleSession:
 
         reloaded = sessions.get_or_create("cli:nothing")
         assert "_last_summary" not in reloaded.metadata
-        assert reloaded.metadata["_memory_checkpoint_version"] == 1
         assert real_consolidator.store.read_unprocessed_history(0) == []
         mock_provider.chat_with_retry.assert_awaited_once()
 
