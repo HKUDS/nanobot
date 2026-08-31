@@ -861,8 +861,10 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to edit"),
-        old_text=StringSchema("The text to find and replace"),
-        new_text=StringSchema("The text to replace with"),
+        old_text=StringSchema("The text to find and replace; copy it from read_file."),
+        new_text=StringSchema(
+            "The replacement text; must differ from old_text for an existing file."
+        ),
         replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
         occurrence=IntegerSchema(
             description="Optional 1-based occurrence to replace when old_text appears multiple times.",
@@ -899,16 +901,9 @@ class EditFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Perform a small, exact replacement in one file by replacing "
-            "old_text with new_text. When replacing text in an existing file, "
-            "old_text and new_text must be different. Use this for narrow text substitutions "
-            "with old_text copied from read_file. For multi-file, structural, "
-            "or generated code edits, prefer apply_patch. If old_text matches "
-            "multiple times, provide more context or choose one selector: occurrence, "
-            "line_hint, or replace_all=true. These selectors are mutually exclusive; "
-            "expected_replacements can independently verify the match count. When editing "
-            "from numbered read_file output, set line_hint to the exact target line. "
-            "Shows closest-match diagnostics on failure."
+            "Perform a small, exact replacement in one file. "
+            "Prefer apply_patch for multi-file, structural, or generated edits. "
+            "occurrence, line_hint, and replace_all=true are mutually exclusive."
         )
 
     @staticmethod
