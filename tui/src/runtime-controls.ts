@@ -310,11 +310,11 @@ export class RuntimeControls {
 
   private render(): void {
     const runtime = this.modelPreset !== "default"
-      ? [this.modelPreset, this.model].filter(Boolean).join("  ·  ")
+      ? [this.modelPreset, this.model].filter(Boolean).join("     ")
       : this.model
-    this.modelText.content = `  ·  ${runtime} ▾`
+    this.modelText.content = `     ${runtime} ▾`
     const access = this.scope.access_mode === "full" ? "full access" : "workspace access"
-    this.accessText.content = `  ·  ${access} ▾`
+    this.accessText.content = `     ${access} ▾`
     this.renderColors()
   }
 

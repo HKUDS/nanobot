@@ -211,7 +211,7 @@ export class Transcript {
     const title = this.createText(`>_  nanobot  v${options.version}`, "text", true)
     const context = this.createText([
       "",
-      `${options.model}  ·  ${options.access}`,
+      `${options.model}     ${options.access}`,
       options.workspace,
     ].join("\n"), "muted")
     row.add(title)

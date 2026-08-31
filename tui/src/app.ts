@@ -1962,7 +1962,7 @@ export class NanobotTui {
     this.titleText.content = identity
     const context = this.contextTokens === null
       ? ""
-      : `  ·  ~${formatTokenCount(this.contextTokens)}${this.contextWindowTokens
+      : `     ~${formatTokenCount(this.contextTokens)}${this.contextWindowTokens
         ? `/${formatTokenCount(this.contextWindowTokens)}`
         : ""} ctx`
     this.runtimeControls.updateModel(this.modelName, this.modelPreset)

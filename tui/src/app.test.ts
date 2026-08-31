@@ -205,7 +205,7 @@ describe("NanobotTui layout", () => {
       expect(occurrences(frame, "Ask nanobot anything")).toBe(1)
       expect(occurrences(frame, "Ready")).toBe(0)
       expect(occurrences(frame, "Getting ready…")).toBe(1)
-      expect(occurrences(frame, "nanobot  ·  test/model")).toBe(1)
+      expect(occurrences(frame, "nanobot     test/model")).toBe(1)
     }
 
     app.accept({ event: "attached", chat_id: "chat" })
@@ -1182,7 +1182,7 @@ describe("NanobotTui layout", () => {
       model_preset: "Codex",
     })
     await setup.flush()
-    expect(ui.runtimeControls.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
+    expect(ui.runtimeControls.modelText.plainText).toContain("Codex     openai/gpt-5.6")
 
     app.accept({
       event: "runtime_model_updated",
@@ -1190,7 +1190,7 @@ describe("NanobotTui layout", () => {
       model_preset: "DeepSeek",
     })
     await setup.flush()
-    expect(ui.runtimeControls.modelText.plainText).toContain("Codex  ·  openai/gpt-5.6")
+    expect(ui.runtimeControls.modelText.plainText).toContain("Codex     openai/gpt-5.6")
     expect(ui.runtimeControls.modelText.plainText).not.toContain("DeepSeek")
   })
 
@@ -1959,7 +1959,7 @@ describe("NanobotTui layout", () => {
       } else if (width >= 28 && height >= 9) {
         expect(occurrences(frame, "Enter now · Tab next")).toBe(1)
       }
-      expect(occurrences(frame, "nanobot  ·  test/model")).toBe(height >= 14 ? 1 : 0)
+      expect(occurrences(frame, "nanobot     test/model")).toBe(height >= 14 ? 1 : 0)
     }
   })
 
