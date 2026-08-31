@@ -29,7 +29,7 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large, the `Consolidator` merges newly archived turns into a cumulative checkpoint and appends the result to `memory/history.jsonl`, while keeping recent conversation available. The latest per-session checkpoint is supplied to future requests; journal entries remain Dream input rather than being injected alongside it.
+When a conversation grows large, the `Consolidator` summarizes older turns and appends the result to `memory/history.jsonl`, while keeping recent conversation available. Each summary preserves useful long-term facts and a short handoff for active work.
 
 This file is:
 

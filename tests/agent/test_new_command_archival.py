@@ -8,6 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.utils.prompt_templates import render_template
+
+_ARCHIVE_PROMPT = render_template("agent/consolidator_archive.md", strip=True)
+
 
 class TestNewCommandArchival:
     """Test /new archival behavior with the structured archive flow."""
@@ -117,7 +121,7 @@ class TestNewCommandArchival:
         await loop.aclose()
         sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
         assert sent[1:-1] == ordinary_history
-        assert "all provided conversation messages" in sent[-1]["content"]
+        assert sent[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
     async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:

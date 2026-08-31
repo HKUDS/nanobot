@@ -1,29 +1,42 @@
-Create a complete replacement memory overview from the existing archived summary and all conversation context provided with this instruction.
+Create a compact replacement checkpoint for this session.
 
-When the system prompt contains `[Archived Context Summary]`, use it as the previous checkpoint and carry forward every still-relevant fact and working-state item. Incorporate all provided conversation messages, using their full order to resolve references.
+When `[Archived Context Summary]` appears in the system prompt, update that previous checkpoint to reflect the current conversation state.
 
-Apply corrections and newer decisions so the replacement overview reflects the current state. Produce a self-contained checkpoint with all facts and working-state details needed for future continuity.
+## Merge rules
 
-Classify facts from the conversation context with the SNIP criteria. Facts satisfying all four criteria receive their best matching memory mark; remaining candidates receive [skip].
+- Use the latest correction or decision as the current version of a fact, and merge duplicates.
+- Preserve exact names, identifiers, paths, commands, decisions, results, and unresolved blockers when they are needed to continue the session.
+- Retain a fact already present in long-term memory when it is needed for session continuity.
+
+## What to retain
+
+Always retain a compact working-state handoff:
+- active objective
+- current status
+- completed results that constrain later work
+- unresolved blockers
+- next action
+- exact identifiers needed for that action
+
+Mark working-state facts `[ephemeral]`.
+
+For other facts, retain a candidate only when it meets all four SNIP criteria:
 - Signal: remembering it saves the user from repeating it
-- Novel: adds distinct information within this conversation context
-- Important: prevents rework or captures preferences / rules
-- Persistent: still relevant after 2 weeks
+- Novel: it adds a distinct fact to this checkpoint
+- Important: losing it would cause rework or discard a preference or rule
+- Persistent: it is expected to remain useful for at least two weeks
 
-Always preserve a compact working-state handoff: the active objective, current status, completed steps, unresolved blockers, next action, and exact identifiers needed for seamless continuation. Mark these facts [ephemeral].
+Assign each retained fact its best current mark:
+- `[permanent]` for core preferences, personal traits, and habits that remain relevant indefinitely
+- `[durable]` for technical discoveries, project knowledge, and configuration that remains valid for months
+- `[ephemeral]` for active task state and temporary decisions that may change within weeks
+- `[correction]` for the current fact that supersedes conflicting earlier long-term memory
 
-Format each fact as:
-- [mark] fact content
+When space is limited, prioritize user corrections and preferences, then solutions, decisions, events, and environment facts.
 
-Marks (choose the best match):
-- [permanent] Core preferences, personal traits, habits — relevant indefinitely
-- [durable] Technical discoveries, project knowledge, config details — valid for months
-- [ephemeral] Active task state, temporary decisions — may change in weeks
-- [correction] Correction to a previous memory — state what changed
-- [skip] Conversational filler, code/source facts derivable from the repo, or audit-only breadcrumbs
+## Output
 
-Priority: user corrections and preferences > solutions > decisions > events > environment facts.
+Return one concise retained fact per line in this form:
+- [mark] fact
 
-Facts that also appear in long-term memory remain eligible for their best matching mark.
-
-Return formatted fact lines, one per line. Represent an empty combined checkpoint as `(nothing)`.
+Use `(nothing)` when no fact qualifies and there is no active working state.

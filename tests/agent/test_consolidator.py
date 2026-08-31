@@ -26,6 +26,8 @@ from nanobot.session.manager import Session
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
+_ARCHIVE_PROMPT = render_template("agent/consolidator_archive.md", strip=True)
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -266,20 +268,21 @@ class TestConsolidatorSummarize:
 
 class TestConsolidatorPromptContract:
     def test_archive_prompt_requests_a_cumulative_replacement_checkpoint(self):
-        prompt = render_template("agent/consolidator_archive.md", strip=True)
+        prompt = _ARCHIVE_PROMPT
 
+        for section in ("## Merge rules", "## What to retain", "## Output"):
+            assert section in prompt
+        assert "replacement checkpoint" in prompt
+        assert "[Archived Context Summary]" in prompt
+        assert "current conversation state" in prompt
         assert "SNIP" in prompt
-        assert "all conversation context provided" in prompt
-        assert "all provided conversation messages" in prompt
-        for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
+        for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]"):
             assert mark in prompt
         assert "working-state handoff" in prompt
-        assert "exact identifiers needed for seamless continuation" in prompt
-        assert "complete replacement memory overview" in prompt
-        assert "carry forward every still-relevant fact" in prompt
-        assert "self-contained checkpoint" in prompt
+        assert "- [mark] fact" in prompt
+        assert "[skip]" not in prompt
+        assert "(nothing)" in prompt
         assert "history.jsonl" not in prompt
-        assert "Facts that also appear in long-term memory remain eligible" in prompt
 
 
 class TestConsolidatorArchiveErrorHandling:
@@ -474,7 +477,7 @@ class TestConsolidatorTokenBudget:
         assert [message["content"] for message in request["messages"][1:-1]] == [
             f"m{i}" for i in range(50)
         ]
-        assert "all provided conversation messages" in request["messages"][-1]["content"]
+        assert request["messages"][-1]["content"] == _ARCHIVE_PROMPT
         assert request["tools"] == []
         assert "tool_choice" not in request
         assert session.last_archived == 50
@@ -713,7 +716,7 @@ class TestCompactIdleSession:
             "second user",
             "second assistant",
         ]
-        assert "all provided conversation messages" in latest_messages[-1]["content"]
+        assert latest_messages[-1]["content"] == _ARCHIVE_PROMPT
         sessions.invalidate("cli:incremental")
         reloaded = sessions.get_or_create("cli:incremental")
         assert reloaded.last_archived == 4
@@ -1028,7 +1031,7 @@ class TestCompactIdleSession:
         # The replacement overview covers all model-visible conversation context.
         assert "u0" not in sent_content
         assert "u26" in sent_content
-        assert "all provided conversation messages" in sent_messages[-1]["content"]
+        assert sent_messages[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
     async def test_full_archive_keeps_extended_legal_replay_suffix(
@@ -1117,7 +1120,7 @@ class TestCompactIdleSession:
             "user",
         ]
         assert sent_messages[2]["tool_calls"][0]["id"] == "call-1"
-        assert "all provided conversation messages" in sent_messages[-1]["content"]
+        assert sent_messages[-1]["content"] == _ARCHIVE_PROMPT
         assert call["tools"] == tools
         assert "tool_choice" not in call
 
@@ -1257,7 +1260,7 @@ class TestCompactIdleSession:
             "new user",
             "new answer",
         ]
-        assert "all provided conversation messages" in sent[-1]["content"]
+        assert sent[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
     async def test_reuses_real_prefix_for_unified_session_workspace(
@@ -1299,7 +1302,7 @@ class TestCompactIdleSession:
 
         sent_messages = runtime.provider.chat_with_retry.call_args.kwargs["messages"]
         assert sent_messages[:-1] == ordinary_messages[:-1]
-        assert "all provided conversation messages" in sent_messages[-1]["content"]
+        assert sent_messages[-1]["content"] == _ARCHIVE_PROMPT
         system = sent_messages[0]["content"]
         assert "PROJECT_WORKSPACE_MARKER" in system
         assert "GLOBAL_WORKSPACE_MARKER" not in system

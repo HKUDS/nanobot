@@ -2268,12 +2268,12 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background checkpoint**: Unprocessed turns are merged with the previous summary into a cumulative checkpoint; failures fall back to a bounded checkpoint that represents both.
-3. **Transcript preservation**: The complete session transcript remains stored, while future model requests receive the latest checkpoint alongside the retained recent suffix.
-4. **Restart-safe resume**: The latest checkpoint is mirrored into session metadata so it can still be recovered after a process restart. `memory/history.jsonl` remains the ingestion journal for Dream and is not injected entry-by-entry into ordinary requests.
+2. **Background compaction**: Older context is summarized while the most recent messages remain available.
+3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
+4. **Restart-safe resume**: The compacted context remains available after a process restart.
 
 > [!NOTE]
-> Auto compact does not remove structured messages from `sessions/<key>.jsonl`; it advances the checkpoint watermark only after the replacement checkpoint has been durably recorded.
+> Auto compact shortens the context sent to the model without deleting the session's structured message history.
 
 ## Timezone
 
