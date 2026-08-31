@@ -2777,7 +2777,10 @@ async def test_send_delta_stream_end_rich_capability_error_latches_and_falls_bac
         MessageBus(),
     )
     _install_ready_app(channel)
-    channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("Method not found"))
+    # Before Bot API 10.1, editMessageText ignores rich_message and requires text.
+    channel._app.bot.do_api_request = AsyncMock(
+        side_effect=BadRequest("Message text is empty")
+    )
     channel._app.bot.edit_message_text = AsyncMock()
     channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
 

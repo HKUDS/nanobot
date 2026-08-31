@@ -938,7 +938,13 @@ class TelegramChannel(BaseChannel):
                 # edit overwrite the already-successful rich result.
                 self.logger.debug("Rich stream edit already applied for {}", chat_id)
                 return True
-            if self._is_rich_capability_error(exc):
+            # Before Bot API 10.1, editMessageText ignores rich_message and
+            # reports the absent text argument instead.
+            pre_rich_edit_server = (
+                bool(content)
+                and str(exc).strip().lower() == "message text is empty"
+            )
+            if self._is_rich_capability_error(exc) or pre_rich_edit_server:
                 self.logger.debug("editMessageText rich_message not available, disabling")
                 self._rich_send_disabled = True
                 return False
