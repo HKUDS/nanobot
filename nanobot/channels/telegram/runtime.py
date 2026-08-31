@@ -902,9 +902,16 @@ class TelegramChannel(BaseChannel):
 
         Editing in place keeps the message identity, so the streaming preview is
         upgraded without the delete-and-resend pattern that caused flickering and
-        dropped line breaks (issue #4470). Returns True on success; on capability
-        errors (server older than Bot API 10.1) the rich latch is tripped so the
-        legacy HTML path is used from then on.
+        dropped line breaks (issue #4470).
+
+        Returns True when the rich edit is in place (including the ambiguous
+        "message is not modified" retry outcome after a response timeout).
+        Returns False only when the legacy HTML path should take over:
+        capability errors (server older than Bot API 10.1, which also trip the
+        rich latch) and content-shaped BadRequest rejections. Transport,
+        rate-limit, and unexpected errors propagate so the final-edit retry
+        contract is preserved — ChannelManager retries the buffered send
+        instead of an immediate legacy edit doubling connection demand.
         """
         if not self._app:
             return False
@@ -924,19 +931,27 @@ class TelegramChannel(BaseChannel):
             )
             return True
         except BadRequest as exc:
+            if self._is_not_modified_error(exc):
+                # Ambiguous success: the rich edit was applied server-side but
+                # its response timed out, so the retry hit "message is not
+                # modified". Treat it as done rather than letting the legacy
+                # edit overwrite the already-successful rich result.
+                self.logger.debug("Rich stream edit already applied for {}", chat_id)
+                return True
             if self._is_rich_capability_error(exc):
                 self.logger.debug("editMessageText rich_message not available, disabling")
                 self._rich_send_disabled = True
-            else:
-                self.logger.debug("editMessageText rich_message rejected: {}", exc)
-            return False
-        except Exception as exc:
-            err_str = str(exc).lower()
-            if "timed out" in err_str or isinstance(exc, TimedOut):
-                self.logger.debug("editMessageText rich_message timeout, falling back to legacy path")
                 return False
-            self.logger.debug("editMessageText rich_message failed: {}", exc)
+            # Content-shaped rejections (invalid markdown, unsupported media in
+            # the rich payload, …) fall back to the legacy HTML edit.
+            self.logger.debug("editMessageText rich_message rejected: {}", exc)
             return False
+        except Exception:
+            # Transport, rate-limit, and unexpected errors propagate so the
+            # final-edit retry contract stays intact: ChannelManager retries
+            # the buffered send instead of this handler doubling connection
+            # demand with an immediate legacy edit.
+            raise
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
