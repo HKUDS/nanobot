@@ -868,7 +868,6 @@ class MemoryArchiver:
                     model=runtime.model,
                     messages=request_messages,
                     tools=request_tools,
-                    tool_choice="none",
                     temperature=runtime.generation.temperature,
                     max_tokens=runtime.generation.max_tokens,
                     reasoning_effort=runtime.generation.reasoning_effort,

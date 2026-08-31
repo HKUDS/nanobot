@@ -474,7 +474,7 @@ class TestConsolidatorTokenBudget:
         ]
         assert "final 50 conversation messages" in request["messages"][-1]["content"]
         assert request["tools"] == []
-        assert request["tool_choice"] == "none"
+        assert "tool_choice" not in request
         assert session.last_archived == 50
         assert session.provider_state == _provider_state()
 
@@ -1120,7 +1120,7 @@ class TestCompactIdleSession:
         assert sent_messages[2]["tool_calls"][0]["id"] == "call-1"
         assert "final 4 conversation messages" in sent_messages[-1]["content"]
         assert call["tools"] == tools
-        assert call["tool_choice"] == "none"
+        assert "tool_choice" not in call
 
         reloaded = sessions.get_or_create("cli:tool-history")
         assert len(reloaded.messages) == 4
