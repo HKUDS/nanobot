@@ -296,7 +296,7 @@ class MemoryStore:
         persisted. If the cleaned content is empty but the raw entry wasn't,
         the record is persisted with an empty string rather than falling back
         to the raw leak — otherwise `strip_think`'s guarantees would be
-        undone by history replay / consolidation downstream.
+        undone when Dream consumes the journal entry.
 
         A defensive cap (*max_chars*, default ``_HISTORY_ENTRY_HARD_CAP``) is
         applied as a final safety net: individual callers should cap their own
@@ -313,7 +313,7 @@ class MemoryStore:
             if raw and not content:
                 logger.debug(
                     "history entry {} stripped to empty (likely template leak); "
-                    "persisting empty content to avoid re-polluting context",
+                    "persisting empty content to avoid re-polluting Dream input",
                     cursor,
                 )
             record = {"cursor": cursor, "timestamp": ts, "content": content}
