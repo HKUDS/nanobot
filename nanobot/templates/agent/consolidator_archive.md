@@ -1,22 +1,22 @@
-Create a complete replacement memory overview from the existing archived summary and the final {{ archive_count }} conversation messages immediately before this instruction.
+Create a complete replacement memory overview by consolidating the existing archived summary with the final {{ archive_count }} conversation messages immediately before this instruction.
 
-If the system prompt contains `[Archived Context Summary]`, treat it as the previous checkpoint. Preserve every still-relevant fact and working-state item from that checkpoint even when the new messages do not repeat it. The final {{ archive_count }} messages are the newly archived chunk. Any earlier conversation messages are context for resolving references, not a second source of new facts.
+When the system prompt contains `[Archived Context Summary]`, use it as the previous checkpoint and carry forward every still-relevant fact and working-state item. Treat the final {{ archive_count }} messages as the newly archived chunk and source new facts from them. Use earlier conversation messages to resolve references.
 
-Merge corrections and newer decisions into the replacement overview instead of keeping stale versions. The returned overview must stand on its own: future requests will receive it without earlier `history.jsonl` entries.
+Apply corrections and newer decisions so the replacement overview reflects the current state. Produce a self-contained checkpoint with all facts and working-state details needed for future continuity.
 
-Use [skip] unless a fact meets all SNIP criteria:
-- Signal: would the user need to repeat this if forgotten?
-- Novel: not just a restatement of another fact in this same conversation chunk
+Classify facts from the newly archived chunk with the SNIP criteria. Facts satisfying all four criteria receive their best matching memory mark; remaining candidates receive [skip].
+- Signal: remembering it saves the user from repeating it
+- Novel: adds distinct information within this conversation chunk
 - Important: prevents rework or captures preferences / rules
 - Persistent: still relevant after 2 weeks
 
-Also preserve a compact working-state handoff even when it is not Persistent: the active objective, current status, completed steps, unresolved blockers, next action, and exact identifiers needed to continue without rework. Mark these facts [ephemeral].
+Always preserve a compact working-state handoff: the active objective, current status, completed steps, unresolved blockers, next action, and exact identifiers needed for seamless continuation. Mark these facts [ephemeral].
 
 Format each fact as:
 - [mark] fact content
 
 Marks (choose the best match):
-- [permanent] Core preferences, personal traits, habits — never becomes stale
+- [permanent] Core preferences, personal traits, habits — relevant indefinitely
 - [durable] Technical discoveries, project knowledge, config details — valid for months
 - [ephemeral] Active task state, temporary decisions — may change in weeks
 - [correction] Correction to a previous memory — state what changed
@@ -24,6 +24,6 @@ Marks (choose the best match):
 
 Priority: user corrections and preferences > solutions > decisions > events > environment facts.
 
-Do not mark something [skip] merely because it might already exist in long-term memory.
+Facts that also appear in long-term memory remain eligible for their best matching mark.
 
-Return only formatted fact lines. Return `(nothing)` only when there is no existing archived summary and the new chunk contains nothing noteworthy.
+Return formatted fact lines, one per line. Represent an empty combined checkpoint as `(nothing)`.

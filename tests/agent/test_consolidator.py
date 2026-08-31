@@ -273,11 +273,13 @@ class TestConsolidatorPromptContract:
         for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
             assert mark in prompt
         assert "working-state handoff" in prompt
-        assert "exact identifiers needed to continue without rework" in prompt
+        assert "exact identifiers needed for seamless continuation" in prompt
         assert "complete replacement memory overview" in prompt
-        assert "Preserve every still-relevant fact" in prompt
-        assert "without earlier `history.jsonl` entries" in prompt
-        assert "Do not mark something [skip] merely because it might already exist" in prompt
+        assert "carry forward every still-relevant fact" in prompt
+        assert "source new facts from them" in prompt
+        assert "self-contained checkpoint" in prompt
+        assert "history.jsonl" not in prompt
+        assert "Facts that also appear in long-term memory remain eligible" in prompt
 
 
 class TestConsolidatorArchiveErrorHandling:
