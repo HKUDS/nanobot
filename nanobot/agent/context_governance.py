@@ -103,9 +103,16 @@ class ContextGovernor:
         self,
         config: ContextGovernanceConfig,
         messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         """Fit a model-facing copy while keeping the source transcript intact."""
-        updated = self.snip_history(config, messages, force=True)
+        updated = self.snip_history(
+            config,
+            messages,
+            tool_definitions=tool_definitions,
+            force=True,
+        )
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
         if not config.context_window_tokens:
@@ -115,7 +122,7 @@ class ContextGovernor:
             config.provider,
             config.model,
             updated,
-            config.tools.get_definitions(),
+            tool_definitions,
         )
         if budget > 0 and estimated <= budget:
             return updated
@@ -133,6 +140,7 @@ class ContextGovernor:
         usage: LLMUsage | None,
         *,
         usage_matches_messages: bool,
+        tool_definitions: list[dict[str, Any]] | None,
     ) -> LLMUsage | None:
         """Return the measurement that crossed the request input budget."""
         if not config.context_window_tokens:
@@ -148,7 +156,7 @@ class ContextGovernor:
             config.provider,
             config.model,
             messages,
-            config.tools.get_definitions(),
+            tool_definitions,
         )
         if budget > 0 and estimated < budget:
             return None
@@ -396,6 +404,7 @@ class ContextGovernor:
         config: ContextGovernanceConfig,
         messages: list[dict[str, Any]],
         *,
+        tool_definitions: list[dict[str, Any]] | None,
         force: bool = False,
     ) -> list[dict[str, Any]]:
         if not messages or not config.context_window_tokens:
@@ -405,12 +414,11 @@ class ContextGovernor:
         if budget <= 0:
             return messages
 
-        tools = config.tools.get_definitions()
         estimate, _ = estimate_prompt_tokens_chain(
             config.provider,
             config.model,
             messages,
-            tools,
+            tool_definitions,
         )
         if not force and estimate <= budget:
             return messages
@@ -425,7 +433,7 @@ class ContextGovernor:
             config.provider,
             config.model,
             system_messages,
-            tools,
+            tool_definitions,
         )
         remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
         kept: list[dict[str, Any]] = []

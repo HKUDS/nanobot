@@ -87,6 +87,7 @@ def test_usage_or_estimate_replaces_reported_zero_for_content(monkeypatch) -> No
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage == LLMUsage.estimated(input_tokens=12, output_tokens=7).with_timing(
@@ -131,6 +132,7 @@ def test_usage_or_estimate_counts_tool_call_output_for_reported_zero(monkeypatch
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage == LLMUsage.estimated(input_tokens=13, output_tokens=9)
@@ -163,6 +165,7 @@ def test_usage_or_estimate_counts_error_without_estimating_tokens(
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage is not None
@@ -198,6 +201,7 @@ def test_usage_or_estimate_trusts_positive_reported_total(monkeypatch) -> None:
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage is not None

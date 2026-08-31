@@ -76,11 +76,20 @@ class ProviderConversationStateController:
         context_window_tokens: int | None,
         model_messages: list[dict[str, Any]] | None = None,
         supplemental_messages: list[dict[str, Any]] | None = None,
+        resume_state: bool = True,
     ) -> ProviderCallContext | None:
-        """Build typed context for the next request and remember its durable delta."""
+        """Build context for the next request and remember its durable delta.
+
+        ``resume_state=False`` abandons opaque history when local request
+        fitting has produced a new independent model-facing context.
+        """
         independent_context = self.independent_request_context(
             context_window_tokens=context_window_tokens,
         )
+        if not resume_state:
+            self._state = None
+            self._request_messages = []
+            return independent_context
         if self._state is None:
             self._request_messages = []
             return independent_context
