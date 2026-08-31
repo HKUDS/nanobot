@@ -142,6 +142,7 @@ _WEBUI_MUTATION_PATHS = {
     "automation.delete": "/api/webui/automations/delete",
     "automation.run": "/api/webui/automations/run",
     "automation.update": "/api/webui/automations/update",
+    "automation.archive": "/api/webui/automations/archive",
     "skill.install": "/api/webui/skills/install",
     "skill.update": "/api/webui/skills/update",
     "skill.delete": "/api/webui/skills/delete",
@@ -460,7 +461,10 @@ class GatewayHTTPHandler:
             return True
         if re.match(r"^/api/sessions/[^/]+/delete$", path):
             return True
-        if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", path):
+        if re.match(
+            r"^/api/webui/automations/(enable|disable|delete|run|update|archive)$",
+            path,
+        ):
             return True
         if path in {"/api/webui/recovery/continue", "/api/webui/recovery/dismiss"}:
             return True
@@ -965,7 +969,10 @@ class GatewayHTTPHandler:
     ) -> Response | None:
         if got == "/api/webui/automations":
             return self._handle_webui_automations(request)
-        m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", got)
+        m = re.match(
+            r"^/api/webui/automations/(enable|disable|delete|run|update|archive)$",
+            got,
+        )
         if m:
             return await self._handle_webui_automation_action(request, m.group(1))
         return None
@@ -1026,6 +1033,31 @@ class GatewayHTTPHandler:
         if self.cron_service is None and self.local_trigger_store is None:
             return _http_error(503, "automation service unavailable")
 
+        if action == "archive":
+            if self.cron_service is None:
+                return _http_error(503, "cron service unavailable")
+            payload = _mutation_payload(request)
+            raw_job_ids = payload.get("job_ids") if payload is not None else None
+            if not isinstance(raw_job_ids, list):
+                return _http_error(400, "job_ids must be an array")
+            raw_items = cast(list[object], raw_job_ids)
+            job_ids = [
+                item.strip()
+                for item in raw_items
+                if isinstance(item, str) and item.strip()
+            ]
+            if len(job_ids) != len(raw_items) or not job_ids:
+                return _http_error(400, "job_ids must contain non-empty strings")
+            result = self.cron_service.archive_jobs(job_ids)
+            return _http_json_response(
+                {
+                    "archived": result.archived,
+                    "already_archived": result.already_archived,
+                    "protected": result.protected,
+                    "not_found": result.not_found,
+                }
+            )
+
         query = _request_query(request)
         job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
         if not job_id:
@@ -1041,6 +1073,8 @@ class GatewayHTTPHandler:
             return _http_error(404, "automation not found")
         if job.payload.kind == "system_event":
             return _http_error(403, "system automation is protected")
+        if job.archived_at_ms is not None and action in {"enable", "disable", "run", "update"}:
+            return _http_error(409, "archived automation is read-only")
         if action in {"enable", "run"} and not is_bound_cron_job(job):
             return _http_error(409, "automation has no linked chat")
 
@@ -1076,6 +1110,8 @@ class GatewayHTTPHandler:
                 return _http_error(404, "automation not found")
             if result == "protected":
                 return _http_error(403, "system automation is protected")
+            if result == "archived":
+                return _http_error(409, "archived automation is read-only")
         else:
             return _http_error(404, "unknown automation action")
 
@@ -1520,13 +1556,32 @@ def _parse_automation_update(
         parsed_schedule = _parse_automation_schedule(cast(dict[str, Any], raw_schedule))
         if isinstance(parsed_schedule, str):
             return parsed_schedule
-        if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
-            return update
-        schedule_error = _validate_automation_schedule(parsed_schedule)
-        if schedule_error:
-            return schedule_error
-        update["schedule"] = parsed_schedule
-        update["delete_after_run"] = parsed_schedule.kind == "at"
+        if current_job is None or not _schedule_matches_job(parsed_schedule, current_job):
+            schedule_error = _validate_automation_schedule(parsed_schedule)
+            if schedule_error:
+                return schedule_error
+            update["schedule"] = parsed_schedule
+            # New one-shot jobs are retained as completed/disabled so users can
+            # inspect and archive them. Existing deleteAfterRun jobs keep their
+            # legacy behavior until their schedule is explicitly changed.
+            update["delete_after_run"] = False
+    has_delivery_channel = "delivery_channel" in values
+    has_delivery_chat_id = "delivery_chat_id" in values
+    if has_delivery_channel != has_delivery_chat_id:
+        return "delivery_channel and delivery_chat_id must be provided together"
+    if has_delivery_channel:
+        raw_channel = values.get("delivery_channel")
+        raw_chat_id = values.get("delivery_chat_id")
+        if raw_channel is not None and not isinstance(raw_channel, str):
+            return "delivery_channel must be a string or null"
+        if raw_chat_id is not None and not isinstance(raw_chat_id, str):
+            return "delivery_chat_id must be a string or null"
+        channel = raw_channel.strip() if isinstance(raw_channel, str) else ""
+        chat_id = raw_chat_id.strip() if isinstance(raw_chat_id, str) else ""
+        if bool(channel) != bool(chat_id):
+            return "delivery_channel and delivery_chat_id must be provided together"
+        update["delivery_channel"] = channel or None
+        update["delivery_chat_id"] = chat_id or None
     return update
 
 

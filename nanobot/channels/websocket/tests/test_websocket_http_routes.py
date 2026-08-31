@@ -2347,6 +2347,8 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         session_key="websocket:abc",
         origin_channel="websocket",
         origin_chat_id="abc",
+        delivery_channel="slack",
+        delivery_chat_id="C123",
     )
     incomplete_job = cron.add_job(
         name="english-quiz",
@@ -2411,6 +2413,9 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["state"]["run_history"] == []
         assert by_id[user_job.id]["origin"]["session_key"] == "websocket:abc"
         assert by_id[user_job.id]["origin"]["preview"] == "hi"
+        assert by_id[user_job.id]["payload"]["delivery_channel"] == "slack"
+        assert by_id[user_job.id]["payload"]["delivery_chat_id"] == "C123"
+        assert by_id[user_job.id]["archived_at_ms"] is None
         assert "session_key" not in by_id[incomplete_job.id]["payload"]
         assert "origin_channel" not in by_id[incomplete_job.id]["payload"]
         assert "origin_chat_id" not in by_id[incomplete_job.id]["payload"]
@@ -2447,6 +2452,52 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["schedule"]["kind"] == "cron"
         assert by_id[user_job.id]["schedule"]["expr"] == "0 9 * * *"
         assert by_id[user_job.id]["schedule"]["tz"] == "UTC"
+
+        delivery_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": user_job.id,
+                "values": {
+                    "delivery_channel": "feishu",
+                    "delivery_chat_id": "oc_ops",
+                },
+            },
+        )
+        assert delivery_update.status_code == 200
+        assert cron.get_job(user_job.id).payload.delivery_channel == "feishu"
+        assert cron.get_job(user_job.id).payload.delivery_chat_id == "oc_ops"
+
+        matching_schedule_delivery_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": user_job.id,
+                "values": {
+                    "schedule": {
+                        "kind": "cron",
+                        "expr": "0 9 * * *",
+                        "tz": "UTC",
+                    },
+                    "delivery_channel": "slack",
+                    "delivery_chat_id": "C456",
+                },
+            },
+        )
+        assert matching_schedule_delivery_update.status_code == 200
+        assert cron.get_job(user_job.id).payload.delivery_channel == "slack"
+        assert cron.get_job(user_job.id).payload.delivery_chat_id == "C456"
+
+        partial_delivery_update = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": user_job.id,
+                "values": {"delivery_channel": "slack"},
+            },
+        )
+        assert partial_delivery_update.status_code == 400
+        assert cron.get_job(user_job.id).payload.delivery_channel == "slack"
 
         unicode_update = await _webui_mutate(
             channel,
@@ -2562,6 +2613,39 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert enabled.status_code == 200
         by_id = {job["id"]: job for job in enabled.json()["jobs"]}
         assert by_id[user_job.id]["enabled"] is True
+
+        archived = await _webui_mutate(
+            channel,
+            "automation.archive",
+            {"job_ids": [user_job.id, user_job.id, "heartbeat", "missing"]},
+        )
+        assert archived.status_code == 200
+        assert archived.json() == {
+            "archived": [user_job.id],
+            "already_archived": [],
+            "protected": ["heartbeat"],
+            "not_found": ["missing"],
+        }
+        assert cron.get_job(user_job.id).archived_at_ms is not None
+
+        archived_list = await _http_get(
+            f"{base_url}/api/webui/automations",
+            headers=auth,
+        )
+        archived_by_id = {job["id"]: job for job in archived_list.json()["jobs"]}
+        assert archived_by_id[user_job.id]["archived_at_ms"] is not None
+        assert archived_by_id[user_job.id]["enabled"] is False
+
+        for archived_action in ("enable", "disable", "run", "update"):
+            payload: dict[str, Any] = {"id": user_job.id}
+            if archived_action == "update":
+                payload["values"] = {"name": "cannot change"}
+            response = await _webui_mutate(
+                channel,
+                f"automation.{archived_action}",
+                payload,
+            )
+            assert response.status_code == 409
 
         deleted = await _webui_mutate(
             channel,
