@@ -28,16 +28,6 @@ def allows_conversation_message_merge(message: dict[str, Any]) -> bool:
     )
 
 
-def _state_context_tokens(state: ProviderConversationState | None) -> int | None:
-    """Return the valid token count stored with resumable provider state."""
-    if state is None:
-        return None
-    value = state.payload.get("context_tokens")
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return None
-    return value
-
-
 class ProviderConversationStateController:
     """Keep provider conversation-state semantics outside the agent runner.
 
@@ -89,30 +79,19 @@ class ProviderConversationStateController:
         tool_definitions: list[dict[str, Any]] | None = None,
     ) -> int | None:
         """Estimate resumed state plus the pending delta for the next request."""
-        state = self._state
-        context_tokens = _state_context_tokens(state)
+        state = self.checkpoint(messages, model_messages=model_messages)
+        if state is None:
+            return None
+        context_tokens = state.payload.get("context_tokens")
         if (
-            state is None
-            or not self._provider.can_resume_conversation_state(state, self._model)
-            or context_tokens is None
+            isinstance(context_tokens, bool)
+            or not isinstance(context_tokens, int)
+            or context_tokens < 0
         ):
             return None
-
-        durable_messages = self._messages_after_boundary(messages)
-        governed_messages = (
-            self._model_messages_after_boundary(model_messages)
-            if model_messages is not None and durable_messages
-            else None
-        )
-        request_messages = (
-            governed_messages
-            if governed_messages is not None
-            else durable_messages
-        )
         pending_messages = [
             *state.pending_messages,
-            *request_messages,
-            *deepcopy(supplemental_messages or []),
+            *(supplemental_messages or []),
         ]
         delta_tokens, _ = estimate_prompt_tokens_chain(
             self._provider,

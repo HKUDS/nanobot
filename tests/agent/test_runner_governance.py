@@ -229,7 +229,6 @@ async def test_runner_drops_resumable_provider_state_when_request_is_fitted(monk
         context_block_limit=500,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        previous_usage=LLMUsage.reported(input_tokens=600, output_tokens=10),
         provider_state=saved_state,
     ))
 
@@ -417,14 +416,13 @@ async def test_runner_fits_max_iteration_finalization_before_dispatch(monkeypatc
 
 
 @pytest.mark.parametrize(
-    ("input_tokens", "usage_matches_messages", "expected_context_tokens"),
-    [(500, True, 500), (100, True, None)],
+    ("input_tokens", "expected_fitted"),
+    [(500, True), (100, False)],
 )
 def test_matching_reported_provider_usage_avoids_local_estimate(
     monkeypatch,
     input_tokens,
-    usage_matches_messages,
-    expected_context_tokens,
+    expected_fitted,
 ):
     provider = MagicMock(spec=LLMProvider)
     tools = MagicMock()
@@ -446,19 +444,17 @@ def test_matching_reported_provider_usage_avoids_local_estimate(
         ),
     )
 
-    pressure_usage = ContextGovernor().pressure_usage(
+    governor = ContextGovernor()
+    monkeypatch.setattr(governor, "fit_to_budget", lambda *_args, **_kwargs: [])
+    _messages, fitted = governor.fit_request(
         _governance_config(provider, tools, spec),
         spec.initial_messages,
         LLMUsage.reported(input_tokens=input_tokens, output_tokens=10),
-        usage_matches_messages=usage_matches_messages,
+        usage_matches_messages=True,
         tool_definitions=tools.get_definitions(),
     )
 
-    assert (
-        pressure_usage.context_tokens if pressure_usage is not None else None
-    ) == expected_context_tokens
-    if pressure_usage is not None:
-        assert pressure_usage.source == "reported"
+    assert fitted is expected_fitted
 
 
 def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
@@ -475,12 +471,15 @@ def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
+    estimate = MagicMock(return_value=(600, "test-counter"))
     monkeypatch.setattr(
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_args, **_kwargs: (600, "test-counter"),
+        estimate,
     )
 
-    pressure_usage = ContextGovernor().pressure_usage(
+    governor = ContextGovernor()
+    monkeypatch.setattr(governor, "fit_to_budget", lambda *_args, **_kwargs: [])
+    _messages, fitted = governor.fit_request(
         _governance_config(provider, tools, spec),
         spec.initial_messages,
         LLMUsage.reported(input_tokens=900, output_tokens=10),
@@ -488,9 +487,8 @@ def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
         tool_definitions=tools.get_definitions(),
     )
 
-    assert pressure_usage is not None
-    assert pressure_usage.context_tokens == 600
-    assert pressure_usage.source == "estimated"
+    assert fitted is True
+    estimate.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -541,7 +539,6 @@ async def test_runner_counts_resumed_provider_state_before_dispatch(monkeypatch)
         context_block_limit=500,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        previous_usage=LLMUsage.reported(input_tokens=450, output_tokens=10),
         provider_state=saved_state,
     ))
 

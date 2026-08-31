@@ -1154,11 +1154,6 @@ class AgentLoop:
                 ephemeral=ephemeral,
                 run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
             ))
-            previous_usage = (
-                LLMUsage.from_dict(session.metadata.get("_last_usage"))
-                if session is not None
-                else None
-            )
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=None,
                 tools=effective_tools,
@@ -1175,7 +1170,6 @@ class AgentLoop:
                 provider_retry_mode=self.provider_retry_mode,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
-                previous_usage=previous_usage,
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall

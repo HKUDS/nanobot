@@ -133,7 +133,7 @@ class ContextGovernor:
             source=source,
         )
 
-    def pressure_usage(
+    def fit_request(
         self,
         config: ContextGovernanceConfig,
         messages: list[dict[str, Any]],
@@ -142,10 +142,10 @@ class ContextGovernor:
         usage_matches_messages: bool,
         tool_definitions: list[dict[str, Any]] | None,
         request_context_tokens: int | None = None,
-    ) -> LLMUsage | None:
-        """Return the measurement that crossed the request input budget."""
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Fit the request when its measured or estimated input is pressured."""
         if not config.context_window_tokens:
-            return None
+            return messages, False
         budget = self.input_budget(config)
         if (
             request_context_tokens is None
@@ -153,21 +153,24 @@ class ContextGovernor:
             and usage is not None
             and usage.context_tokens is not None
         ):
-            if budget <= 0 or usage.context_tokens >= budget:
-                return usage
-            return None
-
-        estimated, _ = estimate_prompt_tokens_chain(
-            config.provider,
-            config.model,
+            pressured = budget <= 0 or usage.context_tokens >= budget
+        else:
+            estimated, _ = estimate_prompt_tokens_chain(
+                config.provider,
+                config.model,
+                messages,
+                tool_definitions,
+            )
+            if request_context_tokens is not None:
+                estimated = max(estimated, request_context_tokens)
+            pressured = budget <= 0 or estimated >= budget
+        if not pressured:
+            return messages, False
+        return self.fit_to_budget(
+            config,
             messages,
-            tool_definitions,
-        )
-        if request_context_tokens is not None:
-            estimated = max(estimated, request_context_tokens)
-        if budget > 0 and estimated < budget:
-            return None
-        return LLMUsage.estimated(input_tokens=estimated, output_tokens=0)
+            tool_definitions=tool_definitions,
+        ), True
 
     @staticmethod
     def input_budget(config: ContextGovernanceConfig) -> int:

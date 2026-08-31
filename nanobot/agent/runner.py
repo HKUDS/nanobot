@@ -32,6 +32,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     LLMUsage,
+    ProviderCallContext,
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import (
@@ -112,7 +113,6 @@ class AgentRunSpec:
     provider_retry_mode: str = "standard"
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
-    previous_usage: LLMUsage | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
@@ -140,12 +140,14 @@ class AgentRunResult:
 
 
 @dataclass(slots=True)
-class _ModelRequestResult:
-    """One provider response paired with the exact model-facing request."""
+class _ModelRequestState:
+    """Per-run state used to govern the next provider request."""
 
-    response: LLMResponse
-    messages: list[dict[str, Any]]
-    tool_definitions: list[dict[str, Any]] | None
+    config: ContextGovernanceConfig
+    conversation: ProviderConversationStateController
+    usage: LLMUsage | None = None
+    messages: list[dict[str, Any]] | None = None
+    tool_definitions: list[dict[str, Any]] | None = None
 
 
 class AgentRunner:
@@ -528,9 +530,10 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
         )
-        latest_usage = spec.previous_usage
-        latest_request_messages: list[dict[str, Any]] | None = None
-        latest_tool_definitions: list[dict[str, Any]] | None = None
+        request_state = _ModelRequestState(
+            config=governance_config,
+            conversation=conversation_state,
+        )
 
         for iteration in range(spec.max_iterations):
             context = AgentHookContext(
@@ -539,20 +542,16 @@ class AgentRunner:
                 session_key=spec.session_key,
             )
             await hook.before_iteration(context)
-            request_result = await self._request_model(
+            response = await self._request_model(
                 spec,
                 messages,
                 hook,
                 context,
-                governance_config=governance_config,
-                previous_usage=latest_usage,
-                previous_request_messages=latest_request_messages,
-                previous_tool_definitions=latest_tool_definitions,
-                conversation_state=conversation_state,
+                request_state=request_state,
                 transcript=messages,
             )
-            response = request_result.response
-            messages_for_model = request_result.messages
+            assert request_state.messages is not None
+            messages_for_model = request_state.messages
             conversation_state.observe_response(response, messages)
             context.response = response
             context.tool_calls = list(response.tool_calls)
@@ -564,17 +563,9 @@ class AgentRunner:
                 response.content,
             )
             response.content = cleaned_content
-            raw_usage = self._usage_or_estimate(
-                spec,
-                messages_for_model,
-                response,
-                tool_definitions=request_result.tool_definitions,
-            )
+            raw_usage = self._record_request_usage(spec, request_state, response)
             context.usage = raw_usage
             usage = self._merge_usage(usage, raw_usage)
-            latest_usage = raw_usage
-            latest_request_messages = deepcopy(messages_for_model)
-            latest_tool_definitions = deepcopy(request_result.tool_definitions)
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
                 await hook.emit_reasoning_end()
@@ -711,23 +702,13 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
-                retry_request = await self._request_finalization_retry(
+                response = await self._request_finalization_retry(
                     spec,
                     messages_for_model,
-                    governance_config=governance_config,
-                    previous_usage=latest_usage,
-                    previous_request_messages=latest_request_messages,
-                    previous_tool_definitions=latest_tool_definitions,
+                    request_state=request_state,
                     transcript=messages,
-                    conversation_state=conversation_state,
                 )
-                response = retry_request.response
-                retry_usage = self._usage_or_estimate(
-                    spec,
-                    retry_request.messages,
-                    response,
-                    tool_definitions=retry_request.tool_definitions,
-                )
+                retry_usage = self._record_request_usage(spec, request_state, response)
                 usage = self._merge_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
                 context.response = response
@@ -914,11 +895,7 @@ class AgentRunner:
                     hook,
                     messages,
                     usage,
-                    conversation_state,
-                    governance_config=governance_config,
-                    previous_usage=latest_usage,
-                    previous_request_messages=latest_request_messages,
-                    previous_tool_definitions=latest_tool_definitions,
+                    request_state=request_state,
                 )
             if terminal_content is None:
                 terminal_content = self._max_iterations_fallback(spec)
@@ -965,41 +942,59 @@ class AgentRunner:
         kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
-    def _fit_model_request(
+    def _prepare_model_request(
         self,
-        governance_config: ContextGovernanceConfig,
-        prepared: list[dict[str, Any]],
+        state: _ModelRequestState,
+        messages: list[dict[str, Any]],
         *,
         tool_definitions: list[dict[str, Any]] | None,
-        previous_usage: LLMUsage | None,
-        previous_request_messages: list[dict[str, Any]] | None,
-        previous_tool_definitions: list[dict[str, Any]] | None,
-        request_context_tokens: int | None,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Fit a governed request copy when its effective payload is pressured."""
-        usage_matches_messages = (
-            previous_request_messages is not None
-            and prepared == previous_request_messages
-            and tool_definitions == previous_tool_definitions
+        transcript: list[dict[str, Any]] | None = None,
+    ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
+        """Prepare, fit, and record the exact payload sent to a provider."""
+        prepared = self.context_governor.prepare_for_model(state.config, messages)
+        supplemental_messages = (
+            [prepared[-1]] if transcript is not None and tool_definitions is None else None
         )
-        pressure_usage = self.context_governor.pressure_usage(
-            governance_config,
+        model_messages = None if supplemental_messages is not None else prepared
+        request_context_tokens = (
+            state.conversation.estimate_request_context_tokens(
+                transcript,
+                model_messages=model_messages,
+                supplemental_messages=supplemental_messages,
+                tool_definitions=tool_definitions,
+            )
+            if transcript is not None
+            else None
+        )
+        usage_matches_messages = (
+            state.messages is not None
+            and prepared == state.messages
+            and tool_definitions == state.tool_definitions
+        )
+        prepared, fitted = self.context_governor.fit_request(
+            state.config,
             prepared,
-            previous_usage,
+            state.usage,
             usage_matches_messages=usage_matches_messages,
             tool_definitions=tool_definitions,
             request_context_tokens=request_context_tokens,
         )
-        if pressure_usage is None:
-            return prepared, False
-        return (
-            self.context_governor.fit_to_budget(
-                governance_config,
-                prepared,
-                tool_definitions=tool_definitions,
-            ),
-            True,
+        provider_context = (
+            state.conversation.prepare_request(
+                transcript,
+                context_window_tokens=state.config.context_window_tokens,
+                model_messages=model_messages,
+                supplemental_messages=supplemental_messages,
+                resume_state=not fitted,
+            )
+            if transcript is not None
+            else state.conversation.independent_request_context(
+                context_window_tokens=state.config.context_window_tokens,
+            )
         )
+        state.messages = deepcopy(prepared)
+        state.tool_definitions = deepcopy(tool_definitions)
+        return prepared, provider_context
 
     async def _request_model(
         self,
@@ -1008,50 +1003,17 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
         *,
-        governance_config: ContextGovernanceConfig,
-        previous_usage: LLMUsage | None,
-        previous_request_messages: list[dict[str, Any]] | None,
-        previous_tool_definitions: list[dict[str, Any]] | None,
+        request_state: _ModelRequestState,
         malformed_retry: bool = False,
-        conversation_state: ProviderConversationStateController,
-        transcript: list[dict[str, Any]],
-        resume_conversation_state: bool = True,
-    ) -> _ModelRequestResult:
+        transcript: list[dict[str, Any]] | None,
+    ) -> LLMResponse:
         timeout_s = self._resolve_llm_timeout_s(spec)
         tool_definitions = spec.tools.get_definitions()
-        messages = self.context_governor.prepare_for_model(
-            governance_config,
-            messages,
-        )
-        request_context_tokens = (
-            conversation_state.estimate_request_context_tokens(
-                transcript,
-                model_messages=messages,
-                tool_definitions=tool_definitions,
-            )
-            if resume_conversation_state
-            else None
-        )
-        messages, fitted = self._fit_model_request(
-            governance_config,
+        messages, provider_context = self._prepare_model_request(
+            request_state,
             messages,
             tool_definitions=tool_definitions,
-            previous_usage=previous_usage,
-            previous_request_messages=previous_request_messages,
-            previous_tool_definitions=previous_tool_definitions,
-            request_context_tokens=request_context_tokens,
-        )
-        provider_context = (
-            conversation_state.prepare_request(
-                transcript,
-                context_window_tokens=spec.runtime.context_window_tokens,
-                model_messages=messages,
-                resume_state=not fitted,
-            )
-            if resume_conversation_state
-            else conversation_state.independent_request_context(
-                context_window_tokens=spec.runtime.context_window_tokens,
-            )
+            transcript=transcript,
         )
 
         kwargs = self._build_request_kwargs(
@@ -1235,14 +1197,9 @@ class AgentRunner:
             )
             return await self._request_model(
                 spec, retry_messages, hook, context,
-                governance_config=governance_config,
-                previous_usage=response.usage,
-                previous_request_messages=messages,
-                previous_tool_definitions=tool_definitions,
+                request_state=request_state,
                 malformed_retry=True,
-                conversation_state=conversation_state,
-                transcript=transcript,
-                resume_conversation_state=False,
+                transcript=None,
             )
         if (
             all_dropped
@@ -1258,13 +1215,9 @@ class AgentRunner:
             return await self._request_no_tools(
                 spec,
                 fallback_messages,
-                governance_config=governance_config,
-                previous_usage=response.usage,
-                previous_request_messages=messages,
-                previous_tool_definitions=tool_definitions,
-                conversation_state=conversation_state,
+                request_state=request_state,
             )
-        return _ModelRequestResult(response, messages, tool_definitions)
+        return response
 
     @staticmethod
     def _drop_malformed_tool_calls(
@@ -1330,31 +1283,22 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         *,
-        governance_config: ContextGovernanceConfig,
-        previous_usage: LLMUsage | None,
-        previous_request_messages: list[dict[str, Any]] | None,
-        previous_tool_definitions: list[dict[str, Any]] | None,
+        request_state: _ModelRequestState,
         transcript: list[dict[str, Any]],
-        conversation_state: ProviderConversationStateController,
-    ) -> _ModelRequestResult:
+    ) -> LLMResponse:
         retry_messages = self._finalization_retry_messages(messages)
-        request_result = await self._request_no_tools(
+        response = await self._request_no_tools(
             spec,
             retry_messages,
-            governance_config=governance_config,
-            previous_usage=previous_usage,
-            previous_request_messages=previous_request_messages,
-            previous_tool_definitions=previous_tool_definitions,
-            conversation_state=conversation_state,
+            request_state=request_state,
             transcript=transcript,
-            resume_conversation_state=True,
         )
-        conversation_state.observe_response(
-            request_result.response,
+        request_state.conversation.observe_response(
+            response,
             transcript,
             adopt_candidate_state=False,
         )
-        return request_result
+        return response
 
     @staticmethod
     def _finalization_retry_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1368,23 +1312,15 @@ class AgentRunner:
         hook: AgentHook,
         messages: list[dict[str, Any]],
         usage: LLMUsage | None,
-        conversation_state: ProviderConversationStateController,
         *,
-        governance_config: ContextGovernanceConfig,
-        previous_usage: LLMUsage | None,
-        previous_request_messages: list[dict[str, Any]] | None,
-        previous_tool_definitions: list[dict[str, Any]] | None,
+        request_state: _ModelRequestState,
     ) -> tuple[str | None, LLMUsage | None]:
         retry_messages = self._budget_exhausted_finalization_messages(messages)
         try:
-            request_result = await self._request_no_tools(
+            response = await self._request_no_tools(
                 spec,
                 retry_messages,
-                governance_config=governance_config,
-                previous_usage=previous_usage,
-                previous_request_messages=previous_request_messages,
-                previous_tool_definitions=previous_tool_definitions,
-                conversation_state=conversation_state,
+                request_state=request_state,
             )
         except Exception:
             logger.exception(
@@ -1393,13 +1329,7 @@ class AgentRunner:
             )
             return None, usage
 
-        response = request_result.response
-        raw_usage = self._usage_or_estimate(
-            spec,
-            request_result.messages,
-            response,
-            tool_definitions=request_result.tool_definitions,
-        )
+        raw_usage = self._record_request_usage(spec, request_state, response)
         usage = self._merge_usage(usage, raw_usage)
         if response.finish_reason == "error" or response.has_tool_calls:
             logger.warning(
@@ -1428,49 +1358,15 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
         *,
-        governance_config: ContextGovernanceConfig,
-        previous_usage: LLMUsage | None,
-        previous_request_messages: list[dict[str, Any]] | None,
-        previous_tool_definitions: list[dict[str, Any]] | None,
-        conversation_state: ProviderConversationStateController,
+        request_state: _ModelRequestState,
         transcript: list[dict[str, Any]] | None = None,
-        resume_conversation_state: bool = False,
-    ) -> _ModelRequestResult:
-        messages = self.context_governor.prepare_for_model(
-            governance_config,
-            messages,
-        )
-        request_context_tokens = (
-            conversation_state.estimate_request_context_tokens(
-                transcript,
-                supplemental_messages=[messages[-1]],
-                tool_definitions=None,
-            )
-            if resume_conversation_state and transcript is not None
-            else None
-        )
-        messages, fitted = self._fit_model_request(
-            governance_config,
+    ) -> LLMResponse:
+        messages, provider_context = self._prepare_model_request(
+            request_state,
             messages,
             tool_definitions=None,
-            previous_usage=previous_usage,
-            previous_request_messages=previous_request_messages,
-            previous_tool_definitions=previous_tool_definitions,
-            request_context_tokens=request_context_tokens,
+            transcript=transcript,
         )
-        if resume_conversation_state:
-            if transcript is None:
-                raise ValueError("transcript is required when resuming conversation state")
-            provider_context = conversation_state.prepare_request(
-                transcript,
-                context_window_tokens=spec.runtime.context_window_tokens,
-                supplemental_messages=[messages[-1]],
-                resume_state=not fitted,
-            )
-        else:
-            provider_context = conversation_state.independent_request_context(
-                context_window_tokens=spec.runtime.context_window_tokens,
-            )
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -1493,7 +1389,7 @@ class AgentRunner:
                 finish_reason="error",
                 error_kind="timeout",
             )
-        return _ModelRequestResult(response, messages, None)
+        return response
 
     @staticmethod
     def _resolve_llm_timeout_s(spec: AgentRunSpec) -> float | None:
@@ -1553,6 +1449,21 @@ class AgentRunner:
             generation_ms=response.generation_ms,
             ttft_ms=response.ttft_ms,
         )
+
+    def _record_request_usage(
+        self,
+        spec: AgentRunSpec,
+        state: _ModelRequestState,
+        response: LLMResponse,
+    ) -> LLMUsage | None:
+        assert state.messages is not None
+        state.usage = self._usage_or_estimate(
+            spec,
+            state.messages,
+            response,
+            tool_definitions=state.tool_definitions,
+        )
+        return state.usage
 
     def _estimate_response_usage(
         self,
