@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import ipaddress
 import json
 import socket
@@ -538,14 +539,32 @@ class WebSocketChannel(BaseChannel):
     # -- Server lifecycle and connection ingress ---------------------------
 
     @staticmethod
-    def _listener_is_serving(server: Server) -> bool:
+    def _socket_is_accepting(sock: socket.socket) -> bool:
+        """Return whether a bound socket still advertises a listen capability.
+
+        ``SO_ACCEPTCONN`` is not portable: macOS/BSD raise ``OSError`` with
+        ``ENOPROTOOPT`` ("Protocol not available") for this option even on a
+        perfectly healthy listening socket. Treating that as "not serving"
+        makes the listener look permanently degraded, so the caller retries
+        forever and the channel never reaches a ready state. When the option
+        is unavailable we fall back to the file-descriptor liveness check.
+        """
+        if sock.fileno() < 0:
+            return False
+        try:
+            return bool(sock.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN))
+        except OSError as exc:
+            if exc.errno in (errno.ENOPROTOOPT, errno.EOPNOTSUPP, errno.EINVAL):
+                return True
+            raise
+
+    @classmethod
+    def _listener_is_serving(cls, server: Server) -> bool:
         """Return whether every bound socket still has a live listen capability."""
         try:
             sockets = server.sockets
             return bool(sockets) and server.is_serving() and all(
-                sock.fileno() >= 0
-                and bool(sock.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN))
-                for sock in sockets
+                cls._socket_is_accepting(sock) for sock in sockets
             )
         except OSError:
             return False
