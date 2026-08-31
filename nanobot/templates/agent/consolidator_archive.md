@@ -1,12 +1,12 @@
-Create a complete replacement memory overview by consolidating the existing archived summary with the final {{ archive_count }} conversation messages immediately before this instruction.
+Create a complete replacement memory overview from the existing archived summary and all conversation context provided with this instruction.
 
-When the system prompt contains `[Archived Context Summary]`, use it as the previous checkpoint and carry forward every still-relevant fact and working-state item. Treat the final {{ archive_count }} messages as the newly archived chunk and source new facts from them. Use earlier conversation messages to resolve references.
+When the system prompt contains `[Archived Context Summary]`, use it as the previous checkpoint and carry forward every still-relevant fact and working-state item. Incorporate all provided conversation messages, using their full order to resolve references.
 
 Apply corrections and newer decisions so the replacement overview reflects the current state. Produce a self-contained checkpoint with all facts and working-state details needed for future continuity.
 
-Classify facts from the newly archived chunk with the SNIP criteria. Facts satisfying all four criteria receive their best matching memory mark; remaining candidates receive [skip].
+Classify facts from the conversation context with the SNIP criteria. Facts satisfying all four criteria receive their best matching memory mark; remaining candidates receive [skip].
 - Signal: remembering it saves the user from repeating it
-- Novel: adds distinct information within this conversation chunk
+- Novel: adds distinct information within this conversation context
 - Important: prevents rework or captures preferences / rules
 - Persistent: still relevant after 2 weeks
 

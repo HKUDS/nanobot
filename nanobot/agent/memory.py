@@ -941,11 +941,7 @@ class MemoryArchiver:
                 session.key,
             )
             return raw_fallback()
-        prompt = render_template(
-            "agent/consolidator_archive.md",
-            strip=True,
-            archive_count=len(archive_history),
-        )
+        prompt = render_template("agent/consolidator_archive.md", strip=True)
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         workspace: Path | None = None
         if self._resolve_prompt_context is not None:

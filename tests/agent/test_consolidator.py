@@ -266,17 +266,17 @@ class TestConsolidatorSummarize:
 
 class TestConsolidatorPromptContract:
     def test_archive_prompt_requests_a_cumulative_replacement_checkpoint(self):
-        prompt = render_template("agent/consolidator_archive.md", strip=True, archive_count=4)
+        prompt = render_template("agent/consolidator_archive.md", strip=True)
 
         assert "SNIP" in prompt
-        assert "final 4 conversation messages" in prompt
+        assert "all conversation context provided" in prompt
+        assert "all provided conversation messages" in prompt
         for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
             assert mark in prompt
         assert "working-state handoff" in prompt
         assert "exact identifiers needed for seamless continuation" in prompt
         assert "complete replacement memory overview" in prompt
         assert "carry forward every still-relevant fact" in prompt
-        assert "source new facts from them" in prompt
         assert "self-contained checkpoint" in prompt
         assert "history.jsonl" not in prompt
         assert "Facts that also appear in long-term memory remain eligible" in prompt
@@ -474,7 +474,7 @@ class TestConsolidatorTokenBudget:
         assert [message["content"] for message in request["messages"][1:-1]] == [
             f"m{i}" for i in range(50)
         ]
-        assert "final 50 conversation messages" in request["messages"][-1]["content"]
+        assert "all provided conversation messages" in request["messages"][-1]["content"]
         assert request["tools"] == []
         assert "tool_choice" not in request
         assert session.last_archived == 50
@@ -713,7 +713,7 @@ class TestCompactIdleSession:
             "second user",
             "second assistant",
         ]
-        assert "final 2 conversation messages" in latest_messages[-1]["content"]
+        assert "all provided conversation messages" in latest_messages[-1]["content"]
         sessions.invalidate("cli:incremental")
         reloaded = sessions.get_or_create("cli:incremental")
         assert reloaded.last_archived == 4
@@ -1025,11 +1025,10 @@ class TestCompactIdleSession:
         archived_call = mock_provider.chat_with_retry.call_args
         sent_messages = archived_call.kwargs["messages"]
         sent_content = [message.get("content") for message in sent_messages]
-        # The ordinary replay prefix contributes recent context, while the
-        # temporary instruction limits the new overview to the unarchived tail.
+        # The replacement overview covers all model-visible conversation context.
         assert "u0" not in sent_content
         assert "u26" in sent_content
-        assert "final 10 conversation messages" in sent_messages[-1]["content"]
+        assert "all provided conversation messages" in sent_messages[-1]["content"]
 
     @pytest.mark.asyncio
     async def test_full_archive_keeps_extended_legal_replay_suffix(
@@ -1118,7 +1117,7 @@ class TestCompactIdleSession:
             "user",
         ]
         assert sent_messages[2]["tool_calls"][0]["id"] == "call-1"
-        assert "final 4 conversation messages" in sent_messages[-1]["content"]
+        assert "all provided conversation messages" in sent_messages[-1]["content"]
         assert call["tools"] == tools
         assert "tool_choice" not in call
 
@@ -1225,7 +1224,7 @@ class TestCompactIdleSession:
         assert sessions.get_or_create("sdk:oversized").last_archived == 1
 
     @pytest.mark.asyncio
-    async def test_incremental_scope_counts_only_model_visible_messages(
+    async def test_archive_context_contains_only_model_visible_messages(
         self,
         real_consolidator,
         mock_provider,
@@ -1258,7 +1257,7 @@ class TestCompactIdleSession:
             "new user",
             "new answer",
         ]
-        assert "final 2 conversation messages" in sent[-1]["content"]
+        assert "all provided conversation messages" in sent[-1]["content"]
 
     @pytest.mark.asyncio
     async def test_reuses_real_prefix_for_unified_session_workspace(
@@ -1300,7 +1299,7 @@ class TestCompactIdleSession:
 
         sent_messages = runtime.provider.chat_with_retry.call_args.kwargs["messages"]
         assert sent_messages[:-1] == ordinary_messages[:-1]
-        assert "final 2 conversation messages" in sent_messages[-1]["content"]
+        assert "all provided conversation messages" in sent_messages[-1]["content"]
         system = sent_messages[0]["content"]
         assert "PROJECT_WORKSPACE_MARKER" in system
         assert "GLOBAL_WORKSPACE_MARKER" not in system
