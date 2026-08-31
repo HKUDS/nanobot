@@ -63,6 +63,8 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     RuntimeContextProvider,
     append_runtime_context,
+    persistent_runtime_context_blocks,
+    project_runtime_context_for_history,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
 )
@@ -700,7 +702,10 @@ class AgentLoop:
         ]
         content_value = cast(object, msg.content)
         has_text = isinstance(content_value, str) and content_value.strip()
-        if has_text or media_paths or runtime_context_blocks:
+        persistent_blocks = persistent_runtime_context_blocks(
+            runtime_context_blocks or (),
+        )
+        if has_text or media_paths or persistent_blocks:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = content_value if isinstance(content_value, str) else ""
@@ -710,7 +715,7 @@ class AgentLoop:
             extra.update(automation_extra)
             text, runtime_context_meta = append_runtime_context(
                 text,
-                runtime_context_blocks or (),
+                persistent_blocks,
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
@@ -2213,6 +2218,13 @@ class AgentLoop:
                         ]
                     entry["content"] = filtered
             elif role == "user":
+                history_runtime_meta: dict[str, Any] | None = None
+                if isinstance(runtime_context_meta, dict):
+                    content, history_runtime_meta = project_runtime_context_for_history(
+                        content,
+                        cast(dict[str, Any], runtime_context_meta),
+                    )
+                    entry["content"] = content
                 if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(
                         cast(list[object], content),
@@ -2220,8 +2232,15 @@ class AgentLoop:
                     if not filtered:
                         continue
                     entry["content"] = filtered
-                if isinstance(runtime_context_meta, dict):
-                    entry[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
+                elif (
+                    isinstance(content, str)
+                    and not content
+                    and isinstance(runtime_context_meta, dict)
+                    and history_runtime_meta is None
+                ):
+                    continue
+                if history_runtime_meta is not None:
+                    entry[RUNTIME_CONTEXT_HISTORY_META] = history_runtime_meta
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user":
