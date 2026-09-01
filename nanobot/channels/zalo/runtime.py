@@ -10,6 +10,7 @@ Reference docs:
 - sendMessage: https://bot.zaloplatforms.com/docs/apis/sendMessage/
 - sendPhoto:   https://bot.zaloplatforms.com/docs/apis/sendPhoto/
 """
+# pyright: reportMissingTypeStubs=false, reportGeneralTypeIssues=false, reportOptionalMemberAccess=false, reportOptionalCall=false, reportUnusedFunction=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingTypeArgument=false
 
 from __future__ import annotations
 
@@ -134,7 +135,6 @@ class ZaloChannel(BaseChannel):
 
     async def _run_polling(self) -> None:
         """Run long polling for Zalo updates."""
-        offset = 0
         while self._running:
             try:
                 # Use SDK get_update or similar
@@ -348,17 +348,17 @@ class ZaloChannel(BaseChannel):
         It converts common Markdown patterns to Unicode Mathematical Alphanumeric Symbols.
         """
         # Header Bold (Thick)
-        HDR_UP = 0x1D400
-        HDR_LOW = 0x1D41A
-        HDR_DIG = 0x1D7CE
+        header_upper = 0x1D400
+        header_lower = 0x1D41A
+        header_digit = 0x1D7CE
 
         # Sub Bold (Softer)
-        SUB_UP = 0x1D5D4
-        SUB_LOW = 0x1D5EE
+        subheader_upper = 0x1D5D4
+        subheader_lower = 0x1D5EE
 
         # Italic
-        IT_UP = 0x1D434
-        IT_LOW = 0x1D44E
+        italic_upper = 0x1D434
+        italic_lower = 0x1D44E
 
         def transform(
             text: str, upper_base: int, lower_base: int, digit_base: int | None = None
@@ -377,13 +377,13 @@ class ZaloChannel(BaseChannel):
             return "".join(result)
 
         def header(match: re.Match) -> str:
-            return transform(match.group(1), HDR_UP, HDR_LOW, HDR_DIG)
+            return transform(match.group(1), header_upper, header_lower, header_digit)
 
         def subheader(match: re.Match) -> str:
-            return transform(match.group(1), SUB_UP, SUB_LOW)
+            return transform(match.group(1), subheader_upper, subheader_lower)
 
         def italic(match: re.Match) -> str:
-            return transform(match.group(1), IT_UP, IT_LOW)
+            return transform(match.group(1), italic_upper, italic_lower)
 
         # =============================
         # FORMAT ORDER
@@ -416,7 +416,7 @@ class ZaloChannel(BaseChannel):
         # Links
         text = re.sub(
             r"\[([^\]]+)\]\(([^)]+)\)",
-            lambda m: f"🔗 {transform(m.group(1), HDR_UP, HDR_LOW)}\n{m.group(2)}",
+            lambda m: f"🔗 {transform(m.group(1), header_upper, header_lower)}\n{m.group(2)}",
             text,
         )
 

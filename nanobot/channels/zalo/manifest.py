@@ -6,12 +6,15 @@ from nanobot.channels.plugin import ChannelPlugin
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
-        "enabled": field("boolean", default=False),
-        "token": field("secret"),
-        "allowFrom": field("list"),
+        "mode": field("enum", choices={"webhook", "polling"}, default="webhook"),
+        "botToken": field("secret"),
+        "webhookSecret": field("secret"),
         "webhookPath": field(default="/webhooks/zalo"),
+        "webhookHost": field(default="0.0.0.0"),
+        "webhookPort": field("int", default=8443),
+        "allowFrom": field("list"),
     },
-    required=required_fields("token"),
+    required=required_fields("botToken"),
     official_url="https://bot.zaloplatforms.com/",
 )
 

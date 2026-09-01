@@ -1,5 +1,9 @@
 """Zalo channel package."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .runtime import MAX_TEXT_LEN, ZaloChannel, ZaloConfig
 __all__ = ["MAX_TEXT_LEN", "ZaloChannel", "ZaloConfig"]
 
 def __getattr__(name: str):
