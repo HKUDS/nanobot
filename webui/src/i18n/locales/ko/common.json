@@ -1179,8 +1179,25 @@
       "stop": "응답 중지",
       "quotedContext": "인용한 문맥",
       "removeQuotedContext": "인용한 문맥 제거",
-      "modelNotConfigured": "모델이 설정되지 않음",
-      "configureModel": "모델 설정",
+      "openModelSetup": "AI 설정 열기",
+      "chooseAI": "AI 선택",
+      "modelSetup": {
+        "title": "AI 선택",
+        "description": "시작 방법을 선택하세요. 모델은 언제든 변경할 수 있습니다.",
+        "ready": "준비됨",
+        "account": {
+          "title": "계정 연결",
+          "description": "지원되는 AI 구독을 사용합니다."
+        },
+        "apiKey": {
+          "title": "API 키 사용",
+          "description": "선호하는 제공업체의 키를 사용합니다."
+        },
+        "local": {
+          "title": "로컬에서 실행",
+          "description": "Ollama, LM Studio 또는 vLLM에 연결합니다."
+        }
+      },
       "switchModel": "이 대화에서 사용할 모델 전환",
       "manageModels": "모델 관리",
       "context": {

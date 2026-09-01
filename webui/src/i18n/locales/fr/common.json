@@ -1179,8 +1179,25 @@
       "stop": "Arrêter la réponse",
       "quotedContext": "Contexte cité",
       "removeQuotedContext": "Supprimer le contexte cité",
-      "modelNotConfigured": "Modèle non configuré",
-      "configureModel": "Configurer le modèle",
+      "openModelSetup": "Ouvrir la configuration de l’IA",
+      "chooseAI": "Choisissez votre IA",
+      "modelSetup": {
+        "title": "Choisissez votre IA",
+        "description": "Choisissez un point de départ. Vous pourrez changer de modèle à tout moment.",
+        "ready": "Prêt",
+        "account": {
+          "title": "Connecter un compte",
+          "description": "Utilisez un abonnement IA compatible."
+        },
+        "apiKey": {
+          "title": "Utiliser une clé API",
+          "description": "Utilisez la clé du fournisseur de votre choix."
+        },
+        "local": {
+          "title": "Exécuter localement",
+          "description": "Connectez Ollama, LM Studio ou vLLM."
+        }
+      },
       "switchModel": "Changer le modèle de cette conversation",
       "manageModels": "Gérer les modèles",
       "context": {

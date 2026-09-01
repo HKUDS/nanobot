@@ -1180,8 +1180,25 @@
       "stop": "Detener respuesta",
       "quotedContext": "Contexto citado",
       "removeQuotedContext": "Quitar contexto citado",
-      "modelNotConfigured": "Modelo no configurado",
-      "configureModel": "Configurar modelo",
+      "openModelSetup": "Abrir configuración de IA",
+      "chooseAI": "Elige tu IA",
+      "modelSetup": {
+        "title": "Elige tu IA",
+        "description": "Elige cómo empezar. Puedes cambiar de modelo en cualquier momento.",
+        "ready": "Listo",
+        "account": {
+          "title": "Conectar una cuenta",
+          "description": "Usa una suscripción de IA compatible."
+        },
+        "apiKey": {
+          "title": "Usar una clave API",
+          "description": "Usa una clave de tu proveedor preferido."
+        },
+        "local": {
+          "title": "Ejecutar localmente",
+          "description": "Conecta Ollama, LM Studio o vLLM."
+        }
+      },
       "switchModel": "Cambiar el modelo de este chat",
       "manageModels": "Gestionar modelos",
       "context": {

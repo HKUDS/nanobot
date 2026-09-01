@@ -1179,8 +1179,25 @@
       "stop": "Dừng phản hồi",
       "quotedContext": "Ngữ cảnh được trích dẫn",
       "removeQuotedContext": "Xóa ngữ cảnh được trích dẫn",
-      "modelNotConfigured": "Chưa cấu hình mô hình",
-      "configureModel": "Cấu hình mô hình",
+      "openModelSetup": "Mở thiết lập AI",
+      "chooseAI": "Chọn AI của bạn",
+      "modelSetup": {
+        "title": "Chọn AI của bạn",
+        "description": "Chọn cách bắt đầu. Bạn có thể đổi mô hình bất cứ lúc nào.",
+        "ready": "Sẵn sàng",
+        "account": {
+          "title": "Kết nối tài khoản",
+          "description": "Dùng gói đăng ký AI được hỗ trợ."
+        },
+        "apiKey": {
+          "title": "Dùng khóa API",
+          "description": "Dùng khóa từ nhà cung cấp bạn chọn."
+        },
+        "local": {
+          "title": "Chạy cục bộ",
+          "description": "Kết nối Ollama, LM Studio hoặc vLLM."
+        }
+      },
       "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
       "manageModels": "Quản lý mô hình",
       "context": {

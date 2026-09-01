@@ -14,6 +14,7 @@ import {
   type ComposerContextUsage,
 } from "@/components/thread/ThreadComposer";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
+import type { ModelSetupAvailability } from "@/components/thread/ModelSetupDialog";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -380,6 +381,22 @@ interface ModelBadgeInfo {
   provider: string | null;
   providerLabel: string | null;
   needsSetup: boolean;
+}
+
+const LOCAL_MODEL_PROVIDERS = new Set(["atomic_chat", "lm_studio", "ollama", "vllm"]);
+
+function modelSetupAvailability(settings: SettingsPayload | null): ModelSetupAvailability {
+  const configured = settings?.providers.filter((provider) => provider.configured) ?? [];
+  const isLocal = (provider: SettingsPayload["providers"][number]) => {
+    if (LOCAL_MODEL_PROVIDERS.has(provider.name)) return true;
+    const apiBase = provider.api_base?.trim().toLowerCase() ?? "";
+    return apiBase.includes("localhost") || apiBase.includes("127.0.0.1") || apiBase.includes("[::1]");
+  };
+  return {
+    account: configured.some((provider) => provider.auth_type === "oauth"),
+    apiKey: configured.some((provider) => provider.auth_type !== "oauth" && !isLocal(provider)),
+    local: configured.some(isLocal),
+  };
 }
 
 function modelPresetForBadge(
@@ -961,8 +978,9 @@ export function ThreadShell({
     [activeModelPreset, modelName, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
-    ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })
+    ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
+  const setupAvailability = useMemo(() => modelSetupAvailability(settings), [settings]);
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -1517,6 +1535,7 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
+          modelSetupAvailability={setupAvailability}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
@@ -1566,6 +1585,7 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
+          modelSetupAvailability={setupAvailability}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}

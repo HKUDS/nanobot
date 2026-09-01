@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { Check, CircleHelp, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Check, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -539,7 +539,6 @@ function PresetPill({
         "composer-model-badge composer-model-pill inline-flex h-full max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/70",
         "w-fit",
         "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible:ring-2 group-focus-visible:ring-ring/45",
-        needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
         isHero ? "gap-1.5 px-2.5 text-[12px]" : "gap-2 px-3 text-[12.5px]",
         offset !== undefined && "composer-model-pill-dock",
       )}
@@ -595,13 +594,13 @@ function PresetProviderIcon({
       data-testid={testId}
       className={cn(
         "grid shrink-0 place-items-center",
-        needsSetup && "text-amber-800 dark:text-amber-200",
+        needsSetup && "text-muted-foreground",
         isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
       )}
       aria-hidden
     >
       {needsSetup ? (
-        <CircleHelp className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
+        <Sparkles className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
       ) : logoUrl ? (
         <img
           src={logoUrl}

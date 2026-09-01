@@ -681,7 +681,7 @@ describe("ThreadShell", () => {
     );
 
     expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
   it("switches through every named preset while preserving call-order priority", async () => {
@@ -763,7 +763,7 @@ describe("ThreadShell", () => {
     );
 
     expect(await screen.findByTitle("fast · gpt-4 · Company Proxy")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
   it("shows the effective fallback model in the composer badge", async () => {
@@ -835,7 +835,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("Default")).toBeInTheDocument();
   });
 
-  it("opens model settings from the unconfigured model badge", async () => {
+  it("opens first-run model setup without clearing the draft", async () => {
     const client = makeClient();
     const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");
     settings.agent.has_api_key = false;
@@ -843,6 +843,20 @@ describe("ThreadShell", () => {
       provider.name === "openai_codex"
         ? { ...provider, auth_type: "oauth", configured: false }
         : provider,
+    );
+    settings.providers.push(
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        auth_type: "oauth",
+        configured: true,
+      },
+      {
+        name: "ollama",
+        label: "Ollama",
+        configured: true,
+        api_base: "http://127.0.0.1:11434",
+      },
     );
     const onOpenModelSettings = vi.fn();
 
@@ -860,17 +874,31 @@ describe("ThreadShell", () => {
       ),
     );
 
-    const badge = await screen.findByRole("button", { name: "Model not configured" });
-    expect(screen.getByTestId("composer-model-setup-icon")).toBeInTheDocument();
+    const badge = await screen.findByRole("button", { name: "Choose your AI" });
+    const setupIcon = screen.getByTestId("composer-model-setup-icon");
+    expect(setupIcon).toBeInTheDocument();
+    expect(setupIcon.parentElement).not.toHaveClass("border-amber-500/35");
     expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
     fireEvent.click(badge);
-    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("dialog", { name: "Choose your AI" })).toBeInTheDocument();
+    expect(screen.getAllByText("Ready")).toHaveLength(3);
+    expect(onOpenModelSettings).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Configure model" }));
-    expect(onOpenModelSettings).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(await screen.findByRole("dialog", { name: "Choose your AI" })).toBeInTheDocument();
+    expect(input).toHaveValue("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Use an API key" }));
+
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("hello");
+    await waitFor(() => expect(input).toHaveFocus());
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
