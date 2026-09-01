@@ -93,11 +93,17 @@ def _provider_state() -> ProviderConversationState:
 
 
 def _build_test_messages(**kwargs):
-    return [
-        {"role": "system", "content": "system prompt"},
+    system = "system prompt"
+    session_summary = kwargs.get("session_summary")
+    if session_summary:
+        system += f"\n\n[Archived Context Summary]\n{session_summary['text']}"
+    messages = [
+        {"role": "system", "content": system},
         *kwargs["history"],
-        {"role": "user", "content": kwargs["current_message"]},
     ]
+    if kwargs["current_message"] is not None:
+        messages.append({"role": "user", "content": kwargs["current_message"]})
+    return messages
 
 
 async def _archive(
@@ -112,10 +118,10 @@ async def _archive(
         messages,
         runtime=runtime,
         session_key=session_key,
-        request_messages=_build_test_messages(
-            history=messages,
-            current_message="consolidate",
-        ),
+        history=[
+            {"role": "system", "content": "system prompt"},
+            *messages,
+        ],
         request_tools=[],
         previous_summary=previous_summary,
     )
@@ -125,6 +131,7 @@ class TestTurnTranscriptSummary:
     async def test_uses_exact_accepted_prefix_and_existing_archiver(
         self,
         consolidator,
+        mock_provider,
         runtime,
     ):
         accepted = [
@@ -132,7 +139,9 @@ class TestTurnTranscriptSummary:
             {"role": "user", "content": "accepted history"},
         ]
         tools = [{"type": "function", "function": {"name": "inspect"}}]
-        consolidator.archiver.archive = AsyncMock(return_value="replacement checkpoint")
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="replacement checkpoint",
+        )
 
         summary = await consolidator.summarize_transcript(
             accepted,
@@ -143,13 +152,100 @@ class TestTurnTranscriptSummary:
         )
 
         assert summary == "replacement checkpoint"
-        call = consolidator.archiver.archive.await_args
-        assert call.args[0] == [{"role": "user", "content": "accepted history"}]
-        assert call.kwargs["request_messages"][:-1] == accepted
-        assert call.kwargs["request_messages"][-1]["role"] == "user"
-        assert "SNIP" in call.kwargs["request_messages"][-1]["content"]
-        assert call.kwargs["request_tools"] == tools
-        assert call.kwargs["previous_summary"] == "previous checkpoint"
+        call = mock_provider.chat_with_retry.await_args.kwargs
+        assert call["messages"][:-1] == accepted
+        assert call["messages"][-1]["role"] == "user"
+        assert "SNIP" in call["messages"][-1]["content"]
+        assert call["tools"] == tools
+
+
+class TestProviderStateSessionArchive:
+    async def test_uses_compacted_state_through_shared_archive_path(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        mock_provider.can_resume_conversation_state.return_value = True
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="- [ephemeral] portable checkpoint",
+        )
+        state = _provider_state().with_pending_messages([
+            {"role": "user", "content": "pending durable delta"},
+        ])
+        session = Session(
+            key="test:native",
+            messages=[
+                {"role": "user", "content": "raw transcript must stay off this request"},
+            ],
+            metadata={
+                "_last_summary": {
+                    "text": "previous checkpoint",
+                    "last_active": "2026-08-31T00:00:00+00:00",
+                },
+            },
+        )
+
+        summary = await consolidator.archive_session(
+            session,
+            archive_end=len(session.messages),
+            runtime=runtime,
+            provider_state=state,
+        )
+
+        assert summary == "- [ephemeral] portable checkpoint"
+        call = mock_provider.chat_with_retry.await_args.kwargs
+        request_state = call["provider_context"].conversation_state
+        assert request_state is not None
+        assert request_state.payload == state.payload
+        assert request_state.pending_messages[0]["content"] == "pending durable delta"
+        assert "SNIP" in request_state.pending_messages[-1]["content"]
+        assert "previous checkpoint" in call["messages"][0]["content"]
+        assert all(
+            "raw transcript must stay off this request" not in str(message.get("content"))
+            for message in call["messages"]
+        )
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [entry["content"] for entry in entries] == [summary]
+
+    async def test_failure_raw_archives_source_and_returns_checkpoint(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        mock_provider.can_resume_conversation_state.return_value = True
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="partial",
+            finish_reason="length",
+        )
+        session = Session(
+            key="test:native",
+            messages=[
+                {"role": "user", "content": "preserve this raw delta"},
+            ],
+            metadata={
+                "_last_summary": {
+                    "text": "previous checkpoint",
+                    "last_active": "2026-08-31T00:00:00+00:00",
+                },
+            },
+        )
+
+        summary = await consolidator.archive_session(
+            session,
+            archive_end=len(session.messages),
+            runtime=runtime,
+            provider_state=_provider_state(),
+        )
+
+        assert "previous checkpoint" in summary
+        assert "preserve this raw delta" in summary
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert "preserve this raw delta" in entries[0]["content"]
 
 
 class TestConsolidatorSummarize:

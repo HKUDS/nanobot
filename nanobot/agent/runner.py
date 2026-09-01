@@ -148,6 +148,7 @@ class AgentRunResult:
     pending_stream_content: str | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
+    provider_compaction_applied: bool = field(default=False, repr=False)
 
 
 @dataclass(slots=True)
@@ -188,6 +189,7 @@ class _ModelRequestState:
     messages: list[dict[str, Any]] | None = None
     tool_definitions: list[dict[str, Any]] | None = None
     compaction: _ContextCompactionState | None = None
+    provider_compaction_applied: bool = False
 
 
 class AgentRunner:
@@ -1016,6 +1018,7 @@ class AgentRunner:
                 if request_state.compaction is not None
                 else None
             ),
+            provider_compaction_applied=request_state.provider_compaction_applied,
         )
 
     def _build_request_kwargs(
@@ -1328,6 +1331,7 @@ class AgentRunner:
             response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
         if generation_elapsed_s > 0:
             response.generation_ms = max(1, round(generation_elapsed_s * 1000))
+        request_state.provider_compaction_applied |= response.provider_compaction_applied
         # chat_stream_with_retry may recover internally, so only fail unfinished
         # hosted calls after the provider returns its final error response.
         if response.finish_reason == "error":
@@ -1556,6 +1560,7 @@ class AgentRunner:
                 finish_reason="error",
                 error_kind="timeout",
             )
+        request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
 
     @staticmethod

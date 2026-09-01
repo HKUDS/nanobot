@@ -4,7 +4,11 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMResponse,
+    ProviderConversationState,
+)
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
@@ -163,4 +167,48 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
         SUMMARY_CONTINUATION_TEXT,
         "continue the task",
         "done",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
+    tmp_path,
+) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=2_000)
+    compacted_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+    )
+    loop.provider.can_resume_conversation_state.return_value = True
+    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        provider_state=compacted_state,
+        provider_compaction_applied=True,
+    ))
+    loop.consolidator.archive_session = AsyncMock(
+        return_value="portable terminal checkpoint",
+    )
+
+    result = await loop.process_direct("continue", session_key="cli:native")
+
+    assert result.content == "done"
+    archive = loop.consolidator.archive_session
+    archive.assert_awaited_once()
+    assert archive.await_args.kwargs["provider_state"] == compacted_state
+    archived_session = archive.await_args.args[0]
+    archive_end = archive.await_args.kwargs["archive_end"]
+    assert archived_session.messages[archive_end - 1]["content"] == "done"
+    reloaded = loop.sessions.get_or_create("cli:native")
+    assert reloaded.provider_state is None
+    assert reloaded.metadata["_last_summary"]["text"] == (
+        "portable terminal checkpoint"
+    )
+    assert reloaded.messages[reloaded.last_archived]["content"] == (
+        SUMMARY_CONTINUATION_TEXT
+    )
+    assert [message["content"] for message in reloaded.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT,
     ]

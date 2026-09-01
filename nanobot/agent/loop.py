@@ -167,6 +167,7 @@ class TurnContext:
     pending_queue: asyncio.Queue[InboundMessage] | None = None
     pending_summary: SessionSummary | None = None
     summary_checkpoint: SessionSummaryCheckpoint | None = None
+    provider_compaction_applied: bool = False
 
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
@@ -2015,6 +2016,7 @@ class AgentLoop:
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages
         ctx.summary_checkpoint = result.summary_checkpoint
+        ctx.provider_compaction_applied = result.provider_compaction_applied
         ctx.stop_reason = result.stop_reason
         if (
             ctx.kind is TurnKind.USER
@@ -2056,6 +2058,24 @@ class AgentLoop:
             summary_checkpoint=ctx.summary_checkpoint,
             input_persisted_early=ctx.input_persisted_early,
         )
+        if not ctx.ephemeral and ctx.provider_compaction_applied:
+            summary = await self.consolidator.archive_session(
+                session,
+                archive_end=len(session.messages),
+                runtime=ctx.require_runtime(),
+                provider_state=session.provider_state,
+            )
+            if summary is not None:
+                self._insert_summary_checkpoint(
+                    session,
+                    SessionSummaryCheckpoint(
+                        summary=summary,
+                        transcript_boundary=len(ctx.all_messages),
+                    ),
+                )
+                # The next request must rebuild from the portable checkpoint;
+                # the opaque continuation predates that transcript rewrite.
+                session.provider_state = None
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)

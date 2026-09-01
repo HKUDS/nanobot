@@ -44,6 +44,7 @@ from nanobot.providers.openai_responses import (
     parse_response_output,
     prepare_responses_input,
     resolve_compact_threshold,
+    responses_items_have_compaction,
     responses_state_matches,
 )
 
@@ -2048,6 +2049,9 @@ class OpenAICompatProvider(LLMProvider):
                             input_items=cast(list[dict[str, Any]], body["input"]),
                             output_items=capture.output_items,
                             usage=usage,
+                        )
+                        result.provider_compaction_applied = (
+                            responses_items_have_compaction(capture.output_items)
                         )
                     return result
                 except Exception as responses_error:

@@ -563,6 +563,9 @@ class LLMResponse:
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    # True only when this response installed a new provider-native compaction
+    # boundary. Replaying an older compaction item does not set this flag.
+    provider_compaction_applied: bool = field(default=False, repr=False)
     # Routing wrappers may preserve or discard an incoming provider-owned
     # continuation independently of the final fallback error's retry policy.
     preserve_provider_state_on_error: bool | None = field(default=None, repr=False)
