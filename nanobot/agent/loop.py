@@ -866,6 +866,22 @@ class AgentLoop:
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
         return cancelled + sub_cancelled + exec_cancelled
 
+    def _release_active_task(self, task: asyncio.Task[Any], key: str) -> None:
+        """Drop *task* from its session group, deleting the group when empty.
+
+        A finished task is removed from the per-session set by the done
+        callback, but the empty set itself would otherwise stay in
+        ``_active_tasks`` for the lifetime of the loop. A gateway that sees
+        many short-lived sessions then accumulates one entry per session
+        (issue #5428).
+        """
+        tasks = self._active_tasks.get(key)
+        if tasks is None:
+            return
+        tasks.discard(task)
+        if not tasks:
+            self._active_tasks.pop(key, None)
+
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
         self._discarding_sessions.add(key)
@@ -1355,7 +1371,9 @@ class AgentLoop:
                     set(),
                 )
                 active_tasks.add(task)
-                task.add_done_callback(active_tasks.discard)
+                task.add_done_callback(
+                    lambda t, k=effective_key: self._release_active_task(t, k)
+                )
         finally:
             await self.aclose()
 
