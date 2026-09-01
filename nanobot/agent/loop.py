@@ -2028,7 +2028,6 @@ class AgentLoop:
             await turn_continuation.maybe_continue_turn(ctx)
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
-        runtime = ctx.require_runtime()
         session = ctx.require_session()
         turn_continuation.prepare_save_boundary(ctx)
 
@@ -2058,13 +2057,6 @@ class AgentLoop:
             input_persisted_early=ctx.input_persisted_early,
         )
         ctx.delivery.record_latency(ctx.turn_latency_ms)
-        if not ctx.ephemeral:
-            self.schedule_background(
-                self.consolidator.maybe_consolidate_by_tokens(
-                    session,
-                    runtime=runtime,
-                )
-            )
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)

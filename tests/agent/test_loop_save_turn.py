@@ -1924,7 +1924,6 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.add_message("user", "question")
@@ -1971,11 +1970,6 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     assert request.metadata == {"subagent_task_id": "sub-1"}
     assert request.turn_id
     record_runtime.assert_called_once_with("cli:test", runtime)
-    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 1
-    assert all(
-        call.kwargs["runtime"] is runtime
-        for call in loop.consolidator.maybe_consolidate_by_tokens.call_args_list
-    )
     initial_messages = seen["initial_messages"]
     assert isinstance(initial_messages, list)
     non_system = [m for m in initial_messages if m.get("role") != "system"]
