@@ -62,28 +62,14 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "skill-creator" in prompt
 
-    def test_prompt_embeds_current_memory_file_contents(self, store):
-        """Dream must see the real current file contents (Tier 4) so it edits the
-        files, not a stale mental model."""
+    def test_prompt_does_not_duplicate_current_memory_file_contents(self, store):
         store.append_history("hello")
         result = store.build_dream_prompt()
         assert result is not None
         prompt, _ = result
-        assert "## Current Memory Files" in prompt
-        assert "### SOUL.md" in prompt
-        assert "### USER.md" in prompt
-        assert "### memory/MEMORY.md" in prompt
-        # Real current contents are embedded verbatim.
-        assert "Project X active" in prompt
-        assert "Helpful" in prompt
-
-    def test_prompt_renders_missing_files_as_empty(self, tmp_path):
-        store = MemoryStore(tmp_path)  # no durable files written
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-        assert "(empty)" in prompt
+        assert "## Current Memory Files" not in prompt
+        assert "Project X active" not in prompt
+        assert "Helpful" not in prompt
 
     def test_workspace_dream_prompt_overrides_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -624,6 +610,63 @@ class TestEphemeralDirect:
         assert "entry-20" in request_text
         assert "entry-21" not in request_text
         assert "entry-60" not in request_text
+
+    async def test_dream_turn_injects_memory_files_once_and_persists_session(self, tmp_path):
+        """Dream gets durable files from system context without losing its session record."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        markers = {
+            "SOUL.md": "DREAM_SOUL_MARKER",
+            "USER.md": "DREAM_USER_MARKER",
+            "memory/MEMORY.md": "DREAM_MEMORY_MARKER",
+        }
+        store = MemoryStore(tmp_path)
+        store.write_soul(markers["SOUL.md"])
+        store.write_user(markers["USER.md"])
+        store.write_memory(markers["memory/MEMORY.md"])
+        store.append_history("history-marker")
+        (tmp_path / "AGENTS.md").write_text("DREAM_AGENTS_MARKER", encoding="utf-8")
+
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+
+        captured: dict[str, list[dict]] = {}
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+
+        async def chat_with_retry(**kwargs):
+            captured["messages"] = kwargs["messages"]
+            return LLMResponse(content="done", finish_reason="stop")
+
+        provider.chat_with_retry = chat_with_retry
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            context_window_tokens=32_000,
+        )
+        session_key = "dream:single-memory-copy"
+
+        await loop.process_direct(
+            prompt,
+            session_key=session_key,
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        messages = captured["messages"]
+        system_prompt = str(messages[0]["content"])
+        request_text = "\n".join(str(message.get("content", "")) for message in messages)
+        for marker in [*markers.values(), "DREAM_AGENTS_MARKER"]:
+            assert marker in system_prompt
+            assert request_text.count(marker) == 1
+        assert loop.sessions._get_session_path(session_key).exists()
 
 
 class TestEphemeralHooks:

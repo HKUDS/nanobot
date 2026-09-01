@@ -109,16 +109,12 @@ class ContextBuilder:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        include_soul_and_user: bool = True,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
         parts = [self._get_identity(channel=channel, workspace=root)]
 
-        bootstrap = self._load_bootstrap_files(
-            root,
-            include_soul_and_user=include_soul_and_user,
-        )
+        bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -199,21 +195,15 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    def _load_bootstrap_files(
-        self,
-        workspace: Path | None = None,
-        *,
-        include_soul_and_user: bool = True,
-    ) -> str:
+    def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
         """Load project instructions plus the agent's global profile files."""
         parts: list[str] = []
         project_root = workspace or self.workspace
-        sources = [("AGENTS.md", project_root)]
-        if include_soul_and_user:
-            sources.extend([
-                ("SOUL.md", self.workspace),
-                ("USER.md", self.workspace),
-            ])
+        sources = [
+            ("AGENTS.md", project_root),
+            ("SOUL.md", self.workspace),
+            ("USER.md", self.workspace),
+        ]
 
         for filename, root in sources:
             file_path = root / filename
@@ -292,7 +282,6 @@ class ContextBuilder:
         channel: str | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        include_soul_and_user: bool = True,
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
@@ -304,7 +293,6 @@ class ContextBuilder:
                     session_summary=transcript.session_summary,
                     workspace=root,
                     include_memory=include_memory,
-                    include_soul_and_user=include_soul_and_user,
                 ),
             },
             *transcript.history,

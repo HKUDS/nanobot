@@ -1108,9 +1108,6 @@ class AgentLoop:
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
-            include_soul_and_user=(
-                not session.policy.suppress_bootstrap_files if session is not None else True
-            ),
         )
         if request_context is None:
             request_ctx = dataclasses.replace(
