@@ -450,6 +450,10 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 return
             prompt, last_cursor = result
             key = dream_session_key()
+            # Non-persistent, and suppresses SOUL.md/USER.md/MEMORY.md from the
+            # turn's system prompt — build_dream_prompt already embeds them,
+            # uncapped, in the user message above.
+            loop.sessions.get_or_create_transient(key, suppress_bootstrap_files=True)
             dream_runtime = loop.dream_runtime()
             resp = await loop.process_direct(
                 prompt,

@@ -62,10 +62,6 @@ class MemoryStore:
     # Deliberately excludes memory/.dream_cursor so progress bookkeeping never
     # appears as a durable-memory edit in the audit record.
     _DREAM_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
-    # Per-file cap when embedding current contents into the Dream prompt. The
-    # durable files are tiny in practice (~5 KB total), but a runaway file must
-    # not unbounded the prompt.
-    _DREAM_FILE_EMBED_CAP = 8000
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
     _LEGACY_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*")
     _LEGACY_RAW_MESSAGE_RE = re.compile(
@@ -574,8 +570,11 @@ class MemoryStore:
     def _render_current_memory_files(self) -> str:
         """Render the durable memory files' current contents for the Dream prompt.
 
-        Missing files render as ``(empty)``; oversized files are capped. The
-        section is the ground truth the model must edit against.
+        Missing files render as ``(empty)``. Content is embedded verbatim and
+        uncapped — Dream is now the only place these files reach the model (the
+        turn's system prompt suppresses them, see ``suppress_bootstrap_files``),
+        so truncating here would be a net information loss rather than removing
+        a duplicate. The section is the ground truth the model must edit against.
         """
         files = [
             ("SOUL.md", self.soul_file),
@@ -588,8 +587,6 @@ class MemoryStore:
                 content = path.read_text(encoding="utf-8") if path.exists() else ""
             except OSError:
                 content = ""
-            if len(content) > self._DREAM_FILE_EMBED_CAP:
-                content = truncate_text(content, self._DREAM_FILE_EMBED_CAP) + "\n...[truncated]"
             blocks.append(f"### {label}\n{content}" if content.strip() else f"### {label}\n(empty)")
         return "## Current Memory Files\n" + "\n\n".join(blocks)
 

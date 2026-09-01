@@ -275,6 +275,10 @@ class SessionPolicy:
     persist: bool = True
     log_content: bool = True
     disabled_tools: frozenset[str] = frozenset()
+    # Suppresses SOUL.md/USER.md (but not AGENTS.md) in the turn's system
+    # prompt. Used by Dream, which embeds those files itself in the user
+    # message instead.
+    suppress_bootstrap_files: bool = False
 
 
 @dataclass
@@ -1870,12 +1874,14 @@ class SessionManager:
         key: str,
         *,
         disabled_tools: Collection[str] = (),
+        suppress_bootstrap_files: bool = False,
     ) -> Session:
         """Return a fresh, non-persistent session without loading history."""
         policy = SessionPolicy(
             persist=False,
             log_content=False,
             disabled_tools=frozenset(disabled_tools),
+            suppress_bootstrap_files=suppress_bootstrap_files,
         )
         session = self.get_cached(key)
         if session is None or session.policy != policy:

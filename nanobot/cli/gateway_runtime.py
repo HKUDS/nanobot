@@ -580,6 +580,10 @@ def _run_gateway(
                     return None
                 prompt, last_cursor = result
                 key = dream_session_key()
+                # Non-persistent, and suppresses SOUL.md/USER.md/MEMORY.md from
+                # the turn's system prompt — build_dream_prompt already embeds
+                # them, uncapped, in the user message above.
+                agent.sessions.get_or_create_transient(key, suppress_bootstrap_files=True)
                 dream_runtime = agent.dream_runtime()
                 await mcp_provider.connect()
                 resp = await agent.process_direct(
