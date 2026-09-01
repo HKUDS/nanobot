@@ -18,7 +18,7 @@ export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
-  brandLogos: false,
+  brandLogos: true,
   browserNotifications: false,
   fileEditDisplayMode: "summary",
 };
@@ -36,7 +36,7 @@ export function readLocalPreferences(): LocalPreferences {
       density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos === true,
+      brandLogos: parsed.brandLogos !== false,
       browserNotifications: parsed.browserNotifications === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
     };
