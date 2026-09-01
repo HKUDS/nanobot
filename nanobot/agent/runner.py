@@ -47,7 +47,6 @@ from nanobot.runtime_context import (
     reattach_runtime_context,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
-from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
 from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
@@ -216,23 +215,35 @@ class AgentRunner:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    @classmethod
+    @staticmethod
     def _append_injected_messages(
-        cls,
         messages: list[dict[str, Any]],
         injections: list[dict[str, Any]],
     ) -> None:
-        """Append injected user messages while preserving role alternation."""
-        for injection in injections:
+        """Append injected messages without rewriting the raw transcript."""
+        messages.extend(injections)
+
+    @classmethod
+    def _merge_adjacent_user_messages_for_model(
+        cls,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge adjacent visible user messages only in the model-facing copy."""
+        prepared: list[dict[str, Any]] = []
+        for source in messages:
+            injection = deepcopy(source)
             if (
-                messages
+                prepared
                 and injection.get("role") == "user"
-                and messages[-1].get("role") == "user"
+                and prepared[-1].get("role") == "user"
+                and injection.get("content") != SUMMARY_CONTINUATION_TEXT
+                and prepared[-1].get("content") != SUMMARY_CONTINUATION_TEXT
                 and not is_hidden_history_message(injection)
-                and not is_hidden_history_message(messages[-1])
-                and allows_conversation_message_merge(messages[-1])
+                and not is_hidden_history_message(prepared[-1])
+                and allows_conversation_message_merge(injection)
+                and allows_conversation_message_merge(prepared[-1])
             ):
-                merged = dict(messages[-1])
+                merged = dict(prepared[-1])
                 left_meta = merged.get("_meta")
                 right_meta = injection.get("_meta")
                 left_meta_dict = cast(dict[str, Any], left_meta) if isinstance(left_meta, dict) else None
@@ -290,26 +301,18 @@ class AgentRunner:
                         merged.get("content"),
                         injection.get("content"),
                     )
-                followup_id = injection.get(PENDING_FOLLOWUP_ID_KEY)
-                if isinstance(followup_id, str) and followup_id:
-                    existing = cast(object, merged.get(PENDING_FOLLOWUP_ID_KEY))
-                    followup_ids = (
-                        [existing]
-                        if isinstance(existing, str)
-                        else [
-                            item
-                            for item in cast(list[object], existing)
-                            if isinstance(item, str)
-                        ]
-                        if isinstance(existing, list)
-                        else []
-                    )
-                    if followup_id not in followup_ids:
-                        followup_ids.append(followup_id)
-                    merged[PENDING_FOLLOWUP_ID_KEY] = followup_ids
-                messages[-1] = merged
+                prepared[-1] = merged
                 continue
-            messages.append(injection)
+            prepared.append(injection)
+        return prepared
+
+    def _prepare_messages_for_model(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        governed = self.context_governor.prepare_for_model(config, messages)
+        return self._merge_adjacent_user_messages_for_model(governed)
 
     async def _try_drain_injections(
         self,
@@ -722,7 +725,7 @@ class AgentRunner:
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 checkpoint_model_messages = (
-                    self.context_governor.prepare_for_model(
+                    self._prepare_messages_for_model(
                         governance_config,
                         messages,
                     )
@@ -1045,7 +1048,7 @@ class AgentRunner:
         transcript: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
         """Prepare, compact or fit, and record the exact provider payload."""
-        prepared = self.context_governor.prepare_for_model(state.config, messages)
+        prepared = self._prepare_messages_for_model(state.config, messages)
         supplemental_messages = (
             [prepared[-1]] if transcript is not None and tool_definitions is None else None
         )
@@ -1091,7 +1094,7 @@ class AgentRunner:
             consolidate_history = spec.consolidate_history
             summary = None
             if delta_messages is not None and consolidate_history is not None:
-                consolidation_prefix = self.context_governor.prepare_for_model(
+                consolidation_prefix = self._prepare_messages_for_model(
                     state.config,
                     compaction.accepted_messages,
                 )
@@ -1110,7 +1113,7 @@ class AgentRunner:
 
             assert delta_messages is not None
             compaction.active_summary = summary
-            prepared = self.context_governor.prepare_for_model(
+            prepared = self._prepare_messages_for_model(
                 state.config,
                 [
                     *self._summary_transcript(spec, summary),

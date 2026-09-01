@@ -475,7 +475,7 @@ async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatc
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         lambda _provider, _model, messages, _tools: (
             (2_000, "test-counter")
-            if any(message.get("content") == oversized for message in messages)
+            if any(oversized in str(message.get("content")) for message in messages)
             else (100, "test-counter")
         ),
     )
