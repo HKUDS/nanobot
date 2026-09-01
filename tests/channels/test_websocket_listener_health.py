@@ -28,6 +28,21 @@ class _StubSocket:
         return self._value
 
 
+class _StubServer:
+    """Minimal server stand-in for the production listener-health boundary."""
+
+    def __init__(self, sock: _StubSocket, *, serving: bool = True):
+        self._sock = sock
+        self._serving = serving
+
+    @property
+    def sockets(self) -> tuple[_StubSocket, ...]:
+        return (self._sock,)
+
+    def is_serving(self) -> bool:
+        return self._serving
+
+
 @pytest.fixture
 def listening_socket() -> socket.socket:
     sock = socket.socket()
@@ -57,7 +72,7 @@ def test_closed_socket_is_not_accepting() -> None:
 
 @pytest.mark.parametrize(
     "unsupported_errno",
-    [errno.ENOPROTOOPT, errno.EOPNOTSUPP, errno.EINVAL],
+    [errno.ENOPROTOOPT, errno.EOPNOTSUPP],
 )
 def test_unsupported_sockopt_falls_back_to_fd_liveness(unsupported_errno: int) -> None:
     """macOS/BSD reject ``SO_ACCEPTCONN`` even on healthy listeners.
@@ -70,6 +85,14 @@ def test_unsupported_sockopt_falls_back_to_fd_liveness(unsupported_errno: int) -
     assert WebSocketChannel._socket_is_accepting(sock) is True
 
 
+def test_listener_health_uses_unsupported_sockopt_fallback() -> None:
+    """The fallback must be wired into the health check that controls readiness."""
+    sock = _StubSocket(fileno=3, error=OSError(errno.ENOPROTOOPT, "Protocol not available"))
+    server: Any = _StubServer(sock)
+
+    assert WebSocketChannel._listener_is_serving(server) is True
+
+
 def test_unexpected_oserror_propagates() -> None:
     sock = _StubSocket(fileno=3, error=OSError(errno.EBADF, "Bad file descriptor"))
 
@@ -77,6 +100,14 @@ def test_unexpected_oserror_propagates() -> None:
         WebSocketChannel._socket_is_accepting(sock)
 
     assert excinfo.value.errno == errno.EBADF
+
+
+def test_listener_health_rejects_invalid_socket_state() -> None:
+    """``EINVAL`` can mean that a live socket isn't actually listening."""
+    sock = _StubSocket(fileno=3, error=OSError(errno.EINVAL, "Invalid argument"))
+    server: Any = _StubServer(sock)
+
+    assert WebSocketChannel._listener_is_serving(server) is False
 
 
 def test_unsupported_sockopt_still_rejects_dead_fd() -> None:

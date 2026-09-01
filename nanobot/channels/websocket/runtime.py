@@ -554,7 +554,7 @@ class WebSocketChannel(BaseChannel):
         try:
             return bool(sock.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN))
         except OSError as exc:
-            if exc.errno in (errno.ENOPROTOOPT, errno.EOPNOTSUPP, errno.EINVAL):
+            if exc.errno in (errno.ENOPROTOOPT, errno.EOPNOTSUPP):
                 return True
             raise
 
