@@ -876,6 +876,10 @@ describe("ThreadShell", () => {
 
     const badge = await screen.findByRole("button", { name: "Choose your AI" });
     expect(screen.queryByTestId("composer-model-setup-icon")).not.toBeInTheDocument();
+    expect(badge.querySelector('[data-needs-setup="true"]')).toHaveClass(
+      "composer-model-pill-setup",
+    );
+    expect(screen.getByTestId("composer-model-setup-label")).toHaveTextContent("Choose your AI");
     expect(badge).not.toHaveClass("border-amber-500/35");
     expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
     fireEvent.click(badge);

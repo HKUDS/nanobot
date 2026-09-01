@@ -533,6 +533,7 @@ function PresetPill({
   return (
     <span
       data-fallback={fallbackModelName ? "true" : undefined}
+      data-needs-setup={needsSetup ? "true" : undefined}
       data-preset-offset={offset}
       title={fallbackTitle || undefined}
       className={cn(
@@ -540,6 +541,7 @@ function PresetPill({
         "w-fit",
         "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible:ring-2 group-focus-visible:ring-ring/45",
         isHero ? "gap-1.5 px-2.5 text-[12px]" : "gap-2 px-3 text-[12.5px]",
+        needsSetup && "composer-model-pill-setup",
         offset !== undefined && "composer-model-pill-dock",
       )}
       style={scale === undefined ? undefined : {
@@ -564,7 +566,26 @@ function PresetPill({
           labelOverflows && "thread-composer-model-label-fade",
         )}
       >
-        {label}
+        {needsSetup ? <SetupPromptLabel label={label} /> : label}
+      </span>
+    </span>
+  );
+}
+
+function SetupPromptLabel({ label }: { label: string }) {
+  const separator = label.indexOf(" ");
+  if (separator < 0) {
+    return <span className="text-foreground/80">{label}</span>;
+  }
+
+  return (
+    <span data-testid="composer-model-setup-label">
+      <span className="text-muted-foreground/90 transition-colors duration-150 group-hover:text-muted-foreground motion-reduce:transition-none">
+        {label.slice(0, separator)}
+      </span>
+      {" "}
+      <span className="text-foreground/80 transition-colors duration-150 group-hover:text-foreground/90 motion-reduce:transition-none">
+        {label.slice(separator + 1)}
       </span>
     </span>
   );
