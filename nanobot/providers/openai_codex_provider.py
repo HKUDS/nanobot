@@ -137,7 +137,6 @@ class OpenAICodexProvider(LLMProvider):
             body.update(self._extra_body)
 
         stage = "oauth_token"
-        native_compaction_applied = False
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(cast(str, token.account_id), token.access)
@@ -209,7 +208,6 @@ class OpenAICodexProvider(LLMProvider):
                         *_retained_compaction_messages(input_items),
                         *compact_items,
                     ]
-                    native_compaction_applied = True
                 except Exception as compact_error:
                     if is_compaction_compatibility_error(compact_error):
                         self._native_compaction_available = False
@@ -222,11 +220,7 @@ class OpenAICodexProvider(LLMProvider):
                     )
 
             stage = "codex_request"
-            result = await _send(body, emit_deltas=True)
-            result.provider_compaction_applied = (
-                result.provider_compaction_applied or native_compaction_applied
-            )
-            return result
+            return await _send(body, emit_deltas=True)
         except Exception as e:
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__

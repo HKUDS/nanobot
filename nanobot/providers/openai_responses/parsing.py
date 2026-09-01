@@ -11,10 +11,7 @@ import httpx
 from loguru import logger
 
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest, parse_tool_arguments
-from nanobot.providers.openai_responses.state import (
-    build_responses_state,
-    responses_items_have_compaction,
-)
+from nanobot.providers.openai_responses.state import build_responses_state
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -643,7 +640,6 @@ def parse_response_output(
         finish_reason=finish_reason,
         usage=usage,
         reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
-        provider_compaction_applied=responses_items_have_compaction(output),
     )
     if (
         state_provider is not None

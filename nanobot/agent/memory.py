@@ -21,18 +21,13 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 from loguru import logger
 
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
     Session,
     SessionManager,
 )
-from nanobot.session.summary import (
-    MEMORY_CHECKPOINT_VERSION,
-    MEMORY_CHECKPOINT_VERSION_KEY,
-    session_summary_from_metadata,
-)
+from nanobot.session.summary import session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -880,72 +875,6 @@ class MemoryArchiver:
         self.store.append_history(summary, session_key=session_key)
         return summary
 
-    async def materialize_provider_checkpoint(
-        self,
-        state: ProviderConversationState,
-        previous_summary: str | None,
-        *,
-        runtime: LLMRuntime,
-        session_key: str,
-    ) -> str | None:
-        """Turn a provider-native compacted state into a portable checkpoint."""
-        if not runtime.provider.can_resume_conversation_state(state, runtime.model):
-            return None
-
-        prompt = render_template("agent/consolidator_archive.md", strip=True)
-        system = (
-            "Materialize the compacted provider conversation into a durable, "
-            "provider-independent working-memory checkpoint."
-        )
-        if previous_summary:
-            system = f"{system}\n\n[Archived Context Summary]\n{previous_summary}"
-        prompt_message = {"role": "user", "content": prompt}
-        request_state = state.with_pending_messages([
-            *state.pending_messages,
-            prompt_message,
-        ])
-        try:
-            with llm_usage_source("dream"):
-                response = await runtime.provider.chat_with_retry(
-                    model=runtime.model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        prompt_message,
-                    ],
-                    tools=[],
-                    temperature=runtime.generation.temperature,
-                    max_tokens=runtime.generation.max_tokens,
-                    reasoning_effort=runtime.generation.reasoning_effort,
-                    provider_context=ProviderCallContext(
-                        conversation_state=request_state,
-                        session_id=f"{session_key}:memory-checkpoint",
-                    ),
-                )
-        except Exception:
-            logger.warning(
-                "Provider checkpoint materialization failed for {}; preserving native state",
-                session_key,
-            )
-            return None
-        if response.finish_reason in {"error", "length"} or response.has_tool_calls:
-            logger.warning(
-                "Provider checkpoint materialization did not complete for {} ({})",
-                session_key,
-                response.finish_reason,
-            )
-            return None
-        summary = response.content
-        if not summary or not summary.strip():
-            return None
-        summary = self.store._normalize_history_entry(summary)
-        if not summary or summary == "(nothing)":
-            return None
-        self.store.append_history(summary, session_key=session_key)
-        return truncate_text_to_tokens(
-            summary,
-            max(1, runtime.generation.max_tokens),
-        )
-
     async def archive_session(
         self,
         session: Session,
@@ -1137,22 +1066,6 @@ class Consolidator:
             return None
         return truncate_text_to_tokens(summary, max(1, max_output_tokens))
 
-    async def materialize_provider_checkpoint(
-        self,
-        state: ProviderConversationState,
-        previous_summary: str | None,
-        *,
-        runtime: LLMRuntime,
-        session_key: str,
-    ) -> str | None:
-        """Create a portable checkpoint from a compacted provider state."""
-        return await self.archiver.materialize_provider_checkpoint(
-            state,
-            previous_summary,
-            runtime=runtime,
-            session_key=session_key,
-        )
-
     def pick_consolidation_boundary(
         self,
         session: Session,
@@ -1191,55 +1104,6 @@ class Consolidator:
                 "text": summary,
                 "last_active": (last_active or session.updated_at).isoformat(),
             }
-
-    def _ensure_cumulative_checkpoint(
-        self,
-        session: Session,
-        *,
-        runtime: LLMRuntime,
-    ) -> None:
-        """Migrate pre-checkpoint archive state without changing its watermark."""
-        if session.last_archived <= 0:
-            return
-        if (
-            cast(object, session.metadata.get(MEMORY_CHECKPOINT_VERSION_KEY))
-            == MEMORY_CHECKPOINT_VERSION
-        ):
-            return
-
-        archived_prefix = session.messages[:session.last_archived]
-        if not archived_prefix:
-            return
-        previous = session_summary_from_metadata(
-            session.metadata,
-            fallback_last_active=session.updated_at,
-        )
-        checkpoint = self.archiver._combine_raw_checkpoint(
-            self.store._build_raw_checkpoint(archived_prefix),
-            previous_summary=previous["text"] if previous is not None else None,
-            max_tokens=runtime.generation.max_tokens,
-        )
-        self._set_last_summary(session, checkpoint)
-        session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
-        self.sessions.save(session)
-        logger.info(
-            "Migrated cumulative Memory checkpoint for {} at archive watermark {}",
-            session.key,
-            session.last_archived,
-        )
-
-    async def migrate_legacy_checkpoint(
-        self,
-        session: Session,
-        *,
-        runtime: LLMRuntime,
-    ) -> Session:
-        """Upgrade pre-checkpoint archive state without performing consolidation."""
-        lock = self.get_lock(session.key)
-        async with lock:
-            fresh = self.sessions.get_or_create(session.key)
-            self._ensure_cumulative_checkpoint(fresh, runtime=runtime)
-            return fresh
 
     def estimate_session_prompt_tokens(
         self,
@@ -1307,16 +1171,6 @@ class Consolidator:
             fresh = self.sessions.get_or_create(session.key)
             if fresh is not session:
                 session = fresh
-            if (
-                session.provider_state is not None
-                and session.provider_state.native_compaction_pending is True
-            ):
-                logger.debug(
-                    "Token consolidation deferred for {}: native provider checkpoint "
-                    "awaits portable materialization",
-                    session.key,
-                )
-                return
             if runtime.context_window_tokens <= 0:
                 return
             if not session.messages:
@@ -1369,7 +1223,6 @@ class Consolidator:
             if summary is None:
                 return
             self._set_last_summary(session, summary)
-            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
             session.last_archived = end_idx
             self.sessions.save(session)
 
@@ -1405,44 +1258,6 @@ class Consolidator:
 
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
-            pending_native_state = session.provider_state
-            if (
-                pending_native_state is not None
-                and pending_native_state.native_compaction_pending is True
-            ):
-                previous = session_summary_from_metadata(
-                    session.metadata,
-                    fallback_last_active=session.updated_at,
-                )
-                summary = await self.materialize_provider_checkpoint(
-                    pending_native_state,
-                    previous["text"] if previous is not None else None,
-                    runtime=runtime,
-                    session_key=session.key,
-                )
-                if summary is None:
-                    logger.debug(
-                        "Idle-session compact deferred for {}: native provider checkpoint "
-                        "materialization remains pending",
-                        session.key,
-                    )
-                    return None
-
-                self._set_last_summary(session, summary, last_active=last_active)
-                session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
-                session.last_archived = archive_end
-                if session.provider_state is pending_native_state:
-                    session.provider_state = None
-                self.sessions.save(session)
-                logger.info(
-                    "Idle-session compact for {} materialized native provider checkpoint: "
-                    "archived={} retained_state={}",
-                    session.key,
-                    len(messages_to_archive),
-                    session.provider_state is not None,
-                )
-                return summary
-
             summary = await self.archive_session(
                 session,
                 archive_end=archive_end,
@@ -1452,7 +1267,6 @@ class Consolidator:
                 return None
 
             self._set_last_summary(session, summary, last_active=last_active)
-            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
 
             # A turn can append while the provider call is in flight. Advance only
             # through the captured batch so new messages remain eligible next time.

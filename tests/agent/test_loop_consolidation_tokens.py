@@ -4,11 +4,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import (
-    GenerationSettings,
-    LLMResponse,
-    ProviderConversationState,
-)
+from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
@@ -55,86 +51,6 @@ async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
     )
 
     loop.consolidator.archive_session.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_legacy_archive_watermark_without_summary_is_repaired_before_request(
-    tmp_path,
-) -> None:
-    loop = _make_loop(
-        tmp_path,
-        estimated_tokens=100,
-        context_window_tokens=1000,
-        max_tokens=256,
-    )
-    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
-
-    session = loop.sessions.get_or_create("cli:legacy")
-    session.messages = [
-        {
-            "role": role,
-            "content": (
-                "LEGACY_ARCHIVED_MARKER"
-                if turn == 0 and role == "user"
-                else f"{role[0]}{turn}"
-            ),
-        }
-        for turn in range(10)
-        for role in ("user", "assistant")
-    ]
-    session.last_archived = 12
-    loop.sessions.save(session)
-    loop.sessions.invalidate("cli:legacy")
-
-    await loop.process_direct("hello", session_key="cli:legacy")
-
-    request_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
-    system_prompt = request_messages[0]["content"]
-    assert "LEGACY_ARCHIVED_MARKER" in system_prompt
-    reloaded = loop.sessions.get_or_create("cli:legacy")
-    assert reloaded.last_archived == 12
-    assert reloaded.metadata["_last_summary"]["text"] in system_prompt
-    assert reloaded.metadata["_memory_checkpoint_version"] == 1
-    assert reloaded.messages[0]["content"] == "LEGACY_ARCHIVED_MARKER"
-    assert loop.context.memory.read_unprocessed_history(since_cursor=0) == []
-
-
-@pytest.mark.asyncio
-async def test_legacy_summary_and_surviving_archive_are_preserved_before_request(
-    tmp_path,
-) -> None:
-    loop = _make_loop(
-        tmp_path,
-        estimated_tokens=100,
-        context_window_tokens=1000,
-        max_tokens=256,
-    )
-    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
-
-    session = loop.sessions.get_or_create("cli:legacy-pruned")
-    session.messages = [
-        {"role": "user", "content": "SURVIVING_ARCHIVED_MARKER"},
-        {"role": "assistant", "content": "surviving archived answer"},
-        {"role": "user", "content": "recent question"},
-        {"role": "assistant", "content": "recent answer"},
-    ]
-    session.last_archived = 2
-    session.metadata["_last_summary"] = {
-        "text": "DROPPED_PREFIX_FACT_ONLY_IN_LEGACY_SUMMARY",
-        "last_active": session.updated_at.isoformat(),
-    }
-    loop.sessions.save(session)
-    loop.sessions.invalidate("cli:legacy-pruned")
-
-    await loop.process_direct("hello", session_key="cli:legacy-pruned")
-
-    request_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
-    system_prompt = request_messages[0]["content"]
-    assert "SURVIVING_ARCHIVED_MARKER" in system_prompt
-    assert "DROPPED_PREFIX_FACT_ONLY_IN_LEGACY_SUMMARY" in system_prompt
-    reloaded = loop.sessions.get_or_create("cli:legacy-pruned")
-    assert reloaded.last_archived == 2
-    assert reloaded.metadata["_memory_checkpoint_version"] == 1
 
 
 @pytest.mark.asyncio
@@ -243,49 +159,8 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
     assert reloaded.messages[reloaded.last_archived]["content"] == (
         SUMMARY_CONTINUATION_TEXT
     )
-    assert reloaded.metadata["_memory_checkpoint_version"] == 1
     assert [message["content"] for message in reloaded.get_history()] == [
         SUMMARY_CONTINUATION_TEXT,
         "continue the task",
         "done",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
-    tmp_path,
-) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=2_000)
-    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
-    compacted_state = ProviderConversationState(
-        kind="openai_responses",
-        provider="openai:test",
-        model="test-model",
-        version=1,
-        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
-    )
-    loop.provider.can_resume_conversation_state.return_value = True
-    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="done",
-        provider_state=compacted_state,
-        provider_compaction_applied=True,
-    ))
-    loop.consolidator.materialize_provider_checkpoint = AsyncMock(
-        return_value="portable terminal checkpoint",
-    )
-
-    result = await loop.process_direct("continue", session_key="cli:native")
-
-    assert result.content == "done"
-    loop.consolidator.materialize_provider_checkpoint.assert_awaited_once()
-    reloaded = loop.sessions.get_or_create("cli:native")
-    assert reloaded.provider_state is None
-    assert reloaded.metadata["_last_summary"]["text"] == (
-        "portable terminal checkpoint"
-    )
-    assert reloaded.messages[reloaded.last_archived]["content"] == (
-        SUMMARY_CONTINUATION_TEXT
-    )
-    assert [message["content"] for message in reloaded.get_history()] == [
-        SUMMARY_CONTINUATION_TEXT,
     ]

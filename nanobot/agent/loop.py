@@ -13,6 +13,7 @@ import weakref
 from collections.abc import Coroutine, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
@@ -94,8 +95,6 @@ from nanobot.session.recovery import (
     restore_runtime_checkpoint,
 )
 from nanobot.session.summary import (
-    MEMORY_CHECKPOINT_VERSION,
-    MEMORY_CHECKPOINT_VERSION_KEY,
     SUMMARY_CONTINUATION_TEXT,
     SessionSummary,
     SessionSummaryCheckpoint,
@@ -1190,15 +1189,6 @@ class AgentLoop:
                     if session is not None and not ephemeral
                     else None
                 ),
-                materialize_provider_checkpoint=(
-                    partial(
-                        self.consolidator.materialize_provider_checkpoint,
-                        runtime=runtime,
-                        session_key=session.key,
-                    )
-                    if session is not None and not ephemeral
-                    else None
-                ),
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
@@ -1899,12 +1889,6 @@ class AgentLoop:
         if ctx.on_runtime_admitted is not None:
             await ctx.on_runtime_admitted(runtime)
         if not ctx.ephemeral:
-            # Compatibility migration only. Runner owns all live request-pressure
-            # consolidation after this point.
-            session = await self.consolidator.migrate_legacy_checkpoint(
-                session,
-                runtime=runtime,
-            )
             ctx.session, ctx.pending_summary = self.auto_compact.prepare_session(
                 session,
                 ctx.session_key,
@@ -2154,6 +2138,55 @@ class AgentLoop:
 
         return filtered
 
+    @staticmethod
+    def _insert_summary_checkpoint(
+        session: Session,
+        checkpoint: SessionSummaryCheckpoint,
+        *,
+        insert_at: int | None = None,
+    ) -> None:
+        """Commit a replacement summary and its hidden transcript boundary."""
+        hint = {
+            "role": "user",
+            "content": SUMMARY_CONTINUATION_TEXT,
+            HIDDEN_HISTORY_META: True,
+            "timestamp": datetime.now().isoformat(),
+        }
+        if insert_at is None:
+            session.messages.append(hint)
+            checkpoint_session_index = len(session.messages) - 1
+        else:
+            session.messages.insert(insert_at, hint)
+            checkpoint_session_index = insert_at
+        session.metadata["_last_summary"] = {
+            "text": checkpoint.summary,
+            "last_active": session.updated_at.isoformat(),
+        }
+        session.last_archived = checkpoint_session_index
+
+    @staticmethod
+    def _validated_checkpoint_boundary(
+        checkpoint: SessionSummaryCheckpoint | None,
+        *,
+        skip: int,
+        message_count: int,
+        session_key: str,
+    ) -> int | None:
+        """Return a checkpoint boundary only when it belongs to this turn."""
+        if checkpoint is None:
+            return None
+        boundary = checkpoint.transcript_boundary
+        if skip - 1 <= boundary <= message_count:
+            return boundary
+        logger.warning(
+            "Ignoring invalid summary boundary {} outside [{}, {}] for {}",
+            boundary,
+            skip - 1,
+            message_count,
+            session_key,
+        )
+        return None
+
     def _save_turn(
         self,
         session: Session,
@@ -2164,9 +2197,7 @@ class AgentLoop:
         summary_checkpoint: SessionSummaryCheckpoint | None = None,
         input_persisted_early: bool = False,
     ) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
-
+        """Commit new-turn messages and an optional summary boundary."""
         declared_tool_call_ids = {
             str(tc["id"])
             for m in session.messages
@@ -2183,52 +2214,30 @@ class AgentLoop:
         }
         last_assistant_idx: int | None = None
         saved_followup_ids: set[str] = set()
-        checkpoint_index = (
-            summary_checkpoint.transcript_boundary
-            if summary_checkpoint is not None
-            and skip - 1 <= summary_checkpoint.transcript_boundary <= len(messages)
-            else None
+        checkpoint_boundary = self._validated_checkpoint_boundary(
+            summary_checkpoint,
+            skip=skip,
+            message_count=len(messages),
+            session_key=session.key,
         )
-        if summary_checkpoint is not None and checkpoint_index is None:
-            logger.warning(
-                "Ignoring invalid summary boundary {} outside [{}, {}] for {}",
-                summary_checkpoint.transcript_boundary,
-                skip - 1,
-                len(messages),
-                session.key,
+
+        # The trigger input may already be the session tail while still being
+        # the first message after the replacement checkpoint.
+        if summary_checkpoint is not None and checkpoint_boundary == skip - 1:
+            insert_at = len(session.messages) - (1 if input_persisted_early else 0)
+            self._insert_summary_checkpoint(
+                session,
+                summary_checkpoint,
+                insert_at=insert_at,
             )
 
-        summary_last_active = session.updated_at.isoformat()
+        for message_index, message in enumerate(messages[skip:], start=skip):
+            # Insert against the raw transcript index before filtering the
+            # message so persistence cleanup cannot shift the H/Δ boundary.
+            if summary_checkpoint is not None and checkpoint_boundary == message_index:
+                self._insert_summary_checkpoint(session, summary_checkpoint)
 
-        def save_summary_checkpoint(*, insert_at: int | None = None) -> None:
-            assert summary_checkpoint is not None
-            hint = {
-                "role": "user",
-                "content": SUMMARY_CONTINUATION_TEXT,
-                HIDDEN_HISTORY_META: True,
-                "timestamp": datetime.now().isoformat(),
-            }
-            if insert_at is None:
-                session.messages.append(hint)
-                checkpoint_session_index = len(session.messages) - 1
-            else:
-                session.messages.insert(insert_at, hint)
-                checkpoint_session_index = insert_at
-            session.metadata["_last_summary"] = {
-                "text": summary_checkpoint.summary,
-                "last_active": summary_last_active,
-            }
-            session.metadata[MEMORY_CHECKPOINT_VERSION_KEY] = MEMORY_CHECKPOINT_VERSION
-            session.last_archived = checkpoint_session_index
-
-        if checkpoint_index == skip - 1:
-            insert_at = len(session.messages) - (1 if input_persisted_early else 0)
-            save_summary_checkpoint(insert_at=insert_at)
-
-        for message_index, m in enumerate(messages[skip:], start=skip):
-            if checkpoint_index == message_index:
-                save_summary_checkpoint()
-            entry = dict(m)
+            entry = dict(message)
             followup_id_value = cast(object, entry.pop(PENDING_FOLLOWUP_ID_KEY, None))
             followup_ids = (
                 [followup_id_value]
@@ -2307,8 +2316,8 @@ class AgentLoop:
                     for tc in (cast(dict[str, Any], tc_value),)
                     if tc.get("id")
                 )
-        if checkpoint_index == len(messages):
-            save_summary_checkpoint()
+        if summary_checkpoint is not None and checkpoint_boundary == len(messages):
+            self._insert_summary_checkpoint(session, summary_checkpoint)
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         if saved_followup_ids:

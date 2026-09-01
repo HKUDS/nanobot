@@ -37,33 +37,6 @@ def _state(label: str, *, pending: list[dict] | None = None) -> ProviderConversa
     )
 
 
-def test_provider_state_round_trips_native_compaction_pending_marker() -> None:
-    state = _state("compacted").with_native_compaction_pending(True)
-
-    restored = ProviderConversationState.from_private_record(state.to_private_record())
-
-    assert restored == state
-    assert state.with_pending_messages([{"role": "user", "content": "continue"}]) \
-        .native_compaction_pending is True
-
-
-def test_provider_state_legacy_record_defaults_native_compaction_marker() -> None:
-    record = _state("legacy").to_private_record()
-    record.pop("native_compaction_pending")
-
-    restored = ProviderConversationState.from_private_record(record)
-
-    assert restored is not None
-    assert restored.native_compaction_pending is False
-
-
-def test_provider_state_rejects_invalid_native_compaction_marker() -> None:
-    record = _state("invalid").to_private_record()
-    record["native_compaction_pending"] = "yes"
-
-    assert ProviderConversationState.from_private_record(record) is None
-
-
 def test_controller_replays_only_messages_after_provider_output() -> None:
     provider = _provider()
     messages = [

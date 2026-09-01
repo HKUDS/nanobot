@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TypedDict, cast
 
-MEMORY_CHECKPOINT_VERSION_KEY = "_memory_checkpoint_version"
-MEMORY_CHECKPOINT_VERSION = 1
-
 SUMMARY_CONTINUATION_TEXT = (
     "Continue the active task from the working-memory checkpoint above."
 )

@@ -87,11 +87,6 @@ class TranscriptInput:
         """Number of boundary-preserving messages in the assembled transcript."""
         return 1 + len(self.history) + (self.current_message is not None)
 
-    @property
-    def history_message_count(self) -> int:
-        """Boundary after system + history and before the fresh turn input."""
-        return 1 + len(self.history)
-
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""

@@ -78,10 +78,6 @@ HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
     Awaitable[str | None],
 ]
-ProviderCheckpointMaterializer = Callable[
-    [ProviderConversationState, str | None],
-    Awaitable[str | None],
-]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -128,7 +124,6 @@ class AgentRunSpec:
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
-    materialize_provider_checkpoint: ProviderCheckpointMaterializer | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
@@ -184,16 +179,6 @@ class _ContextCompactionState:
             return None
         return deepcopy(request_messages[boundary:])
 
-    def accept(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        raw_boundary: int,
-    ) -> None:
-        self.accepted_messages = deepcopy(messages)
-        self.raw_accepted_boundary = raw_boundary
-
-
 @dataclass(slots=True)
 class _ModelRequestState:
     """Per-run state used to govern the next provider request."""
@@ -203,9 +188,7 @@ class _ModelRequestState:
     usage: LLMUsage | None = None
     messages: list[dict[str, Any]] | None = None
     tool_definitions: list[dict[str, Any]] | None = None
-    fitted: bool = False
     compaction: _ContextCompactionState | None = None
-    native_compaction_pending: bool = False
 
 
 class AgentRunner:
@@ -612,31 +595,23 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
         )
+        compaction: _ContextCompactionState | None = None
+        if spec.consolidate_history is not None and spec.transcript_input is not None:
+            accepted_history_boundary = 1 + len(spec.transcript_input.history)
+            compaction = _ContextCompactionState(
+                raw_messages=messages,
+                accepted_messages=deepcopy(messages[:accepted_history_boundary]),
+                raw_accepted_boundary=accepted_history_boundary,
+                active_summary=(
+                    spec.transcript_input.session_summary["text"]
+                    if spec.transcript_input.session_summary is not None
+                    else None
+                ),
+            )
         request_state = _ModelRequestState(
             config=governance_config,
             conversation=conversation_state,
-            native_compaction_pending=(
-                spec.provider_state.native_compaction_pending
-                if spec.provider_state is not None
-                else False
-            ),
-            compaction=(
-                _ContextCompactionState(
-                    raw_messages=messages,
-                    accepted_messages=deepcopy(
-                        messages[:spec.transcript_input.history_message_count]
-                    ),
-                    raw_accepted_boundary=spec.transcript_input.history_message_count,
-                    active_summary=(
-                        spec.transcript_input.session_summary["text"]
-                        if spec.transcript_input.session_summary is not None
-                        else None
-                    ),
-                )
-                if spec.consolidate_history is not None
-                and spec.transcript_input is not None
-                else None
-            ),
+            compaction=compaction,
         )
 
         for iteration in range(spec.max_iterations):
@@ -660,16 +635,12 @@ class AgentRunner:
                 request_state=request_state,
                 transcript=messages,
             )
-            if response.provider_compaction_applied:
-                request_state.native_compaction_pending = True
             assert request_state.messages is not None
             messages_for_model = request_state.messages
             conversation_state.observe_response(response, messages)
             if request_state.compaction is not None:
-                request_state.compaction.accept(
-                    messages_for_model,
-                    raw_boundary=request_message_count,
-                )
+                request_state.compaction.accepted_messages = deepcopy(messages_for_model)
+                request_state.compaction.raw_accepted_boundary = request_message_count
             context.response = response
             context.tool_calls = list(response.tool_calls)
 
@@ -1026,46 +997,6 @@ class AgentRunner:
                 final_content = terminal_content
             self._append_final_message(messages, terminal_content)
 
-        final_provider_state = conversation_state.finish(messages)
-        summary_checkpoint = (
-            request_state.compaction.summary_checkpoint
-            if request_state.compaction is not None
-            else None
-        )
-        if (
-            request_state.native_compaction_pending
-            and final_provider_state is not None
-            and spec.materialize_provider_checkpoint is not None
-            and stop_reason != "error"
-        ):
-            previous_summary = (
-                request_state.compaction.active_summary
-                if request_state.compaction is not None
-                else None
-            )
-            try:
-                portable_summary = await spec.materialize_provider_checkpoint(
-                    final_provider_state,
-                    previous_summary,
-                )
-            except Exception:
-                logger.exception(
-                    "Provider checkpoint materialization failed for {}; preserving native state",
-                    spec.session_key or "default",
-                )
-            else:
-                if portable_summary:
-                    summary_checkpoint = SessionSummaryCheckpoint(
-                        summary=portable_summary,
-                        transcript_boundary=len(messages),
-                    )
-                    final_provider_state = None
-
-        if final_provider_state is not None:
-            final_provider_state = final_provider_state.with_native_compaction_pending(
-                request_state.native_compaction_pending
-            )
-
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -1076,8 +1007,12 @@ class AgentRunner:
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
-            provider_state=final_provider_state,
-            summary_checkpoint=summary_checkpoint,
+            provider_state=conversation_state.finish(messages),
+            summary_checkpoint=(
+                request_state.compaction.summary_checkpoint
+                if request_state.compaction is not None
+                else None
+            ),
         )
 
     def _build_request_kwargs(
@@ -1130,17 +1065,28 @@ class AgentRunner:
             and prepared == state.messages
             and tool_definitions == state.tool_definitions
         )
-        pressure = self.context_governor.request_pressure(
-            state.config,
-            prepared,
-            state.usage,
-            usage_matches_messages=usage_matches_messages,
-            tool_definitions=tool_definitions,
-            request_context_tokens=request_context_tokens,
-        )
         fitted = False
         compaction = state.compaction
-        if pressure is not None and compaction is not None:
+        pressure: tuple[int, str] | None = None
+        if compaction is None:
+            prepared, fitted = self.context_governor.fit_request(
+                state.config,
+                prepared,
+                state.usage,
+                usage_matches_messages=usage_matches_messages,
+                tool_definitions=tool_definitions,
+                request_context_tokens=request_context_tokens,
+            )
+        else:
+            pressure = self.context_governor.request_pressure(
+                state.config,
+                prepared,
+                state.usage,
+                usage_matches_messages=usage_matches_messages,
+                tool_definitions=tool_definitions,
+                request_context_tokens=request_context_tokens,
+            )
+        if compaction is not None and pressure is not None:
             delta_messages = compaction.delta_after_accepted(messages)
             consolidate_history = spec.consolidate_history
             summary = None
@@ -1164,7 +1110,6 @@ class AgentRunner:
 
             assert delta_messages is not None
             compaction.active_summary = summary
-            state.native_compaction_pending = False
             prepared = self.context_governor.prepare_for_model(
                 state.config,
                 [
@@ -1189,15 +1134,6 @@ class AgentRunner:
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
             )
-        elif pressure is not None:
-            prepared, fitted = self.context_governor.fit_request(
-                state.config,
-                prepared,
-                state.usage,
-                usage_matches_messages=usage_matches_messages,
-                tool_definitions=tool_definitions,
-                request_context_tokens=request_context_tokens,
-            )
         provider_context = (
             state.conversation.prepare_request(
                 transcript,
@@ -1213,7 +1149,6 @@ class AgentRunner:
         )
         state.messages = deepcopy(prepared)
         state.tool_definitions = deepcopy(tool_definitions)
-        state.fitted = fitted
         return prepared, provider_context
 
     async def _request_model(

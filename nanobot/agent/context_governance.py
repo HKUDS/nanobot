@@ -161,9 +161,11 @@ class ContextGovernor:
         if not config.context_window_tokens:
             return None
         budget = self.input_budget(config)
-        if (
-            request_context_tokens is None
-            and usage_matches_messages
+        if request_context_tokens is not None:
+            measured = request_context_tokens
+            source = "resumed provider state plus pending messages"
+        elif (
+            usage_matches_messages
             and usage is not None
             and usage.context_tokens is not None
         ):
@@ -176,9 +178,6 @@ class ContextGovernor:
                 messages,
                 tool_definitions,
             )
-            if request_context_tokens is not None and request_context_tokens > measured:
-                measured = request_context_tokens
-                source = "resumed provider state plus pending messages"
         if budget > 0 and measured < budget:
             return None
         return measured, source
@@ -462,14 +461,15 @@ class ContextGovernor:
         if budget <= 0:
             return messages
 
-        estimate, _ = estimate_prompt_tokens_chain(
-            config.provider,
-            config.model,
-            messages,
-            tool_definitions,
-        )
-        if not force and estimate <= budget:
-            return messages
+        if not force:
+            estimate, _ = estimate_prompt_tokens_chain(
+                config.provider,
+                config.model,
+                messages,
+                tool_definitions,
+            )
+            if estimate <= budget:
+                return messages
 
         system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]
         non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]

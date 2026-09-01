@@ -811,7 +811,6 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
     )
 
     assert response.content == "done"
-    assert response.provider_compaction_applied is True
     assert len(bodies) == 2
     assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
     assert bodies[1]["input"][-1] == {
@@ -890,7 +889,6 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
     )
 
     assert response.content == "done"
-    assert response.provider_compaction_applied is False
     assert len(bodies) == 2
     assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
     assert bodies[1]["input"][-1] != {"type": "compaction_trigger"}

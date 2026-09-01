@@ -152,66 +152,6 @@ class TestTurnTranscriptSummary:
         assert call.kwargs["previous_summary"] == "previous checkpoint"
 
 
-class TestProviderCheckpointMaterialization:
-    async def test_uses_compacted_state_without_raw_transcript(
-        self,
-        consolidator,
-        mock_provider,
-        runtime,
-    ):
-        mock_provider.can_resume_conversation_state.return_value = True
-        mock_provider.chat_with_retry.return_value = LLMResponse(
-            content="- [ephemeral] portable checkpoint",
-        )
-        state = _provider_state().with_pending_messages([
-            {"role": "user", "content": "pending durable delta"},
-        ])
-
-        summary = await consolidator.materialize_provider_checkpoint(
-            state,
-            "previous checkpoint",
-            runtime=runtime,
-            session_key="test:native",
-        )
-
-        assert summary == "- [ephemeral] portable checkpoint"
-        call = mock_provider.chat_with_retry.await_args.kwargs
-        assert call["tools"] == []
-        assert call["provider_context"].context_window_tokens is None
-        assert call["provider_context"].session_id == "test:native:memory-checkpoint"
-        request_state = call["provider_context"].conversation_state
-        assert request_state is not None
-        assert request_state.payload == state.payload
-        assert request_state.pending_messages[0]["content"] == "pending durable delta"
-        assert "SNIP" in request_state.pending_messages[-1]["content"]
-        assert "previous checkpoint" in call["messages"][0]["content"]
-        assert all(
-            "raw transcript" not in str(message.get("content"))
-            for message in call["messages"]
-        )
-
-    async def test_preserves_native_state_when_materialization_is_not_replayable(
-        self,
-        consolidator,
-        mock_provider,
-        runtime,
-    ):
-        mock_provider.can_resume_conversation_state.return_value = True
-        mock_provider.chat_with_retry.return_value = LLMResponse(
-            content="partial",
-            finish_reason="length",
-        )
-
-        summary = await consolidator.materialize_provider_checkpoint(
-            _provider_state(),
-            None,
-            runtime=runtime,
-            session_key="test:native",
-        )
-
-        assert summary is None
-
-
 class TestConsolidatorSummarize:
     def test_format_messages_keeps_media_only_user_turn(self):
         path = "/home/user/.nanobot/media/websocket/clip.mp4"
@@ -471,25 +411,6 @@ class TestConsolidatorArchiveErrorHandling:
 
 
 class TestConsolidatorTokenBudget:
-    async def test_pending_native_checkpoint_defers_raw_history_consolidation(
-        self,
-        consolidator,
-        runtime,
-    ):
-        session = Session(key="test:native-checkpoint-pending")
-        session.provider_state = _provider_state().with_native_compaction_pending(True)
-        session.add_message("user", "large raw history")
-        consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = MagicMock(
-            return_value=(10_000, "test-counter")
-        )
-        consolidator.archive_session = AsyncMock(return_value="raw summary")
-
-        await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
-
-        consolidator.estimate_session_prompt_tokens.assert_not_called()
-        consolidator.archive_session.assert_not_awaited()
-
     async def test_prompt_below_threshold_does_not_consolidate(
         self, consolidator, runtime
     ):
@@ -762,77 +683,6 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:short")
         assert reloaded.last_archived == 2
         assert [message["content"] for message in reloaded.get_history()] == ["hello", "hi"]
-
-    @pytest.mark.asyncio
-    async def test_pending_native_checkpoint_materializes_without_raw_history(
-        self,
-        real_consolidator,
-        mock_provider,
-        runtime,
-    ):
-        mock_provider.can_resume_conversation_state.return_value = True
-        mock_provider.chat_with_retry.return_value = LLMResponse(
-            content="Portable native checkpoint.",
-            finish_reason="stop",
-        )
-        sessions = real_consolidator.sessions
-        session = sessions.get_or_create("cli:native-idle")
-        session.provider_state = _provider_state().with_native_compaction_pending(True)
-        session.add_message("user", "raw user history")
-        session.add_message("assistant", "raw assistant history")
-        sessions.save(session)
-        real_consolidator.archive_session = AsyncMock()
-
-        result = await real_consolidator.compact_idle_session(
-            "cli:native-idle",
-            runtime=runtime,
-        )
-
-        assert result == "Portable native checkpoint."
-        real_consolidator.archive_session.assert_not_awaited()
-        request = mock_provider.chat_with_retry.await_args.kwargs
-        assert all(
-            "raw user history" not in str(message.get("content"))
-            and "raw assistant history" not in str(message.get("content"))
-            for message in request["messages"]
-        )
-        sessions.invalidate("cli:native-idle")
-        reloaded = sessions.get_or_create("cli:native-idle")
-        assert reloaded.last_archived == 2
-        assert reloaded.metadata["_last_summary"]["text"] == result
-        assert reloaded.provider_state is None
-
-    @pytest.mark.asyncio
-    async def test_failed_native_checkpoint_does_not_fall_back_to_raw_idle_archive(
-        self,
-        real_consolidator,
-        mock_provider,
-        runtime,
-    ):
-        mock_provider.can_resume_conversation_state.return_value = True
-        mock_provider.chat_with_retry.return_value = LLMResponse(
-            content="partial",
-            finish_reason="length",
-        )
-        sessions = real_consolidator.sessions
-        session = sessions.get_or_create("cli:native-idle-failure")
-        session.provider_state = _provider_state().with_native_compaction_pending(True)
-        session.add_message("user", "raw history must not be resent")
-        sessions.save(session)
-        real_consolidator.archive_session = AsyncMock()
-
-        result = await real_consolidator.compact_idle_session(
-            "cli:native-idle-failure",
-            runtime=runtime,
-        )
-
-        assert result is None
-        real_consolidator.archive_session.assert_not_awaited()
-        sessions.invalidate("cli:native-idle-failure")
-        reloaded = sessions.get_or_create("cli:native-idle-failure")
-        assert reloaded.last_archived == 0
-        assert reloaded.provider_state is not None
-        assert reloaded.provider_state.native_compaction_pending is True
 
     @pytest.mark.asyncio
     async def test_idle_compaction_with_no_new_messages_is_noop(
