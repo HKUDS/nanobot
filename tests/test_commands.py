@@ -42,8 +42,8 @@ def mock_paths():
         workspace_dir = base_dir / "workspace"
 
         mock_cp.return_value = config_file
-        mock_ws.return_value = workspace_dir
-        mock_sc.side_effect = lambda config: config_file.write_text("{}")
+        mock_ws.side_effect = lambda workspace=None: workspace_dir
+        mock_sc.side_effect = lambda config, path=None: config_file.write_text("{}")
 
         yield config_file, workspace_dir
 
