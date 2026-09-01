@@ -548,14 +548,15 @@ function PresetPill({
         zIndex: Math.round(scale * 100),
       }}
     >
-      <PresetProviderIcon
-        label={label}
-        modelDetail={modelDetail}
-        provider={inferredProvider}
-        needsSetup={needsSetup}
-        testId={needsSetup ? "composer-model-setup-icon" : `composer-model-logo${inferredProvider ? `-${inferredProvider}` : ""}`}
-        isHero={isHero}
-      />
+      {!needsSetup ? (
+        <PresetProviderIcon
+          label={label}
+          modelDetail={modelDetail}
+          provider={inferredProvider}
+          testId={`composer-model-logo${inferredProvider ? `-${inferredProvider}` : ""}`}
+          isHero={isHero}
+        />
+      ) : null}
       <span
         ref={labelRef}
         className={cn(
@@ -573,20 +574,16 @@ function PresetProviderIcon({
   label,
   modelDetail,
   provider,
-  needsSetup = false,
   testId,
   isHero,
 }: {
   label: string;
   modelDetail?: string | null;
   provider?: string | null;
-  needsSetup?: boolean;
   testId?: string;
   isHero: boolean;
 }) {
-  const inferredProvider = needsSetup
-    ? null
-    : provider || inferProviderFromModelName(modelDetail || label);
+  const inferredProvider = provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   return (
@@ -594,14 +591,11 @@ function PresetProviderIcon({
       data-testid={testId}
       className={cn(
         "grid shrink-0 place-items-center",
-        needsSetup && "text-muted-foreground",
         isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
       )}
       aria-hidden
     >
-      {needsSetup ? (
-        <Sparkles className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
-      ) : logoUrl ? (
+      {logoUrl ? (
         <img
           src={logoUrl}
           alt=""

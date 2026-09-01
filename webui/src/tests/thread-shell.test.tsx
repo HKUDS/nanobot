@@ -875,9 +875,8 @@ describe("ThreadShell", () => {
     );
 
     const badge = await screen.findByRole("button", { name: "Choose your AI" });
-    const setupIcon = screen.getByTestId("composer-model-setup-icon");
-    expect(setupIcon).toBeInTheDocument();
-    expect(setupIcon.parentElement).not.toHaveClass("border-amber-500/35");
+    expect(screen.queryByTestId("composer-model-setup-icon")).not.toBeInTheDocument();
+    expect(badge).not.toHaveClass("border-amber-500/35");
     expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
     fireEvent.click(badge);
     expect(await screen.findByRole("dialog", { name: "Choose your AI" })).toBeInTheDocument();
