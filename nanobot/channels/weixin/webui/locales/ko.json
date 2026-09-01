@@ -1,0 +1,56 @@
+{
+  "description": "WeChat 대화에서 nanobot을 사용합니다.",
+  "requirements": "WeChat 채널 설정 및 게이트웨이",
+  "setup": {
+    "primaryAction": "WeChat 연결",
+    "docsLabel": "WeChat 설정 가이드 열기",
+    "officialLabel": "WeChat 열기",
+    "tryIt": "QR 로그인 후 연결된 계정으로 WeChat DM을 보내세요.",
+    "summary": "WeChat은 QR 코드로 로그인하고 계정 상태를 로컬에 저장합니다.",
+    "steps": [
+      "연결을 클릭하고 휴대폰 WeChat으로 QR 코드를 스캔하세요.",
+      "WeChat이 메시지를 받는 동안 로컬 게이트웨이를 실행해 두세요.",
+      "DM으로 테스트해 계정 연결을 확인하세요."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "token": {
+        "label": "토큰",
+        "placeholder": "QR 로그인으로 저장됨"
+      },
+      "sendProgress": { "label": "진행 상황 보내기" },
+      "sendToolHints": { "label": "도구 힌트 보내기" },
+      "streaming": { "label": "스트리밍 API 사용" },
+      "replyProgressMessages": { "label": "구조화된 진행 상황 보내기" },
+      "replyProgressMaxMessages": { "label": "구조화된 진행 메시지 한도" },
+      "contextMessageBudget": { "label": "컨텍스트 메시지 예산" },
+      "blockStreaming": { "label": "응답을 블록으로 보내기" },
+      "blockStreamingMinChars": { "label": "최소 블록 크기" },
+      "blockStreamingMaxMessages": { "label": "블록 메시지 한도" },
+      "baseUrl": { "label": "API URL" },
+      "cdnBaseUrl": { "label": "CDN URL" },
+      "routeTag": { "label": "경로 태그" },
+      "stateDir": { "label": "상태 디렉터리" },
+      "pollTimeout": { "label": "폴링 제한 시간" }
+    }
+  },
+  "custom": {
+    "qrAlt": "WeChat 로그인 QR 코드",
+    "scanTitle": "WeChat으로 스캔",
+    "scanDescription": "휴대폰 WeChat으로 스캔하세요. 로그인 후 nanobot이 계정 상태를 로컬에 저장합니다.",
+    "waiting": "WeChat 스캔을 기다리는 중...",
+    "connected": "WeChat이 연결되었습니다.",
+    "stopped": "WeChat 로그인이 중지되었습니다.",
+    "connecting": "연결 중...",
+    "verifyTitle": "인증 필요",
+    "verifyDescription": "계속하려면 WeChat에 표시된 숫자를 입력하세요.",
+    "verifyMismatch": "코드가 일치하지 않습니다. WeChat에 표시된 새 숫자를 입력하세요.",
+    "expired": "WeChat 로그인이 만료되었습니다. 다시 연결하려면 다시 스캔하세요.",
+    "failed": "WeChat에 연결할 수 없습니다. 다시 시도하세요.",
+    "verifyPlaceholder": "코드",
+    "verifySubmit": "인증"
+  }
+}

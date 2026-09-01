@@ -1,0 +1,1952 @@
+"""Tests for the mid-turn injection system: drain, checkpoints, pending queues, error paths."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.automation_turns import publish_next_deferred_turn
+from nanobot.agent.context import TranscriptInput
+from nanobot.agent.tools.context import RequestContext
+from nanobot.config.schema import AgentDefaults
+from nanobot.providers.base import LLMResponse, ToolCallRequest
+
+_MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+def _make_injection_callback(queue: asyncio.Queue):
+    """Return an async callback that drains *queue* into a list of dicts."""
+    async def inject_cb():
+        items = []
+        while not queue.empty():
+            items.append(await queue.get())
+        return items
+    return inject_cb
+
+
+def _make_loop(tmp_path, *, recovery_admission=None):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    with patch("nanobot.agent.loop.ContextBuilder"), \
+         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+        mock_sub_mgr.return_value.close = AsyncMock()
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            recovery_admission=recovery_admission,
+        )
+    return loop
+
+@pytest.mark.asyncio
+async def test_drain_injections_returns_empty_when_no_callback():
+    """No injection_callback → empty list."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=None,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_extracts_content_from_inbound_messages():
+    """Should extract .content from InboundMessage objects."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    msgs = [
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="hello"),
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="world"),
+    ]
+
+    async def cb():
+        return msgs
+
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": "world"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_passes_limit_to_callback_when_supported():
+    """Limit-aware callbacks can preserve overflow in their own queue."""
+    from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    seen_limits: list[int] = []
+
+    msgs = [
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content=f"msg{i}")
+        for i in range(_MAX_INJECTIONS_PER_TURN + 3)
+    ]
+
+    async def cb(*, limit: int):
+        seen_limits.append(limit)
+        return msgs[:limit]
+
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert seen_limits == [_MAX_INJECTIONS_PER_TURN]
+    assert result == [
+        {"role": "user", "content": "msg0"},
+        {"role": "user", "content": "msg1"},
+        {"role": "user", "content": "msg2"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_skips_empty_content():
+    """Messages with blank content should be filtered out."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    msgs = [
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content=""),
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="   "),
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="valid"),
+    ]
+
+    async def cb():
+        return msgs
+
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == [{"role": "user", "content": "valid"}]
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_filters_empty_dict_payloads():
+    """Pre-normalized dict injections should obey the same empty-content guard."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    multimodal = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}]
+    msgs = [
+        {"role": "user", "content": ""},
+        {"role": "user", "content": "   "},
+        {"role": "user", "content": None},
+        {"role": "assistant", "content": "should not be re-injected as user"},
+        None,
+        {"role": "user", "content": "valid"},
+        {"role": "user", "content": multimodal},
+    ]
+
+    async def cb():
+        return msgs
+
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == [
+        {"role": "user", "content": "valid"},
+        {"role": "user", "content": multimodal},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_skips_objects_with_none_content():
+    """Objects exposing content=None should be skipped rather than stringified."""
+    from types import SimpleNamespace
+
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    async def cb():
+        return [
+            SimpleNamespace(content=None),
+            SimpleNamespace(content=""),
+            SimpleNamespace(content="valid"),
+        ]
+
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == [{"role": "user", "content": "valid"}]
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_handles_callback_exception():
+    """If the callback raises, return empty list (error is logged)."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    runner = AgentRunner()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    async def cb():
+        raise RuntimeError("boom")
+
+    spec = make_run_spec(provider,
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_checkpoint1_injects_after_tool_execution():
+    """Follow-up messages are injected after tool execution, before next LLM call."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    captured_messages = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append(list(messages))
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="using tool",
+                tool_calls=[ToolCallRequest(id="c1", name="read_file", arguments={"path": "x"})],
+                usage=None,
+            )
+        return LLMResponse(content="final answer", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    # Put a follow-up message in the queue before the run starts
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up question")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "final answer"
+    # The second call should have the injected user message
+    assert call_count["n"] == 2
+    last_messages = captured_messages[-1]
+    injected = [m for m in last_messages if m.get("role") == "user" and m.get("content") == "follow-up question"]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_wait_does_not_block_next_iteration_after_tools():
+    """Background waits begin only after a no-tool response is ready to finish."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    second_request_started = asyncio.Event()
+    allow_final_response = asyncio.Event()
+    terminal_wait_started = asyncio.Event()
+    release_terminal_result = asyncio.Event()
+    call_count = 0
+    terminal_result_delivered = False
+
+    async def chat_with_retry(*, messages, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="c1", name="read_file", arguments={"path": "x"})],
+            )
+        if call_count == 2:
+            second_request_started.set()
+            await allow_final_response.wait()
+            return LLMResponse(content="main work finished", tool_calls=[])
+        return LLMResponse(content="combined final answer", tool_calls=[])
+
+    async def drain_available():
+        return []
+
+    async def wait_at_terminal():
+        nonlocal terminal_result_delivered
+        if terminal_result_delivered:
+            return []
+        terminal_wait_started.set()
+        await release_terminal_result.wait()
+        terminal_result_delivered = True
+        return [
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="c",
+                content="background result",
+            )
+        ]
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner()
+    run_task = asyncio.create_task(runner.run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=drain_available,
+        terminal_injection_callback=wait_at_terminal,
+    )))
+
+    await asyncio.wait_for(second_request_started.wait(), timeout=1.0)
+    assert not terminal_wait_started.is_set()
+
+    allow_final_response.set()
+    await asyncio.wait_for(terminal_wait_started.wait(), timeout=1.0)
+    assert not run_task.done()
+
+    release_terminal_result.set()
+    result = await asyncio.wait_for(run_task, timeout=1.0)
+
+    assert call_count == 3
+    assert result.had_injections is True
+    assert result.final_content == "combined final answer"
+
+
+@pytest.mark.asyncio
+async def test_goal_continuation_precedes_terminal_wait():
+    """An active sustained goal keeps running without joining background work."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="goal checkpoint", tool_calls=[]),
+        LLMResponse(content="goal complete", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    continuation_checks = 0
+    terminal_waits = 0
+
+    def continue_goal() -> str | None:
+        nonlocal continuation_checks
+        continuation_checks += 1
+        return "Continue the active goal." if continuation_checks == 1 else None
+
+    async def drain_available():
+        return []
+
+    async def wait_at_terminal():
+        nonlocal terminal_waits
+        terminal_waits += 1
+        return []
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "complete the goal"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=drain_available,
+        terminal_injection_callback=wait_at_terminal,
+        continuation_callback=continue_goal,
+    ))
+
+    assert provider.chat_with_retry.await_count == 2
+    assert terminal_waits == 1
+    assert result.final_content == "goal complete"
+
+
+@pytest.mark.asyncio
+async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
+    """After final response, if injections exist, stream_end should get resuming=True."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    stream_end_calls = []
+
+    class TrackingHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+        async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+            stream_end_calls.append(resuming)
+
+        def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+            return content
+
+    async def chat_stream_with_retry(*, messages, on_content_delta=None, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    # Inject a follow-up that arrives during the first response
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="quick follow-up")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=TrackingHook(),
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "second answer"
+    assert call_count["n"] == 2
+    # First stream_end should have resuming=True (because injections found)
+    assert stream_end_calls[0] is True
+    # Second (final) stream_end should have resuming=False
+    assert stream_end_calls[-1] is False
+
+
+@pytest.mark.asyncio
+async def test_injected_followup_starts_new_length_recovery_chain():
+    """A follow-up gets a fresh recovery budget and no content from the prior answer."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first-1 ", finish_reason="length"),
+        LLMResponse(content="first-2 ", finish_reason="length"),
+        LLMResponse(content="first-3 ", finish_reason="length"),
+        LLMResponse(content="first-final", finish_reason="stop"),
+        LLMResponse(content="follow-up ", finish_reason="length"),
+        LLMResponse(content="answer", finish_reason="stop"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up question")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "give a long answer"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=8,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "follow-up answer"
+    assert provider.chat_with_retry.await_count == 6
+
+
+@pytest.mark.asyncio
+async def test_checkpoint2_preserves_final_response_in_history_before_followup():
+    """A follow-up injected after a final answer must still see that answer in history."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    captured_messages = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append([dict(message) for message in messages])
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up question")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.final_content == "second answer"
+    assert call_count["n"] == 2
+    assert captured_messages[-1] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "follow-up question"},
+    ]
+    assert [
+        {"role": message["role"], "content": message["content"]}
+        for message in result.messages
+        if message.get("role") == "assistant"
+    ] == [
+        {"role": "assistant", "content": "first answer"},
+        {"role": "assistant", "content": "second answer"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_loop_injected_followup_preserves_image_media(tmp_path):
+    """Mid-turn follow-ups with images should keep multimodal content."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    image_path = tmp_path / "followup.png"
+    image_path.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+    ))
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    captured_messages: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append(list(messages))
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="cli",
+        sender_id="u",
+        chat_id="c",
+        content="",
+        media=[str(image_path)],
+    ))
+
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "hello"}], current_message=None),
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
+        pending_queue=pending_queue,
+    )
+
+    assert result.final_content == "second answer"
+    assert result.had_injections is True
+    assert call_count["n"] == 2
+    injected_user_messages = [
+        message for message in captured_messages[-1]
+        if message.get("role") == "user" and isinstance(message.get("content"), list)
+    ]
+    assert injected_user_messages
+    assert any(
+        block.get("type") == "image_url"
+        for block in injected_user_messages[-1]["content"]
+        if isinstance(block, dict)
+    )
+
+
+@pytest.mark.asyncio
+async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_MESSAGE_META,
+        RuntimeContextBlock,
+        public_history_message,
+        wrap_runtime_context_lines,
+    )
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first answer", tool_calls=[], usage=None),
+        LLMResponse(content="second answer", tool_calls=[], usage=None),
+    ])
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    seen_contexts = []
+
+    async def provide_identity(request):
+        seen_contexts.append((
+            request.channel,
+            request.chat_id,
+            request.sender_id,
+            request.message_id,
+            request.session_key,
+            request.original_user_text,
+            request.metadata["sender_name"],
+            request.metadata["thread_id"],
+        ))
+        return RuntimeContextBlock(
+            source="identity",
+            content=wrap_runtime_context_lines([
+                " | ".join(str(value) for value in seen_contexts[-1]),
+            ]),
+        )
+
+    loop.register_runtime_context_provider(provide_identity)
+    session = loop.sessions.get_or_create("telegram:group-1")
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="telegram",
+        sender_id="user-b",
+        chat_id="group-1",
+        content="follow-up from the second speaker",
+        metadata={
+            "message_id": "message-2",
+            "sender_name": "Bob",
+            "thread_id": "topic-7",
+        },
+    ))
+    await pending_queue.put(InboundMessage(
+        channel="telegram",
+        sender_id="user-c",
+        chat_id="group-1",
+        content="another follow-up",
+        metadata={
+            "message_id": "message-3",
+            "sender_name": "Carol",
+            "thread_id": "topic-7",
+        },
+    ))
+
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(
+            history=[{"role": "user", "content": "initial message from user A"}],
+            current_message=None,
+        ),
+        runtime=runtime,
+        session=session,
+        request_context=RequestContext(
+            channel="telegram",
+            chat_id="group-1",
+            session_key=session.key,
+            runtime=runtime,
+        ),
+        pending_queue=pending_queue,
+    )
+
+    assert seen_contexts == [
+        (
+            "telegram",
+            "group-1",
+            "user-b",
+            "message-2",
+            session.key,
+            "follow-up from the second speaker",
+            "Bob",
+            "topic-7",
+        ),
+        (
+            "telegram",
+            "group-1",
+            "user-c",
+            "message-3",
+            session.key,
+            "another follow-up",
+            "Carol",
+            "topic-7",
+        ),
+    ]
+
+    injected = [message for message in result.messages if message.get("role") == "user"][-1]
+    assert "follow-up from the second speaker" in str(injected["content"])
+    model_messages = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
+    assert "telegram | group-1 | user-b | message-2" in str(model_messages)
+    assert "Bob | topic-7" in str(model_messages)
+    assert "telegram | group-1 | user-c | message-3" in str(model_messages)
+    assert "Carol | topic-7" in str(model_messages)
+    assert injected["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == [
+        "identity",
+        "identity",
+    ]
+
+    loop._save_turn(session, result.messages, skip=1)
+    persisted = [message for message in session.messages if message.get("role") == "user"][-1]
+    assert "telegram | group-1 | user-b | message-2" in str(persisted["content"])
+    assert "telegram | group-1 | user-c | message-3" in str(persisted["content"])
+    assert public_history_message(persisted)["content"] == (
+        "follow-up from the second speaker\n\nanother follow-up"
+    )
+
+
+@pytest.mark.asyncio
+async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    payload = (
+        "[Subagent 'x' completed successfully]\n\n"
+        "Task: t\n\n"
+        "Result:\nr\n\n"
+        "Summarize this naturally for the user."
+    )
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="c",
+        content="visible follow-up",
+    ))
+    await pending_queue.put(InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:c",
+        content=payload,
+        metadata={"injected_event": "subagent_result", "subagent_task_id": "sub-1"},
+    ))
+
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "hello"}], current_message=None),
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
+        pending_queue=pending_queue,
+    )
+
+    assert result.final_content == "second answer"
+    assert result.had_injections is True
+    assert call_count["n"] == 2
+    injected_users = [message for message in result.messages if message.get("role") == "user"][-2:]
+    assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
+    assert injected_users[1][HIDDEN_HISTORY_META] == {
+        "kind": "subagent_result",
+        "subagent_task_id": "sub-1",
+    }
+    assert injected_users[1]["injected_event"] == "subagent_result"
+
+
+@pytest.mark.asyncio
+async def test_runner_merges_multiple_injected_user_messages_without_losing_media():
+    """Multiple injected follow-ups should not create lossy consecutive user messages."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    captured_messages = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append([dict(message) for message in messages])
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage=None)
+        return LLMResponse(content="second answer", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    async def inject_cb():
+        if call_count["n"] == 1:
+            return [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                        {"type": "text", "text": "look at this"},
+                    ],
+                },
+                {"role": "user", "content": "and answer briefly"},
+            ]
+        return []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.final_content == "second answer"
+    assert call_count["n"] == 2
+    second_call = captured_messages[-1]
+    user_messages = [message for message in second_call if message.get("role") == "user"]
+    assert len(user_messages) == 2
+    injected = user_messages[-1]
+    assert isinstance(injected["content"], list)
+    assert any(
+        block.get("type") == "image_url"
+        for block in injected["content"]
+        if isinstance(block, dict)
+    )
+    assert any(
+        block.get("type") == "text" and block.get("text") == "and answer briefly"
+        for block in injected["content"]
+        if isinstance(block, dict)
+    )
+
+
+def test_runner_merge_keeps_all_recovery_followup_ids() -> None:
+    """Merged follow-ups stay acknowledged together after a later save."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
+
+    messages = [{"role": "user", "content": "first", PENDING_FOLLOWUP_ID_KEY: "one"}]
+    AgentRunner._append_injected_messages(
+        messages,
+        [{"role": "user", "content": "second", PENDING_FOLLOWUP_ID_KEY: "two"}],
+    )
+
+    assert messages[-1][PENDING_FOLLOWUP_ID_KEY] == ["one", "two"]
+
+
+def test_runner_merge_preserves_runtime_markers_with_media() -> None:
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_HISTORY_META,
+        RUNTIME_CONTEXT_MESSAGE_META,
+        RuntimeContextBlock,
+        append_runtime_context,
+        public_history_message,
+    )
+
+    first_visible = [
+        {"type": "text", "text": "first"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]
+    first_content, first_marker = append_runtime_context(
+        first_visible,
+        [RuntimeContextBlock(source="first", content="private first")],
+    )
+    second_content, second_marker = append_runtime_context(
+        "second",
+        [RuntimeContextBlock(source="second", content="private second")],
+    )
+    messages: list[dict] = []
+
+    AgentRunner._append_injected_messages(messages, [
+        {
+            "role": "user",
+            "content": first_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: first_marker},
+        },
+        {
+            "role": "user",
+            "content": second_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: second_marker},
+        },
+    ])
+
+    assert len(messages) == 1
+    merged = messages[0]
+    assert "private first" in str(merged["content"])
+    assert "private second" in str(merged["content"])
+    persisted = {
+        "role": "user",
+        "content": merged["content"],
+        RUNTIME_CONTEXT_HISTORY_META: merged["_meta"][RUNTIME_CONTEXT_MESSAGE_META],
+    }
+    assert public_history_message(persisted)["content"] == [
+        *first_visible,
+        {"type": "text", "text": "second"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_injection_cycles_capped_at_max():
+    """Injection cycles should be capped at _MAX_INJECTION_CYCLES."""
+    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    drain_count = {"n": 0}
+
+    async def inject_cb():
+        drain_count["n"] += 1
+        # Only inject for the first _MAX_INJECTION_CYCLES drains
+        if drain_count["n"] <= _MAX_INJECTION_CYCLES:
+            return [InboundMessage(channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}")]
+        return []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "start"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    # Should be capped: _MAX_INJECTION_CYCLES injection rounds + 1 final round
+    assert call_count["n"] == _MAX_INJECTION_CYCLES + 1
+
+
+@pytest.mark.asyncio
+async def test_no_injections_flag_is_false_by_default():
+    """had_injections should be False when no injection callback or no messages."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.had_injections is False
+
+
+@pytest.mark.asyncio
+async def test_pending_queue_cleanup_on_dispatch(tmp_path):
+    """_pending_queues should be cleaned up after _dispatch completes."""
+    loop = _make_loop(tmp_path)
+
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    loop.provider.chat_with_retry = chat_with_retry
+
+    from nanobot.bus.events import InboundMessage
+
+    msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="hello")
+    # The queue should not exist before dispatch
+    assert msg.session_key not in loop._pending_queues
+
+    await loop._dispatch(msg)
+
+    # The queue should be cleaned up after dispatch
+    assert msg.session_key not in loop._pending_queues
+
+
+@pytest.mark.asyncio
+async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
+    """A queued dispatch must not steal the active task's injection queue."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    route_policy = MagicMock(side_effect=lambda _msg, _key, route: route)
+    loop.turn_delivery_factory.route_policy = route_policy
+    session_key = "cli:c"
+    lock = loop._session_locks.setdefault(session_key, asyncio.Lock())
+    await lock.acquire()
+    active_pending = asyncio.Queue(maxsize=1)
+    loop._pending_queues[session_key] = active_pending
+
+    waiting_at_lock = asyncio.Event()
+    original_acquire = asyncio.Lock.acquire
+
+    async def _patched_acquire(self, *args, **kwargs):
+        if self is lock:
+            waiting_at_lock.set()
+        return await original_acquire(self, *args, **kwargs)
+
+    with patch.object(asyncio.Lock, "acquire", _patched_acquire):
+        waiting = asyncio.create_task(
+            loop._dispatch(
+                InboundMessage(channel="cli", sender_id="u", chat_id="c", content="queued")
+            )
+        )
+        await asyncio.wait_for(waiting_at_lock.wait(), timeout=2.0)
+
+    assert loop._pending_queues[session_key] is active_pending
+    route_policy.assert_not_called()
+
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    route_policy.assert_not_called()
+    lock.release()
+
+
+@pytest.mark.asyncio
+async def test_followup_routed_to_pending_queue(tmp_path):
+    """Unified-session follow-ups should route into the active pending queue."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    loop = _make_loop(tmp_path)
+    loop._unified_session = True
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(channel="discord", sender_id="u", chat_id="c", content="follow-up")
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert loop._dispatch.await_count == 0
+    assert queued_msg.content == "follow-up"
+    assert queued_msg.session_key == UNIFIED_SESSION_KEY
+
+
+@pytest.mark.asyncio
+async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
+    """Recovery admission runs before a newer WebUI message is injected."""
+    from nanobot.bus.events import InboundMessage
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(return_value=True)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    session_key = "websocket:chat"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat",
+        content="new request",
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+    admission.admit.assert_awaited_once_with(msg)
+    assert queued_msg.content == msg.content
+    assert queued_msg.metadata["_recovery_followup_id"]
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_unified_websocket_followup_admits_effective_session(tmp_path):
+    """Recovery admission and the pending queue must use the same session key."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(return_value=True)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._unified_session = True
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u",
+        chat_id="chat",
+        content="new request",
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+    admitted_msg = admission.admit.await_args.args[0]
+    assert admitted_msg.session_key == UNIFIED_SESSION_KEY
+    assert queued_msg.session_key == UNIFIED_SESSION_KEY
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_path):
+    """Injected results stay inside the active turn instead of opening a side turn."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+    route_policy = MagicMock(side_effect=lambda _msg, _key, route: route)
+    loop.turn_delivery_factory.route_policy = route_policy
+
+    session_key = "websocket:chat-1"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id=session_key,
+        content="background result",
+        metadata={
+            "injected_event": "subagent_result",
+            "subagent_task_id": "sub-1",
+        },
+        session_key_override=session_key,
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert queued_msg is msg
+    assert loop._dispatch.await_count == 0
+    route_policy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cron_turn_deferred_while_session_active(tmp_path):
+    """Cron turns wait for the active session instead of becoming injections."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.cron.session_turns import (
+        CRON_DEFER_UNTIL_IDLE_META,
+        CRON_TRIGGER_META,
+    )
+
+    loop = _make_loop(tmp_path)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    session_key = "websocket:chat-1"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="cron",
+        chat_id="chat-1",
+        content="scheduled work",
+        metadata={
+            CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-1"},
+            CRON_DEFER_UNTIL_IDLE_META: True,
+        },
+        session_key_override=session_key,
+    )
+    await loop.bus.publish_inbound(msg)
+
+    for _ in range(20):
+        if loop._cron_turns.deferred_queues.get(session_key):
+            break
+        await asyncio.sleep(0.05)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert pending.empty()
+    assert loop._dispatch.await_count == 0
+    assert loop._cron_turns.deferred_queues[session_key] == [msg]
+    assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
+
+    await publish_next_deferred_turn(
+        deferred_queues=loop._cron_turns.deferred_queues,
+        publish_inbound=loop.bus.publish_inbound,
+        session_key=session_key,
+    )
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+    assert queued is msg
+    assert session_key not in loop._cron_turns.deferred_queues
+    assert loop.pending_cron_job_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
+async def test_local_trigger_turn_deferred_while_session_active(tmp_path):
+    """Local trigger turns wait for the active session instead of becoming injections."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    session_key = "websocket:chat-1"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="trigger",
+        chat_id="chat-1",
+        content="review failed CI",
+        metadata={
+            LOCAL_TRIGGER_META: {
+                "trigger_id": "trg_123",
+                "trigger_name": "CI review",
+                "delivery_id": "tdl_123",
+            },
+        },
+        session_key_override=session_key,
+    )
+    await loop.bus.publish_inbound(msg)
+
+    for _ in range(20):
+        if loop._local_trigger_turns.deferred_queues.get(session_key):
+            break
+        await asyncio.sleep(0.05)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert pending.empty()
+    assert loop._dispatch.await_count == 0
+    assert loop._local_trigger_turns.deferred_queues[session_key] == [msg]
+    assert loop.pending_local_trigger_ids_for_session(session_key) == {"trg_123"}
+
+    assert await publish_next_deferred_turn(
+        deferred_queues=loop._local_trigger_turns.deferred_queues,
+        publish_inbound=loop.bus.publish_inbound,
+        session_key=session_key,
+    ) is True
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+    assert queued is msg
+    assert session_key not in loop._local_trigger_turns.deferred_queues
+    assert loop.pending_local_trigger_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
+async def test_submitted_cron_turn_reports_pending_until_completed(tmp_path):
+    """Bound cron jobs remain marked pending while their session turn is in flight."""
+    from nanobot.bus.events import InboundMessage, OutboundMessage
+    from nanobot.cron.session_turns import CRON_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._running = True
+
+    session_key = "websocket:chat-1"
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="cron",
+        chat_id="chat-1",
+        content="scheduled work",
+        metadata={CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-1"}},
+        session_key_override=session_key,
+    )
+
+    submit_task = asyncio.create_task(loop.submit_cron_turn(msg))
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+
+    assert queued is msg
+    assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
+
+    response = OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="done",
+    )
+    loop._cron_turns.complete(msg, response=response)
+
+    assert await asyncio.wait_for(submit_task, timeout=0.5) is response
+    assert loop.pending_cron_job_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
+async def test_submitted_local_trigger_turn_reports_pending_until_completed(tmp_path):
+    """Local triggers remain marked pending while their session turn is in flight."""
+    from nanobot.bus.events import InboundMessage, OutboundMessage
+    from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._running = True
+
+    session_key = "websocket:chat-1"
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="trigger",
+        chat_id="chat-1",
+        content="review failed CI",
+        metadata={
+            LOCAL_TRIGGER_META: {
+                "trigger_id": "trg_123",
+                "trigger_name": "CI review",
+                "delivery_id": "tdl_123",
+            },
+        },
+        session_key_override=session_key,
+    )
+
+    submit_task = asyncio.create_task(loop.submit_local_trigger_turn(msg))
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+
+    assert queued is msg
+    assert loop.pending_local_trigger_ids_for_session(session_key) == {"trg_123"}
+
+    response = OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="done",
+    )
+    loop._local_trigger_turns.complete(msg, response=response)
+
+    assert await asyncio.wait_for(submit_task, timeout=0.5) is response
+    assert loop.pending_local_trigger_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
+async def test_local_trigger_turn_cancellation_reports_agent_failure(tmp_path):
+    """A cancelled agent turn should not cancel the local-trigger worker."""
+    from nanobot.agent.automation_turns import AutomationTurnError
+    from nanobot.bus.events import InboundMessage
+    from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._running = True
+
+    session_key = "websocket:chat-1"
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="trigger",
+        chat_id="chat-1",
+        content="review failed CI",
+        metadata={
+            LOCAL_TRIGGER_META: {
+                "trigger_id": "trg_123",
+                "trigger_name": "CI review",
+                "delivery_id": "tdl_123",
+            },
+        },
+        session_key_override=session_key,
+    )
+
+    submit_task = asyncio.create_task(loop.submit_local_trigger_turn(msg))
+    assert await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5) is msg
+
+    loop._local_trigger_turns.complete(msg, error=asyncio.CancelledError())
+
+    with pytest.raises(AutomationTurnError, match="CancelledError"):
+        await asyncio.wait_for(submit_task, timeout=0.5)
+    assert not submit_task.cancelled()
+    assert loop.pending_local_trigger_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
+async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_path):
+    """Pending queue should leave overflow messages queued for later drains."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    captured_messages: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append([dict(message) for message in messages])
+        return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    pending_queue = asyncio.Queue()
+    total_followups = _MAX_INJECTIONS_PER_TURN + 2
+    for idx in range(total_followups):
+        await pending_queue.put(InboundMessage(
+            channel="cli",
+            sender_id="u",
+            chat_id="c",
+            content=f"follow-up-{idx}",
+        ))
+
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "hello"}], current_message=None),
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
+        pending_queue=pending_queue,
+    )
+
+    assert result.final_content == "answer-3"
+    assert result.had_injections is True
+    assert call_count["n"] == 3
+    flattened_user_content = "\n".join(
+        message["content"]
+        for message in captured_messages[-1]
+        if message.get("role") == "user" and isinstance(message.get("content"), str)
+    )
+    for idx in range(total_followups):
+        assert f"follow-up-{idx}" in flattened_user_content
+    assert pending_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
+    """QueueFull should preserve the message by dispatching a queued task."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    dispatched = asyncio.Event()
+
+    async def _dispatch(_msg):
+        dispatched.set()
+
+    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
+
+    pending = asyncio.Queue(maxsize=1)
+    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="already queued"))
+    loop._pending_queues["cli:c"] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up")
+    await loop.bus.publish_inbound(msg)
+
+    await asyncio.wait_for(dispatched.wait(), timeout=2)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert loop._dispatch.await_count == 1
+    dispatched_msg = loop._dispatch.await_args.args[0]
+    assert dispatched_msg.content == "follow-up"
+    assert pending.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_queue_overflow_keeps_websocket_followup_durable(tmp_path):
+    """Fallback dispatch must not acknowledge a WebUI message before it commits."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.manager import Session
+    from nanobot.session.recovery import pending_followups
+
+    loop = _make_loop(tmp_path)
+    dispatched = asyncio.Event()
+    release_dispatch = asyncio.Event()
+
+    async def _dispatch(_msg):
+        dispatched.set()
+        await release_dispatch.wait()
+
+    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
+    session = Session(key="websocket:c")
+    loop.sessions.get_or_create.return_value = session
+    pending = asyncio.Queue(maxsize=1)
+    pending.put_nowait(
+        InboundMessage(channel="websocket", sender_id="u", chat_id="c", content="already queued")
+    )
+    loop._pending_queues["websocket:c"] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    await loop.bus.publish_inbound(
+        InboundMessage(
+            channel="websocket",
+            sender_id="u",
+            chat_id="c",
+            content="durable follow-up",
+            metadata={"webui": True},
+        )
+    )
+    await asyncio.wait_for(dispatched.wait(), timeout=2)
+
+    assert [message.content for message in pending_followups(session)] == ["durable follow-up"]
+    dispatched_msg = loop._dispatch.await_args.args[0]
+    assert dispatched_msg.metadata["_recovery_followup_id"]
+
+    release_dispatch.set()
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
+    """Messages left in the pending queue after _dispatch are re-published to the bus.
+
+    This tests the finally-block cleanup that prevents message loss when
+    the runner exits early (e.g., max_iterations) with messages
+    still in the queue.
+    """
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    bus = loop.bus
+
+    # Simulate a completed dispatch by manually registering a queue
+    # with leftover messages, then running the cleanup logic directly.
+    pending = asyncio.Queue(maxsize=20)
+    session_key = "cli:c"
+    loop._pending_queues[session_key] = pending
+    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="leftover-1"))
+    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="leftover-2"))
+
+    # Execute the cleanup logic from the finally block
+    queue = loop._pending_queues.pop(session_key, None)
+    assert queue is not None
+    leftover = 0
+    while True:
+        try:
+            item = queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        await bus.publish_inbound(item)
+        leftover += 1
+
+    assert leftover == 2
+
+    # Verify the messages are now on the bus
+    msgs = []
+    while not bus.inbound.empty():
+        msgs.append(await asyncio.wait_for(bus.consume_inbound(), timeout=0.5))
+    contents = [m.content for m in msgs]
+    assert "leftover-1" in contents
+    assert "leftover-2" in contents
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_after_recoverable_tool_error():
+    """A tool error and injected follow-up continue in the same runner conversation."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="stale prefix ",
+                finish_reason="length",
+                usage=None,
+            )
+        if call_count["n"] == 2:
+            return LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="c1", name="exec", arguments={"cmd": "bad"})],
+                usage=None,
+            )
+        # Third call: respond normally to the injected follow-up.
+        return LLMResponse(content="reply to follow-up", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(side_effect=RuntimeError("tool exploded"))
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after error")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "reply to follow-up"
+    assert call_count["n"] == 3
+    # The injection should be in the messages history
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and m.get("content") == "follow-up after error"
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_llm_error():
+    """Pending injections should be drained when the LLM returns an error finish_reason."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                usage=None,
+            )
+        # Second call: respond normally to the injected follow-up
+        return LLMResponse(content="recovered answer", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after LLM error")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "previous response"},
+            {"role": "user", "content": "trigger error"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "recovered answer"
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and "follow-up after LLM error" in str(m.get("content", ""))
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_empty_final_response():
+    """Pending injections should be drained when the runner exits due to empty response."""
+    from nanobot.agent.runner import _MAX_EMPTY_RETRIES, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= _MAX_EMPTY_RETRIES + 1:
+            return LLMResponse(content="", tool_calls=[], usage=None)
+        # After retries exhausted + injection drain, respond normally
+        return LLMResponse(content="answer after empty", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after empty")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "previous response"},
+            {"role": "user", "content": "trigger empty"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "answer after empty"
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and "follow-up after empty" in str(m.get("content", ""))
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_max_iterations():
+    """Pending injections should be drained when the runner hits max_iterations.
+
+    Unlike other error paths, max_iterations cannot continue the loop, so
+    injections are appended to messages but not processed by the LLM.
+    The key point is they are consumed from the queue to prevent re-publish.
+    """
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
+            usage=None,
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after max iters")
+    )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.had_injections is True
+    # The injection was consumed from the queue (preventing re-publish)
+    assert injection_queue.empty()
+    # The injection message is appended to conversation history
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and m.get("content") == "follow-up after max iters"
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_set_flag_when_followup_arrives_after_last_iteration():
+    """Late follow-ups drained in max_iterations should still flip had_injections."""
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
+            usage=None,
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    class InjectOnLastAfterIterationHook(AgentHook):
+        def __init__(self) -> None:
+            self.after_iteration_calls = 0
+
+        async def after_iteration(self, context) -> None:
+            self.after_iteration_calls += 1
+            if self.after_iteration_calls == 2:
+                await injection_queue.put(
+                    InboundMessage(
+                        channel="cli",
+                        sender_id="u",
+                        chat_id="c",
+                        content="late follow-up after max iters",
+                    )
+                )
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+        hook=InjectOnLastAfterIterationHook(),
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.had_injections is True
+    assert injection_queue.empty()
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and m.get("content") == "late follow-up after max iters"
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_injection_cycle_cap_on_error_path():
+    """Injection cycles should be capped even when every iteration hits an LLM error."""
+    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content=None,
+            tool_calls=[],
+            finish_reason="error",
+            usage=None,
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    drain_count = {"n": 0}
+
+    async def inject_cb():
+        drain_count["n"] += 1
+        if drain_count["n"] <= _MAX_INJECTION_CYCLES:
+            return [InboundMessage(channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}")]
+        return []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "previous"},
+            {"role": "user", "content": "trigger error"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks
+    assert call_count["n"] == _MAX_INJECTION_CYCLES + 1

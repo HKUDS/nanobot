@@ -1,17 +1,61 @@
-"""Post-run evaluation for background tasks (heartbeat & cron).
+"""Post-run notification evaluation for heartbeat checks.
 
-After the agent executes a background task, this module makes a lightweight
+After heartbeat executes an internal check, this module makes a lightweight
 LLM call to decide whether the result warrants notifying the user.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.utils.prompt_templates import render_template
+from nanobot.utils.workspace_prompts import (
+    WORKSPACE_PROMPT_MAX_CHARS,
+    has_workspace_prompt_override,
+    load_workspace_prompt_override,
+    workspace_prompt_file,
+)
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
+
+# Cap for a workspace-local heartbeat evaluator prompt override.
+EVALUATOR_PROMPT_MAX_CHARS = WORKSPACE_PROMPT_MAX_CHARS
+
+
+def evaluator_prompt_file(workspace: Path) -> Path:
+    """Path to the workspace-local heartbeat evaluator prompt override."""
+    return workspace_prompt_file(workspace, "evaluator")
+
+
+def has_evaluator_prompt_override(workspace: Path) -> bool:
+    """True when the workspace defines a non-empty evaluator prompt override."""
+    return has_workspace_prompt_override(evaluator_prompt_file(workspace))
+
+
+def default_evaluator_prompt() -> str:
+    """The built-in heartbeat notification-gate system prompt."""
+    return render_template("agent/evaluator.md", part="system", strip=True)
+
+
+def resolve_evaluator_prompt(workspace: Path) -> str:
+    """Return the active evaluator prompt: workspace override or built-in default.
+
+    Oversized overrides are truncated so a runaway file cannot blow up the
+    evaluator call.
+    """
+    text, original_chars = load_workspace_prompt_override(evaluator_prompt_file(workspace))
+    if text is not None:
+        if original_chars > EVALUATOR_PROMPT_MAX_CHARS:
+            logger.warning(
+                "Workspace heartbeat evaluator prompt exceeds {} chars ({}); truncating.",
+                EVALUATOR_PROMPT_MAX_CHARS, original_chars,
+            )
+        return text
+    return default_evaluator_prompt()
 
 _EVALUATE_TOOL = [
     {
@@ -37,56 +81,58 @@ _EVALUATE_TOOL = [
     }
 ]
 
-_SYSTEM_PROMPT = (
-    "You are a notification gate for a background agent. "
-    "You will be given the original task and the agent's response. "
-    "Call the evaluate_notification tool to decide whether the user "
-    "should be notified.\n\n"
-    "Notify when the response contains actionable information, errors, "
-    "completed deliverables, or anything the user explicitly asked to "
-    "be reminded about.\n\n"
-    "Suppress when the response is a routine status check with nothing "
-    "new, a confirmation that everything is normal, or essentially empty."
-)
-
-
 async def evaluate_response(
     response: str,
     task_context: str,
     provider: LLMProvider,
     model: str,
+    evaluator_prompt: str,
+    default_notify: bool = False,
 ) -> bool:
-    """Decide whether a background-task result should be delivered to the user.
+    """Decide whether a heartbeat result should be delivered to the user.
 
-    Uses a lightweight tool-call LLM request (same pattern as heartbeat
-    ``_decide()``).  Falls back to ``True`` (notify) on any failure so
-    that important messages are never silently dropped.
+    On any failure, falls back to ``default_notify``. Heartbeat passes
+    ``False`` to fail closed.
     """
+
     try:
         llm_response = await provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": (
-                    f"## Original task\n{task_context}\n\n"
-                    f"## Agent response\n{response}"
+                {"role": "system", "content": evaluator_prompt},
+                {"role": "user", "content": render_template(
+                    "agent/evaluator.md",
+                    part="user",
+                    task_context=task_context,
+                    response=response,
                 )},
             ],
             tools=_EVALUATE_TOOL,
             model=model,
-            max_tokens=256,
+            max_tokens=4096,
             temperature=0.0,
         )
 
-        if not llm_response.has_tool_calls:
-            logger.warning("evaluate_response: no tool call returned, defaulting to notify")
-            return True
+        if not llm_response.should_execute_tools:
+            if llm_response.has_tool_calls:
+                logger.warning(
+                    "evaluate_response: ignoring tool calls under finish_reason='{}', "
+                    "defaulting to notify={}",
+                    llm_response.finish_reason,
+                    default_notify,
+                )
+            else:
+                logger.warning(
+                    "evaluate_response: no tool call returned, defaulting to notify={}",
+                    default_notify,
+                )
+            return default_notify
 
         args = llm_response.tool_calls[0].arguments
-        should_notify = args.get("should_notify", True)
+        should_notify = args.get("should_notify", default_notify)
         reason = args.get("reason", "")
         logger.info("evaluate_response: should_notify={}, reason={}", should_notify, reason)
         return bool(should_notify)
 
     except Exception:
-        logger.exception("evaluate_response failed, defaulting to notify")
-        return True
+        logger.exception("evaluate_response failed, defaulting to notify={}", default_notify)
+        return default_notify

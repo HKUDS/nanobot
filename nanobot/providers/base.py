@@ -1,12 +1,60 @@
 """Base LLM provider interface."""
 
+from __future__ import annotations
+
 import asyncio
 import json
+import os
+import re
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+import json_repair
 from loguru import logger
+
+from nanobot.utils.helpers import sanitize_surrogates_deep
+
+if TYPE_CHECKING:
+    from nanobot.llm_usage.models import LLMCallRecord
+
+STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
+DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
+MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
+RETRY_AFTER_BUFFER = 1
+
+RetryEventCallback = Callable[[str], Awaitable[None]]
+LLMCallObserver = Callable[["LLMCallRecord"], None]
+
+
+def resolve_stream_idle_timeout_s(
+    *,
+    env_value: str | None = None,
+    default: float = DEFAULT_STREAM_IDLE_TIMEOUT_S,
+    maximum: float = MAX_STREAM_IDLE_TIMEOUT_S,
+) -> float:
+    """Return a safe streaming idle timeout from env/config text."""
+    raw = os.environ.get(STREAM_IDLE_TIMEOUT_ENV) if env_value is None else env_value
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid {}={!r}; using {}", STREAM_IDLE_TIMEOUT_ENV, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Ignoring non-positive {}={!r}; using {}", STREAM_IDLE_TIMEOUT_ENV, raw, default)
+        return default
+    if value > maximum:
+        logger.warning("Clamping {}={!r} to {}", STREAM_IDLE_TIMEOUT_ENV, raw, maximum)
+        return maximum
+    return value
 
 
 @dataclass
@@ -14,25 +62,488 @@ class ToolCallRequest:
     """A tool call request from the LLM."""
     id: str
     name: str
-    arguments: dict[str, Any]
+    arguments: Any
+    extra_content: dict[str, Any] | None = None
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
 
+    def has_valid_name(self) -> bool:
+        """Whether this call carries a usable (non-empty string) tool name.
+
+        ToolCallRequest.name is typed ``str`` but not enforced at runtime: a
+        model/gateway can emit a degenerate call with ``name=None`` or ``""``.
+        Such a call cannot be executed and, if persisted and replayed, makes
+        upstream APIs reject the whole request (e.g. Anthropic-style
+        ``messages.content.N.tool_use.name: Input should be a valid string``),
+        which permanently wedges the session.
+        """
+        runtime_name = cast(object, self.name)
+        return isinstance(runtime_name, str) and bool(runtime_name)
+
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
-        tool_call = {
+        arguments = (
+            self.arguments
+            if isinstance(self.arguments, str)
+            else json.dumps(self.arguments, ensure_ascii=False)
+        )
+        tool_call: dict[str, Any] = {
             "id": self.id,
             "type": "function",
             "function": {
                 "name": self.name,
-                "arguments": json.dumps(self.arguments, ensure_ascii=False),
+                "arguments": arguments,
             },
         }
+        if self.extra_content:
+            tool_call["extra_content"] = self.extra_content
         if self.provider_specific_fields:
             tool_call["provider_specific_fields"] = self.provider_specific_fields
         if self.function_provider_specific_fields:
             tool_call["function"]["provider_specific_fields"] = self.function_provider_specific_fields
         return tool_call
+
+
+def parse_tool_arguments(arguments: Any) -> Any:
+    """Parse provider tool arguments without guessing executable parameters.
+
+    Valid JSON object strings become dicts. Empty strings become no-arg calls.
+    Malformed JSON and JSON array/scalar values are preserved so ToolRegistry
+    can reject them before execution.
+    """
+    if arguments is None:
+        return {}
+    if not isinstance(arguments, str):
+        return arguments
+
+    stripped = arguments.strip()
+    if not stripped:
+        return {}
+
+    try:
+        parsed = json.loads(stripped)
+    except Exception:
+        return arguments
+    return arguments if parsed is None else parsed
+
+
+def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
+    """Return object-shaped arguments for provider history replay only.
+
+    This compatibility path may repair malformed JSON because it only shapes
+    existing conversation history for provider protocols. Do not use it for
+    newly generated tool calls that are about to execute.
+    """
+    if arguments is None:
+        return {}
+    if isinstance(arguments, dict):
+        return cast(dict[str, Any], arguments)
+    if not isinstance(arguments, str):
+        return {}
+
+    stripped = arguments.strip()
+    if not stripped:
+        return {}
+
+    try:
+        parsed = json.loads(stripped)
+    except Exception:
+        try:
+            parsed = json_repair.loads(stripped)
+        except Exception:
+            return {}
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+
+
+def tool_arguments_json_for_replay(arguments: Any) -> str:
+    """Return JSON object string arguments for provider history replay only."""
+    return json.dumps(tool_arguments_object_for_replay(arguments), ensure_ascii=False)
+
+
+@dataclass
+class ProviderConversationState:
+    """Opaque provider-owned continuation state.
+
+    ``payload`` may contain encrypted reasoning or other provider-private
+    protocol items. Keep it out of normal logs and public chat history.
+    ``pending_messages`` are Chat-style messages produced after the most
+    recent provider response and are materialized by the owning provider on
+    the next request.
+    """
+
+    kind: str
+    provider: str
+    model: str
+    version: int
+    payload: dict[str, Any] = field(default_factory=dict, repr=False)
+    pending_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+
+    def with_pending_messages(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> ProviderConversationState:
+        """Return a state copy with an isolated pending-message list."""
+        return ProviderConversationState(
+            kind=self.kind,
+            provider=self.provider,
+            model=self.model,
+            version=self.version,
+            payload=self.payload,
+            pending_messages=deepcopy(messages),
+        )
+
+    def to_private_record(self) -> dict[str, Any]:
+        """Serialize for the private session sidecar, never for public history."""
+        return {
+            "kind": self.kind,
+            "provider": self.provider,
+            "model": self.model,
+            "version": self.version,
+            "payload": deepcopy(self.payload),
+            "pending_messages": deepcopy(self.pending_messages),
+        }
+
+    @classmethod
+    def from_private_record(
+        cls,
+        value: object,
+    ) -> ProviderConversationState | None:
+        """Validate and deserialize a private session-sidecar value."""
+        if not isinstance(value, dict):
+            return None
+        data = cast(dict[str, Any], value)
+        kind = data.get("kind")
+        provider = data.get("provider")
+        model = data.get("model")
+        version = data.get("version")
+        payload = data.get("payload")
+        pending = data.get("pending_messages", [])
+        if (
+            not isinstance(kind, str)
+            or not kind
+            or not isinstance(provider, str)
+            or not provider
+            or not isinstance(model, str)
+            or not model
+            or isinstance(version, bool)
+            or not isinstance(version, int)
+            or not isinstance(payload, dict)
+            or not isinstance(pending, list)
+            or any(
+                not isinstance(message, dict)
+                for message in cast(list[object], pending)
+            )
+        ):
+            return None
+        return cls(
+            kind=kind,
+            provider=provider,
+            model=model,
+            version=version,
+            payload=deepcopy(cast(dict[str, Any], payload)),
+            pending_messages=deepcopy(cast(list[dict[str, Any]], pending)),
+        )
+
+
+@dataclass(frozen=True)
+class ProviderCallContext:
+    """Optional provider-owned continuation data for one model request.
+
+    The regular ``chat`` contract stays provider-agnostic. Responses-capable
+    providers consume this context through the opt-in ``chat_with_context``
+    hooks, while every other provider inherits the context-free delegation.
+    ``session_id`` gives providers a stable conversation-scoped routing key
+    without exposing that identity in the public message transcript.
+    """
+
+    conversation_state: ProviderConversationState | None = field(default=None, repr=False)
+    context_window_tokens: int | None = None
+    session_id: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class LLMUsage:
+    """Canonical token usage reported by, or estimated for, one or more LLM calls.
+
+    ``input_tokens`` is the logical input total and therefore includes cache reads
+    and writes.  ``None`` cache counts mean the wire protocol did not report that
+    metric, while zero means it explicitly reported no cache activity.
+
+    ``total_tokens`` preserves a provider-reported total when it exceeds the
+    visible input plus output (for example, hidden reasoning or tool usage).  It
+    must be at least ``input_tokens + output_tokens``.  The reported and estimated
+    totals partition it exactly, including after multi-call aggregation.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reported_tokens: int = 0
+    estimated_tokens: int = 0
+    generation_ms: int = 0
+    measured_output_tokens: int = 0
+    ttft_ms: int = 0
+    timed_requests: int = 0
+    context_tokens: int | None = None
+    request_count: int = 0
+
+    def __post_init__(self) -> None:
+        token_fields = {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "reported_tokens": self.reported_tokens,
+            "estimated_tokens": self.estimated_tokens,
+            "generation_ms": self.generation_ms,
+            "measured_output_tokens": self.measured_output_tokens,
+            "ttft_ms": self.ttft_ms,
+            "timed_requests": self.timed_requests,
+            "request_count": self.request_count,
+        }
+        for name, value in token_fields.items():
+            runtime_value = cast(object, value)
+            if (
+                not isinstance(runtime_value, int)
+                or isinstance(runtime_value, bool)
+                or runtime_value < 0
+            ):
+                raise ValueError(f"{name} must be a non-negative integer")
+        for name, value in (
+            ("cache_read_tokens", self.cache_read_tokens),
+            ("cache_write_tokens", self.cache_write_tokens),
+            ("context_tokens", self.context_tokens),
+        ):
+            runtime_value = cast(object, value)
+            if runtime_value is not None and (
+                not isinstance(runtime_value, int)
+                or isinstance(runtime_value, bool)
+                or runtime_value < 0
+            ):
+                raise ValueError(f"{name} must be None or a non-negative integer")
+
+        visible_total = self.input_tokens + self.output_tokens
+        if self.total_tokens < visible_total:
+            raise ValueError("total_tokens must be at least input_tokens + output_tokens")
+        if self.reported_tokens + self.estimated_tokens != self.total_tokens:
+            raise ValueError("reported_tokens + estimated_tokens must equal total_tokens")
+        cache_total = (self.cache_read_tokens or 0) + (self.cache_write_tokens or 0)
+        if cache_total > self.input_tokens:
+            raise ValueError("cache token counts cannot exceed logical input_tokens")
+
+    @classmethod
+    def reported(
+        cls,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+    ) -> LLMUsage:
+        """Build usage normalized from a provider response."""
+        visible_total = input_tokens + output_tokens
+        normalized_total = (
+            visible_total if total_tokens is None else max(visible_total, total_tokens)
+        )
+        return cls(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=normalized_total,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            reported_tokens=normalized_total,
+            context_tokens=input_tokens,
+            request_count=1,
+        )
+
+    @classmethod
+    def estimated(cls, *, input_tokens: int, output_tokens: int) -> LLMUsage:
+        """Build usage estimated locally because the provider omitted it."""
+        return cls(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            estimated_tokens=input_tokens + output_tokens,
+            context_tokens=input_tokens,
+            request_count=1,
+        )
+
+    @classmethod
+    def empty_request(cls) -> LLMUsage:
+        """Represent a completed model request with no measurable token usage."""
+        return cls(
+            input_tokens=0,
+            output_tokens=0,
+            total_tokens=0,
+            request_count=1,
+        )
+
+    @property
+    def source(self) -> Literal["reported", "estimated", "mixed"]:
+        if self.estimated_tokens == 0:
+            return "reported"
+        if self.reported_tokens == 0:
+            return "estimated"
+        return "mixed"
+
+    def with_timing(
+        self,
+        *,
+        generation_ms: int | None,
+        ttft_ms: int | None,
+    ) -> LLMUsage:
+        """Attach locally measured streaming telemetry to this usage value."""
+        return LLMUsage(
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            total_tokens=self.total_tokens,
+            cache_read_tokens=self.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens,
+            reported_tokens=self.reported_tokens,
+            estimated_tokens=self.estimated_tokens,
+            generation_ms=max(0, generation_ms or 0),
+            measured_output_tokens=self.output_tokens if generation_ms is not None else 0,
+            ttft_ms=max(0, ttft_ms or 0),
+            timed_requests=1 if ttft_ms is not None else 0,
+            context_tokens=self.context_tokens,
+            request_count=self.request_count,
+        )
+
+    def __add__(self, other: LLMUsage) -> LLMUsage:
+        """Aggregate calls without turning partially reported cache data into a count."""
+
+        def _sum_cache(left: int | None, right: int | None) -> int | None:
+            return left + right if left is not None and right is not None else None
+
+        return LLMUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+            cache_read_tokens=_sum_cache(self.cache_read_tokens, other.cache_read_tokens),
+            cache_write_tokens=_sum_cache(self.cache_write_tokens, other.cache_write_tokens),
+            reported_tokens=self.reported_tokens + other.reported_tokens,
+            estimated_tokens=self.estimated_tokens + other.estimated_tokens,
+            generation_ms=self.generation_ms + other.generation_ms,
+            measured_output_tokens=(
+                self.measured_output_tokens + other.measured_output_tokens
+            ),
+            ttft_ms=self.ttft_ms + other.ttft_ms,
+            timed_requests=self.timed_requests + other.timed_requests,
+            context_tokens=(
+                other.context_tokens
+                if other.context_tokens is not None
+                else self.context_tokens
+            ),
+            request_count=self.request_count + other.request_count,
+        )
+
+    def to_dict(self) -> dict[str, int | str | None]:
+        """Serialize the canonical contract at JSON/persistence boundaries."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "reported_tokens": self.reported_tokens,
+            "estimated_tokens": self.estimated_tokens,
+            "source": self.source,
+            "generation_ms": self.generation_ms,
+            "measured_output_tokens": self.measured_output_tokens,
+            "ttft_ms": self.ttft_ms,
+            "timed_requests": self.timed_requests,
+            "context_tokens": self.context_tokens,
+            "request_count": self.request_count,
+        }
+
+    def to_turn_dict(self) -> dict[str, int]:
+        """Project canonical usage into the compact WebUI/TUI per-turn shape."""
+        result: dict[str, int] = {
+            "prompt_tokens": self.input_tokens,
+            "completion_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "request_count": self.request_count,
+            "estimated_tokens": self.estimated_tokens,
+        }
+        if self.context_tokens is not None:
+            result["context_tokens"] = self.context_tokens
+        if self.cache_read_tokens is not None:
+            result["cached_tokens"] = self.cache_read_tokens
+        if self.cache_write_tokens is not None:
+            result["cache_write_tokens"] = self.cache_write_tokens
+        if self.generation_ms > 0 and self.measured_output_tokens > 0:
+            result["generation_ms"] = self.generation_ms
+            result["measured_completion_tokens"] = self.measured_output_tokens
+        if self.timed_requests > 0:
+            result["ttft_ms"] = self.ttft_ms
+            result["timed_requests"] = self.timed_requests
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> LLMUsage | None:
+        """Validate the exact first-party serialized contract."""
+        if not isinstance(value, dict):
+            return None
+        data = cast(dict[object, object], value)
+        integer_fields = (
+            "input_tokens",
+            "output_tokens",
+            "reported_tokens",
+            "estimated_tokens",
+            "generation_ms",
+            "measured_output_tokens",
+            "ttft_ms",
+            "timed_requests",
+            "request_count",
+        )
+        serialized_fields = {
+            *integer_fields,
+            "total_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "context_tokens",
+            "source",
+        }
+        if set(data) != serialized_fields:
+            return None
+        if any(
+            not isinstance(item := data.get(name), int) or isinstance(item, bool)
+            for name in integer_fields
+        ):
+            return None
+        cache_read = data.get("cache_read_tokens")
+        cache_write = data.get("cache_write_tokens")
+        context_tokens = data.get("context_tokens")
+        total = data.get("total_tokens")
+        source = data.get("source")
+        if any(
+            item is not None and (not isinstance(item, int) or isinstance(item, bool))
+            for item in (cache_read, cache_write, context_tokens)
+        ) or not isinstance(total, int) or isinstance(total, bool):
+            return None
+        try:
+            usage = cls(
+                input_tokens=cast(int, data["input_tokens"]),
+                output_tokens=cast(int, data["output_tokens"]),
+                total_tokens=total,
+                cache_read_tokens=cast(int | None, cache_read),
+                cache_write_tokens=cast(int | None, cache_write),
+                reported_tokens=cast(int, data["reported_tokens"]),
+                estimated_tokens=cast(int, data["estimated_tokens"]),
+                generation_ms=cast(int, data["generation_ms"]),
+                measured_output_tokens=cast(int, data["measured_output_tokens"]),
+                ttft_ms=cast(int, data["ttft_ms"]),
+                timed_requests=cast(int, data["timed_requests"]),
+                context_tokens=cast(int | None, context_tokens),
+                request_count=cast(int, data["request_count"]),
+            )
+        except (KeyError, ValueError):
+            return None
+        if source != usage.source:
+            return None
+        return usage
 
 
 @dataclass
@@ -41,40 +552,61 @@ class LLMResponse:
     content: str | None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
-    usage: dict[str, int] = field(default_factory=dict)
-    reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
-    thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
-    
+    usage: LLMUsage | None = None
+    # Locally measured streaming telemetry. ``generation_ms`` excludes time to
+    # first token and provider retry gaps; ``ttft_ms`` measures the first
+    # streamed reasoning/content delta from request start. They stay separate
+    # from provider usage because providers do not report these consistently.
+    generation_ms: int | None = None
+    ttft_ms: int | None = None
+    retry_after: float | None = None  # Provider supplied retry wait in seconds.
+    reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
+    thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
+    provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    # Routing wrappers may preserve or discard an incoming provider-owned
+    # continuation independently of the final fallback error's retry policy.
+    preserve_provider_state_on_error: bool | None = field(default=None, repr=False)
+    # Structured error metadata used by retry policy when finish_reason == "error".
+    error_status_code: int | None = None
+    error_kind: str | None = None  # e.g. "timeout", "connection"
+    error_type: str | None = None  # Provider/type semantic, e.g. insufficient_quota.
+    error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
+    error_retry_after_s: float | None = None
+    error_should_retry: bool | None = None
+
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
         return len(self.tool_calls) > 0
 
+    @property
+    def should_execute_tools(self) -> bool:
+        """Tools execute only when has_tool_calls AND finish_reason is a tool-capable stop.
+        Blocks gateway-injected calls under ``refusal`` / ``content_filter`` / ``error`` (#3220)."""
+        if not self.has_tool_calls:
+            return False
+        return self.finish_reason in ("tool_calls", "function_call", "stop")
+
 
 @dataclass(frozen=True)
 class GenerationSettings:
-    """Default generation parameters for LLM calls.
-
-    Stored on the provider so every call site inherits the same defaults
-    without having to pass temperature / max_tokens / reasoning_effort
-    through every layer.  Individual call sites can still override by
-    passing explicit keyword arguments to chat() / chat_with_retry().
-    """
+    """Default generation settings."""
 
     temperature: float = 0.7
     max_tokens: int = 4096
     reasoning_effort: str | None = None
 
 
+_SYNTHETIC_USER_CONTENT = "(conversation continued)"
+
+
 class LLMProvider(ABC):
-    """
-    Abstract base class for LLM providers.
-    
-    Implementations should handle the specifics of each provider's API
-    while maintaining a consistent interface.
-    """
+    """Base class for LLM providers."""
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
+    _PERSISTENT_MAX_DELAY = 60
+    _PERSISTENT_IDENTICAL_ERROR_LIMIT = 10
+    _RETRY_HEARTBEAT_CHUNK = 30
     _TRANSIENT_ERROR_MARKERS = (
         "429",
         "rate limit",
@@ -87,25 +619,191 @@ class LLMProvider(ABC):
         "timed out",
         "connection",
         "server error",
+        "server_error",
         "temporarily unavailable",
+        "速率限制",
+        "访问量过大",
+    )
+    _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
+    _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
+    _NON_RETRYABLE_429_ERROR_TOKENS = frozenset({
+        "insufficient_quota",
+        "quota_exceeded",
+        "quota_exhausted",
+        "billing_hard_limit_reached",
+        "insufficient_balance",
+        "credit_balance_too_low",
+        "billing_not_active",
+        "payment_required",
+    })
+    _RETRYABLE_429_ERROR_TOKENS = frozenset({
+        "rate_limit_exceeded",
+        "rate_limit_error",
+        "too_many_requests",
+        "request_limit_exceeded",
+        "requests_limit_exceeded",
+        "overloaded_error",
+    })
+    _NON_RETRYABLE_429_TEXT_MARKERS = (
+        "insufficient_quota",
+        "insufficient quota",
+        "quota exceeded",
+        "quota exhausted",
+        "billing hard limit",
+        "billing_hard_limit_reached",
+        "billing not active",
+        "insufficient balance",
+        "insufficient_balance",
+        "credit balance too low",
+        "payment required",
+        "out of credits",
+        "out of quota",
+        "exceeded your current quota",
+    )
+    _RETRYABLE_429_TEXT_MARKERS = (
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "retry after",
+        "try again in",
+        "temporarily unavailable",
+        "overloaded",
+        "concurrency limit",
+        "速率限制",
     )
 
     _SENTINEL = object()
 
-    def __init__(self, api_key: str | None = None, api_base: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        *,
+        provider_name: str,
+    ):
+        runtime_provider_name = cast(object, provider_name)
+        if not isinstance(runtime_provider_name, str) or not runtime_provider_name.strip():
+            raise ValueError("provider_name must be a non-empty configured identity")
         self.api_key = api_key
         self.api_base = api_base
+        self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
+        self._llm_call_observer: LLMCallObserver | None = None
+
+    def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
+        """Attach a fail-open observer for each physical retry-managed call."""
+        self._llm_call_observer = observer
+
+    def _usage_for_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+    ) -> LLMUsage | None:
+        usage = response.usage
+        if usage is None or usage.total_tokens == 0:
+            if response.finish_reason in {"error", "cancelled"}:
+                return None
+            messages = kwargs.get("messages")
+            if not isinstance(messages, list):
+                return usage
+            tools_value = kwargs.get("tools")
+            tools = cast(list[dict[str, Any]], tools_value) if isinstance(tools_value, list) else None
+            model_value = kwargs.get("model")
+            model = model_value if isinstance(model_value, str) else self.get_default_model()
+            try:
+                from nanobot.utils.helpers import (
+                    build_assistant_message,
+                    estimate_message_tokens,
+                    estimate_prompt_tokens_chain,
+                )
+
+                input_tokens, _ = estimate_prompt_tokens_chain(
+                    self,
+                    model,
+                    cast(list[dict[str, Any]], messages),
+                    tools,
+                )
+                assistant_message = build_assistant_message(
+                    response.content or "",
+                    tool_calls=[call.to_openai_tool_call() for call in response.tool_calls],
+                    reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
+                )
+                usage = LLMUsage.estimated(
+                    input_tokens=max(0, input_tokens),
+                    output_tokens=max(0, estimate_message_tokens(assistant_message)),
+                )
+            except Exception:
+                logger.exception("failed to estimate usage for {}", self.provider_name)
+                return usage
+        return usage.with_timing(
+            generation_ms=response.generation_ms,
+            ttft_ms=response.ttft_ms,
+        )
+
+    def _observe_llm_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        started_at_ms: int,
+        started_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
+        observer = self._llm_call_observer
+        if observer is None:
+            return response
+        usage = self._usage_for_call(response, kwargs)
+        if usage is not None:
+            response.usage = usage
+        model_value = kwargs.get("model")
+        model = model_value if isinstance(model_value, str) and model_value else self.get_default_model()
+        try:
+            from nanobot.llm_usage.context import current_llm_usage_source
+            from nanobot.llm_usage.models import LLMCallRecord
+
+            observer(LLMCallRecord(
+                started_at_ms=started_at_ms,
+                duration_ms=max(0, (time.monotonic_ns() - started_at_ns) // 1_000_000),
+                provider=self.provider_name,
+                model=model,
+                source=current_llm_usage_source(),
+                stream=stream,
+                finish_reason=response.finish_reason,
+                usage=usage,
+                error_status_code=response.error_status_code,
+                error_kind=response.error_kind,
+            ))
+        except Exception:
+            logger.exception("LLM call observer failed for {}", self.provider_name)
+        return response
+
+    def can_resume_conversation_state(
+        self,
+        state: ProviderConversationState,
+        model: str | None = None,
+    ) -> bool:
+        """Whether this provider can safely consume an opaque saved state."""
+        return False
+
+    def supports_native_compaction(self, model: str | None = None) -> bool:
+        """Whether requests may include provider-native context compaction."""
+        return False
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Replace empty text content that causes provider 400 errors.
+        """Sanitize message content: fix empty blocks, strip internal _meta fields.
 
-        Empty content can appear when MCP tools return nothing. Most providers
-        reject empty-string content or empty text blocks in list content.
+        Also strips unpaired UTF-16 surrogate code points from every string leaf
+        as a defense-in-depth pass before the payload leaves the process. Lone
+        surrogates (e.g. leaking from a Windows console, prompt_toolkit history,
+        or a truncated JSON round-trip) otherwise cause ``UnicodeEncodeError:
+        'utf-8' codec can't encode characters ... surrogates not allowed`` when
+        the HTTP client serializes the request body.
         """
         result: list[dict[str, Any]] = []
-        for msg in messages:
+        for raw_msg in messages:
+            msg = {key: value for key, value in raw_msg.items() if key != "_meta"}
             content = msg.get("content")
 
             if isinstance(content, str) and not content:
@@ -115,18 +813,26 @@ class LLMProvider(ABC):
                 continue
 
             if isinstance(content, list):
-                filtered = [
-                    item for item in content
-                    if not (
-                        isinstance(item, dict)
+                new_items: list[Any] = []
+                changed = False
+                for raw_item in cast(list[object], content):
+                    item = cast(dict[str, Any], raw_item) if isinstance(raw_item, dict) else None
+                    if (
+                        item is not None
                         and item.get("type") in ("text", "input_text", "output_text")
                         and not item.get("text")
-                    )
-                ]
-                if len(filtered) != len(content):
+                    ):
+                        changed = True
+                        continue
+                    if item is not None and "_meta" in item:
+                        new_items.append({k: v for k, v in item.items() if k != "_meta"})
+                        changed = True
+                    else:
+                        new_items.append(raw_item)
+                if changed:
                     clean = dict(msg)
-                    if filtered:
-                        clean["content"] = filtered
+                    if new_items:
+                        clean["content"] = new_items
                     elif msg.get("role") == "assistant" and msg.get("tool_calls"):
                         clean["content"] = None
                     else:
@@ -141,7 +847,43 @@ class LLMProvider(ABC):
                 continue
 
             result.append(msg)
-        return result
+        # Defense-in-depth: scrub lone UTF-16 surrogates from every string leaf.
+        # This is idempotent and no-op when messages are already clean.
+        sanitized = sanitize_surrogates_deep(result)
+        return cast(list[dict[str, Any]], sanitized) if isinstance(sanitized, list) else result
+
+    @staticmethod
+    def _tool_name(tool: dict[str, Any]) -> str:
+        """Extract tool name from either OpenAI or Anthropic-style tool schemas."""
+        name = tool.get("name")
+        if isinstance(name, str):
+            return name
+        fn = tool.get("function")
+        fn_object = cast(dict[str, Any], fn) if isinstance(fn, dict) else None
+        if fn_object is not None:
+            fname = fn_object.get("name")
+            if isinstance(fname, str):
+                return fname
+        return ""
+
+    @classmethod
+    def _tool_cache_marker_indices(cls, tools: list[dict[str, Any]]) -> list[int]:
+        """Return cache marker indices: builtin/MCP boundary and tail index."""
+        if not tools:
+            return []
+
+        tail_idx = len(tools) - 1
+        last_builtin_idx: int | None = None
+        for i in range(tail_idx, -1, -1):
+            if not cls._tool_name(tools[i]).startswith("mcp_"):
+                last_builtin_idx = i
+                break
+
+        ordered_unique: list[int] = []
+        for idx in (last_builtin_idx, tail_idx):
+            if idx is not None and idx not in ordered_unique:
+                ordered_unique.append(idx)
+        return ordered_unique
 
     @staticmethod
     def _sanitize_request_messages(
@@ -149,7 +891,7 @@ class LLMProvider(ABC):
         allowed_keys: frozenset[str],
     ) -> list[dict[str, Any]]:
         """Keep only provider-safe message keys and normalize assistant content."""
-        sanitized = []
+        sanitized: list[dict[str, Any]] = []
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in allowed_keys}
             if clean.get("role") == "assistant" and "content" not in clean:
@@ -170,7 +912,7 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
@@ -178,7 +920,7 @@ class LLMProvider(ABC):
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
             tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
@@ -189,6 +931,499 @@ class LLMProvider(ABC):
         err = (content or "").lower()
         return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
 
+    @classmethod
+    def is_transient_response(cls, response: LLMResponse) -> bool:
+        """Prefer structured error metadata, fallback to text markers for legacy providers."""
+        if response.error_should_retry is not None:
+            return bool(response.error_should_retry)
+
+        if response.error_status_code is not None:
+            status = int(response.error_status_code)
+            if status == 429:
+                return cls._is_retryable_429_response(response)
+            if status in cls._RETRYABLE_STATUS_CODES or status >= 500:
+                return True
+
+        kind = (response.error_kind or "").strip().lower()
+        if kind in cls._TRANSIENT_ERROR_KINDS:
+            return True
+
+        return cls._is_transient_error(response.content)
+
+    @classmethod
+    def is_arrearage_response(cls, response: LLMResponse) -> bool:
+        """Detect API-key arrearage / quota / billing errors that won't clear on retry.
+
+        These surface as HTTP 402 or as billing semantic tokens (e.g.
+        ``insufficient_quota``, ``payment_required``); reuses the same token and
+        text markers the 429 retry policy treats as non-retryable.
+        """
+        if response.error_status_code is not None and int(response.error_status_code) == 402:
+            return True
+
+        type_token = cls._normalize_error_token(response.error_type)
+        code_token = cls._normalize_error_token(response.error_code)
+        if any(
+            token in cls._NON_RETRYABLE_429_ERROR_TOKENS
+            for token in (type_token, code_token)
+            if token is not None
+        ):
+            return True
+
+        content = (response.content or "").lower()
+        return any(marker in content for marker in cls._NON_RETRYABLE_429_TEXT_MARKERS)
+
+    @staticmethod
+    def _normalize_error_token(value: Any) -> str | None:
+        if value is None:
+            return None
+        token = str(value).strip().lower()
+        return token or None
+
+    @classmethod
+    def _extract_error_type_code(cls, payload: Any) -> tuple[str | None, str | None]:
+        data: dict[str, Any] | None = None
+        if isinstance(payload, dict):
+            data = cast(dict[str, Any], payload)
+        elif isinstance(payload, str):
+            text = payload.strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    data = cast(dict[str, Any], parsed)
+        if data is None:
+            return None, None
+
+        error_obj = data.get("error")
+        type_value = data.get("type")
+        code_value = data.get("code")
+        error_object = cast(dict[str, Any], error_obj) if isinstance(error_obj, dict) else None
+        if error_object is not None:
+            type_value = error_object.get("type") or type_value
+            code_value = error_object.get("code") or code_value
+
+        return cls._normalize_error_token(type_value), cls._normalize_error_token(code_value)
+
+    @classmethod
+    def _is_retryable_429_response(cls, response: LLMResponse) -> bool:
+        type_token = cls._normalize_error_token(response.error_type)
+        code_token = cls._normalize_error_token(response.error_code)
+        semantic_tokens = {
+            token for token in (type_token, code_token)
+            if token is not None
+        }
+        if any(token in cls._NON_RETRYABLE_429_ERROR_TOKENS for token in semantic_tokens):
+            return False
+
+        content = (response.content or "").lower()
+        if any(marker in content for marker in cls._NON_RETRYABLE_429_TEXT_MARKERS):
+            return False
+
+        if any(token in cls._RETRYABLE_429_ERROR_TOKENS for token in semantic_tokens):
+            return True
+        if any(marker in content for marker in cls._RETRYABLE_429_TEXT_MARKERS):
+            return True
+        # Unknown 429 defaults to WAIT+retry.
+        return True
+
+    @staticmethod
+    def _content_as_blocks(content: Any) -> list[dict[str, Any]]:
+        """Convert message content to blocks so mixed user content can be merged."""
+        if isinstance(content, list):
+            return [
+                dict(cast(dict[str, Any], item))
+                if isinstance(item, dict)
+                else {"type": "text", "text": str(item)}
+                for item in cast(list[object], content)
+            ]
+        if content is None:
+            return []
+        return [{"type": "text", "text": str(content)}]
+
+    @staticmethod
+    def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Merge consecutive same-role messages and drop trailing assistant messages.
+
+        Some providers (OpenAI-compat, Azure, vLLM, Ollama, etc.) reject requests
+        where the last message is 'assistant' (prefill not supported) or two
+        consecutive non-system messages share the same role.
+        """
+        if not messages:
+            return messages
+
+        merged: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            if (
+                merged
+                and role != "system"
+                and role not in ("tool",)
+                and merged[-1].get("role") == role
+                and role in ("user", "assistant")
+            ):
+                prev = merged[-1]
+                if role == "assistant":
+                    prev_has_tools = bool(prev.get("tool_calls"))
+                    curr_has_tools = bool(msg.get("tool_calls"))
+                    if curr_has_tools:
+                        merged[-1] = dict(msg)
+                        continue
+                    if prev_has_tools:
+                        continue
+                prev_content = prev.get("content") or ""
+                curr_content = msg.get("content") or ""
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    prev["content"] = (prev_content + "\n\n" + curr_content).strip()
+                elif role == "user":
+                    combined = dict(msg)
+                    combined["content"] = [
+                        *LLMProvider._content_as_blocks(prev_content),
+                        *LLMProvider._content_as_blocks(curr_content),
+                    ]
+                    merged[-1] = combined
+                else:
+                    merged[-1] = dict(msg)
+            else:
+                merged.append(dict(msg))
+
+        last_popped = None
+        while merged and merged[-1].get("role") == "assistant":
+            last_popped = merged.pop()
+
+        # If removing trailing assistant messages left only system messages,
+        # the request would be invalid for most providers (e.g. Zhipu/GLM
+        # error 1214).  Recover by converting the last popped assistant
+        # message to a user message so the LLM can still see the content.
+        if (
+            merged
+            and last_popped is not None
+            and not any(m.get("role") in ("user", "tool") for m in merged)
+        ):
+            recovered = dict(last_popped)
+            recovered["role"] = "user"
+            merged.append(recovered)
+
+        # Safety net: ensure the first non-system message is not a bare
+        # ``assistant`` message.  Providers like GLM reject system→assistant
+        # with error 1214.  This can happen when upstream truncation (e.g.
+        # _snip_history) drops the only user message.  Insert a synthetic
+        # user message to keep the sequence valid.
+        for i, msg in enumerate(merged):
+            if msg.get("role") != "system":
+                if msg.get("role") == "assistant" and not msg.get("tool_calls"):
+                    merged.insert(i, {"role": "user", "content": _SYNTHETIC_USER_CONTENT})
+                break
+
+        return merged
+
+    @staticmethod
+    def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Replace image_url blocks with text placeholder. Returns None if no images found."""
+        found = False
+        result: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                new_content: list[Any] = []
+                for raw_block in cast(list[object], content):
+                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
+                    if block is not None and block.get("type") == "image_url":
+                        placeholder = (
+                            "[Image not delivered to model — "
+                            "do not describe or reference it]"
+                        )
+                        new_content.append({"type": "text", "text": placeholder})
+                        found = True
+                    else:
+                        new_content.append(raw_block)
+                result.append({**msg, "content": new_content})
+            else:
+                result.append(msg)
+        return result if found else None
+
+    @staticmethod
+    def _contains_image_content(value: object) -> bool:
+        """Return whether a JSON-like provider payload contains an input image."""
+        if isinstance(value, dict):
+            mapping = cast(dict[str, object], value)
+            if mapping.get("type") in {"image_url", "input_image"}:
+                return True
+            return any(LLMProvider._contains_image_content(item) for item in mapping.values())
+        if isinstance(value, list):
+            return any(
+                LLMProvider._contains_image_content(item)
+                for item in cast(list[object], value)
+            )
+        return False
+
+    @staticmethod
+    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
+        """Replace image_url blocks with text placeholder *in-place*.
+
+        Mutates the content lists of the original message dicts so that
+        callers holding references to those dicts also see the stripped
+        version.
+        """
+        found = False
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for i, raw_block in enumerate(cast(list[object], content)):
+                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
+                    if block is not None and block.get("type") == "image_url":
+                        placeholder = (
+                            "[Image not delivered to model — "
+                            "do not describe or reference it]"
+                        )
+                        content[i] = {"type": "text", "text": placeholder}
+                        found = True
+        return found
+
+    async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
+        """Call chat() and convert unexpected exceptions to error responses."""
+        started_at_ms = time.time_ns() // 1_000_000
+        started_at_ns = time.monotonic_ns()
+        try:
+            provider_context = kwargs.pop("provider_context", None)
+            if isinstance(provider_context, ProviderCallContext):
+                response = await self.chat_with_context(
+                    provider_context=provider_context,
+                    **kwargs,
+                )
+            else:
+                response = await self.chat(**kwargs)
+        except asyncio.CancelledError:
+            self._observe_llm_call(
+                LLMResponse(
+                    content=None,
+                    finish_reason="cancelled",
+                    error_kind="cancelled",
+                ),
+                kwargs,
+                started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns,
+                stream=False,
+            )
+            raise
+        except Exception as exc:
+            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+        return self._observe_llm_call(
+            response,
+            kwargs,
+            started_at_ms=started_at_ms,
+            started_at_ns=started_at_ns,
+            stream=False,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Stream a chat completion, calling *on_content_delta* for each text chunk.
+
+        *on_thinking_delta* is reserved for providers that expose incremental
+        thinking/reasoning on the wire; the default fallback invokes neither
+        callback for native deltas (only the optional single *on_content_delta*
+        after :meth:`chat`).
+
+        Returns the same ``LLMResponse`` as :meth:`chat`.  The default
+        implementation falls back to a non-streaming call and delivers the
+        full content as a single delta.  Providers that support native
+        streaming should override this method.
+        """
+        _ = on_thinking_delta, on_tool_call_delta
+        response = await self.chat(
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+        )
+        if on_content_delta and response.content:
+            await on_content_delta(response.content)
+        return response
+
+    async def chat_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Opt-in continuation hook; ordinary providers delegate to ``chat``."""
+        _ = provider_context
+        return await self.chat(**kwargs)
+
+    async def chat_stream_with_context(
+        self,
+        *,
+        provider_context: ProviderCallContext,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Streaming continuation hook with a context-free default."""
+        _ = provider_context
+        return await self.chat_stream(**kwargs)
+
+    async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
+        """Call chat_stream() and convert unexpected exceptions to error responses."""
+        started_at_ms = time.time_ns() // 1_000_000
+        started_at_ns = time.monotonic_ns()
+        first_output_at_ns: int | None = None
+
+        def _mark_output(delta: str) -> None:
+            nonlocal first_output_at_ns
+            if delta and first_output_at_ns is None:
+                first_output_at_ns = time.monotonic_ns()
+
+        if self._llm_call_observer is not None:
+            content_callback = kwargs.get("on_content_delta")
+            if callable(content_callback):
+                typed_content_callback = cast(
+                    Callable[[str], Awaitable[None]],
+                    content_callback,
+                )
+
+                async def _timed_content_delta(delta: str) -> None:
+                    _mark_output(delta)
+                    await typed_content_callback(delta)
+
+                kwargs["on_content_delta"] = _timed_content_delta
+
+            thinking_callback = kwargs.get("on_thinking_delta")
+            if callable(thinking_callback):
+                typed_thinking_callback = cast(
+                    Callable[[str], Awaitable[None]],
+                    thinking_callback,
+                )
+
+                async def _timed_thinking_delta(delta: str) -> None:
+                    _mark_output(delta)
+                    await typed_thinking_callback(delta)
+
+                kwargs["on_thinking_delta"] = _timed_thinking_delta
+
+        def _attach_stream_timing(response: LLMResponse) -> LLMResponse:
+            if first_output_at_ns is None:
+                return response
+            finished_at_ns = time.monotonic_ns()
+            if response.ttft_ms is None:
+                response.ttft_ms = max(0, round((first_output_at_ns - started_at_ns) / 1_000_000))
+            if response.generation_ms is None:
+                response.generation_ms = max(
+                    1,
+                    round((finished_at_ns - first_output_at_ns) / 1_000_000),
+                )
+            return response
+
+        try:
+            provider_context = kwargs.pop("provider_context", None)
+            if isinstance(provider_context, ProviderCallContext):
+                response = await self.chat_stream_with_context(
+                    provider_context=provider_context,
+                    **kwargs,
+                )
+            else:
+                response = await self.chat_stream(**kwargs)
+        except asyncio.CancelledError:
+            self._observe_llm_call(
+                LLMResponse(
+                    content=None,
+                    finish_reason="cancelled",
+                    error_kind="cancelled",
+                ),
+                kwargs,
+                started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns,
+                stream=True,
+            )
+            raise
+        except Exception as exc:
+            response = LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+        return self._observe_llm_call(
+            _attach_stream_timing(response),
+            kwargs,
+            started_at_ms=started_at_ms,
+            started_at_ns=started_at_ns,
+            stream=True,
+        )
+
+    async def chat_stream_with_retry(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: object = _SENTINEL,
+        temperature: object = _SENTINEL,
+        reasoning_effort: object = _SENTINEL,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        retry_mode: str = "standard",
+        on_retry_wait: RetryEventCallback | None = None,
+        provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
+    ) -> LLMResponse:
+        """Call chat_stream() with retry on transient provider failures."""
+        if max_tokens is self._SENTINEL or max_tokens is None:
+            max_tokens = self.generation.max_tokens
+        if temperature is self._SENTINEL or temperature is None:
+            temperature = self.generation.temperature
+        if reasoning_effort is self._SENTINEL:
+            reasoning_effort = self.generation.reasoning_effort
+
+        has_streamed_content = False
+
+        async def _tracking_delta(text: str) -> None:
+            nonlocal has_streamed_content
+            if text:
+                has_streamed_content = True
+            if on_content_delta:
+                await on_content_delta(text)
+
+        async def _recover_stream() -> None:
+            nonlocal has_streamed_content
+            if on_stream_recover:
+                await on_stream_recover()
+            has_streamed_content = False
+
+        kw: dict[str, Any] = dict(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            on_content_delta=_tracking_delta if on_content_delta is not None else None,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
+        )
+        if provider_context is not None:
+            kw["provider_context"] = provider_context
+        if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
+            kw["on_stream_recover"] = _recover_stream
+        return await self._run_chat_with_retry(
+            kw,
+            messages,
+            stream=True,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
+            should_retry_guard=lambda: not has_streamed_content,
+            on_stream_recover=_recover_stream if on_stream_recover else None,
+        )
+
     async def chat_with_retry(
         self,
         messages: list[dict[str, Any]],
@@ -198,71 +1433,299 @@ class LLMProvider(ABC):
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
+        retry_mode: str = "standard",
+        on_retry_wait: RetryEventCallback | None = None,
+        provider_context: ProviderCallContext | None = None,
+        on_retry_exhausted: RetryEventCallback | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
         Parameters default to ``self.generation`` when not explicitly passed,
         so callers no longer need to thread temperature / max_tokens /
-        reasoning_effort through every layer.
+        reasoning_effort through every layer. Explicit ``None`` is also
+        normalized to the provider's generation defaults so that downstream
+        ``_build_kwargs`` never sees ``None`` for ``max_tokens`` / ``temperature``
+        (which would crash ``max(1, max_tokens)``).
         """
-        if max_tokens is self._SENTINEL:
+        if max_tokens is self._SENTINEL or max_tokens is None:
             max_tokens = self.generation.max_tokens
-        if temperature is self._SENTINEL:
+        if temperature is self._SENTINEL or temperature is None:
             temperature = self.generation.temperature
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
-        for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
-            try:
-                response = await self.chat(
-                    messages=messages,
-                    tools=tools,
-                    model=model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    reasoning_effort=reasoning_effort,
-                    tool_choice=tool_choice,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                response = LLMResponse(
-                    content=f"Error calling LLM: {exc}",
-                    finish_reason="error",
-                )
+        kw: dict[str, Any] = dict(
+            messages=messages, tools=tools, model=model,
+            max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+        )
+        if provider_context is not None:
+            kw["provider_context"] = provider_context
+        return await self._run_chat_with_retry(
+            kw,
+            messages,
+            stream=False,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
+        )
 
+    async def _run_chat_with_retry(
+        self,
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        stream: bool,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        should_retry_guard: Callable[[], bool] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Run one chat entry point through this provider's retry policy."""
+        call = self._safe_chat_stream if stream else self._safe_chat
+        return await self._run_with_retry(
+            call,
+            kw,
+            original_messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
+            should_retry_guard=should_retry_guard,
+            on_stream_recover=on_stream_recover,
+        )
+
+    @classmethod
+    def _extract_retry_after(cls, content: str | None) -> float | None:
+        text = (content or "").lower()
+        patterns = (
+            r"retry after\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)?",
+            r"try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)",
+            r"wait\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)\s*before retry",
+            r"retry[_-]?after[\"'\s:=]+(\d+(?:\.\d+)?)",
+        )
+        for idx, pattern in enumerate(patterns):
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            value = float(match.group(1))
+            unit = match.group(2) if idx < 3 else "s"
+            return cls._to_retry_seconds(value, unit)
+        return None
+
+    @classmethod
+    def _to_retry_seconds(cls, value: float, unit: str | None = None) -> float:
+        normalized_unit = (unit or "s").lower()
+        if normalized_unit in {"ms", "milliseconds"}:
+            return max(0.1, value / 1000.0)
+        if normalized_unit in {"m", "min", "minutes"}:
+            return max(0.1, value * 60.0)
+        return max(0.1, value)
+
+    @classmethod
+    def _extract_retry_after_from_headers(cls, headers: Any) -> float | None:
+        if not headers:
+            return None
+
+        def _header_value(name: str) -> Any:
+            if hasattr(headers, "get"):
+                value = headers.get(name) or headers.get(name.title())
+                if value is not None:
+                    return value
+            if isinstance(headers, dict):
+                for key, value in cast(dict[object, Any], headers).items():
+                    if isinstance(key, str) and key.lower() == name.lower():
+                        return value
+            return None
+
+        with suppress(TypeError, ValueError):
+            retry_ms = _header_value("retry-after-ms")
+            if retry_ms is not None:
+                value = float(retry_ms) / 1000.0
+                if value > 0:
+                    return value
+
+        retry_after = _header_value("retry-after")
+        if retry_after is None:
+            return None
+        retry_after_text = str(retry_after).strip()
+        if not retry_after_text:
+            return None
+        if re.fullmatch(r"\d+(?:\.\d+)?", retry_after_text):
+            return cls._to_retry_seconds(float(retry_after_text), "s")
+        try:
+            retry_at = parsedate_to_datetime(retry_after_text)
+        except Exception:
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        remaining = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
+        return max(0.1, remaining)
+
+    @classmethod
+    def _extract_retry_after_from_response(cls, response: LLMResponse) -> float | None:
+        if response.error_retry_after_s is not None and response.error_retry_after_s > 0:
+            return response.error_retry_after_s
+        if response.retry_after is not None and response.retry_after > 0:
+            return response.retry_after
+        return cls._extract_retry_after(response.content)
+
+    async def _sleep_with_heartbeat(
+        self,
+        delay: float,
+        *,
+        attempt: int,
+        persistent: bool,
+        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
+        remaining = max(0.0, delay)
+        while remaining > 0:
+            if on_retry_wait:
+                kind = "persistent retry" if persistent else "retry"
+                await on_retry_wait(
+                    f"Model request failed, {kind} in {max(1, int(round(remaining)))}s "
+                    f"(attempt {attempt})."
+                )
+            chunk = min(remaining, self._RETRY_HEARTBEAT_CHUNK)
+            await asyncio.sleep(chunk)
+            remaining -= chunk
+
+    async def _run_with_retry(
+        self,
+        call: Callable[..., Awaitable[LLMResponse]],
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        retry_mode: str,
+        on_retry_wait: RetryEventCallback | None,
+        on_retry_exhausted: RetryEventCallback | None,
+        should_retry_guard: Callable[[], bool] | None = None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        attempt = 0
+        delays = list(self._CHAT_RETRY_DELAYS)
+        persistent = retry_mode == "persistent"
+        last_response: LLMResponse | None = None
+        last_error_key: str | None = None
+        identical_error_count = 0
+        while True:
+            attempt += 1
+            response = await call(**kw)
             if response.finish_reason != "error":
                 return response
-            if not self._is_transient_error(response.content):
+            last_response = response
+            if should_retry_guard is not None and not should_retry_guard():
+                is_timeout = (response.error_kind or "").lower() == "timeout"
+                if is_timeout:
+                    if on_stream_recover:
+                        logger.warning(
+                            "LLM stream stalled after content was emitted; "
+                            "starting a new stream segment and retrying"
+                        )
+                        await on_stream_recover()
+                    else:
+                        logger.warning(
+                            "LLM stream stalled after content was emitted; "
+                            "suppressing delta callbacks and retrying"
+                        )
+                        kw.setdefault("on_content_delta", None)
+                        kw["on_content_delta"] = None
+                        kw["on_thinking_delta"] = None
+                        kw["on_tool_call_delta"] = None
+                        should_retry_guard = None
+                else:
+                    logger.warning(
+                        "LLM stream failed after content was emitted; skipping retry"
+                    )
+                    return response
+            error_key = ((response.content or "").strip().lower() or None)
+            if error_key and error_key == last_error_key:
+                identical_error_count += 1
+            else:
+                last_error_key = error_key
+                identical_error_count = 1 if error_key else 0
+
+            if not self.is_transient_response(response):
+                stripped = self._strip_image_content(kw["messages"])
+                provider_context = kw.get("provider_context")
+                stripped_context: ProviderCallContext | None = None
+                if isinstance(provider_context, ProviderCallContext):
+                    state = provider_context.conversation_state
+                    if state is not None and (
+                        stripped is not None
+                        or self._strip_image_content(state.pending_messages) is not None
+                        or self._contains_image_content(state.payload)
+                    ):
+                        # Provider-owned payloads may retain earlier input_image items.
+                        # Rebuild from the stripped public transcript for this retry.
+                        stripped_context = ProviderCallContext(
+                            context_window_tokens=(
+                                provider_context.context_window_tokens
+                            ),
+                            session_id=provider_context.session_id,
+                        )
+                if stripped is not None or stripped_context is not None:
+                    logger.warning(
+                        "Non-transient LLM error with image content, retrying without images"
+                    )
+                    retry_kw = dict(kw)
+                    if stripped is not None:
+                        retry_kw["messages"] = stripped
+                    if stripped_context is not None:
+                        retry_kw["provider_context"] = stripped_context
+                    result = await call(**retry_kw)
+                    # Permanently strip images from the original messages so
+                    # subsequent iterations do not repeat the error-retry cycle.
+                    if result.finish_reason != "error":
+                        self._strip_image_content_inplace(original_messages)
+                    return result
                 return response
 
-            err = (response.content or "").lower()
-            logger.warning(
-                "LLM transient error (attempt {}/{}), retrying in {}s: {}",
-                attempt,
-                len(self._CHAT_RETRY_DELAYS),
-                delay,
-                err[:120],
-            )
-            await asyncio.sleep(delay)
+            if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
+                logger.warning(
+                    "Stopping persistent retry after {} identical transient errors: {}",
+                    identical_error_count,
+                    (response.content or "")[:120].lower(),
+                )
+                if on_retry_exhausted:
+                    await on_retry_exhausted(
+                        f"Persistent retry stopped after {identical_error_count} identical errors."
+                    )
+                return response
 
-        try:
-            return await self.chat(
-                messages=messages,
-                tools=tools,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                tool_choice=tool_choice,
+            if not persistent and attempt > len(delays):
+                logger.warning(
+                    "LLM request failed after {} attempts, giving up: {}",
+                    attempt,
+                    (response.content or "")[:120].lower(),
+                )
+                if on_retry_exhausted:
+                    await on_retry_exhausted(
+                        f"Model request failed after {attempt} attempts, giving up."
+                    )
+                break
+
+            retry_after = self._extract_retry_after_from_response(response)
+            base_delay = delays[min(attempt - 1, len(delays) - 1)]
+            delay = retry_after + RETRY_AFTER_BUFFER if retry_after else base_delay
+            if persistent:
+                delay = min(delay, self._PERSISTENT_MAX_DELAY)
+
+            logger.warning(
+                "LLM transient error (attempt {}{}), retrying in {}s: {}",
+                attempt,
+                "+" if persistent and attempt > len(delays) else f"/{len(delays)}",
+                int(round(delay)),
+                (response.content or "")[:120].lower(),
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            return LLMResponse(
-                content=f"Error calling LLM: {exc}",
-                finish_reason="error",
+            await self._sleep_with_heartbeat(
+                delay,
+                attempt=attempt,
+                persistent=persistent,
+                on_retry_wait=on_retry_wait,
             )
+
+        return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
 
     @abstractmethod
     def get_default_model(self) -> str:

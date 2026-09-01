@@ -1,0 +1,38 @@
+{
+  "description": "Signal 메시지에서 nanobot을 사용합니다.",
+  "requirements": "signal-cli HTTP 데몬, 전화번호 및 허용 목록",
+  "setup": {
+    "docsLabel": "Signal 설정 가이드 열기",
+    "officialLabel": "signal-cli 가이드 열기",
+    "tryIt": "연결된 전화번호로 Signal DM을 보내세요.",
+    "summary": "Signal은 Signal 전화번호에 연결된 signal-cli HTTP 데몬을 통해 접속합니다.",
+    "steps": [
+      "signal-cli-rest-api를 설치하고 Signal 번호를 연결하거나 등록하세요.",
+      "데몬 호스트, 포트, 연결된 전화번호를 입력하세요.",
+      "저장하고 Signal을 활성화한 다음 DM으로 테스트하세요."
+    ],
+    "fields": {
+      "phoneNumber": {
+        "label": "전화번호",
+        "placeholder": "+1234567890",
+        "help": "signal-cli에 등록된 Signal 번호를 사용하세요."
+      },
+      "daemonHost": {
+        "label": "데몬 호스트",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "데몬 포트",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "허용된 DM",
+        "placeholder": "전화번호 또는 UUID"
+      },
+      "group_allowFrom": {
+        "label": "허용된 그룹",
+        "placeholder": "그룹 ID"
+      }
+    }
+  }
+}

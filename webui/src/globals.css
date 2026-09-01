@@ -1,0 +1,881 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@supports (content-visibility: auto) {
+  .apps-catalog-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4.25rem;
+  }
+}
+
+/* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
+@layer base {
+  :root {
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 240 3% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 3% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 3% 12%;
+    --primary: 240 4% 16%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 40 8% 90.5%;
+    --input: 40 8% 90.5%;
+    --ring: 0 0% 3.9%;
+    --inline-token-highlight: #ef8e30;
+    --session-handle-lightness: 0.5;
+    --session-handle-chroma: 0.12;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 17 88% 32%;
+    --temporary-border: 17 88% 40%;
+    --radius: 0.4375rem;
+    /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
+    --radius-mark: 0.25rem;
+    --radius-compact: 0.5rem;
+    --radius-control: 0.75rem;
+    --radius-floating: 1.125rem;
+    --radius-panel: 1.375rem;
+    --radius-modal: 1.375rem;
+    --radius-prominent: 1.75rem;
+    --radius-pill: 9999px;
+    --sidebar: 40 8% 96.8%;
+    --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-selected: 40 1% 89.4%;
+    --sidebar-accent: 0 0% 95.8%;
+    --sidebar-accent-foreground: 0 0% 9%;
+    --sidebar-border: 40 8% 90.5%;
+    --settings-canvas: var(--background);
+    --settings-surface: 60 6% 96.7%;
+    --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
+    --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: 0 0% 19%;
+    --foreground: 240 4% 96%;
+    --card: 0 0% 22%;
+    --card-foreground: 240 4% 96%;
+    --popover: var(--card);
+    --popover-foreground: 240 4% 96%;
+    --primary: 240 5% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: var(--card);
+    --secondary-foreground: 0 0% 98%;
+    --muted: var(--card);
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 25%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 28%;
+    --input: var(--border);
+    --ring: 0 0% 83.1%;
+    --inline-token-highlight: #ef8e30;
+    --session-handle-lightness: 0.75;
+    --session-handle-chroma: 0.11;
+    --temporary-control-active: #ef8e30;
+    --temporary-accent: 24 95% 53%;
+    --temporary-foreground: 32 98% 73%;
+    --temporary-border: 27 96% 61%;
+    --sidebar: var(--card);
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-selected: 0 0% 29.8%;
+    --sidebar-accent: var(--background);
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: var(--border);
+    --settings-canvas: var(--background);
+    --settings-surface: var(--card);
+    --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
+    --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    overflow: hidden;
+  }
+
+  * {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: thin;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: var(--radius-pill);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::selection {
+    @apply bg-primary/15;
+  }
+}
+
+@layer utilities {
+  .composer-model-badge {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .composer-model-badge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: rgb(236 141 49);
+    opacity: 0;
+    transition: opacity 180ms ease-out;
+  }
+
+  .composer-model-badge[data-fallback="true"] {
+    border-color: rgb(236 141 49 / 0.38);
+  }
+
+  .composer-model-badge[data-fallback="true"]::before {
+    opacity: 0.1;
+  }
+
+  .dark .composer-model-badge[data-fallback="true"]::before {
+    opacity: 0.15;
+  }
+
+  .composer-model-badge > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-model-badge::before {
+      transition-duration: 150ms;
+    }
+  }
+
+  .host-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .host-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  html.native-host,
+  html.native-host body,
+  html.native-host #root {
+    background: transparent;
+  }
+
+  html.native-host body {
+    overflow: hidden;
+  }
+
+  .host-window-shell,
+  .host-sidebar-glass {
+    --host-glass-spot: hsl(var(--background) / 0.42);
+    --host-glass-start: hsl(var(--sidebar) / 0.5);
+    --host-glass-end: hsl(var(--sidebar) / 0.3);
+    background:
+      radial-gradient(
+        circle at 18% 0%,
+        var(--host-glass-spot),
+        transparent 34rem
+      ),
+      linear-gradient(
+        180deg,
+        var(--host-glass-start),
+        var(--host-glass-end)
+      );
+    background-attachment: fixed, fixed;
+    -webkit-backdrop-filter: saturate(185%) blur(34px);
+    backdrop-filter: saturate(185%) blur(34px);
+  }
+
+  .host-sidebar-glass {
+    background: hsl(var(--sidebar) / 0.94);
+    -webkit-backdrop-filter: saturate(145%) blur(18px);
+    backdrop-filter: saturate(145%) blur(18px);
+    box-shadow: 14px 0 32px -30px rgb(0 0 0 / 0.12);
+  }
+
+  .dark .host-window-shell,
+  .dark .host-sidebar-glass {
+    --host-glass-spot: hsl(var(--foreground) / 0.06);
+    --host-glass-start: hsl(var(--sidebar) / 0.48);
+    --host-glass-end: hsl(var(--sidebar) / 0.3);
+  }
+
+  .dark .host-sidebar-glass {
+    background: hsl(var(--sidebar) / 0.96);
+    box-shadow: 14px 0 34px -30px rgb(0 0 0 / 0.34);
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .host-sidebar-glass {
+      background: hsl(var(--sidebar) / 0.92);
+    }
+  }
+
+  html.native-host * {
+    scrollbar-width: none;
+    scrollbar-gutter: auto !important;
+  }
+
+  html.native-host *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  /* Keep the outer document rhythm clean at message boundaries. */
+  .markdown-content > :first-child {
+    @apply mt-0;
+  }
+  .markdown-content > :last-child {
+    @apply mb-0;
+  }
+
+  /* Override Tailwind Typography's built-in colors with our design tokens
+     so assistant messages use the same --foreground as user messages. */
+  .markdown-content {
+    --tw-prose-body: hsl(var(--foreground));
+    --tw-prose-headings: hsl(var(--foreground));
+    --tw-prose-bold: hsl(var(--foreground));
+    --tw-prose-lead: hsl(var(--foreground));
+    line-height: var(--cjk-line-height);
+  }
+
+  .markdown-content .contains-task-list {
+    @apply list-none pl-0;
+  }
+
+  .markdown-content .task-list-item {
+    @apply list-none pl-0;
+  }
+
+  /* CJK-friendly line-height: prose paragraphs default to 1.625 which is
+     tight for Chinese/Japanese/Korean characters. Bump to 1.8 for better
+     readability when the browser detects a CJK primary font. */
+  :lang(zh),
+  :lang(zh-CN),
+  :lang(zh-TW),
+  :lang(zh-HK),
+  :lang(ja),
+  :lang(ko) {
+    --cjk-line-height: 1.8;
+  }
+  :root {
+    --cjk-line-height: 1.625;
+  }
+
+  /* L→R sheen clipped to live activity labels. The highlight lives inside
+     the glyphs, not in the row background, so dark mode stays quiet. */
+  @keyframes streaming-text-sheen-ltr {
+    0% {
+      background-position: 140% 50%;
+    }
+    100% {
+      background-position: -40% 50%;
+    }
+  }
+  .streaming-text-sheen {
+    position: relative;
+    color: hsl(var(--muted-foreground));
+  }
+  .file-reference-sheen {
+    color: inherit;
+  }
+  .streaming-text-sheen::after {
+    content: attr(data-sheen-text);
+    position: absolute;
+    inset: 0;
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    color: transparent;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      transparent 38%,
+      hsl(var(--foreground) / 0.98) 50%,
+      transparent 62%,
+      transparent 100%
+    );
+    background-size: 260% 100%;
+    background-position: 140% 50%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: streaming-text-sheen-ltr 2.8s ease-in-out infinite;
+  }
+  .dark .streaming-text-sheen::after {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      transparent 38%,
+      hsl(var(--foreground) / 0.98) 50%,
+      transparent 62%,
+      transparent 100%
+    );
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .streaming-text-sheen::after {
+      animation: none;
+      content: "";
+    }
+    .streaming-text-fallback::after {
+      animation: none;
+    }
+  }
+
+  /**
+   * The composer is one persistent grid item in both landing and thread
+   * layouts. On desktop, the landing's trailing flexible row holds it at the
+   * visual center; collapsing only that row lets the same element dock at the
+   * bottom without a remount or a transform clone.
+   */
+  .thread-layout {
+    --thread-composer-fade-height: 2.25rem;
+    grid-template-rows: minmax(min-content, 1fr) auto 0fr;
+    transition: grid-template-rows 220ms ease-out;
+  }
+  .thread-layout[data-layout="thread"] {
+    grid-template-rows: minmax(0, 1fr) auto 0fr;
+  }
+  .thread-layout[data-layout="external"] {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  @media (min-width: 640px) {
+    .thread-layout[data-layout="hero"] {
+      grid-template-rows: minmax(min-content, 1fr) auto 1fr;
+    }
+  }
+
+  /**
+   * Keep the transcript and composer visually continuous. The scrollport owns
+   * the fade because overflow clips its contents before an adjacent overlay
+   * can soften the edge. The matching in-flow gap keeps the last line fully
+   * visible once the user reaches the bottom.
+   */
+  .thread-message-viewport {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+  }
+  .thread-message-end-gap {
+    height: var(--thread-composer-fade-height);
+  }
+  .thread-composer-dock {
+    background: hsl(var(--background));
+  }
+
+  @keyframes composer-status-strip-enter {
+    0% {
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+    72% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(-1px) scale(1.004);
+    }
+    100% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes composer-status-strip-exit {
+    0% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    100% {
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(8px) scale(0.99);
+    }
+  }
+  .composer-status-strip {
+    transform-origin: bottom center;
+    will-change: max-height, opacity, transform;
+  }
+  .composer-status-strip[data-state="enter"] {
+    animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .composer-status-strip[data-state="exit"] {
+    animation: composer-status-strip-exit 180ms ease-in both;
+  }
+  .composer-status-drawer {
+    --composer-status-drawer-duration: 220ms;
+    --composer-status-drawer-easing: ease-out;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    pointer-events: none;
+    transition:
+      grid-template-rows var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing);
+  }
+  .composer-status-drawer[data-state="open"] {
+    grid-template-rows: 1fr;
+    pointer-events: auto;
+  }
+  .composer-status-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .composer-status-drawer-content {
+    opacity: 0;
+    transform: translateY(8px);
+    transform-origin: bottom center;
+    transition:
+      opacity var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing),
+      transform var(--composer-status-drawer-duration)
+        var(--composer-status-drawer-easing);
+  }
+  .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .composer-workspace-drawer {
+    --composer-workspace-drawer-duration: 220ms;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .composer-workspace-drawer[data-state="open"] {
+    --composer-workspace-drawer-duration: 240ms;
+
+    grid-template-rows: 1fr;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .composer-workspace-drawer-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .composer-workspace-drawer {
+      transition:
+        grid-template-rows var(--composer-workspace-drawer-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    }
+    .composer-workspace-drawer-content {
+      transform: translateY(-6px);
+      transition: transform var(--composer-workspace-drawer-duration)
+        cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+      transform: translateY(0);
+    }
+  }
+  @keyframes queued-prompt-row-enter {
+    0% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .queued-prompt-row {
+    animation: queued-prompt-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-status-strip {
+      will-change: auto;
+    }
+    .composer-status-strip[data-state] {
+      animation: none;
+    }
+    .composer-status-drawer {
+      transition-duration: 0.01ms;
+    }
+    .composer-status-drawer-content {
+      transform: none;
+      transition-duration: 120ms, 0.01ms;
+    }
+    .thread-layout {
+      transition-duration: 0.01ms;
+    }
+    .queued-prompt-row {
+      animation: none;
+    }
+  }
+
+  .workbench-pane {
+    transform-origin: top left;
+  }
+
+  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
+  @keyframes goal-shell-glow-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
+        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
+    }
+    50% {
+      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
+        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
+    }
+  }
+  .goal-shell-glow {
+    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
+  }
+  @keyframes goal-shell-glow-breathe-dark {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
+        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
+    }
+    50% {
+      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
+        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
+    }
+  }
+  .dark .goal-shell-glow {
+    animation-name: goal-shell-glow-breathe-dark;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .goal-shell-glow {
+      animation: none;
+      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
+    }
+    .dark .goal-shell-glow {
+      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
+    }
+  }
+
+  /* Subtle scrollbar that doesn't fight the dark background. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+    border-radius: var(--radius-pill);
+  }
+  .scrollbar-track-transparent {
+    scrollbar-gutter: stable;
+  }
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /*
+   * Mobile responsive safety net — keep the chat viewport + composer inside a
+   * narrow viewport (see #4693). These are containment rules: long markdown
+   * (URLs, branch names, file paths, code, tables) wraps or scrolls inside its
+   * own box instead of forcing the whole column — and thus the page — wider
+   * than 100vw. Desktop layout is unchanged; the rules only engage when content
+   * would otherwise overflow. Fenced code blocks keep their own internal
+   * horizontal scroll (CodeBlock and the markdown <pre> wrappers already set
+   * overflow-x: auto), so clipping the thread column horizontally is safe.
+   */
+
+  /* Prose container: allow it to shrink within its column and break long words
+     so long URLs / paths never stretch the conversation wider than 100vw. */
+  .markdown-content {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Long links and inline code break rather than stretch the column. */
+  .markdown-content a,
+  .markdown-content code {
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Fenced / pre blocks scroll inside their own box, never the page. */
+  .markdown-content pre,
+  .not-prose pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Wide markdown tables scroll horizontally within the conversation column.
+     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
+     custom `table` component (see MarkdownTextRenderer); min-w-max on the
+     <table> keeps natural column widths so it scrolls instead of shrinking. */
+
+  /* Clip any residual horizontal bleed at the thread column edge. Vertical
+     scrolling and internal code-block scroll are unaffected. */
+  .thread-viewport-scrollbar {
+    overflow-x: hidden;
+  }
+
+  .thread-viewport {
+    container-name: thread-viewport;
+    container-type: inline-size;
+  }
+
+  @supports (content-visibility: auto) {
+    .thread-render-unit {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 12rem;
+    }
+  }
+
+  .thread-prompt-rail {
+    display: none;
+    left: 1.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .thread-prompt-rail {
+      display: block;
+    }
+  }
+
+  @container thread-viewport (max-width: 59rem) {
+    .thread-prompt-rail {
+      display: none;
+    }
+  }
+}
+
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/*
+ * Composer controls compress against their actual container, not the viewport.
+ * Permission state has priority over the model label; both retain their full
+ * accessible names and tooltip text when their visible labels are shortened.
+ */
+.thread-composer-surface {
+  container-name: thread-composer;
+  container-type: inline-size;
+}
+
+.thread-composer-footer-actions {
+  flex: 0 1 auto;
+  max-width: 58%;
+}
+
+.thread-composer-model-badge {
+  flex-shrink: 1;
+}
+
+.thread-composer-model-label-fade {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+}
+
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
+  transform: scale(0.98);
+}
+
+@keyframes composer-model-pill-viewport-enter {
+  from {
+    transform: scale(0.9074);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.composer-model-pill-viewport {
+  transform-origin: right center;
+  animation: composer-model-pill-viewport-enter 210ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+}
+
+.composer-model-pill-dock {
+  transform-origin: right center;
+  transition-property: none;
+  will-change: transform;
+}
+
+.composer-model-pill-track[data-settling="true"],
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes preset-name-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  35% {
+    transform: translateX(-2px);
+  }
+
+  70% {
+    transform: translateX(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
+    transform: none !important;
+  }
+
+  .composer-model-pill-track[data-settling="true"],
+  .composer-model-pill-dock {
+    transition: none;
+    will-change: auto;
+  }
+
+  .composer-model-pill-viewport {
+    animation: none;
+  }
+}
+
+@container thread-composer (max-width: 21rem) {
+  .thread-composer-footer {
+    column-gap: 0.25rem;
+    padding-inline: 0.5rem;
+  }
+
+  .thread-composer-footer-primary,
+  .thread-composer-footer-actions {
+    gap: 0.25rem;
+  }
+
+  .thread-composer-access {
+    max-width: 6.5rem;
+    padding-inline: 0.5rem;
+    font-size: 0.71875rem;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0.25rem;
+  }
+
+  .thread-composer-access-chevron {
+    margin-left: 0.25rem;
+  }
+
+  .thread-composer-access-label-full {
+    display: none;
+  }
+
+  .thread-composer-access-label-short {
+    display: inline;
+  }
+}
+
+@container thread-composer (max-width: 19rem) {
+  .thread-composer-model-badge {
+    width: 2rem;
+    flex: none;
+  }
+
+  .thread-composer-model-badge .composer-model-pill {
+    width: 100%;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .thread-composer-model-label {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 16rem) {
+  .thread-composer-access {
+    width: 2rem;
+    flex: none;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0;
+  }
+
+  .thread-composer-access-label-short,
+  .thread-composer-access-chevron {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 15rem) {
+  .thread-composer-action.touch-target,
+  .thread-composer-access.touch-target {
+    width: 2rem;
+    min-width: 2rem;
+    height: 2rem;
+    min-height: 2rem;
+  }
+}
+@media (forced-colors: active) {
+  [data-workbench-move-handle]:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}

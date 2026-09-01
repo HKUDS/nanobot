@@ -1,0 +1,92 @@
+{
+  "description": "讓 nanobot 接收並回覆電子郵件。",
+  "requirements": "IMAP 收件匣、SMTP 寄件服務、應用程式密碼和明確授權",
+  "setup": {
+    "docsLabel": "開啟郵件設定指南",
+    "officialLabel": "開啟應用程式密碼指南",
+    "tryIt": "向已連接的信箱傳送一封測試郵件。",
+    "summary": "郵件渠道透過 IMAP 讀取郵件並透過 SMTP 回覆。請使用專用信箱，並在啟用前明確授權。",
+    "steps": [
+      "建立專用信箱，並在服務商要求時建立應用程式密碼。",
+      "選擇服務商預設，或手動填入 IMAP 和 SMTP 設定。",
+      "授予權限，儲存並啟用郵件渠道，然後向信箱傳送一封測試郵件。"
+    ],
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud",
+      "custom": "自訂"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "已授權",
+        "help": "必要的安全開關。僅在確定要連接此機器人信箱後才開啟。",
+        "choices": {
+          "true": "已授權",
+          "false": "未授權"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP 主機",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP 使用者名稱",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP 密碼",
+        "placeholder": "應用程式密碼",
+        "help": "若郵件服務商要求，請使用應用程式密碼。"
+      },
+      "smtpHost": {
+        "label": "SMTP 主機",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP 使用者名稱",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP 密碼",
+        "placeholder": "應用程式密碼",
+        "help": "通常與 IMAP 使用同一個應用程式密碼。"
+      },
+      "imapPort": {
+        "label": "IMAP 連接埠",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP 連接埠",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "寄件地址",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "輪詢間隔",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "允許的寄件者",
+        "placeholder": "電子郵件地址，以逗號分隔",
+        "help": "留空則要求寄件者先完成配對。"
+      },
+      "verifyDkim": {
+        "label": "驗證 DKIM",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "verifySpf": {
+        "label": "驗證 SPF",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      }
+    }
+  }
+}

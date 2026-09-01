@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.pairing import (
+    PAIRING_CODE_META_KEY,
+    format_pairing_reply,
+    generate_code,
+    is_approved,
+)
 
 
 class BaseChannel(ABC):
@@ -22,7 +28,9 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
-    transcription_api_key: str = ""
+    send_progress: bool = True
+    send_tool_hints: bool = True
+    show_reasoning: bool = True
 
     def __init__(self, config: Any, bus: MessageBus):
         """
@@ -33,21 +41,35 @@ class BaseChannel(ABC):
             bus: The message bus for communication.
         """
         self.config = config
+        self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Groq Whisper. Returns empty string on failure."""
-        if not self.transcription_api_key:
-            return ""
+        """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
         try:
-            from nanobot.providers.transcription import GroqTranscriptionProvider
+            from nanobot.audio.transcription import (
+                resolve_transcription_config,
+                transcribe_audio_file,
+            )
+            from nanobot.config.loader import load_config
 
-            provider = GroqTranscriptionProvider(api_key=self.transcription_api_key)
-            return await provider.transcribe(file_path)
-        except Exception as e:
-            logger.warning("{}: audio transcription failed: {}", self.name, e)
+            return await transcribe_audio_file(file_path, resolve_transcription_config(load_config()))
+        except Exception:
+            self.logger.exception("Audio transcription failed")
             return ""
+
+    async def login(self, force: bool = False) -> bool:
+        """
+        Perform channel-specific interactive login (e.g. QR code scan).
+
+        Args:
+            force: If True, ignore existing credentials and force re-authentication.
+
+        Returns True if already authenticated or login succeeds.
+        Override in subclasses that support interactive login.
+        """
+        return True
 
     @abstractmethod
     async def start(self) -> None:
@@ -73,18 +95,162 @@ class BaseChannel(ABC):
 
         Args:
             msg: The message to send.
+
+        Implementations should raise on delivery failure so the channel manager
+        can apply any retry policy in one place.
         """
         pass
 
+    def progress_transport_defaults(self) -> tuple[bool, bool] | None:
+        """Return channel-owned defaults for progress and tool-hint messages.
+
+        ``None`` keeps the global channel policy. Channels should override this
+        only when their transport requires different defaults.
+        """
+        return None
+
+    def should_retry_send_error(self, error: Exception) -> bool:
+        """Return whether the channel manager may retry a failed delivery.
+
+        Channels with protocol-level business errors can override this hook to
+        prevent retries that cannot succeed until external state changes.
+        Transport and unexpected errors remain retryable by default.
+        """
+        return True
+
+    def start_error_message(self, error: Exception) -> str | None:
+        """Return an actionable public message for a channel startup failure.
+
+        Channel-specific exception handling stays in the owning channel. Returning
+        ``None`` keeps the manager's generic fallback.
+        """
+        return None
+
+    async def send_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
+        merge_next: bool = False,
+    ) -> None:
+        """Deliver a streaming text chunk.
+
+        Override in subclasses to enable streaming. Implementations should
+        raise on delivery failure so the channel manager can retry.
+
+        Stateful implementations should key buffers by ``stream_id`` rather
+        than only by ``chat_id`` when it is provided.
+
+        ``merge_next`` marks a resumable provider boundary whose next text
+        segment belongs to the same user-visible message.
+        """
+        pass
+
+    async def send_reasoning_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+    ) -> None:
+        """Stream a chunk of model reasoning/thinking content.
+
+        Default is no-op. Channels with a native low-emphasis primitive
+        (Slack context block, Telegram expandable blockquote, Discord
+        subtext, WebUI italic bubble, ...) override to render reasoning
+        as a subordinate trace that updates in place as the model thinks.
+
+        Streaming contract mirrors :meth:`send_delta`: stateful implementations
+        should key buffers by ``stream_id`` rather than only by ``chat_id``.
+        """
+        return
+
+    async def send_reasoning_end(
+        self,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+    ) -> None:
+        """Mark the end of a reasoning stream segment.
+
+        Default is no-op. Channels that buffer ``send_reasoning_delta``
+        chunks for in-place updates use this signal to flush and freeze
+        the rendered group; one-shot channels can ignore it entirely.
+        """
+        return
+
+    async def send_file_edit_events(
+        self,
+        chat_id: str,
+        edits: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Deliver structured live file-edit events.
+
+        Default is no-op. Channels with a rich activity surface can override
+        this to render editing progress without receiving empty text messages.
+        """
+        return
+
+    async def send_reasoning(self, msg: OutboundMessage) -> None:
+        """Deliver a complete reasoning block.
+
+        Default implementation reuses the streaming pair so plugins only
+        need to override the delta/end methods. Equivalent to one delta
+        with the full content followed immediately by an end marker —
+        keeps a single rendering path for both streamed and one-shot
+        reasoning (e.g. DeepSeek-R1's final-response ``reasoning_content``).
+        """
+        if not msg.content:
+            return
+        stream_id = getattr(msg.event, "stream_id", None)
+        await self.send_reasoning_delta(
+            msg.chat_id,
+            msg.content,
+            msg.metadata,
+            stream_id=stream_id,
+        )
+        await self.send_reasoning_end(
+            msg.chat_id,
+            msg.metadata,
+            stream_id=stream_id,
+        )
+
+    @property
+    def supports_streaming(self) -> bool:
+        """True when config enables streaming AND this subclass implements send_delta."""
+        cfg = self.config
+        config_mapping = cast(dict[str, Any], cfg) if isinstance(cfg, dict) else None
+        streaming: Any = (
+            config_mapping.get("streaming", False)
+            if config_mapping is not None
+            else getattr(cast(Any, cfg), "streaming", False)
+        )
+        return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
+
     def is_allowed(self, sender_id: str) -> bool:
-        """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
-        allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list:
-            logger.warning("{}: allow_from is empty — all access denied", self.name)
-            return False
+        """Check sender permission: star > allowlist > pairing store > deny."""
+        if isinstance(self.config, dict):
+            config_mapping = cast(dict[str, Any], self.config)
+            allow_list: Any = (
+                config_mapping.get("allow_from") or config_mapping.get("allowFrom") or []
+            )
+        else:
+            allow_list = getattr(self.config, "allow_from", None) or []
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+        # allowFrom entries are opaque tokens — must match exactly.
+        if str(sender_id) in allow_list:
+            return True
+        if is_approved(self.name, str(sender_id)):
+            return True
+        return False
 
     async def _handle_message(
         self,
@@ -94,27 +260,52 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        is_dm: bool = False,
+        authorization_id: str | None = None,
+        require_existing_session: bool = False,
     ) -> None:
-        """
-        Handle an incoming message from the chat platform.
+        """Handle a message after checking its authorization subject.
 
-        This method checks permissions and forwards to the bus.
-
-        Args:
-            sender_id: The sender's identifier.
-            chat_id: The chat/channel identifier.
-            content: Message text content.
-            media: Optional list of media URLs.
-            metadata: Optional channel-specific metadata.
-            session_key: Optional session key override (e.g. thread-scoped sessions).
+        ``sender_id`` is the identity recorded on the inbound message.  Channels
+        where access is scoped to another entity (for example, a group or room)
+        can pass that entity as ``authorization_id`` without changing the
+        sender's identity.  When omitted, authorization remains sender-based.
         """
-        if not self.is_allowed(sender_id):
-            logger.warning(
-                "Access denied for sender {} on channel {}. "
-                "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
-            )
+        permission_id = authorization_id if authorization_id is not None else sender_id
+        if not self.is_allowed(permission_id):
+            if is_dm:
+                try:
+                    code = generate_code(self.name, str(sender_id))
+                except OSError:
+                    # Transient pairing-store I/O failure: skip the pairing
+                    # reply for this message rather than crash the handler.
+                    self.logger.warning(
+                        "Pairing store unavailable; dropping DM from {}", sender_id
+                    )
+                    return
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(chat_id),
+                        content=format_pairing_reply(code),
+                        metadata={PAIRING_CODE_META_KEY: code},
+                    )
+                )
+                self.logger.info(
+                    "Sent pairing code {} to sender {} in chat {}",
+                    code, sender_id, chat_id,
+                )
+            else:
+                self.logger.warning(
+                    "Access denied for sender {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id,
+                )
             return
+
+        meta = metadata or {}
+        if self.supports_streaming:
+            meta = {**meta, "_wants_stream": True}
 
         msg = InboundMessage(
             channel=self.name,
@@ -122,8 +313,9 @@ class BaseChannel(ABC):
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {},
+            metadata=meta,
             session_key_override=session_key,
+            require_existing_session=require_existing_session,
         )
 
         await self.bus.publish_inbound(msg)
@@ -132,6 +324,16 @@ class BaseChannel(ABC):
     def default_config(cls) -> dict[str, Any]:
         """Return default config for onboard. Override in plugins to auto-populate config.json."""
         return {"enabled": False}
+
+    @classmethod
+    def refresh_feature_metadata(
+        cls,
+        config_path: Path,
+        *,
+        instance_id: str = "default",
+    ) -> bool:
+        """Refresh persisted display metadata after an explicit settings action."""
+        return False
 
     @property
     def is_running(self) -> bool:

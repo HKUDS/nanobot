@@ -1,0 +1,38 @@
+{
+  "description": "Kết nối nanobot qua gateway NapCat.",
+  "requirements": "Endpoint WebSocket NapCat và token truy cập tùy chọn",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn NapCat",
+    "officialLabel": "Mở tài liệu NapCat",
+    "tryIt": "Gửi tin nhắn thử QQ qua NapCat.",
+    "summary": "NapCat kết nối nanobot với QQ qua endpoint OneBot WebSocket cục bộ hoặc từ xa.",
+    "steps": [
+      "Khởi động NapCat và bật dịch vụ Forward WebSocket.",
+      "Sao chép URL WebSocket và token tùy chọn vào nanobot.",
+      "Lưu và bật NapCat, sau đó gửi tin nhắn thử QQ."
+    ],
+    "fields": {
+      "wsUrl": {
+        "label": "URL WebSocket",
+        "placeholder": "ws://127.0.0.1:3001",
+        "help": "Dùng URL Forward WebSocket từ NapCat."
+      },
+      "accessToken": {
+        "label": "Token truy cập",
+        "placeholder": "Token tùy chọn"
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID QQ, phân tách bằng dấu phẩy"
+      }
+    }
+  }
+}

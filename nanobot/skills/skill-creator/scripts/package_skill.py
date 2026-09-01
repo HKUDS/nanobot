@@ -12,28 +12,26 @@ Example:
 
 import sys
 import zipfile
+from contextlib import suppress
 from pathlib import Path
 
 from quick_validate import validate_skill
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    try:
+    with suppress(ValueError):
         path.relative_to(root)
         return True
-    except ValueError:
-        return False
+    return False
 
 
 def _cleanup_partial_archive(skill_filename: Path) -> None:
-    try:
-        if skill_filename.exists():
+    if skill_filename.exists():
+        with suppress(OSError):
             skill_filename.unlink()
-    except OSError:
-        pass
 
 
-def package_skill(skill_path, output_dir=None):
+def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) -> Path | None:
     """
     Package a skill folder into a .skill file.
 
@@ -80,9 +78,9 @@ def package_skill(skill_path, output_dir=None):
 
     skill_filename = output_path / f"{skill_name}.skill"
 
-    EXCLUDED_DIRS = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
+    excluded_dirs = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
 
-    files_to_package = []
+    files_to_package: list[Path] = []
     resolved_archive = skill_filename.resolve()
 
     for file_path in skill_path.rglob("*"):
@@ -93,7 +91,7 @@ def package_skill(skill_path, output_dir=None):
             return None
 
         rel_parts = file_path.relative_to(skill_path).parts
-        if any(part in EXCLUDED_DIRS for part in rel_parts):
+        if any(part in excluded_dirs for part in rel_parts):
             continue
 
         if file_path.is_file():
@@ -126,7 +124,7 @@ def package_skill(skill_path, output_dir=None):
         return None
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python package_skill.py <path/to/skill-folder> [output-directory]")
         print("\nExample:")
