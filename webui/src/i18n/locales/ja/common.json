@@ -1179,25 +1179,9 @@
       "stop": "応答を停止",
       "quotedContext": "引用したコンテキスト",
       "removeQuotedContext": "引用したコンテキストを削除",
-      "openModelSetup": "AI 設定を開く",
+      "modelNotConfigured": "モデルが未設定です",
+      "configureModel": "モデルを設定",
       "chooseAI": "AI を選択",
-      "modelSetup": {
-        "title": "AI を選択",
-        "description": "開始方法を選んでください。モデルはいつでも変更できます。",
-        "ready": "準備完了",
-        "account": {
-          "title": "アカウントを接続",
-          "description": "対応する AI サブスクリプションを使用します。"
-        },
-        "apiKey": {
-          "title": "API キーを使用",
-          "description": "お好みのプロバイダーのキーを使用します。"
-        },
-        "local": {
-          "title": "ローカルで実行",
-          "description": "Ollama、LM Studio、vLLM に接続します。"
-        }
-      },
       "switchModel": "この会話で使うモデルを切り替える",
       "manageModels": "モデルを管理",
       "context": {

@@ -1179,25 +1179,9 @@
       "stop": "Hentikan respons",
       "quotedContext": "Konteks kutipan",
       "removeQuotedContext": "Hapus konteks kutipan",
-      "openModelSetup": "Buka penyiapan AI",
+      "modelNotConfigured": "Model belum dikonfigurasi",
+      "configureModel": "Konfigurasi model",
       "chooseAI": "Pilih AI Anda",
-      "modelSetup": {
-        "title": "Pilih AI Anda",
-        "description": "Pilih cara memulai. Anda dapat mengganti model kapan saja.",
-        "ready": "Siap",
-        "account": {
-          "title": "Hubungkan akun",
-          "description": "Gunakan langganan AI yang didukung."
-        },
-        "apiKey": {
-          "title": "Gunakan kunci API",
-          "description": "Gunakan kunci dari penyedia pilihan Anda."
-        },
-        "local": {
-          "title": "Jalankan secara lokal",
-          "description": "Hubungkan Ollama, LM Studio, atau vLLM."
-        }
-      },
       "switchModel": "Ganti model untuk percakapan ini",
       "manageModels": "Kelola model",
       "context": {

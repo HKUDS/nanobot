@@ -70,7 +70,6 @@ import {
   ModelPresetBadge,
   type ModelPresetOption,
 } from "@/components/thread/ModelPresetBadge";
-import { ModelSetupDialog } from "@/components/thread/ModelSetupDialog";
 import {
   ACCEPT_ATTR,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -114,7 +113,6 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { formatCompactTokenCount } from "@/lib/format";
-import type { ModelSetupAvailability, ModelSetupIntent } from "@/lib/model-setup";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -300,9 +298,8 @@ interface ThreadComposerProps {
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
-  modelSetupAvailability?: ModelSetupAvailability;
   fallbackModelName?: string | null;
-  onModelBadgeClick?: (intent?: ModelSetupIntent) => void;
+  onModelBadgeClick?: () => void;
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
   variant?: "thread" | "hero";
@@ -1000,7 +997,6 @@ export function ThreadComposer({
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
-  modelSetupAvailability = { account: false, apiKey: false, local: false },
   fallbackModelName = null,
   onModelBadgeClick,
   onManageModels,
@@ -1040,7 +1036,6 @@ export function ThreadComposer({
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [sendPending, setSendPending] = useState(false);
-  const [modelSetupOpen, setModelSetupOpen] = useState(false);
   const interactionDisabled = !!disabled || sendPending;
   const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
@@ -2013,7 +2008,7 @@ export function ThreadComposer({
 
   const submit = useCallback(() => {
     if (modelNeedsSetup) {
-      setModelSetupOpen(true);
+      onModelBadgeClick?.();
       return;
     }
     if (!canSend) return;
@@ -2121,6 +2116,7 @@ export function ThreadComposer({
     isStreaming,
     maxTextBytes,
     modelNeedsSetup,
+    onModelBadgeClick,
     onSend,
     onStop,
     onQuotedContextChange,
@@ -2130,15 +2126,6 @@ export function ThreadComposer({
     textTooLargeMessage,
     value,
   ]);
-
-  const openModelSetup = useCallback(() => {
-    setModelSetupOpen(true);
-  }, []);
-
-  const continueModelSetup = useCallback((intent: ModelSetupIntent) => {
-    setModelSetupOpen(false);
-    onModelBadgeClick?.(intent);
-  }, [onModelBadgeClick]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showCliAppMenu) {
@@ -2561,7 +2548,7 @@ export function ThreadComposer({
                 needsSetup={modelNeedsSetup}
                 fallbackModelName={fallbackModelName}
                 isHero={isHero}
-                onClick={modelNeedsSetup ? openModelSetup : undefined}
+                onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
             ) : null}
             {!voiceRecorder.isRecording ? <ComposerContextBadge usage={contextUsage} /> : null}
@@ -2620,10 +2607,10 @@ export function ThreadComposer({
                 showStopButton
                   ? t("thread.composer.stop")
                   : modelNeedsSetup
-                    ? t("thread.composer.openModelSetup", { defaultValue: "Open AI setup" })
+                    ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
                     : t("thread.composer.send")
               }
-              onClick={showStopButton ? handleStop : modelNeedsSetup ? openModelSetup : undefined}
+              onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
                 "thread-composer-action touch-target rounded-full transition-transform",
                 showStopButton
@@ -2669,13 +2656,6 @@ export function ThreadComposer({
           </div>
         ) : null}
       </div>
-      <ModelSetupDialog
-        availability={modelSetupAvailability}
-        open={modelSetupOpen}
-        onOpenChange={setModelSetupOpen}
-        onReturnFocus={() => textareaRef.current?.focus()}
-        onSelect={continueModelSetup}
-      />
     </form>
   );
 }

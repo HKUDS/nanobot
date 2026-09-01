@@ -1179,25 +1179,9 @@
       "stop": "停止回覆",
       "quotedContext": "引用內容",
       "removeQuotedContext": "移除引用內容",
-      "openModelSetup": "開啟 AI 設定",
+      "modelNotConfigured": "尚未設定模型",
+      "configureModel": "設定模型",
       "chooseAI": "選擇你的 AI",
-      "modelSetup": {
-        "title": "選擇你的 AI",
-        "description": "選擇一種開始方式，之後可隨時更換模型。",
-        "ready": "已就緒",
-        "account": {
-          "title": "連結帳戶",
-          "description": "使用支援的 AI 訂閱。"
-        },
-        "apiKey": {
-          "title": "使用 API 金鑰",
-          "description": "使用你偏好的服務商金鑰。"
-        },
-        "local": {
-          "title": "在本機執行",
-          "description": "連結 Ollama、LM Studio 或 vLLM。"
-        }
-      },
       "switchModel": "切換此對話使用的模型",
       "manageModels": "管理模型預設",
       "context": {

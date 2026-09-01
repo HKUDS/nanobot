@@ -835,7 +835,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("Default")).toBeInTheDocument();
   });
 
-  it("opens first-run model setup without clearing the draft", async () => {
+  it("opens model settings directly without clearing the draft", async () => {
     const client = makeClient();
     const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");
     settings.agent.has_api_key = false;
@@ -882,53 +882,24 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("composer-model-setup-label")).toHaveTextContent("Choose your AI");
     expect(badge).not.toHaveClass("border-amber-500/35");
     expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
-    fireEvent.click(badge);
-    expect(await screen.findByRole("dialog", { name: "Choose your AI" })).toBeInTheDocument();
-    expect(screen.getAllByText("Ready")).toHaveLength(3);
-    expect(onOpenModelSettings).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     const input = screen.getByRole("textbox", { name: "Message input" });
-    await waitFor(() => expect(input).toHaveFocus());
     fireEvent.change(input, {
       target: { value: "hello" },
     });
+    fireEvent.click(badge);
+
+    expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("hello");
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    onOpenModelSettings.mockClear();
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
-    expect(await screen.findByRole("dialog", { name: "Choose your AI" })).toBeInTheDocument();
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
     expect(input).toHaveValue("hello");
-    fireEvent.click(screen.getByRole("button", { name: "Use an API key" }));
-
-    expect(onOpenModelSettings).toHaveBeenCalledWith("apiKey");
-    expect(input).toHaveValue("hello");
-    expect(input).not.toHaveFocus();
     expect(client.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("focuses the composer when returning from model setup", async () => {
-    const client = makeClient();
-    const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");
-    settings.agent.has_api_key = false;
-    const view = (focusComposerRequest: number) => wrap(
-      client,
-      <ThreadShell
-        session={session("setup-focus")}
-        title="Setup focus"
-        onToggleSidebar={() => {}}
-        settingsSnapshot={settings}
-        focusComposerRequest={focusComposerRequest}
-      />,
-      "openai-codex/gpt-5.1-codex",
-    );
-    const { rerender } = render(view(0));
-    const input = await screen.findByRole("textbox", { name: "Message input" });
-    input.blur();
-    expect(input).not.toHaveFocus();
-
-    rerender(view(1));
-
-    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it("keeps image generation controls out of the composer", async () => {

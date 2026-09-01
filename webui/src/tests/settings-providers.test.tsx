@@ -14,48 +14,6 @@ async function chooseProviderToConfigure(label: string) {
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
 
-  it.each([
-    ["account", "OpenAI Codex", ["DeepSeek", "Ollama", "Custom provider"]],
-    ["apiKey", "DeepSeek", ["OpenAI Codex", "Ollama"]],
-    ["local", "Ollama", ["OpenAI Codex", "DeepSeek", "Custom provider"]],
-  ] as const)("opens the %s first-run provider path", async (intent, expected, excluded) => {
-    const base = settingsPayload();
-    const payload: SettingsPayload = {
-      ...base,
-      providers: [
-        {
-          name: "openai_codex",
-          label: "OpenAI Codex",
-          configured: false,
-          auth_type: "oauth",
-        },
-        {
-          name: "deepseek",
-          label: "DeepSeek",
-          configured: false,
-          auth_type: "api_key",
-        },
-        {
-          name: "ollama",
-          label: "Ollama",
-          configured: false,
-          api_base: "http://127.0.0.1:11434",
-        },
-      ],
-    };
-
-    renderSettingsView({
-      initialSection: "models",
-      initialSettings: payload,
-      modelSetupIntent: intent,
-    });
-
-    const menu = await screen.findByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: expected })).toBeInTheDocument();
-    for (const label of excluded) {
-      expect(within(menu).queryByRole("menuitem", { name: label })).not.toBeInTheDocument();
-    }
-  });
 
   it("signs in to the xAI Grok provider", async () => {
     const base = settingsPayload();

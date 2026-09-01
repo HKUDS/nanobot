@@ -39,10 +39,6 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import {
-  modelSetupAvailability,
-  type ModelSetupIntent,
-} from "@/lib/model-setup";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -358,7 +354,6 @@ interface ThreadShellProps {
   composerPortalTarget?: HTMLElement | null;
   composerActive?: boolean;
   composerInputAriaLabel?: string;
-  focusComposerRequest?: number;
   emptyComposerVariant?: "hero" | "thread";
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
@@ -367,7 +362,7 @@ interface ThreadShellProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
-  onOpenModelSettings?: (intent?: ModelSetupIntent) => void;
+  onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
 }
 
@@ -659,7 +654,6 @@ export function ThreadShell({
   composerPortalTarget,
   composerActive = true,
   composerInputAriaLabel,
-  focusComposerRequest = 0,
   emptyComposerVariant = "hero",
   workspaceScope = null,
   workspaceDefaultScope = null,
@@ -969,10 +963,6 @@ export function ThreadShell({
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
-  const setupAvailability = useMemo(
-    () => modelSetupAvailability(settings?.providers),
-    [settings?.providers],
-  );
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -1527,7 +1517,6 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          modelSetupAvailability={setupAvailability}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
@@ -1555,7 +1544,7 @@ export function ThreadShell({
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
-          focusRequest={composerFocusSignal + focusComposerRequest}
+          focusRequest={composerFocusSignal}
           onQuotedContextChange={setQuotedContext}
         />
       ) : (
@@ -1577,7 +1566,6 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          modelSetupAvailability={setupAvailability}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
@@ -1603,7 +1591,6 @@ export function ThreadShell({
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
-          focusRequest={composerFocusSignal + focusComposerRequest}
         />
       )}
     </>

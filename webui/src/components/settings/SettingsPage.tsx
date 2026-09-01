@@ -31,12 +31,10 @@ import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings"
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SkillSummary } from "@/lib/types";
-import type { ModelSetupIntent } from "@/lib/model-setup";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
   controller: SettingsController;
-  modelSetupIntent: ModelSetupIntent | null;
   theme: "light" | "dark";
   showSidebar: boolean;
   onToggleTheme: () => void;
@@ -49,7 +47,6 @@ interface SettingsPageProps {
 
 export function SettingsPage({
   controller,
-  modelSetupIntent,
   theme,
   showSidebar,
   onToggleTheme,
@@ -286,7 +283,6 @@ export function SettingsPage({
               providerSaving={providerSaving}
               showBrandLogos={localPrefs.brandLogos}
               remoteBrowserAccess={remoteBrowserAccess}
-              setupIntent={modelSetupIntent}
               onToggleProvider={handleToggleProvider}
               onToggleProviderKey={toggleProviderKeyVisibility}
               onToggleProviderKeyEditing={toggleProviderKeyEditing}

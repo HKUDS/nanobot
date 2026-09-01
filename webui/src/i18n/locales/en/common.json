@@ -1193,25 +1193,9 @@
       "stop": "Stop response",
       "quotedContext": "Quoted context",
       "removeQuotedContext": "Remove quoted context",
-      "openModelSetup": "Open AI setup",
+      "modelNotConfigured": "Model not configured",
+      "configureModel": "Configure model",
       "chooseAI": "Choose your AI",
-      "modelSetup": {
-        "title": "Choose your AI",
-        "description": "Pick a starting point. You can change models at any time.",
-        "ready": "Ready",
-        "account": {
-          "title": "Connect an account",
-          "description": "Use a supported AI subscription."
-        },
-        "apiKey": {
-          "title": "Use an API key",
-          "description": "Bring a key from your preferred provider."
-        },
-        "local": {
-          "title": "Run locally",
-          "description": "Connect Ollama, LM Studio, or vLLM."
-        }
-      },
       "switchModel": "Switch model for this chat",
       "manageModels": "Manage models",
       "context": {
