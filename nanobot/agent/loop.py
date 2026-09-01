@@ -2058,24 +2058,14 @@ class AgentLoop:
             summary_checkpoint=ctx.summary_checkpoint,
             input_persisted_early=ctx.input_persisted_early,
         )
-        if not ctx.ephemeral and ctx.provider_compaction_applied:
-            summary = await self.consolidator.archive_session(
-                session,
-                archive_end=len(session.messages),
-                runtime=ctx.require_runtime(),
-                provider_state=session.provider_state,
-            )
-            if summary is not None:
-                self._insert_summary_checkpoint(
-                    session,
-                    SessionSummaryCheckpoint(
-                        summary=summary,
-                        transcript_boundary=len(ctx.all_messages),
-                    ),
-                )
-                # The next request must rebuild from the portable checkpoint;
-                # the opaque continuation predates that transcript rewrite.
-                session.provider_state = None
+        if (
+            not ctx.ephemeral
+            and ctx.provider_compaction_applied
+            and ctx.summary_checkpoint is not None
+        ):
+            # The next request must rebuild from the portable checkpoint;
+            # the opaque continuation predates that transcript rewrite.
+            session.provider_state = None
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)

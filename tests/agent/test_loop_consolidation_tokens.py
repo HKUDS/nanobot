@@ -175,6 +175,12 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
     tmp_path,
 ) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=2_000)
+    session = loop.sessions.get_or_create("cli:native")
+    session.messages = [
+        {"role": "user", "content": "accepted history"},
+        {"role": "assistant", "content": "accepted answer"},
+    ]
+    loop.sessions.save(session)
     compacted_state = ProviderConversationState(
         kind="openai_responses",
         provider="openai:test",
@@ -188,19 +194,21 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
         provider_state=compacted_state,
         provider_compaction_applied=True,
     ))
-    loop.consolidator.archive_session = AsyncMock(
+    loop.consolidator.summarize_transcript = AsyncMock(
         return_value="portable terminal checkpoint",
     )
 
     result = await loop.process_direct("continue", session_key="cli:native")
 
     assert result.content == "done"
-    archive = loop.consolidator.archive_session
-    archive.assert_awaited_once()
-    assert archive.await_args.kwargs["provider_state"] == compacted_state
-    archived_session = archive.await_args.args[0]
-    archive_end = archive.await_args.kwargs["archive_end"]
-    assert archived_session.messages[archive_end - 1]["content"] == "done"
+    summarize = loop.consolidator.summarize_transcript
+    summarize.assert_awaited_once()
+    accepted = summarize.await_args.args[0]
+    accepted_contents = [message.get("content") for message in accepted]
+    assert "accepted history" in accepted_contents
+    assert "accepted answer" in accepted_contents
+    assert "continue" not in accepted_contents
+    assert "done" not in accepted_contents
     reloaded = loop.sessions.get_or_create("cli:native")
     assert reloaded.provider_state is None
     assert reloaded.metadata["_last_summary"]["text"] == (
@@ -211,4 +219,6 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
     )
     assert [message["content"] for message in reloaded.get_history()] == [
         SUMMARY_CONTINUATION_TEXT,
+        "continue",
+        "done",
     ]

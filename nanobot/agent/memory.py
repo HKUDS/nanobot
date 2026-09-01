@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 from loguru import logger
 
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
@@ -828,7 +827,6 @@ class MemoryArchiver:
         history: list[dict[str, Any]],
         request_tools: list[dict[str, Any]],
         previous_summary: str | None = None,
-        provider_state: ProviderConversationState | None = None,
         input_token_budget: int | None = None,
         fallback_max_tokens: int | None = None,
     ) -> str | None:
@@ -858,26 +856,7 @@ class MemoryArchiver:
             *[dict(message) for message in history],
             prompt_message,
         ]
-        provider_context: ProviderCallContext | None = None
-        if provider_state is not None:
-            if not runtime.provider.can_resume_conversation_state(
-                provider_state,
-                runtime.model,
-            ):
-                logger.debug(
-                    "Memory archive provider state is not replayable for {}; raw-dumping",
-                    session_key,
-                )
-                return raw_fallback()
-            provider_context = ProviderCallContext(
-                conversation_state=provider_state.with_pending_messages([
-                    *provider_state.pending_messages,
-                    prompt_message,
-                ]),
-                session_id=f"{session_key}:memory-checkpoint",
-            )
-            request_tools = []
-        elif input_token_budget is not None:
+        if input_token_budget is not None:
             estimated, source = estimate_prompt_tokens_chain(
                 runtime.provider,
                 runtime.model,
@@ -903,7 +882,6 @@ class MemoryArchiver:
                     temperature=runtime.generation.temperature,
                     max_tokens=runtime.generation.max_tokens,
                     reasoning_effort=runtime.generation.reasoning_effort,
-                    provider_context=provider_context,
                 )
         except Exception:
             logger.warning("Memory archive provider call failed, raw-dumping to history")
@@ -926,8 +904,6 @@ class MemoryArchiver:
             logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
             return raw_fallback()
         if summary == "(nothing)":
-            if provider_state is not None:
-                return previous_summary or raw_fallback()
             return "(nothing)"
         self.store.append_history(summary, session_key=session_key)
         return summary
@@ -939,7 +915,6 @@ class MemoryArchiver:
         archive_end: int,
         runtime: LLMRuntime,
         input_token_budget: int,
-        provider_state: ProviderConversationState | None = None,
     ) -> str | None:
         """Archive a captured session prefix without mutating the session."""
         messages = list(session.messages[session.last_archived:archive_end])
@@ -951,7 +926,7 @@ class MemoryArchiver:
         )
         previous_summary = session_summary["text"] if session_summary else None
 
-        if provider_state is None and input_token_budget <= 0:
+        if input_token_budget <= 0:
             logger.debug(
                 "Memory archive has no safe input budget for {}; raw-dumping",
                 session.key,
@@ -962,30 +937,27 @@ class MemoryArchiver:
                 previous_summary=previous_summary,
                 max_tokens=runtime.generation.max_tokens,
             )
-        if provider_state is None:
-            prefix = Session(
-                key=session.key,
-                messages=list(session.messages[:archive_end]),
-                last_consolidated=session.last_archived,
+        prefix = Session(
+            key=session.key,
+            messages=list(session.messages[:archive_end]),
+            last_consolidated=session.last_archived,
+        )
+        history = prefix.get_history(max_tokens=input_token_budget)
+        archive_history = Session(
+            key=session.key,
+            messages=messages,
+        ).get_history()
+        if not archive_history or history[-len(archive_history):] != archive_history:
+            logger.debug(
+                "Memory archive cannot replay the full chunk for {}; raw-dumping",
+                session.key,
             )
-            history = prefix.get_history(max_tokens=input_token_budget)
-            archive_history = Session(
-                key=session.key,
-                messages=messages,
-            ).get_history()
-            if not archive_history or history[-len(archive_history):] != archive_history:
-                logger.debug(
-                    "Memory archive cannot replay the full chunk for {}; raw-dumping",
-                    session.key,
-                )
-                return self._raw_checkpoint(
-                    messages,
-                    session_key=session.key,
-                    previous_summary=previous_summary,
-                    max_tokens=runtime.generation.max_tokens,
-                )
-        else:
-            history = []
+            return self._raw_checkpoint(
+                messages,
+                session_key=session.key,
+                previous_summary=previous_summary,
+                max_tokens=runtime.generation.max_tokens,
+            )
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         workspace: Path | None = None
         if self._resolve_prompt_context is not None:
@@ -1005,7 +977,6 @@ class MemoryArchiver:
             history=history_messages,
             request_tools=tools,
             previous_summary=previous_summary,
-            provider_state=provider_state,
             input_token_budget=input_token_budget,
         )
 
@@ -1166,7 +1137,6 @@ class Consolidator:
         *,
         archive_end: int,
         runtime: LLMRuntime,
-        provider_state: ProviderConversationState | None = None,
     ) -> str | None:
         """Archive one captured session range through the shared Memory path."""
         return await self.archiver.archive_session(
@@ -1174,7 +1144,6 @@ class Consolidator:
             archive_end=archive_end,
             runtime=runtime,
             input_token_budget=self._input_token_budget(runtime),
-            provider_state=provider_state,
         )
 
     async def maybe_consolidate_by_tokens(

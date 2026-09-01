@@ -288,6 +288,62 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
     assert summarized[-1]["content"] == BACKFILL_CONTENT
 
 
+async def test_native_compaction_summarizes_h_without_current_tool_exchange(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+            provider_compaction_applied=True,
+        ),
+        LLMResponse(content="done"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="complete tool result")
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args: (100, "test-counter"),
+    )
+    consolidate = AsyncMock(return_value="portable checkpoint")
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=[
+                {"role": "user", "content": "accepted question"},
+                {"role": "assistant", "content": "accepted answer"},
+            ],
+            current_message="inspect the project",
+        ),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        tools=tools,
+        model="test-model",
+        context_window_tokens=2_000,
+        context_block_limit=500,
+        max_tokens=100,
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    consolidate.assert_awaited_once_with(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "accepted question"},
+            {"role": "assistant", "content": "accepted answer"},
+        ],
+        None,
+    )
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.transcript_boundary == 3
+    assert result.provider_compaction_applied is True
+    assert any(message.get("content") == "inspect the project" for message in result.messages)
+    assert any(message.get("content") == "complete tool result" for message in result.messages)
+
+
 async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False

@@ -560,6 +560,30 @@ class AgentRunner:
             )
         )
 
+    @staticmethod
+    async def _summarize_provider_compaction(
+        spec: AgentRunSpec,
+        state: _ModelRequestState,
+        response: LLMResponse,
+    ) -> None:
+        """Materialize the H replaced by provider-native compaction."""
+        compaction = state.compaction
+        summarize = spec.consolidate_history
+        if not response.provider_compaction_applied or compaction is None or summarize is None:
+            return
+
+        summary = await summarize(
+            deepcopy(compaction.accepted_messages),
+            compaction.active_summary,
+        )
+        if not summary:
+            return
+        compaction.active_summary = summary
+        compaction.summary_checkpoint = SessionSummaryCheckpoint(
+            summary=summary,
+            transcript_boundary=compaction.raw_accepted_boundary,
+        )
+
     async def _run_core(
         self,
         spec: AgentRunSpec,
@@ -1331,6 +1355,7 @@ class AgentRunner:
             response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
         if generation_elapsed_s > 0:
             response.generation_ms = max(1, round(generation_elapsed_s * 1000))
+        await self._summarize_provider_compaction(spec, request_state, response)
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         # chat_stream_with_retry may recover internally, so only fail unfinished
         # hosted calls after the provider returns its final error response.
@@ -1560,6 +1585,7 @@ class AgentRunner:
                 finish_reason="error",
                 error_kind="timeout",
             )
+        await self._summarize_provider_compaction(spec, request_state, response)
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
 
