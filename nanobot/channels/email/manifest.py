@@ -36,6 +36,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "allowedAttachmentTypes": field("list"),
         "maxAttachmentSize": field("int", default=2_000_000),
         "maxAttachmentsPerEmail": field("int", default=5),
+        "trustedAuthservIds": field("list"),
     },
     required=required_fields(
         "consentGranted",

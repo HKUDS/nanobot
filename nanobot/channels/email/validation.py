@@ -100,6 +100,8 @@ def validate(
     values: dict[str, Any],
     context: ChannelValidationContext,
 ) -> dict[str, Any]:
+    from nanobot.channels.email.runtime import EmailConfig
+
     checks, missing = required_checks("email", values)
     if truthy(values.get("consentGranted")):
         checks.append(check("consent", "Mailbox consent", "pass", "Consent is enabled for this mailbox."))
@@ -112,6 +114,42 @@ def validate(
                 "Grant consent before nanobot reads this mailbox.",
             )
         )
+
+    verify_dkim = _bool_value(values, "verifyDkim", default=True)
+    verify_spf = _bool_value(values, "verifySpf", default=True)
+    trusted_authserv_ids = values.get("trustedAuthservIds")
+    if isinstance(trusted_authserv_ids, str):
+        trusted_authserv_ids = [item.strip() for item in trusted_authserv_ids.split(",") if item.strip()]
+    try:
+        auth_config = EmailConfig.model_validate({
+            "trustedAuthservIds": [] if trusted_authserv_ids is None else trusted_authserv_ids,
+        })
+    except ValueError:
+        checks.append(check(
+            "trusted_authserv_ids", "Trusted mail authentication service", "fail",
+            "Use exact authserv-id values, not wildcards, URLs, or empty entries.",
+        ))
+    else:
+        if verify_dkim or verify_spf:
+            if auth_config.trusted_authserv_ids:
+                checks.append(
+                    check(
+                        "trusted_authserv_ids",
+                        "Trusted mail authentication service",
+                        "pass",
+                        "Authentication-Results is restricted to configured authserv-id values.",
+                    )
+                )
+            else:
+                missing.append("trustedAuthservIds")
+                checks.append(
+                    check(
+                        "trusted_authserv_ids",
+                        "Trusted mail authentication service",
+                        "fail",
+                        "Set trustedAuthservIds when SPF or DKIM verification is enabled.",
+                    )
+                )
 
     for prefix, default_port in (("imap", 993), ("smtp", 587)):
         label = prefix.upper()

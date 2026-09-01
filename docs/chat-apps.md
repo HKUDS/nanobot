@@ -767,6 +767,13 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
 > - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
+> - `trustedAuthservIds`: Exact `authserv-id` values added by the receiving mail
+>   service. Required while `verifyDkim` or `verifySpf` is enabled. Gmail normally
+>   uses `mx.google.com`; inspect a received message's raw headers for other services.
+>   The service must prepend one consolidated result and remove inbound headers that
+>   claim the same identity; duplicate trusted results are rejected.
+>   Existing installations must follow the [v0.3.5 upgrade instructions](guides/email-ai-agent.md#upgrading-to-v035)
+>   before re-enabling verified email polling.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 > - `postAction`: Optional post-processing for processed emails: `"delete"` or `"move"` (default `null`).
@@ -794,6 +801,7 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
       "allowFrom": ["your-real-email@gmail.com"],
+      "trustedAuthservIds": ["mx.google.com"],
       "postAction": "move",
       "postActionMoveMailbox": "[Gmail]/Trash",
       "postActionIgnoreSkipped": true,

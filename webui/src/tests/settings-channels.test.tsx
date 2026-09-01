@@ -74,6 +74,7 @@ function channelSetupContract(
           field("allowFrom", "list"),
           field("verifyDkim", "bool", { defaultValue: "true" }),
           field("verifySpf", "bool", { defaultValue: "true" }),
+          field("trustedAuthservIds", "list"),
         ],
         requirements: [
           { alternatives: [["channels.email.consentGranted"]] },
@@ -1599,6 +1600,9 @@ describe("Settings channels", () => {
     expect(screen.queryByRole("button", { name: "Gmail" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByText("Quick fill")).toBeVisible();
+    const trustedServices = screen.getByLabelText("Trusted authentication services");
+    expect(trustedServices).toBeVisible();
+    fireEvent.change(trustedServices, { target: { value: "mx.receiver.example" } });
     fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.custom.test" } });
     fireEvent.click(screen.getByRole("button", { name: "Gmail" }));
     expect(screen.getByLabelText("IMAP host")).toHaveValue("imap.custom.test");
@@ -1643,6 +1647,7 @@ describe("Settings channels", () => {
           name: "email",
           values: expect.objectContaining({
             "channels.email.consentGranted": "true",
+            "channels.email.trustedAuthservIds": "mx.receiver.example",
           }),
         }),
         20_000,

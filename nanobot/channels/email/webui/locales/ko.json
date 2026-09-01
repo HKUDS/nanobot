@@ -155,6 +155,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "최대 첨부 파일"
+      },
+      "trustedAuthservIds": {
+        "label": "신뢰할 인증 서비스",
+        "placeholder": "mx.google.com, 쉼표로 구분",
+        "help": "수신 메일 서비스가 추가한 정확한 authserv-id입니다. SPF 또는 DKIM 확인 시 필수입니다."
       }
     }
   }
