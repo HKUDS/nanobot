@@ -481,6 +481,67 @@ describe("App layout", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
   });
 
+  it("carries a first-run setup path into settings and restores composer focus", async () => {
+    const user = userEvent.setup();
+    const base = baseSettingsPayload();
+    mockFetchRoutes({
+      "/api/settings": {
+        ...base,
+        agent: {
+          ...base.agent,
+          model: "",
+          resolved_provider: "",
+          has_api_key: false,
+          model_preset: "",
+        },
+        model_presets: [],
+        model_call_order: [],
+        providers: [
+          {
+            name: "openai_codex",
+            label: "OpenAI Codex",
+            configured: false,
+            auth_type: "oauth",
+          },
+          {
+            name: "deepseek",
+            label: "DeepSeek",
+            configured: false,
+            auth_type: "api_key",
+          },
+          {
+            name: "ollama",
+            label: "Ollama",
+            configured: false,
+            api_base: "http://127.0.0.1:11434",
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: "Choose your AI" }));
+    await user.click(await screen.findByRole("button", { name: "Run locally" }));
+
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    const providerMenu = await screen.findByRole("menu");
+    expect(within(providerMenu).getByRole("menuitem", { name: "Ollama" }))
+      .toBeInTheDocument();
+    expect(within(providerMenu).queryByRole("menuitem", { name: "OpenAI Codex" }))
+      .not.toBeInTheDocument();
+    expect(within(providerMenu).queryByRole("menuitem", { name: "DeepSeek" }))
+      .not.toBeInTheDocument();
+
+    const composer = screen.getByRole("textbox", { name: "Message input" });
+    expect(composer).not.toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Back to chat" }));
+    await waitFor(() => expect(composer).toHaveFocus());
+  });
+
   it("places Automations after Skills in the main sidebar", async () => {
     render(<App />);
 

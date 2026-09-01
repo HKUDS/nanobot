@@ -57,6 +57,7 @@ import {
 } from "@/lib/bootstrap";
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
+import type { ModelSetupIntent } from "@/lib/model-setup";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
@@ -1053,6 +1054,8 @@ function Shell({
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
+  const [modelSetupIntent, setModelSetupIntent] = useState<ModelSetupIntent | null>(null);
+  const [chatFocusRequest, setChatFocusRequest] = useState(0);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [hostSidebarPreviewOpen, setHostSidebarPreviewOpen] = useState(false);
@@ -1981,8 +1984,12 @@ function Shell({
     [onSelectChat],
   );
 
-  const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
+  const onOpenSettings = useCallback((
+    section: SettingsSectionKey = "overview",
+    setupIntent: ModelSetupIntent | null = null,
+  ) => {
     setSessionSearchOpen(false);
+    setModelSetupIntent(setupIntent);
     navigate({ view: "settings", activeKey, settingsSection: section });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
@@ -1991,8 +1998,8 @@ function Shell({
     void loadSettingsView();
   }, []);
 
-  const onOpenModelSettings = useCallback(() => {
-    onOpenSettings("models");
+  const onOpenModelSettings = useCallback((intent?: ModelSetupIntent) => {
+    onOpenSettings("models", intent ?? null);
   }, [onOpenSettings]);
 
   const onOpenApps = useCallback(() => {
@@ -2015,6 +2022,7 @@ function Shell({
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
+      setModelSetupIntent(null);
       navigate({
         view: shellViewForSettingsSection(section),
         activeKey,
@@ -2025,7 +2033,9 @@ function Shell({
   );
 
   const onBackToChat = useCallback(() => {
+    const restoreComposerFocus = modelSetupIntent !== null;
     setMobileSidebarOpen(false);
+    setModelSetupIntent(null);
     const nextKey = (() => {
       if (!activeKey) return null;
       if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
@@ -2036,7 +2046,10 @@ function Shell({
       activeKey: nextKey,
       settingsSection: "overview",
     });
-  }, [activeKey, navigate, topicSessions]);
+    if (restoreComposerFocus) {
+      setChatFocusRequest((value) => value + 1);
+    }
+  }, [activeKey, modelSetupIntent, navigate, topicSessions]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -2792,6 +2805,7 @@ function Shell({
                         onWorkspaceScopeChange={applyWorkspaceScope}
                         settingsSnapshot={settingsSnapshot}
                         onOpenModelSettings={onOpenModelSettings}
+                        focusComposerRequest={chatFocusRequest}
                         skills={skills}
                       />
                     );
@@ -2850,6 +2864,7 @@ function Shell({
                       }}
                       settingsSnapshot={settingsSnapshot}
                       onOpenModelSettings={onOpenModelSettings}
+                      focusComposerRequest={context.active ? chatFocusRequest : 0}
                       skills={skills}
                     />
                   );
@@ -2863,6 +2878,7 @@ function Shell({
                     theme={theme}
                     initialSection={settingsInitialSection}
                     initialSettings={settingsSnapshot}
+                    modelSetupIntent={modelSetupIntent}
                     showSidebar={view === "settings"}
                     onToggleTheme={toggle}
                     onBackToChat={onBackToChat}

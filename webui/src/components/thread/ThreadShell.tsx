@@ -14,7 +14,6 @@ import {
   type ComposerContextUsage,
 } from "@/components/thread/ThreadComposer";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
-import type { ModelSetupAvailability } from "@/components/thread/ModelSetupDialog";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -40,6 +39,10 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
+import {
+  modelSetupAvailability,
+  type ModelSetupIntent,
+} from "@/lib/model-setup";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -355,6 +358,7 @@ interface ThreadShellProps {
   composerPortalTarget?: HTMLElement | null;
   composerActive?: boolean;
   composerInputAriaLabel?: string;
+  focusComposerRequest?: number;
   emptyComposerVariant?: "hero" | "thread";
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
@@ -363,7 +367,7 @@ interface ThreadShellProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
-  onOpenModelSettings?: () => void;
+  onOpenModelSettings?: (intent?: ModelSetupIntent) => void;
   skills?: SkillSummary[];
 }
 
@@ -381,22 +385,6 @@ interface ModelBadgeInfo {
   provider: string | null;
   providerLabel: string | null;
   needsSetup: boolean;
-}
-
-const LOCAL_MODEL_PROVIDERS = new Set(["atomic_chat", "lm_studio", "ollama", "vllm"]);
-
-function modelSetupAvailability(settings: SettingsPayload | null): ModelSetupAvailability {
-  const configured = settings?.providers.filter((provider) => provider.configured) ?? [];
-  const isLocal = (provider: SettingsPayload["providers"][number]) => {
-    if (LOCAL_MODEL_PROVIDERS.has(provider.name)) return true;
-    const apiBase = provider.api_base?.trim().toLowerCase() ?? "";
-    return apiBase.includes("localhost") || apiBase.includes("127.0.0.1") || apiBase.includes("[::1]");
-  };
-  return {
-    account: configured.some((provider) => provider.auth_type === "oauth"),
-    apiKey: configured.some((provider) => provider.auth_type !== "oauth" && !isLocal(provider)),
-    local: configured.some(isLocal),
-  };
 }
 
 function modelPresetForBadge(
@@ -671,6 +659,7 @@ export function ThreadShell({
   composerPortalTarget,
   composerActive = true,
   composerInputAriaLabel,
+  focusComposerRequest = 0,
   emptyComposerVariant = "hero",
   workspaceScope = null,
   workspaceDefaultScope = null,
@@ -980,7 +969,10 @@ export function ThreadShell({
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
-  const setupAvailability = useMemo(() => modelSetupAvailability(settings), [settings]);
+  const setupAvailability = useMemo(
+    () => modelSetupAvailability(settings?.providers),
+    [settings?.providers],
+  );
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -1563,7 +1555,7 @@ export function ThreadShell({
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
-          focusRequest={composerFocusSignal}
+          focusRequest={composerFocusSignal + focusComposerRequest}
           onQuotedContextChange={setQuotedContext}
         />
       ) : (
@@ -1611,6 +1603,7 @@ export function ThreadShell({
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
+          focusRequest={composerFocusSignal + focusComposerRequest}
         />
       )}
     </>

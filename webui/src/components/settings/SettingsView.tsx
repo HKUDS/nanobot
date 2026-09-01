@@ -1,6 +1,7 @@
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
+import type { ModelSetupIntent } from "@/lib/model-setup";
 import type { SettingsPayload, SkillSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
@@ -9,6 +10,7 @@ interface SettingsViewProps {
   theme: "light" | "dark";
   initialSection?: SettingsSectionKey;
   initialSettings?: SettingsPayload | null;
+  modelSetupIntent?: ModelSetupIntent | null;
   showSidebar?: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
@@ -27,6 +29,7 @@ export function SettingsView({
   theme,
   initialSection = "overview",
   initialSettings = null,
+  modelSetupIntent = null,
   showSidebar = true,
   onToggleTheme,
   onBackToChat,
@@ -53,6 +56,7 @@ export function SettingsView({
   return (
     <SettingsPage
       controller={controller}
+      modelSetupIntent={modelSetupIntent}
       theme={theme}
       showSidebar={showSidebar}
       onToggleTheme={onToggleTheme}

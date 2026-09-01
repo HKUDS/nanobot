@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { ModelSetupIntent } from "@/lib/model-setup";
 import type { SettingsPayload } from "@/lib/types";
 
 export const requestMutationMock = vi.fn();
@@ -137,6 +138,7 @@ export function renderSettingsView(
       | "browser"
       | "runtime";
     initialSettings?: SettingsPayload;
+    modelSetupIntent?: ModelSetupIntent;
     showSidebar?: boolean;
     onBackToChat?: () => void;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -149,6 +151,7 @@ export function renderSettingsView(
         theme="light"
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
+        modelSetupIntent={options.modelSetupIntent}
         showSidebar={options.showSidebar}
         onToggleTheme={() => {}}
         onBackToChat={options.onBackToChat ?? (() => {})}

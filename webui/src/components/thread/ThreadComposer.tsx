@@ -70,10 +70,7 @@ import {
   ModelPresetBadge,
   type ModelPresetOption,
 } from "@/components/thread/ModelPresetBadge";
-import {
-  ModelSetupDialog,
-  type ModelSetupAvailability,
-} from "@/components/thread/ModelSetupDialog";
+import { ModelSetupDialog } from "@/components/thread/ModelSetupDialog";
 import {
   ACCEPT_ATTR,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -117,6 +114,7 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { formatCompactTokenCount } from "@/lib/format";
+import type { ModelSetupAvailability, ModelSetupIntent } from "@/lib/model-setup";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -304,7 +302,7 @@ interface ThreadComposerProps {
   modelNeedsSetup?: boolean;
   modelSetupAvailability?: ModelSetupAvailability;
   fallbackModelName?: string | null;
-  onModelBadgeClick?: () => void;
+  onModelBadgeClick?: (intent?: ModelSetupIntent) => void;
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
   variant?: "thread" | "hero";
@@ -2137,9 +2135,9 @@ export function ThreadComposer({
     setModelSetupOpen(true);
   }, []);
 
-  const continueModelSetup = useCallback(() => {
+  const continueModelSetup = useCallback((intent: ModelSetupIntent) => {
     setModelSetupOpen(false);
-    onModelBadgeClick?.();
+    onModelBadgeClick?.(intent);
   }, [onModelBadgeClick]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {

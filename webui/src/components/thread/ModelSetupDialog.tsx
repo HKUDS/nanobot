@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Check, Cloud, KeyRound, Laptop } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -9,14 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-
-export interface ModelSetupAvailability {
-  account: boolean;
-  apiKey: boolean;
-  local: boolean;
-}
-
-export type ModelSetupIntent = keyof ModelSetupAvailability;
+import type { ModelSetupAvailability, ModelSetupIntent } from "@/lib/model-setup";
 
 const SETUP_OPTIONS = [
   {
@@ -59,14 +53,22 @@ export function ModelSetupDialog({
   onSelect: (intent: ModelSetupIntent) => void;
 }) {
   const { t } = useTranslation();
+  const selectedRef = useRef(false);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) selectedRef.current = false;
+        onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent
         className="max-w-md gap-5 p-5 sm:p-6"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          onReturnFocus();
+          if (!selectedRef.current) onReturnFocus();
+          selectedRef.current = false;
         }}
       >
         <DialogHeader className="pr-7">
@@ -89,7 +91,10 @@ export function ModelSetupDialog({
                 key={option.intent}
                 type="button"
                 aria-label={t(option.titleKey, { defaultValue: option.title })}
-                onClick={() => onSelect(option.intent)}
+                onClick={() => {
+                  selectedRef.current = true;
+                  onSelect(option.intent);
+                }}
                 className={cn(
                   "group flex min-h-[68px] w-full items-center gap-3 rounded-control border border-border/55 bg-background px-3.5 py-3 text-left",
                   "transition-[background-color,border-color,transform] duration-150 ease-out hover:border-border hover:bg-muted/45 active:scale-[0.99]",

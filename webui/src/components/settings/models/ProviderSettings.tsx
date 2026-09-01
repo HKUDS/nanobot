@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   Clipboard,
@@ -42,6 +42,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { providerBrand } from "@/lib/provider-brand";
+import {
+  providerMatchesModelSetupIntent,
+  type ModelSetupIntent,
+} from "@/lib/model-setup";
 import { cn } from "@/lib/utils";
 import type {
   NanobotFeaturesPayload,
@@ -232,12 +236,17 @@ const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> 
   { value: "responses", label: "Responses" },
 ];
 
-const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
+const LOCAL_PROVIDER_ORDER = new Map(
   ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
     name,
     index,
   ]),
 );
+const MODEL_SETUP_TITLE_KEYS: Record<ModelSetupIntent, string> = {
+  account: "thread.composer.modelSetup.account.title",
+  apiKey: "thread.composer.modelSetup.apiKey.title",
+  local: "thread.composer.modelSetup.local.title",
+};
 
 export function ProviderOAuthLoginDialog({
   flow,
@@ -655,6 +664,7 @@ export function ProvidersSettings({
   providerSaving,
   showBrandLogos,
   remoteBrowserAccess,
+  setupIntent,
   onToggleProvider,
   onToggleProviderKey,
   onToggleProviderKeyEditing,
@@ -678,6 +688,7 @@ export function ProvidersSettings({
   providerSaving: string | null;
   showBrandLogos: boolean;
   remoteBrowserAccess: boolean;
+  setupIntent?: ModelSetupIntent | null;
   onToggleProvider: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
@@ -697,22 +708,56 @@ export function ProvidersSettings({
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
     emptyCustomProviderDraft,
   );
+  const sectionRef = useRef<HTMLElement>(null);
+  const [setupPickerOpen, setSetupPickerOpen] = useState(false);
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const unconfiguredProviders = useMemo(
     () =>
-      orderUnconfiguredProviders(
+      orderProviderPickerOptions(
         settings.providers.filter(
           (provider) => !provider.configured && provider.name !== "custom",
         ),
       ),
     [settings.providers],
   );
+  const providerPickerOptions = useMemo(
+    () => setupIntent
+      ? orderProviderPickerOptions(
+          settings.providers.filter(
+            (provider) =>
+              provider.name !== "custom"
+              && providerMatchesModelSetupIntent(provider, setupIntent),
+          ),
+        )
+      : unconfiguredProviders,
+    [settings.providers, setupIntent, unconfiguredProviders],
+  );
   const selectedUnconfiguredProvider =
     unconfiguredProviders.find((provider) => provider.name === expandedProvider) ?? null;
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
+  useEffect(() => {
+    if (!setupIntent) {
+      setSetupPickerOpen(false);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      sectionRef.current?.scrollIntoView?.({ block: "start" });
+      setSetupPickerOpen(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [setupIntent]);
   const toggleProvider = (providerName: string) => {
     setCreatingCustomProvider(false);
     onToggleProvider(providerName);
+  };
+  const chooseProvider = (providerName: string) => {
+    setCreatingCustomProvider(false);
+    if (expandedProvider !== providerName) onToggleProvider(providerName);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`settings-provider-${providerName}`)?.scrollIntoView?.({
+        block: "start",
+      });
+    });
   };
   const beginCustomProviderCreation = () => {
     if (expandedProvider) onToggleProvider(expandedProvider);
@@ -776,7 +821,11 @@ export function ProvidersSettings({
       ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
       : null;
     return (
-      <div key={provider.name} className="divide-y divide-border/45">
+      <div
+        key={provider.name}
+        id={`settings-provider-${provider.name}`}
+        className="divide-y divide-border/45"
+      >
         <button
           type="button"
           aria-expanded={expanded}
@@ -1222,7 +1271,7 @@ export function ProvidersSettings({
           </div>
         </div>
       ) : null}
-      <section>
+      <section ref={sectionRef}>
         <SettingsSectionTitle>
           {tx("settings.providers.title", "Model providers")}
         </SettingsSectionTitle>
@@ -1233,7 +1282,12 @@ export function ProvidersSettings({
             : null}
           {customProviderForm}
           {!expandedProvider && !creatingCustomProvider ? (
-            <DropdownMenu modal={false}>
+            <DropdownMenu
+              modal={false}
+              {...(setupIntent
+                ? { open: setupPickerOpen, onOpenChange: setSetupPickerOpen }
+                : {})}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -1244,10 +1298,12 @@ export function ProvidersSettings({
                       <Plus className="h-5 w-5" aria-hidden />
                     </span>
                     <span className="truncate text-[15px] font-semibold text-foreground">
-                      {tx(
-                        "settings.providers.addOwnProvider",
-                        "Add your own model provider",
-                      )}
+                      {setupIntent
+                        ? t(MODEL_SETUP_TITLE_KEYS[setupIntent])
+                        : tx(
+                            "settings.providers.addOwnProvider",
+                            "Add your own model provider",
+                          )}
                     </span>
                   </span>
                   <ChevronDown
@@ -1261,25 +1317,25 @@ export function ProvidersSettings({
                 sideOffset={8}
                 className="max-h-[24rem] w-[380px] max-w-[calc(100vw-2rem)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
               >
-                <DropdownMenuItem
-                  onSelect={beginCustomProviderCreation}
-                  className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
-                >
-                  <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
-                  <span className="truncate text-[13px] font-medium">
-                    {tx("settings.providers.customProvider", "Custom provider")}
-                  </span>
-                </DropdownMenuItem>
-                {unconfiguredProviders.length > 0 ? <DropdownMenuSeparator /> : null}
-                {unconfiguredProviders.map((provider) => (
+                {!setupIntent || setupIntent === "apiKey" ? (
+                  <DropdownMenuItem
+                    onSelect={beginCustomProviderCreation}
+                    className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
+                  >
+                    <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
+                    <span className="truncate text-[13px] font-medium">
+                      {tx("settings.providers.customProvider", "Custom provider")}
+                    </span>
+                  </DropdownMenuItem>
+                ) : null}
+                {providerPickerOptions.length > 0
+                  && (!setupIntent || setupIntent === "apiKey")
+                  ? <DropdownMenuSeparator />
+                  : null}
+                {providerPickerOptions.map((provider) => (
                   <DropdownMenuItem
                     key={provider.name}
-                    onSelect={() => {
-                      setCreatingCustomProvider(false);
-                      if (expandedProvider !== provider.name) {
-                        onToggleProvider(provider.name);
-                      }
-                    }}
+                    onSelect={() => chooseProvider(provider.name)}
                     className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
                   >
                     <ProviderIcon
@@ -1300,7 +1356,7 @@ export function ProvidersSettings({
   );
 }
 
-function orderUnconfiguredProviders(
+function orderProviderPickerOptions(
   providers: SettingsPayload["providers"],
 ): SettingsPayload["providers"] {
   return providers
@@ -1313,7 +1369,7 @@ function orderUnconfiguredProviders(
 }
 
 function providerVisibilityRank(provider: SettingsPayload["providers"][number]): number {
-  const localRank = LOCAL_UNCONFIGURED_PROVIDER_ORDER.get(provider.name);
+  const localRank = LOCAL_PROVIDER_ORDER.get(provider.name);
   if (localRank !== undefined) return localRank;
   if ((provider.api_key_required ?? true) === false) return 100;
   return 200;
