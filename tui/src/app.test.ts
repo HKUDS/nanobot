@@ -253,6 +253,23 @@ describe("NanobotTui layout", () => {
     expect(sent).toEqual(["你好"])
   })
 
+  test("keeps input typed immediately after Enter in the next draft", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await Bun.sleep(1)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    composer.setText("first")
+    setup.mockInput.pressEnter()
+    for (const key of "next") setup.mockInput.pressKey(key)
+    await waitUntil(() => sent.length > 0)
+
+    expect(sent).toEqual(["first"])
+    expect(composer.plainText).toBe("next")
+  })
+
   test("inserts newlines with Shift+Enter and the universal Ctrl+J fallback", async () => {
     const sent: string[] = []
     setup = await createRenderer({

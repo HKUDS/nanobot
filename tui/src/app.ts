@@ -733,7 +733,10 @@ export class NanobotTui {
       // IMEs may commit their final composed glyph after Enter. Matching the
       // OpenCode/OpenTUI integration, defer twice before reading plainText.
       onSubmit: () => this.deferSubmit(),
-      onPaste: (event) => this.handlePaste(event),
+      onPaste: (event) => {
+        this.flushSubmit()
+        if (!this.composer.isDestroyed) this.handlePaste(event)
+      },
     })
     this.status = new TextRenderable(renderer, {
       id: "nanobot-tui-status",
@@ -855,12 +858,15 @@ export class NanobotTui {
     if (this.submitPending) return
     this.submitPending = true
     const generation = ++this.submitGeneration
-    setTimeout(() => setTimeout(() => {
-      if (generation !== this.submitGeneration) return
-      this.submitPending = false
-      if (this.composer.isDestroyed) return
-      this.submit()
-    }, 0), 0)
+    setTimeout(() => setTimeout(() => this.flushSubmit(generation), 0), 0)
+  }
+
+  private flushSubmit(generation = this.submitGeneration): void {
+    if (!this.submitPending || generation !== this.submitGeneration) return
+    this.submitPending = false
+    this.submitGeneration += 1
+    if (this.composer.isDestroyed) return
+    this.submit()
   }
 
   private submit(): void {
@@ -1575,6 +1581,15 @@ export class NanobotTui {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    // The app receives keypresses before the focused Textarea. Seal the pending
+    // submission first so this key is inserted into the next draft.
+    if (this.submitPending) {
+      this.flushSubmit()
+      if (this.quitting || this.composer.isDestroyed) {
+        key.preventDefault()
+        return
+      }
+    }
     if (this.diffViewer.visible) {
       if (key.ctrl && key.name === "c") {
         const selected = this.renderer.getSelection()?.getSelectedText()
