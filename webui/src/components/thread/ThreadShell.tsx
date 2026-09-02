@@ -343,7 +343,6 @@ interface ThreadShellProps {
   onToggleTheme?: () => void;
   hideSidebarToggleForHostChrome?: boolean;
   hideSidebarToggle?: boolean;
-  hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   hideHeaderTitle?: boolean;
   inlineHandle?: boolean;
@@ -643,7 +642,6 @@ export function ThreadShell({
   onToggleTheme = () => {},
   hideSidebarToggleForHostChrome = false,
   hideSidebarToggle = false,
-  hostChromeTitleInset = false,
   hideThemeButton = false,
   hideHeaderTitle = false,
   inlineHandle = false,
@@ -1624,7 +1622,6 @@ export function ThreadShell({
       onToggleTheme={onToggleTheme}
       hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
       hideSidebarToggle={hideSidebarToggle}
-      hostChromeTitleInset={hostChromeTitleInset}
       hideThemeButton={hideThemeButton}
       hideTitle={hideHeaderTitle}
       actions={headerActions}
