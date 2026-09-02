@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -47,17 +47,33 @@ class MattermostConfig(Base):
     allow_from_match_mode: str = "id"
     allow_from: list[str] = Field(default_factory=list)
     group_policy: str = "mention"
+    group_policy_in_thread: str = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     reply_in_thread: bool = True
     include_thread_context: bool = True
     thread_context_limit: int = 20
     streaming: bool = True
-    streaming_max_chars: int = 16000
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
     send_progress: bool = True
     send_tool_hints: bool = True
     dm: MattermostDMConfig = Field(default_factory=MattermostDMConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _inherit_thread_policy(cls, data: Any) -> Any:
+        """Preserve the existing group policy unless a thread override is set."""
+        if not isinstance(data, dict):
+            return data
+        raw = cast(dict[str, Any], data)
+        if "groupPolicyInThread" in raw or "group_policy_in_thread" in raw:
+            return raw
+        values = dict(raw)
+        values["group_policy_in_thread"] = values.get(
+            "groupPolicy",
+            values.get("group_policy", "mention"),
+        )
+        return values
 
 
 def _server_url_to_ws_url(server_url: str) -> str:
@@ -89,7 +105,6 @@ class MattermostChannel(BaseChannel):
         self._ws_task: asyncio.Task[None] | None = None
         self._self_id: str | None = None
         self._self_username: str | None = None
-        self._self_email: str | None = None
         self._usernames: dict[str, str] = {}
         self._user_emails: dict[str, str] = {}
         self._channel_types: dict[str, str] = {}
@@ -121,7 +136,6 @@ class MattermostChannel(BaseChannel):
             me = cast(dict[str, Any], resp.json())
             self._self_id = me.get("id")
             self._self_username = me.get("username")
-            self._self_email = me.get("email", "")
             self.logger.info("bot @{} connected", self._self_username)
         except Exception as e:
             self.logger.error("Failed to identify bot user: {}", e)
@@ -204,6 +218,10 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("failed to parse post json")
             return
 
+        post_type = post.get("type")
+        if isinstance(post_type, str) and post_type.startswith("system_"):
+            return
+
         sender_id = post.get("user_id", "")
         channel_id = post.get("channel_id", "")
         message_text = post.get("message", "")
@@ -244,8 +262,10 @@ class MattermostChannel(BaseChannel):
                 )
             return
 
-        if not is_dm and not self._should_respond_in_channel(message_text, channel_id):
-            return
+        if not is_dm:
+            in_thread = bool(root_id)
+            if not self._should_respond_in_channel(message_text, channel_id, in_thread=in_thread):
+                return
 
         message_text = self._strip_bot_mention(message_text)
 
@@ -360,12 +380,18 @@ class MattermostChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return True
 
-    def _should_respond_in_channel(self, text: str, chat_id: str) -> bool:
-        if self.config.group_policy == "open":
+    def _should_respond_in_channel(
+        self, text: str, chat_id: str, *, in_thread: bool = False,
+    ) -> bool:
+        policy = (
+            self.config.group_policy_in_thread if in_thread
+            else self.config.group_policy
+        )
+        if policy == "open":
             return True
-        if self.config.group_policy == "mention":
+        if policy == "mention":
             return self._is_mentioned(text)
-        if self.config.group_policy == "allowlist":
+        if policy == "allowlist":
             return chat_id in self.config.group_allow_from
         return False
 
@@ -633,11 +659,6 @@ class MattermostChannel(BaseChannel):
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())
 
-    async def _api_put(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
-        resp = await self._require_http_client().put(path, json=json_data)
-        resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
-
     async def _create_post(
         self,
         channel_id: str,
@@ -655,9 +676,6 @@ class MattermostChannel(BaseChannel):
         if file_ids:
             body["file_ids"] = file_ids
         return await self._api_post("/api/v4/posts", body)
-
-    async def _edit_post(self, post_id: str, message: str) -> dict[str, Any]:
-        return await self._api_put(f"/api/v4/posts/{post_id}", {"id": post_id, "message": message})
 
     async def _upload_file(self, channel_id: str, file_path: str) -> str | None:
         path = Path(file_path)

@@ -141,14 +141,13 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
     )
 
 
-def test_save_skip_matches_prefix_when_current_message_merged():
+def test_save_skip_matches_prefix_when_current_message_was_persisted():
     skip = _save_skip_for_turn(
         message_metadata=None,
-        initial_message_count=2,  # [system, merged user]
-        history_count=1,
+        initial_message_count=3,  # [system, history user, current user]
         input_persisted_early=True,
     )
-    assert skip == 2
+    assert skip == 3
 
 
 def test_save_skip_unchanged_for_standalone_current_message():
@@ -156,12 +155,10 @@ def test_save_skip_unchanged_for_standalone_current_message():
     assert _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=3,
-        history_count=1,
         input_persisted_early=True,
     ) == 3
     assert _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=3,
-        history_count=1,
         input_persisted_early=False,
     ) == 2

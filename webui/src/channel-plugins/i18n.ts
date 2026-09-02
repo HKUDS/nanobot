@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 
-export type ChannelFieldMessages = {
+type ChannelFieldMessages = {
   label: string;
   placeholder?: string;
   help?: string;

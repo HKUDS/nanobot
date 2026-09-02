@@ -30,12 +30,12 @@ from nanobot.nanobot import (
     StreamEvent,
     StreamEventType,
 )
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.session.manager import FILE_MAX_MESSAGES
 from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 
@@ -46,7 +46,9 @@ def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
     }
     if overrides:
         data.update(overrides)
-    config_path = tmp_path / "config.json"
+    config_dir = tmp_path.parent / f"{tmp_path.name}-instance"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.json"
     config_path.write_text(json.dumps(data))
     return config_path
 
@@ -96,9 +98,24 @@ def test_from_config_missing_env_reports_explicit_config_path(
 
 def test_from_config_creates_instance(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    workspace = tmp_path / "workspace"
+    bot = Nanobot.from_config(config_path, workspace=workspace)
     assert bot._loop is not None
-    assert bot._loop.workspace == tmp_path
+    assert bot._loop.workspace == workspace
+    assert bot._loop.sessions.sessions_dir.parent == config_path.parent / "sessions"
+
+
+def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        {"tools": {"mcpServers": {"demo": {"command": "fake-mcp"}}}},
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    assert bot._mcp_provider is not None
+    assert bot._mcp_provider.configured_server_names == {"demo"}
+    assert bot._mcp_provider._registry is bot._loop.tools
 
 
 def test_from_config_accepts_default_model_override(tmp_path):
@@ -241,27 +258,6 @@ def test_workspace_override(tmp_path):
 
     bot = Nanobot.from_config(config_path, workspace=custom_ws)
     assert bot._loop.workspace == custom_ws
-
-
-def test_sdk_make_provider_uses_github_copilot_backend():
-    from nanobot.config.schema import Config
-    from nanobot.providers.factory import make_provider
-
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "github-copilot",
-                    "model": "github-copilot/gpt-4.1",
-                }
-            }
-        }
-    )
-
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = make_provider(config)
-
-    assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
 @pytest.mark.asyncio
@@ -606,7 +602,7 @@ async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
     result = await bot.run("hi")
     assert result.tools_used == []
     assert result.messages == []
-    assert result.usage == {}
+    assert result.usage is None
     assert result.stop_reason is None
     assert result.error is None
 
@@ -627,7 +623,7 @@ async def test_run_populates_observability_fields(tmp_path):
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            usage=LLMUsage.reported(input_tokens=10, output_tokens=2),
             stop_reason="completed",
             error=None,
             tool_events=[{"tool": "read_file", "status": "ok"}],
@@ -646,7 +642,7 @@ async def test_run_populates_observability_fields(tmp_path):
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=2)
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.metadata == {"latency_ms": 42}
@@ -663,7 +659,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
         content="done",
         tool_calls=[],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
     ))
     bot = Nanobot(AgentLoop(
         bus=MessageBus(),
@@ -675,8 +671,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     result = await bot.run("hi", ephemeral=True)
 
     assert result.content == "done"
-    assert result.usage["total_tokens"] == 3
-    assert result.usage["provider_tokens"] == 3
+    assert result.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
 
 
 @pytest.mark.asyncio
@@ -1058,7 +1053,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"total_tokens": 9},
+            usage=LLMUsage.reported(input_tokens=9, output_tokens=0),
             stop_reason="completed",
         )
         for hook in hooks:
@@ -1078,7 +1073,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"total_tokens": 9}
+    assert result.usage == LLMUsage.reported(input_tokens=9, output_tokens=0)
     assert result.stop_reason == "completed"
     assert result.metadata == {"latency_ms": 5}
 
@@ -1402,13 +1397,13 @@ async def test_sdk_capture_prefers_run_level_snapshot():
     await hook.after_run(AgentRunHookContext(
         messages=final_messages,
         tools_used=["read_file"],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
         stop_reason="completed",
     ))
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
-    assert hook.usage == {"total_tokens": 3}
+    assert hook.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
     assert hook.stop_reason == "completed"
 
 
@@ -1417,7 +1412,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock()
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
 
     snapshot = await bot.sessions.ingest(
         "sdk:history",
@@ -1447,7 +1441,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[0]["source"] == "longmemeval"
     assert snapshot.messages[1]["source"] == "longmemeval"
     bot._loop.process_direct.assert_not_called()
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_not_called()
 
     reloaded = bot.sessions.get("sdk:history")
     assert reloaded is not None
@@ -1455,7 +1448,7 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_sessions_ingest_archives_overflow_at_persistence_boundary(tmp_path):
+async def test_sessions_ingest_preserves_full_transcript(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
@@ -1463,16 +1456,14 @@ async def test_sessions_ingest_archives_overflow_at_persistence_boundary(tmp_pat
         "sdk:overflow",
         [
             {"role": "user", "content": f"message-{index}"}
-            for index in range(FILE_MAX_MESSAGES + 1)
+            for index in range(2_001)
         ],
     )
 
-    assert len(snapshot.messages) == FILE_MAX_MESSAGES
-    assert snapshot.messages[0]["content"] == "message-1"
-    history = bot.memory.read_history(session_key="sdk:overflow")
-    assert len(history) == 1
-    assert "[RAW] 1 messages" in history[0]["content"]
-    assert "message-0" in history[0]["content"]
+    assert len(snapshot.messages) == 2_001
+    assert snapshot.messages[0]["content"] == "message-0"
+    assert snapshot.messages[-1]["content"] == "message-2000"
+    assert bot.memory.read_history(session_key="sdk:overflow") == []
 
 
 @pytest.mark.asyncio
@@ -1504,10 +1495,15 @@ async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
     exported.messages[0]["content"] = "mutated copy"
     assert bot.sessions.get("sdk:first").messages[0]["content"] == "hello"
 
+    state_before_clear = bot._loop._file_state_store.for_session("sdk:first")
     cleared = bot.sessions.clear("sdk:first")
     assert cleared.messages == []
+    state_after_clear = bot._loop._file_state_store.for_session("sdk:first")
+    assert state_after_clear is not state_before_clear
     assert bot.sessions.flush() >= 1
+    state_before_delete = state_after_clear
     assert bot.sessions.delete("sdk:first") is True
+    assert bot._loop._file_state_store.for_session("sdk:first") is not state_before_delete
     assert bot.sessions.get("sdk:first") is None
 
 
@@ -1637,12 +1633,13 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     runtime = bot._loop.llm_runtime()
     bot._loop.runtime_for_session = MagicMock(return_value=runtime)  # type: ignore[method-assign]
 
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    compact_session = AsyncMock()
+    bot._loop.consolidator.compact_idle_session = compact_session
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
-    assert (
-        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"]
-        is runtime
+    compact_session.assert_awaited_once_with(
+        "sdk:history",
+        runtime=runtime,
     )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path
@@ -1658,37 +1655,40 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_aclose_delegates_to_loop_close_mcp(tmp_path):
+async def test_aclose_releases_loop_and_mcp_provider(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
+    assert bot._mcp_provider is not None
+    bot._mcp_provider.aclose = AsyncMock()
 
     await bot.aclose()
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()
+    bot._mcp_provider.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_context_manager_calls_aclose_on_exit(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
 
     async with bot as b:
         assert b is bot
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_context_manager_does_not_swallow_exceptions(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
 
     with pytest.raises(ValueError):
         async with bot as b:
             assert b is bot
             raise ValueError("boom")
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()

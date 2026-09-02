@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cancelMcpOAuth,
   configureChannel,
+  completeMcpOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -14,6 +16,7 @@ import {
   fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
+  fetchMcpOAuthStatus,
   fetchMcpPresets,
   fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
@@ -41,6 +44,7 @@ import {
   saveCustomMcpServer,
   searchMarketplaceSkills,
   startApiService,
+  startMcpOAuth,
   stopApiService,
   cancelChannelConnect,
   pollChannelConnect,
@@ -59,8 +63,19 @@ import {
   validateChannel,
 } from "@/lib/api";
 
+const requestMutation = vi.fn();
+const mutationTransport = {
+  requestMutation: <T>(
+    action: string,
+    payload?: Record<string, unknown>,
+    timeoutMs?: number,
+  ) => requestMutation(action, payload, timeoutMs) as Promise<T>,
+};
+
 describe("webui API helpers", () => {
   beforeEach(() => {
+    requestMutation.mockReset();
+    requestMutation.mockResolvedValue({});
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -184,88 +199,74 @@ describe("webui API helpers", () => {
 
   it("validates channel settings with form values", async () => {
     await validateChannel(
-      "tok",
+      mutationTransport,
       "slack",
       { "channels.slack.botToken": "xoxb-test" },
       { instanceId: "default" },
     );
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/channels/validate?name=slack&instance_id=default",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-Channel-Values": JSON.stringify({
-            "channels.slack.botToken": "xoxb-test",
-          }),
-        }),
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.channel.validate",
+      {
+        name: "slack",
+        instance_id: "default",
+        values: { "channels.slack.botToken": "xoxb-test" },
+      },
+      20_000,
     );
-    expect(fetch).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("configures channels through the WebSocket HTTP shim", async () => {
+  it("configures channels through the authenticated WebSocket", async () => {
     await configureChannel(
-      "tok",
+      mutationTransport,
       "discord",
       { "channels.discord.token": "saved-secret" },
       { enable: true },
     );
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/channels/configure?name=discord&enable=true",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-Channel-Values": JSON.stringify({
-            "channels.discord.token": "saved-secret",
-          }),
-        }),
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.channel.configure",
+      {
+        name: "discord",
+        enable: true,
+        values: { "channels.discord.token": "saved-secret" },
+      },
+      150_000,
     );
-    expect(fetch).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("serializes channel QR connect helpers", async () => {
-    await startChannelConnect("tok", "weixin", { force: true });
-    expect(fetch).toHaveBeenLastCalledWith(
-      "/api/settings/channels/weixin/connect/start?force=true",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+  it("serializes channel QR connect request envelopes", async () => {
+    await startChannelConnect(mutationTransport, "weixin", { force: true });
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.start",
+      { channel: "weixin", force: true },
+      150_000,
     );
 
-    await pollChannelConnect("tok", "weixin", "session+/=");
-    expect(fetch).toHaveBeenLastCalledWith(
-      "/api/settings/channels/weixin/connect/poll?session_id=session%2B%2F%3D",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await pollChannelConnect(mutationTransport, "weixin", "session+/=");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.poll",
+      { channel: "weixin", session_id: "session+/=" },
+      150_000,
     );
 
-    await cancelChannelConnect("tok", "weixin", "session+/=");
-    expect(fetch).toHaveBeenLastCalledWith(
-      "/api/settings/channels/weixin/connect/cancel?session_id=session%2B%2F%3D",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await cancelChannelConnect(mutationTransport, "weixin", "session+/=");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.cancel",
+      { channel: "weixin", session_id: "session+/=" },
+      20_000,
     );
   });
 
   it("serializes workspace automation actions", async () => {
-    await runAutomationAction("tok", "disable", "job 1/2");
+    await runAutomationAction(mutationTransport, "disable", "job 1/2");
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/automations/disable?id=job+1%2F2",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "automation.disable",
+      { id: "job 1/2" },
+      20_000,
     );
   });
 
@@ -275,19 +276,14 @@ describe("webui API helpers", () => {
       message: "Ask 今日 quiz",
       schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" },
     } as const;
-    await updateAutomation("tok", "job 1/2", values);
+    await updateAutomation(mutationTransport, "job 1/2", values);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/automations/update?id=job+1%2F2",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)),
-        },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "automation.update",
+      { id: "job 1/2", values },
+      20_000,
     );
-    const header = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
-    expect(header["X-Nanobot-Automation-Values"]).not.toContain("每日");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("fetches the WebUI skill summary", async () => {
@@ -348,81 +344,85 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("encodes provider install coordinates", async () => {
+  it("sends provider install coordinates without placing them in a URL", async () => {
     await installMarketplaceSkill(
-      "tok",
+      mutationTransport,
       "skillhub",
       "@tencent/skills",
       "ima-skills",
       "1.1.8",
     );
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/skills/install?provider=skillhub&source=%40tencent%2Fskills&skill=ima-skills&version=1.1.8",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "skill.install",
+      {
+        provider: "skillhub",
+        source: "@tencent/skills",
+        skill: "ima-skills",
+        version: "1.1.8",
+      },
+      150_000,
     );
   });
 
-  it("updates and deletes installed skills with encoded names", async () => {
-    await updateSkillEnabled("tok", "custom skill", false);
+  it("updates and deletes installed skills over the WebSocket", async () => {
+    await updateSkillEnabled(mutationTransport, "custom skill", false);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/skills/update?name=custom+skill&enabled=false",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "skill.update",
+      { name: "custom skill", enabled: false },
+      20_000,
     );
 
-    await deleteSkill("tok", "custom skill");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/skills/delete?name=custom+skill",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await deleteSkill(mutationTransport, "custom skill");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "skill.delete",
+      { name: "custom skill" },
+      20_000,
     );
   });
 
-  it("percent-encodes websocket keys when deleting a session", async () => {
-    await deleteSession("tok", "websocket:chat-1");
+  it("sends the session key in a mutation payload", async () => {
+    await deleteSession(mutationTransport, "websocket:chat-1");
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/delete",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "session.delete",
+      { key: "websocket:chat-1" },
+      20_000,
     );
   });
 
   it("passes the automation cascade flag when deleting a session", async () => {
-    await deleteSession("tok", "websocket:chat-1", { deleteAutomations: true });
+    await deleteSession(mutationTransport, "websocket:chat-1", { deleteAutomations: true });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/delete?delete_automations=true",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "session.delete",
+      { key: "websocket:chat-1", delete_automations: true },
+      20_000,
     );
   });
 
-  it("serializes settings updates as a narrow query string", async () => {
-    await updateSettings("tok", {
+  it("serializes settings updates as a narrow mutation payload", async () => {
+    await updateSettings(mutationTransport, {
       modelPreset: "default",
       model: "openrouter/test",
       provider: "openrouter",
       contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
-      botName: "nanobot",
-      botIcon: "nb",
       toolHintMaxLength: 120,
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.agent.update",
+      {
+        model_preset: "default",
+        model: "openrouter/test",
+        provider: "openrouter",
+        context_window_tokens: 262144,
+        timezone: "Asia/Shanghai",
+        tool_hint_max_length: 120,
+      },
+      20_000,
     );
   });
 
@@ -438,8 +438,8 @@ describe("webui API helpers", () => {
   });
 
   it("serializes model configuration creation", async () => {
-    await createModelConfiguration("tok", {
-      label: "Fast writing",
+    await createModelConfiguration(mutationTransport, {
+      name: "Fast writing",
       provider: "openai",
       model: "openai/gpt-4.1-mini",
       maxTokens: 4096,
@@ -448,18 +448,25 @@ describe("webui API helpers", () => {
       reasoningEffort: "high",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/create?label=Fast+writing&provider=openai&model=openai%2Fgpt-4.1-mini&max_tokens=4096&context_window_tokens=128000&temperature=0.4&reasoning_effort=high",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_configuration.create",
+      {
+        name: "Fast writing",
+        provider: "openai",
+        model: "openai/gpt-4.1-mini",
+        max_tokens: 4096,
+        context_window_tokens: 128000,
+        temperature: 0.4,
+        reasoning_effort: "high",
+      },
+      20_000,
     );
   });
 
   it("serializes model configuration updates", async () => {
-    await updateModelConfiguration("tok", {
+    await updateModelConfiguration(mutationTransport, {
       name: "codex",
-      label: "Codex",
+      newName: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
       maxTokens: 8192,
@@ -468,42 +475,47 @@ describe("webui API helpers", () => {
       reasoningEffort: null,
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5&max_tokens=8192&context_window_tokens=65536&temperature=0&reasoning_effort=",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_configuration.update",
+      {
+        name: "codex",
+        new_name: "Codex",
+        provider: "openai_codex",
+        model: "openai-codex/gpt-5.5",
+        max_tokens: 8192,
+        context_window_tokens: 65536,
+        temperature: 0,
+        reasoning_effort: "",
+      },
+      20_000,
     );
   });
 
   it("serializes model preset deletion and migration", async () => {
-    await deleteModelConfiguration("tok", "spare");
-    await migrateModelConfigurations("tok");
+    await deleteModelConfiguration(mutationTransport, "spare");
+    await migrateModelConfigurations(mutationTransport);
 
-    expect(fetch).toHaveBeenNthCalledWith(
+    expect(requestMutation).toHaveBeenNthCalledWith(
       1,
-      "/api/settings/model-configurations/delete?name=spare",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+      "settings.model_configuration.delete",
+      { name: "spare" },
+      20_000,
     );
-    expect(fetch).toHaveBeenNthCalledWith(
+    expect(requestMutation).toHaveBeenNthCalledWith(
       2,
-      "/api/settings/model-configurations/migrate",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+      "settings.model_configuration.migrate",
+      {},
+      20_000,
     );
   });
 
   it("serializes model call order as an ordered JSON array", async () => {
-    await updateModelCallOrder("tok", ["backup", "primary"]);
+    await updateModelCallOrder(mutationTransport, ["backup", "primary"]);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-call-order/update?order=%5B%22backup%22%2C%22primary%22%5D",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_call_order.update",
+      { order: ["backup", "primary"] },
+      20_000,
     );
   });
 
@@ -518,30 +530,39 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await expect(
-      updateModelConfiguration("tok", {
-        name: "codex",
-        model: "openai-codex/gpt-5.5",
-      }),
-    ).rejects.toMatchObject({
+    await expect(fetchApiService("tok")).rejects.toMatchObject({
       status: 200,
       message: "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again.",
     });
   });
 
-  it("surfaces API error response bodies", async () => {
+  it("surfaces correlated WebSocket mutation errors", async () => {
+    requestMutation.mockRejectedValueOnce(
+      Object.assign(new Error("npm error ENOTEMPTY"), { status: 500 }),
+    );
+
+    await expect(
+      runCliAppAction(mutationTransport, "install", "hyperframes"),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: "npm error ENOTEMPTY",
+    });
+  });
+
+  it("extracts user-facing messages from JSON API errors", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: false,
-        status: 500,
-        text: async () => "npm error ENOTEMPTY",
+        status: 400,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => JSON.stringify({ error: "Paste the complete callback URL." }),
       }),
     );
 
-    await expect(runCliAppAction("tok", "install", "hyperframes")).rejects.toMatchObject({
-      status: 500,
-      message: "npm error ENOTEMPTY",
+    await expect(fetchMcpOAuthStatus("tok", "flow-123")).rejects.toMatchObject({
+      status: 400,
+      message: "Paste the complete callback URL.",
     });
   });
 
@@ -557,50 +578,45 @@ describe("webui API helpers", () => {
     await pending;
   });
 
-  it("serializes provider settings updates without returning secrets", async () => {
-    await updateProviderSettings("tok", {
+  it("keeps provider secrets in the WebSocket payload", async () => {
+    await updateProviderSettings(mutationTransport, {
       provider: "openrouter",
       apiKey: "sk-or-test",
       apiBase: "https://openrouter.ai/api/v1",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=openrouter",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
-            apiKey: "sk-or-test",
-            apiBase: "https://openrouter.ai/api/v1",
-          })),
-        },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.update",
+      {
+        provider: "openrouter",
+        apiKey: "sk-or-test",
+        apiBase: "https://openrouter.ai/api/v1",
+      },
+      20_000,
     );
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("serializes OAuth provider advanced settings", async () => {
-    await updateProviderSettings("tok", {
+    await updateProviderSettings(mutationTransport, {
       provider: "xai_grok",
       proxy: "http://127.0.0.1:7890",
-      extraBody: '{"service_tier":"priority"}',
+      extraBody: '{"tools":[]}',
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=xai_grok",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
-            proxy: "http://127.0.0.1:7890",
-            extraBody: '{"service_tier":"priority"}',
-          })),
-        },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.update",
+      {
+        provider: "xai_grok",
+        proxy: "http://127.0.0.1:7890",
+        extraBody: '{"tools":[]}',
+      },
+      20_000,
     );
   });
 
   it("serializes custom provider creation with advanced settings", async () => {
-    await createProviderSettings("tok", {
+    const update = {
       name: "Company Gateway",
       apiKey: "sk-company",
       apiBase: "https://gateway.example/v1",
@@ -609,25 +625,13 @@ describe("webui API helpers", () => {
       extraQuery: '{"api-version":"2026-01-01"}',
       proxy: "http://127.0.0.1:7890",
       thinkingStyle: "enable_thinking",
-    });
+    };
+    await createProviderSettings(mutationTransport, update);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/create",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
-            name: "Company Gateway",
-            apiKey: "sk-company",
-            apiBase: "https://gateway.example/v1",
-            extraHeaders: '{"X-Tenant":"engineering"}',
-            extraBody: '{"service_tier":"priority"}',
-            extraQuery: '{"api-version":"2026-01-01"}',
-            proxy: "http://127.0.0.1:7890",
-            thinkingStyle: "enable_thinking",
-          })),
-        },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.create",
+      update,
+      20_000,
     );
   });
 
@@ -643,74 +647,65 @@ describe("webui API helpers", () => {
   });
 
   it("serializes provider OAuth login and logout actions", async () => {
-    await loginProviderOAuth("tok", "openai_codex");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login?provider=openai_codex",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await loginProviderOAuth(mutationTransport, "openai_codex");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_login",
+      { provider: "openai_codex" },
+      20_000,
     );
 
-    await loginProviderOAuth("tok", "openai_codex", "", true);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login?provider=openai_codex&remote_browser=true",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await loginProviderOAuth(mutationTransport, "openai_codex", true);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_login",
+      { provider: "openai_codex", remote_browser: true },
+      20_000,
     );
 
-    await completeProviderOAuth("tok", "xai_grok", "flow-123");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await completeProviderOAuth(mutationTransport, "xai_grok", "flow-123");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_complete",
+      { provider: "xai_grok", flow_id: "flow-123" },
+      20_000,
     );
 
     await completeProviderOAuth(
-      "tok",
+      mutationTransport,
       "xai_grok",
       "flow-123",
       "secret",
     );
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-OAuth-Code": "secret",
-        },
-      }),
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_complete",
+      { provider: "xai_grok", flow_id: "flow-123", authorization_response: "secret" },
+      20_000,
     );
 
     await completeProviderOAuth(
-      "tok",
+      mutationTransport,
       "openai_codex",
       "flow-codex",
       "http://localhost:1455/auth/callback?code=secret&state=test",
     );
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login/complete?provider=openai_codex&flow_id=flow-codex",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-OAuth-Callback":
-            "http://localhost:1455/auth/callback?code=secret&state=test",
-        },
-      }),
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_complete",
+      {
+        provider: "openai_codex",
+        flow_id: "flow-codex",
+        authorization_response: "http://localhost:1455/auth/callback?code=secret&state=test",
+      },
+      20_000,
     );
 
-    await logoutProviderOAuth("tok", "openai_codex");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-logout?provider=openai_codex",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await logoutProviderOAuth(mutationTransport, "openai_codex");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_logout",
+      { provider: "openai_codex" },
+      20_000,
     );
   });
 
   it("serializes web search settings updates", async () => {
-    await updateWebSearchSettings("tok", {
+    await updateWebSearchSettings(mutationTransport, {
       provider: "searxng",
       baseUrl: "https://search.example.com",
       maxResults: 8,
@@ -718,30 +713,37 @@ describe("webui API helpers", () => {
       useJinaReader: false,
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&use_jina_reader=false",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.web_search.update",
+      {
+        provider: "searxng",
+        base_url: "https://search.example.com",
+        max_results: 8,
+        timeout: 45,
+        use_jina_reader: false,
+      },
+      20_000,
     );
   });
 
   it("serializes network safety settings updates", async () => {
-    await updateNetworkSafetySettings("tok", {
+    await updateNetworkSafetySettings(mutationTransport, {
       webuiAllowLocalServiceAccess: false,
       webuiDefaultAccessMode: "full",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=full",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.network_safety.update",
+      {
+        webui_allow_local_service_access: false,
+        webui_default_access_mode: "full",
+      },
+      20_000,
     );
   });
 
   it("serializes image generation settings updates", async () => {
-    await updateImageGenerationSettings("tok", {
+    await updateImageGenerationSettings(mutationTransport, {
       enabled: true,
       provider: "openrouter",
       model: "openai/gpt-5.4-image-2",
@@ -750,11 +752,17 @@ describe("webui API helpers", () => {
       maxImagesPerTurn: 3,
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/image-generation/update?enabled=true&provider=openrouter&model=openai%2Fgpt-5.4-image-2&default_aspect_ratio=16%3A9&default_image_size=2K&max_images_per_turn=3",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.image_generation.update",
+      {
+        enabled: true,
+        provider: "openrouter",
+        model: "openai/gpt-5.4-image-2",
+        default_aspect_ratio: "16:9",
+        default_image_size: "2K",
+        max_images_per_turn: 3,
+      },
+      20_000,
     );
   });
 
@@ -776,12 +784,11 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await runCliAppAction("tok", "install", "gimp");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/cli-apps/install?name=gimp",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await runCliAppAction(mutationTransport, "install", "gimp");
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.cli_app.install",
+      { name: "gimp" },
+      150_000,
     );
   });
 
@@ -821,20 +828,18 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await enableNanobotFeature("tok", "matrix");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/nanobot-features/enable?name=matrix",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await enableNanobotFeature(mutationTransport, "matrix");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.enable",
+      { name: "matrix" },
+      150_000,
     );
 
-    await disableNanobotFeature("tok", "matrix");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/nanobot-features/disable?name=matrix",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await disableNanobotFeature(mutationTransport, "matrix");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.disable",
+      { name: "matrix" },
+      20_000,
     );
   });
 
@@ -845,34 +850,31 @@ describe("webui API helpers", () => {
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
 
-    await startApiService("tok", { host: "127.0.0.1", port: 8900, timeout: 120 });
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/api-service/start?host=127.0.0.1&port=8900&timeout=120",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    await startApiService(
+      mutationTransport,
+      { host: "127.0.0.1", port: 8900, timeout: 120 },
+    );
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.api_service.start",
+      { host: "127.0.0.1", port: 8900, timeout: 120 },
+      150_000,
     );
 
     await startApiService(
-      "tok",
+      mutationTransport,
       { host: "0.0.0.0", port: 8900, timeout: 120, apiKey: "secret-token" },
     );
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/api-service/start?host=0.0.0.0&port=8900&timeout=120",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-API-Service-Values": JSON.stringify({ api_key: "secret-token" }),
-        },
-      }),
-    );
-    expect(fetch).not.toHaveBeenCalledWith(
-      expect.stringContaining("secret-token"),
-      expect.anything(),
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.api_service.start",
+      { host: "0.0.0.0", port: 8900, timeout: 120, api_key: "secret-token" },
+      150_000,
     );
 
-    await stopApiService("tok");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/api-service/stop",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    await stopApiService(mutationTransport);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.api_service.stop",
+      {},
+      20_000,
     );
   });
 
@@ -893,71 +895,88 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await runMcpPresetAction("tok", "enable", "browserbase", {
+    await runMcpPresetAction(mutationTransport, "enable", "browserbase", {
       browserbase_api_key: "bb_live_test",
     });
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.enable",
+      { name: "browserbase", browserbase_api_key: "bb_live_test" },
+      20_000,
+    );
+
+    await startMcpOAuth(mutationTransport, "notion", true);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "notion", reset: true },
+      30_000,
+    );
+
+    await fetchMcpOAuthStatus("tok", "flow-123");
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/enable?name=browserbase",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            browserbase_api_key: "bb_live_test",
-          }),
-        }),
-      }),
+      "/api/settings/mcp-oauth/status?flow_id=flow-123",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    const callbackUrl =
+      "http://127.0.0.1:8765/auth/mcp/callback?code=secret&state=state-123";
+    await completeMcpOAuth(mutationTransport, "flow-123", callbackUrl);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_complete",
+      { flow_id: "flow-123", callback_url: callbackUrl },
+      20_000,
+    );
+
+    await cancelMcpOAuth(mutationTransport, "flow-123");
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_cancel",
+      { flow_id: "flow-123" },
+      20_000,
     );
   });
 
   it("serializes custom MCP, mcp.json import, and tool allowlist actions", async () => {
-    await saveCustomMcpServer("tok", {
+    const custom = {
       name: "docs",
       transport: "stdio",
       command: "npx",
       args: '["-y","docs-mcp"]',
       env: '{"API_KEY":"secret"}',
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/custom",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            name: "docs",
-            transport: "stdio",
-            command: "npx",
-            args: '["-y","docs-mcp"]',
-            env: '{"API_KEY":"secret"}',
-          }),
-        }),
-      }),
+    };
+    await saveCustomMcpServer(mutationTransport, custom);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.custom",
+      custom,
+      20_000,
     );
 
-    await importMcpConfig("tok", '{"mcpServers":{"docs":{"command":"npx"}}}');
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/import",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            config: '{"mcpServers":{"docs":{"command":"npx"}}}',
-          }),
-        }),
-      }),
+    const oauthCustom = {
+      name: "company-mcp",
+      transport: "streamableHttp",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+    };
+    await saveCustomMcpServer(mutationTransport, oauthCustom);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.custom",
+      oauthCustom,
+      20_000,
     );
 
-    await updateMcpServerTools("tok", "docs", ["search", "fetch"]);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/tools",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            name: "docs",
-            enabled_tools: ["search", "fetch"],
-          }),
-        }),
-      }),
+    await importMcpConfig(
+      mutationTransport,
+      '{"mcpServers":{"docs":{"command":"npx"}}}',
+    );
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.import",
+      { config: '{"mcpServers":{"docs":{"command":"npx"}}}' },
+      20_000,
+    );
+
+    await updateMcpServerTools(mutationTransport, "docs", ["search", "fetch"]);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.tools",
+      { name: "docs", enabled_tools: ["search", "fetch"] },
+      20_000,
     );
   });
 
@@ -966,6 +985,7 @@ describe("webui API helpers", () => {
       schema_version: 1,
       pinned_keys: ["websocket:chat-1"],
       archived_keys: ["websocket:old"],
+      session_order: ["websocket:chat-1", "websocket:old"],
       title_overrides: { "websocket:chat-1": "Release" },
       project_name_overrides: { "/Users/me/nanobot": "Core" },
       tags_by_key: {},
@@ -992,19 +1012,12 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await updateSidebarState("tok", state);
-    const [url, init] = vi.mocked(fetch).mock.calls.at(-1)!;
-    expect(String(url).startsWith("/api/webui/sidebar-state/update?")).toBe(true);
-    expect(init).toEqual(expect.objectContaining({
-      headers: { Authorization: "Bearer tok" },
-    }));
-    const encodedState = new URLSearchParams(String(url).split("?", 2)[1]).get("state");
-    expect(encodedState).toBeTruthy();
-    expect(JSON.parse(encodedState ?? "{}")).toMatchObject({
-      pinned_keys: ["websocket:chat-1"],
-      title_overrides: { "websocket:chat-1": "Release" },
-      project_name_overrides: { "/Users/me/nanobot": "Core" },
-    });
+    await updateSidebarState(mutationTransport, state);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "sidebar.update",
+      { state },
+      20_000,
+    );
   });
 
   it("fetches workspace project state", async () => {
@@ -1048,6 +1061,10 @@ describe("webui API helpers", () => {
             title: "优化 WebUI 标题",
             model_preset: "fast",
             run_started_at: 1_700_000_000,
+            handle: {
+              id: "handle_0123456789abcdef0123456789abcdef",
+              name: "mira-0123456789",
+            },
           },
         ],
       }),
@@ -1060,6 +1077,10 @@ describe("webui API helpers", () => {
         preview: "",
         modelPreset: "fast",
         runStartedAt: 1_700_000_000,
+        handle: {
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
+        },
       },
     ]);
   });

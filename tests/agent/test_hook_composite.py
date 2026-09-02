@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hook import (
     AgentHook,
     AgentHookContext,
@@ -13,6 +14,7 @@ from nanobot.agent.hook import (
     AgentTurnHookContext,
     CompositeHook,
 )
+from nanobot.agent.tools.context import RequestContext
 
 
 def _ctx() -> AgentHookContext:
@@ -453,16 +455,16 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
 
     loop = _make_loop(tmp_path, hooks=[TrackingHook()])
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+        return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
-    content, tools_used, messages, _, _ = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}],
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
         runtime=loop.llm_runtime(),
     )
 
-    assert content == "done"
+    assert result.final_content == "done"
     assert "before_run" in events
     assert "before_iter:0" in events
     assert "after_iter:0" in events
@@ -494,22 +496,26 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
 
     loop = _make_loop(tmp_path, hook_factories=[factory("registered")])
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+        return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     async def on_progress(*args, **kwargs):
         pass
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}],
-        runtime=loop.llm_runtime(),
+        TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
+        runtime=runtime,
         on_progress=on_progress,
-        channel="websocket",
-        chat_id="chat-1",
-        message_id="msg-1",
-        metadata={"source": "test"},
-        session_key="websocket:chat-1",
+        request_context=RequestContext(
+            channel="websocket",
+            chat_id="chat-1",
+            message_id="msg-1",
+            session_key="websocket:chat-1",
+            runtime=runtime,
+            metadata={"source": "test"},
+        ),
         hook_factories=[factory("turn")],
     )
 
@@ -541,16 +547,16 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
 
     loop = _make_loop(tmp_path, hooks=[BadHook()])
     loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="still works", tool_calls=[], usage={})
+        return_value=LLMResponse(content="still works", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
-    content, _, _, _, _ = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}],
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
         runtime=loop.llm_runtime(),
     )
 
-    assert content == "still works"
+    assert result.final_content == "still works"
 
 
 @pytest.mark.asyncio
@@ -562,7 +568,7 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
         tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
-        usage={},
+        usage=None,
     ))
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.tools.execute = AsyncMock(return_value="ok")
@@ -572,7 +578,9 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
 
     with pytest.raises(RuntimeError, match="progress failed"):
         await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=bad_progress
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=bad_progress,
         )
 
 
@@ -590,11 +598,12 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    content, tools_used, _, _, _ = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
     )
-    assert content == (
+    assert result.final_content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."
     )
-    assert tools_used == ["list_dir", "list_dir"]
+    assert result.tools_used == ["list_dir", "list_dir"]

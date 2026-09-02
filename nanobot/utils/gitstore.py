@@ -5,14 +5,13 @@ from __future__ import annotations
 import io
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, cast
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
 if TYPE_CHECKING:
-    from dulwich.objects import Blob, Commit, ObjectID, Tree, TreeEntry
+    from dulwich.objects import Blob, Commit, ObjectID, Tree
     from dulwich.refs import Ref
     from dulwich.repo import Repo
 
@@ -43,25 +42,6 @@ class CommitInfo:
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
-
-
-@dataclass
-class LineAge:
-    """Age of a single line based on git blame."""
-
-    age_days: int  # days since last modification
-
-
-def _compute_line_ages(
-    annotated: Iterable[tuple[tuple["Commit", "TreeEntry"], bytes]],
-) -> list[LineAge]:
-    """Convert annotate results to per-line ages."""
-    now = datetime.now(tz=timezone.utc).date()
-    ages: list[LineAge] = []
-    for (commit, _tree_entry), _line_bytes in annotated:
-        dt = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc).date()
-        ages.append(LineAge(age_days=(now - dt).days))
-    return ages
 
 
 class GitStore:
@@ -153,12 +133,13 @@ class GitStore:
         try:
             from dulwich import porcelain
 
-            # .gitignore excludes everything except tracked files,
-            # so any staged/unstaged change must be in our files.
+            # Stage first so Dulwich refreshes the content hashes.  A status
+            # check can miss rapid same-size rewrites when the filesystem also
+            # preserves the file's mtime.
+            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             st = porcelain.status(str(self._workspace))
-            unstaged = cast(list[object], st.unstaged)
             staged = cast(dict[object, list[object]], st.staged)
-            if not unstaged and not any(staged.values()):
+            if not any(staged.values()):
                 return None
 
             message_value = cast(object, message)
@@ -167,7 +148,6 @@ class GitStore:
                 if isinstance(message_value, str)
                 else cast(bytes, message_value)
             )
-            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,
@@ -292,33 +272,6 @@ class GitStore:
             return entries
         except Exception as exc:
             raise GitStoreError("Git log failed") from exc
-
-    def line_ages(self, file_path: str) -> list[LineAge]:
-        """Compute the age of each line in a tracked file via git blame.
-
-        Returns one LineAge per line, in order.
-        Returns an empty list if the repo is not initialized or the file is
-        empty. Annotation failures raise :class:`GitStoreError`.
-        """
-
-        if not self.is_initialized():
-            return []
-
-        target = self._workspace / file_path
-        if not target.exists() or target.stat().st_size == 0:
-            return []
-
-        try:
-            from dulwich import porcelain
-
-            annotated = porcelain.annotate(str(self._workspace), file_path)
-        except Exception as exc:
-            raise GitStoreError(f"Git line annotation failed for {file_path}") from exc
-
-        if not annotated:
-            return []
-
-        return _compute_line_ages(annotated)
 
     def diff_commits(self, sha1: str, sha2: str) -> str:
         """Show diff between two commits."""
@@ -460,13 +413,6 @@ class GitStore:
             return None
         commit = cast("Commit", commit_obj)
         return cast("Tree", repo[commit.tree])
-
-    def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
-        """Find a commit by short SHA prefix match."""
-        for c in self.log(max_entries=max_entries):
-            if c.sha.startswith(short_sha):
-                return c
-        return None
 
     def show_commit_diff(
         self,

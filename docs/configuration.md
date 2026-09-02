@@ -190,7 +190,7 @@ These variables are process-level switches. Set them in the same terminal, servi
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NANOBOT_MAX_CONCURRENT_REQUESTS` | `3` | Maximum concurrently running inbound agent requests. Must be an integer; set `0` or a negative value for unlimited. |
+| `NANOBOT_MAX_CONCURRENT_REQUESTS` | Unlimited | Maximum concurrently running inbound agent requests. Set a positive integer to apply a cap; unset, `0`, or a negative value means unlimited. |
 | `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds. Ordinary requests use this value; streaming requests use the greater of 300 seconds or twice this value. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
 | `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Streaming idle timeout, in seconds, used by streaming providers. Invalid or non-positive values are ignored; values above `3600` are clamped. |
 | `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for OpenAI-compatible providers. Invalid or non-positive values are ignored. |
@@ -270,6 +270,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM gateway for hosted model families + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
+| `edenai` | LLM gateway for Eden AI's OpenAI-compatible model catalog | [app.edenai.run](https://app.edenai.run/) |
 | `opencode` | LLM gateway (OpenCode Zen coding-agent models) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
 | `opencode_zen` | LLM gateway (legacy alias for OpenCode Zen) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
 | `opencode_go` | LLM gateway (OpenCode Go low-cost coding models) | [opencode.ai/docs/go](https://opencode.ai/docs/go/) |
@@ -331,7 +332,11 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
+ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
+specially and appended after generated function tools. With Responses, configure it in Responses
+API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends
+`extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
 
 ```json
 {
@@ -348,6 +353,36 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 }
 ```
 
+The WebUI's OpenAI web-search switch writes the corresponding `apiType` and `extraBody.tools`
+fields. A hosted search tool replaces nanobot's same-name local `web_search` function for that
+request, while other tools such as `web_fetch` remain available.
+
+</details>
+
+<details>
+<summary><b>DeepSeek native web search</b></summary>
+
+DeepSeek V4 Flash and Pro use DeepSeek's native Responses API. Their provider-hosted web search is
+enabled by default because it does not require a separate paid add-on. Turn it off from the
+WebUI provider settings, or with:
+
+```json
+{
+  "providers": {
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "extraBody": {
+        "tools": []
+      }
+    }
+  }
+}
+```
+
+The switch applies to `deepseek-v4-flash` and `deepseek-v4-pro`; DeepSeek models that remain on
+Chat Completions cannot use this Responses tool. Native search calls appear in the WebUI activity
+stream, and their opaque output items are preserved for multi-turn Responses state replay.
+
 </details>
 
 <a id="responses-state-and-compaction"></a>
@@ -358,7 +393,7 @@ Providers that use the Responses API can keep reasoning context across a
 conversation, which helps with multi-step tasks. Supported providers can also
 compact long conversations automatically.
 
-nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4 Flash, and compatible GitHub Copilot models.
+nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4, and compatible GitHub Copilot models.
 Native compaction is also automatic when the provider supports it. The
 threshold is derived from the active model's context window and reserved output
 headroom; no provider configuration is required.
@@ -696,7 +731,12 @@ Then run:
 nanobot agent -m "Hello!"
 ```
 
-To opt in to Codex Fast mode, merge this provider setting into `config.json`:
+The WebUI model selector loads the models available to the signed-in account
+from Codex's online catalog. Context-window and reasoning-effort metadata come
+from that response; if discovery is unavailable, nanobot keeps a small built-in
+fallback instead of emptying the selector.
+
+Codex Fast mode can be enabled from the WebUI provider settings, or with:
 
 ```json
 {
@@ -710,9 +750,9 @@ To opt in to Codex Fast mode, merge this provider setting into `config.json`:
 }
 ```
 
-`priority` is the Responses API request value used by Codex Fast mode. The setting only works
-for models and accounts that support Fast mode; remove `service_tier` to return to standard
-processing. Fast mode consumes Codex credits at a higher rate. See the
+The switch sends the Responses API `service_tier: "priority"` value. It only works for models
+and accounts that support Fast mode; turn the switch off to return to standard processing.
+Fast mode consumes Codex credits at a higher rate. See the
 [OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
 
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
@@ -731,11 +771,16 @@ nanobot provider login xai-grok --set-main
 nanobot agent -m "Hello from Grok."
 ```
 
-The default model is `xai-grok/grok-4.5` with a 500,000-token context window.
-The provider reads xAI's model catalog and includes the server-hosted `x_search`
-tool only when the selected model advertises `supportsBackendSearch`. Models
-without that capability continue normally without hosted X Search. When enabled,
-searches run inside xAI's Responses API and citations arrive as inline links.
+The default model is `xai-grok/grok-4.6` with a 500,000-token context window.
+The provider reads and caches xAI's online model catalog for both WebUI model
+selection and runtime capabilities. Newly available models appear automatically;
+when discovery fails, the last successful catalog or built-in fallback remains
+available. The server-hosted `x_search` tool is included only when the selected
+model advertises support. Models without that capability continue normally
+without hosted X Search. When enabled, searches run inside xAI's Responses API
+and citations arrive as inline links.
+Hosted X Search is on by default to preserve this behavior. It can be turned off in the
+WebUI provider settings or with `providers.xaiGrok.extraBody.tools: []`.
 
 This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
 public OAuth client and proxy contract used by
@@ -769,6 +814,10 @@ a nanobot update.
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+
+After login, the WebUI loads the account-specific Copilot model catalog online.
+Only models compatible with nanobot's current chat-completions or Responses
+transport are shown.
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash
@@ -1369,21 +1418,6 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 {
   "modelPresets": {
     "fast": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4.5",
-      "maxTokens": 4096,
-      "contextWindowTokens": 65536
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "fast",
-      "fallbackModels": ["deep", "localSmall"]
-    }
-  },
-  "modelPresets": {
-    "fast": {
-      "label": "Fast",
       "model": "gpt-4.1-mini",
       "provider": "openai",
       "maxTokens": 4096,
@@ -1392,7 +1426,6 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
       "reasoningEffort": "low"
     },
     "deep": {
-      "label": "Deep",
       "model": "claude-opus-4-5",
       "provider": "anthropic",
       "maxTokens": 8192,
@@ -1400,22 +1433,28 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
       "reasoningEffort": "high"
     },
     "localSmall": {
-      "label": "Local Small",
       "model": "llama3.2",
       "provider": "ollama",
       "maxTokens": 4096,
       "contextWindowTokens": 32768,
       "temperature": 0.2
     }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": ["deep", "localSmall"]
+    }
   }
 }
 ```
 
-`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+`modelPresets` is a top-level object. Each key (`fast`, `deep`, `coding`, etc.) is the preset's one canonical name: it is shown in the interface, passed to `/model <name>`, and referenced by defaults, fallbacks, sessions, and Dream. New and renamed presets must be unique ignoring case. Existing keys accepted by earlier releases remain loadable so upgrades do not break startup. Each preset supports:
+
+Older configs may still contain a `label` inside a preset. It is accepted when loading for compatibility but ignored; the object key remains the canonical name.
 
 | Field | Description |
 |-------|-------------|
-| `label` | Optional display name shown in model lists. |
 | `model` | Model name to use for this preset. |
 | `provider` | Provider name, or `"auto"` to use provider auto-detection. |
 | `maxTokens` | Maximum completion/output tokens. |
@@ -1886,6 +1925,14 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
 
+> [!NOTE]
+> Using the remote reader means the fetched URL itself is disclosed to the
+> third-party service. URLs that visibly carry credentials (userinfo, signed-URL
+> or token-style query parameters) are detected and fetched locally instead, but
+> secrets embedded in a URL's *path* (for example bot-token or webhook-style
+> URLs) cannot be reliably detected. Set `useJinaReader: false` if fetched URLs
+> must never leave the machine.
+
 If you want to always use the local conversion, you can force it using:
 
 ```json
@@ -1946,15 +1993,52 @@ Add MCP servers to your `config.json`:
 }
 ```
 
-Two transport modes are supported:
+MCP servers can run locally over stdio or connect remotely over HTTP:
 
-| Mode | Config | Example |
+| Connection | Config | Example |
 |------|--------|---------|
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
-| **HTTP** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/sse`) |
+| **Streamable HTTP / SSE** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/mcp`) |
+
+Remote HTTP servers may use browser OAuth instead of static headers. In the
+WebUI, open **Apps → MCP → Add MCP server**, choose **Custom**, select HTTP or
+SSE, and choose **OAuth** under **Authentication**. Save the server, then choose
+**Connect**. For manual configuration, add `auth: "oauth"` and open
+**Apps → MCP** to connect. Known presets such as Xmind, Notion, and Linear add
+the config automatically on first click.
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "notion": {
+        "type": "streamableHttp",
+        "url": "https://mcp.notion.com/mcp",
+        "auth": "oauth"
+      }
+    }
+  }
+}
+```
+
+nanobot opens the server's authorization page and handles the callback through
+the gateway. The tools become available immediately when hot reload succeeds;
+otherwise the WebUI asks for a restart. OAuth tokens and dynamic client
+registration data are stored in the nanobot data directory under
+`auth/mcp.json`; they are not written to `config.json`. Removing the MCP server
+from Apps also removes its saved OAuth credentials. Normal gateway startup never
+opens a browser or registers a new OAuth client when credentials are
+missing—interactive authorization starts only after a user clicks **Connect**.
+
+For a remotely accessed WebUI, HTTPS is recommended. Configure
+`channels.websocket.publicWsUrl` with the browser-facing `wss://` endpoint so
+nanobot can register the matching HTTPS callback and finish automatically. A
+loopback WebUI may use HTTP. When a remote WebUI is served over plain HTTP,
+nanobot instead registers a localhost callback and asks you to paste the complete
+callback URL from the browser address bar after authorization.
 
 > [!IMPORTANT]
-> HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request is validated again before redirects are followed. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
+> HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request—including OAuth metadata, client registration, token exchange, and redirects—is validated again. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
 
 Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
@@ -2018,6 +2102,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, enables nanobot's application-level workspace guards for workspace-aware tools. File tools resolve paths under the active workspace; selected internal roots can be added as read-only or explicitly write-enabled roots, and media uploads are read-only by default. Shell execution rejects workspace-external `working_dir` values and applies best-effort command path checks, but this is not an OS sandbox. |
+| `tools.maxSessionMessagesPerMinute` | `6` | Maximum messages one source session may send during any rolling 60-second window. Additional sends are rejected to stop runaway agent loops. |
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables workspace restriction for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
@@ -2029,7 +2114,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
-**Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. The default `docker-compose.yml` drops all Linux capabilities and keeps Docker's default AppArmor/seccomp profiles enabled. If you enable `"tools.exec.sandbox": "bwrap"` inside Docker, start Compose with `docker-compose.bwrap.yml` as an additional override so bubblewrap can create nested namespaces.
+**Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. The default `docker-compose.yml` drops all Linux capabilities except the `CHOWN`, `SETGID`, and `SETUID` capabilities required by the root entrypoint to initialize bind-mount ownership and become UID 1000. It enables `no-new-privileges` so the final non-root process cannot regain those bootstrap capabilities, and keeps Docker's default AppArmor/seccomp profiles enabled. If you enable `"tools.exec.sandbox": "bwrap"` inside Docker, start Compose with `docker-compose.bwrap.yml` as an additional override so bubblewrap can create nested namespaces. The host must also allow unprivileged user namespaces; the override cannot bypass a host-level namespace restriction.
 
 
 ## Pairing
@@ -2148,7 +2233,7 @@ The notification gate runs on a built-in system prompt. Advanced users can overr
 
 ## Subagent Concurrency
 
-By default, nanobot only allows one spawned subagent at a time. When the limit is reached, the `spawn` tool returns an error so the agent can decide to wait or rearrange its work. This protects local LLM servers from loading multiple KV caches at once. If your provider can handle more parallel work, raise the limit:
+By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
 
 ```json
 {
@@ -2160,22 +2245,11 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 }
 ```
 
-Subagents also stop immediately when one of their tools returns an execution error. That default keeps failures visible to the parent agent. If your subagent workflows use tools that can fail transiently and should be retried or worked around by the model, disable hard-stop behavior:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "failOnToolError": false
-    }
-  }
-}
-```
+The deprecated `agents.defaults.failOnToolError` field is silently ignored when present in older configs.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
-| `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
+| `agents.defaults.maxConcurrentSubagents` | `4` | Maximum number of subagents that may run at the same time. Additional tasks wait for capacity. |
 
 
 ## Auto Compact
@@ -2202,16 +2276,12 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
-3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
-4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
+2. **Background compaction**: Older context is summarized while the most recent messages remain available.
+3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
+4. **Restart-safe resume**: The compacted context remains available after a process restart.
 
 > [!NOTE]
-> Mental model: "summarize older context, keep the freshest live turns, **and overwrite the session file with the compact form.**" It is not a full `session.clear()`, but it is a write — not a soft cursor move.
->
-> Concretely, auto compact rewrites `sessions/<key>.jsonl` in place: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the session file.
->
-> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
+> Auto compact shortens the context sent to the model without deleting the session's structured message history.
 
 ## Timezone
 
@@ -2280,6 +2350,20 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
+
+### Agent Plugins v1
+
+nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`; a v1 package has `plugin.json` and may add `mcp.json`, `skills/<name>/SKILL.md`, or both. Agent Plugins are the common package and activation boundary for installable capabilities; they do not replace native providers, channels, tools, standalone workspace skills, or directly configured MCP servers.
+
+Directory presence means installed; activation is explicit in **Apps**. Skills use progressive loading and `$skill-name` invocation, with workspace > plugin > built-in precedence.
+Enabled `stdio` servers receive contained `PLUGIN_ROOT` and isolated `PLUGIN_DATA` paths; explicit
+`tools.mcpServers` entries win collisions. Invalid or escaping components are ignored.
+An enabled package is treated as immutable: changing any packaged file disables it until the user
+reviews and enables it again. Runtime state belongs under `PLUGIN_DATA`, not the package root.
+
+Enabled plugins run as the nanobot user; permissions are descriptive, not an OS sandbox. The optional `extensions.dev.nanobot.logo` accepts a contained PNG, JPEG, or WebP up to 256 KiB.
+
+CLI Apps use the same skills-only package layout while their installer manages executables, updates, and removal. Future catalogs can place packages before using this activation path.
 
 ## Tool Hint Max Length
 

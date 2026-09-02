@@ -6,8 +6,19 @@ import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent
+from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent, UserInputEvent
+from nanobot.bus.runtime_events import (
+    RuntimeEventBus,
+    RuntimeEventContext,
+    TurnRuntimeAdmitted,
+    UserInputAccepted,
+)
+from nanobot.providers.base import GenerationSettings
 from nanobot.session import webui_turns as wth
+from nanobot.session.manager import SessionManager
+from nanobot.session.session_handles import session_handle_for_name
+from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 
 
@@ -144,10 +155,18 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     bus.publish_outbound = AsyncMock()
     observer = wth.build_webui_fallback_model_observer(bus)
 
+    runtime = LLMRuntime(
+        provider=MagicMock(),
+        model="openai/gpt-4.1",
+        generation=GenerationSettings(),
+        context_window_tokens=16_000,
+        model_preset="Deep Research",
+    )
     with request_context(
         RequestContext(
             channel="websocket",
             chat_id="chat-model",
+            runtime=runtime,
             metadata={"webui": True},
         )
     ):
@@ -159,6 +178,98 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     assert outbound.metadata == {"webui": True}
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
+    assert outbound.event.model_preset == "Deep Research"
+
+
+@pytest.mark.asyncio
+async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe(runtime_events)
+    runtime = LLMRuntime(
+        provider=MagicMock(),
+        model="openai-codex/gpt-5.6",
+        generation=GenerationSettings(),
+        context_window_tokens=262_144,
+        model_preset="Codex",
+    )
+
+    await runtime_events.publish(
+        TurnRuntimeAdmitted(
+            context=RuntimeEventContext(
+                channel="websocket",
+                chat_id="chat-model",
+                session_key="websocket:chat-model",
+                metadata={"webui": True},
+            ),
+            runtime=runtime,
+        )
+    )
+
+    outbound = bus.publish_outbound.await_args.args[0]
+    assert outbound.channel == "websocket"
+    assert outbound.chat_id == "chat-model"
+    assert isinstance(outbound.event, TurnModelUpdatedEvent)
+    assert outbound.event.model == "openai-codex/gpt-5.6"
+    assert outbound.event.model_preset == "Codex"
+
+
+@pytest.mark.asyncio
+async def test_session_input_is_projected_by_the_webui_coordinator(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    sessions = SessionManager(tmp_path)
+    target_session = sessions.get_or_create("websocket:target")
+    target_session.metadata["webui"] = True
+    sessions.save(target_session)
+    source = session_handle_for_name("websocket:source", "luma")
+    envelope = {
+        "message_id": "message-1",
+        "created_at_ms": 123,
+        "expect_reply": False,
+        "source_handle": source.name,
+        "source_session_key": "websocket:source",
+        "target_session_key": "websocket:target",
+    }
+    append_input = MagicMock()
+    monkeypatch.setattr(wth, "append_session_message_input", append_input)
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sessions,
+        schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe(runtime_events)
+
+    await runtime_events.publish(UserInputAccepted(
+        context=RuntimeEventContext(
+            channel="system",
+            chat_id="websocket:target",
+            session_key="websocket:target",
+            metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
+        ),
+        content="Review this",
+    ))
+
+    append_input.assert_called_once()
+    outbound = bus.publish_outbound.await_args.args[0]
+    assert outbound.channel == "websocket"
+    assert outbound.chat_id == "target"
+    assert isinstance(outbound.event, UserInputEvent)
+    assert outbound.event.content == "Review this"
+    assert outbound.event.provenance["session_message"]["session"] == {
+        "id": source.id,
+        "name": source.name,
+    }
 
 
 @pytest.mark.asyncio

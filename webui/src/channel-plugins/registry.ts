@@ -8,7 +8,7 @@ type ChannelUiContributionModule = {
 };
 
 const modules = import.meta.glob<ChannelUiContributionModule>(
-  "../../../nanobot/channels/*/webui/**/*.{ts,tsx}",
+  "../../../nanobot/channels/*/webui/index.{ts,tsx}",
   {
     eager: true,
   },

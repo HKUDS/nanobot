@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { MessageCircleMore } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
+import { cn } from "@/lib/utils";
+
 const MAX_QUOTED_CONTEXT_CHARS = 4_000;
 
 interface SelectionActionState {
@@ -142,7 +145,10 @@ export function AssistantSelectionAction({
       ref={actionRef}
       type="button"
       data-selection-follow-up="true"
-      className="fixed z-[80] inline-flex h-9 max-w-[calc(100vw-24px)] items-center gap-1.5 rounded-full border border-border/80 bg-popover px-3 text-[13px] font-medium text-popover-foreground shadow-lg shadow-black/10 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:shadow-black/35"
+      className={cn(
+        floatingSurfaceElevationClassName,
+        "fixed z-[80] inline-flex h-9 max-w-[calc(100vw-24px)] items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
       style={{
         left: action.left,
         top: action.top,

@@ -16,7 +16,10 @@ export function formatToolCallTrace(call: unknown): string | null {
   if (!name) return null;
   const args = item.function?.arguments ?? item.arguments;
   if (typeof args === "string" && args.trim()) return `${name}(${args})`;
-  if (args && typeof args === "object") return `${name}(${JSON.stringify(args)})`;
+  if (args && typeof args === "object") {
+    const serialized = JSON.stringify(args);
+    return serialized === "{}" || serialized === "[]" ? `${name}()` : `${name}(${serialized})`;
+  }
   return `${name}()`;
 }
 
@@ -115,4 +118,25 @@ export function mergeUniqueToolTraceLines(
     added = true;
   }
   return { traces, added };
+}
+
+export function mergeToolProgressTraceLines(
+  previousTraces: string[],
+  previousEvents: ToolProgressEvent[] | undefined,
+  incomingTraces: string[],
+  incomingEvents: ToolProgressEvent[],
+): string[] {
+  const mergedEvents = mergeToolProgressEvents(previousEvents, incomingEvents);
+  const candidates = mergeUniqueToolTraceLines(previousTraces, incomingTraces).traces;
+  const eventTraceKeys = new Set([
+    ...toolTraceLinesFromEvents(previousEvents),
+    ...toolTraceLinesFromEvents(incomingEvents),
+  ].map(canonicalToolTrace));
+  const nonEventTraces = candidates.filter(
+    (line) => !eventTraceKeys.has(canonicalToolTrace(line)),
+  );
+  return mergeUniqueToolTraceLines(
+    nonEventTraces,
+    toolTraceLinesFromEvents(mergedEvents),
+  ).traces;
 }

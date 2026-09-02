@@ -224,7 +224,7 @@ export function TokenUsageHeatmap({
                     <span
                       aria-label={ariaLabel}
                       className={cn(
-                        "aspect-square w-full rounded-[2px] transition-transform hover:scale-110 sm:rounded-[4px]",
+                        "aspect-square w-full rounded-mark transition-transform hover:scale-110",
                         tokenUsageCellClass(level, cell.future),
                       )}
                     />
@@ -232,7 +232,7 @@ export function TokenUsageHeatmap({
                   <TooltipContent
                     side="top"
                     align="center"
-                    className="rounded-[10px] border-border/45 bg-popover px-2.5 py-1.5 text-[11px] font-normal text-popover-foreground shadow-lg"
+                    className="px-2.5 py-1.5 text-[11px] font-normal"
                   >
                     <span className="block">{label}</span>
                     {breakdown ? (

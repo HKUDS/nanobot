@@ -136,7 +136,7 @@ export function ChannelLogo({
   if (showBrandLogos && logoUrl) {
     return (
       <span
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] border border-border/45 bg-background"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-background"
       >
         <img
           src={logoUrl}
@@ -154,7 +154,7 @@ export function ChannelLogo({
   if (Icon) {
     return (
       <span
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background"
         style={{ color }}
         aria-hidden
       >
@@ -165,7 +165,7 @@ export function ChannelLogo({
 
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background text-[11px] font-bold"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background text-[11px] font-bold"
       style={{ color }}
       aria-hidden
     >
@@ -174,7 +174,7 @@ export function ChannelLogo({
   );
 }
 
-export function channelDisplayName(feature: NanobotFeatureInfo): string {
+function channelDisplayName(feature: NanobotFeatureInfo): string {
   return channelUiPresentation(feature.name, feature.webui)?.displayName ?? feature.display_name;
 }
 
@@ -275,7 +275,7 @@ export function ChannelRuntimeError({
 }) {
   if (!message) return null;
   return (
-    <div className={`${className} rounded-[12px] border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive`}>
+    <div className={`${className} rounded-control border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive`}>
       {message}
     </div>
   );

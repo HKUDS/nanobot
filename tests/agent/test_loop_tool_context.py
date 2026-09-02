@@ -1,9 +1,11 @@
 import asyncio
+import inspect
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -11,8 +13,10 @@ from nanobot.agent.tools.context import (
     current_request_context,
     reset_request_context,
 )
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import Config
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
@@ -56,6 +60,51 @@ class _Tools:
         return (self.tool, arguments, None) if name == "cron" else (None, arguments, None)
 
 
+def test_loop_registers_default_tools_in_injected_registry(tmp_path: Path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    registry = ToolRegistry()
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        tool_registry=registry,
+    )
+
+    assert loop.tools is registry
+    assert registry.has("read_file")
+
+
+def _config_for_loop(tmp_path: Path) -> Config:
+    return Config.model_validate({"agents": {"defaults": {"workspace": str(tmp_path)}}})
+
+
+def _provider_for_loop() -> MagicMock:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    return provider
+
+
+def test_loop_from_config_requires_caller_owned_registry(tmp_path: Path) -> None:
+    signature = inspect.signature(AgentLoop.from_config)
+
+    with pytest.raises(TypeError, match="tool_registry"):
+        signature.bind(_config_for_loop(tmp_path))
+
+
+def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    loop = AgentLoop.from_config(
+        _config_for_loop(tmp_path),
+        tool_registry=registry,
+        provider=_provider_for_loop(),
+    )
+
+    assert loop.tools is registry
+    assert loop.tools.has("read_file")
+
+
 @pytest.mark.asyncio
 async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()
@@ -85,12 +134,15 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=runtime,
-        channel="slack",
-        chat_id="C123",
-        metadata=metadata,
-        session_key="slack:C123:111.222",
+        request_context=RequestContext(
+            channel="slack",
+            chat_id="C123",
+            session_key="slack:C123:111.222",
+            runtime=runtime,
+            metadata=metadata,
+        ),
     )
 
     assert cron.contexts[-1] == {
@@ -183,12 +235,15 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
     try:
         with pytest.raises(RuntimeError, match="runner failed"):
             await loop._run_agent_loop(
-                [],
+                TranscriptInput(history=[], current_message=None),
                 runtime=runtime,
-                channel="slack",
-                chat_id="C123",
-                session_key="slack:C123:111.222",
-                original_user_text="  unchanged user text  ",
+                request_context=RequestContext(
+                    channel="slack",
+                    chat_id="C123",
+                    session_key="slack:C123:111.222",
+                    original_user_text="  unchanged user text  ",
+                    runtime=runtime,
+                ),
             )
         assert current_request_context() is outer
     finally:

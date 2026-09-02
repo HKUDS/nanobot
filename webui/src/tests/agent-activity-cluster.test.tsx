@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
@@ -139,6 +140,34 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "model-activity",
+            role: "assistant",
+            content: "**partial answer**",
+            activityKind: "model",
+            isStreaming: true,
+            createdAt: 1,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    const block = screen.getByTestId("activity-model-message");
+    await waitFor(() => expect(block.querySelector("strong")).not.toBeNull());
+    expect(block.querySelector("strong")).toHaveTextContent("partial answer");
+    expect(screen.queryByTestId("activity-step")).not.toBeInTheDocument();
+  });
+
   it("jumps to the latest activity when opened", () => {
     const raf = installAnimationFrameQueue();
     try {
@@ -265,6 +294,63 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("feathers only the activity edges with clipped content", () => {
+    const raf = installAnimationFrameQueue();
+    try {
+      render(
+        <AgentActivityCluster
+          messages={activityMessages()}
+          isTurnStreaming
+          hasBodyBelow={false}
+        />,
+      );
+
+      const scrollport = screen.getByTestId("agent-activity-scroll");
+      setScrollGeometry(scrollport, {
+        scrollHeight: 1000,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+
+      act(() => {
+        raf.flush();
+      });
+      expect(scrollport).toHaveAttribute("data-fade-top", "true");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+      const topFade = screen.getByTestId("activity-scroll-fade-top");
+      expect(scrollport).not.toContainElement(topFade);
+      expect(scrollport).not.toHaveClass("activity-scroll-fade");
+      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
+
+      scrollport.scrollTop = 440;
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "true");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+      expect(screen.getByTestId("activity-scroll-fade-top")).toBeInTheDocument();
+      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
+
+      scrollport.scrollTop = 0;
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "false");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
+
+      setScrollGeometry(scrollport, {
+        scrollHeight: 100,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+      fireEvent.scroll(scrollport);
+      expect(scrollport).toHaveAttribute("data-fade-top", "false");
+      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
+    } finally {
+      raf.restore();
+    }
+  });
+
   it("turns the live reasoning marker into an animated check when thinking completes", async () => {
     const liveReasoning: UIMessage = {
       id: "r-check",
@@ -338,10 +424,10 @@ describe("AgentActivityCluster", () => {
 
       expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
       act(() => {
-        vi.advanceTimersByTime(901);
+        vi.advanceTimersByTime(301);
       });
       expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Thought" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Worked" })).toHaveAttribute(
         "aria-expanded",
         "false",
       );
@@ -365,13 +451,14 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "Thought" });
+    const button = screen.getByRole("button", { name: "Worked" });
+    expect(button).toHaveAttribute("data-thread-disclosure");
     const chevron = button.querySelector("svg");
     expect(chevron).toBeInTheDocument();
     expect(chevron).toHaveClass("transition-colors", "duration-200");
     expect(chevron?.parentElement).toHaveClass(
       "transition-transform",
-      "[transition-duration:600ms]",
+      "[transition-duration:220ms]",
     );
   });
 
@@ -391,7 +478,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
   });
 
   it("labels mixed tool activity as work instead of thought", () => {
@@ -423,8 +510,8 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
+    expect(screen.getByText("Worked")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
   it("renders file edits as one-line activity rows", async () => {
@@ -472,6 +559,69 @@ describe("AgentActivityCluster", () => {
     } finally {
       restoreMotion();
     }
+  });
+
+  it("keeps a completed file edit at its original position in the turn", () => {
+    const before: UIMessage = {
+      id: "model-before-edit",
+      role: "assistant",
+      content: "Before the edit",
+      activityKind: "model",
+      createdAt: 1,
+    };
+    const after: UIMessage = {
+      id: "model-after-edit",
+      role: "assistant",
+      content: "After the edit",
+      activityKind: "model",
+      createdAt: 3,
+    };
+    const fileEdit = (status: "editing" | "done"): UIMessage => ({
+      id: "file-edit-in-place",
+      role: "tool",
+      kind: "trace",
+      content: "edit_file()",
+      traces: ["edit_file()"],
+      fileEdits: [{
+        call_id: "call-edit-in-place",
+        tool: "edit_file",
+        path: "src/app.tsx",
+        phase: status === "editing" ? "start" : "end",
+        added: status === "editing" ? 0 : 2,
+        deleted: 0,
+        approximate: false,
+        status,
+      }],
+      createdAt: 2,
+    });
+    const assertBetween = (middle: HTMLElement) => {
+      const beforeElement = screen.getByText("Before the edit");
+      const afterElement = screen.getByText("After the edit");
+      expect(beforeElement.compareDocumentPosition(middle) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+      expect(middle.compareDocumentPosition(afterElement) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+    };
+
+    const { rerender } = render(
+      <AgentActivityCluster
+        messages={[before, fileEdit("editing"), after]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    assertBetween(screen.getByText("Editing"));
+
+    rerender(
+      <AgentActivityCluster
+        messages={[before, fileEdit("done"), after]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    assertBetween(screen.getByText("Edited"));
   });
 
   it("renders file edit diffs and responds to preference changes", () => {
@@ -1118,12 +1268,13 @@ describe("AgentActivityCluster", () => {
             id: "search-start",
             role: "tool",
             kind: "trace",
-            content: line,
-            traces: [line],
+            content: "web_search()",
+            traces: ["web_search()"],
             toolEvents: [{
               phase: "start",
+              call_id: "hosted-search-1",
               name: "web_search",
-              arguments: { query: "site:linkedin.com/company Evomap startup" },
+              arguments: {},
             }],
             createdAt: 1,
           },
@@ -1135,6 +1286,7 @@ describe("AgentActivityCluster", () => {
             traces: [line],
             toolEvents: [{
               phase: "error",
+              call_id: "hosted-search-1",
               name: "web_search",
               arguments: { query: "site:linkedin.com/company Evomap startup" },
               error: "Search provider rate limited the request",

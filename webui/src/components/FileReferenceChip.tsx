@@ -78,7 +78,7 @@ export function FileReferenceChip({
                 "text-sky-600 transition-colors hover:text-sky-700",
                 "dark:text-sky-300 dark:hover:text-sky-200",
                 interactive && [
-                  "cursor-pointer rounded-[5px]",
+                  "cursor-pointer rounded-compact",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45",
                 ],
               )}
@@ -110,10 +110,9 @@ export function FileReferenceChip({
           sideOffset={8}
           collisionPadding={12}
           className={cn(
-            "max-w-[min(38rem,calc(100vw-2rem))] rounded-[10px]",
-            "border-border/60 bg-popover/95 px-2.5 py-1.5",
+            "max-w-[min(38rem,calc(100vw-2rem))] rounded-control",
+            "px-2.5 py-1.5",
             "break-all font-mono text-[11px] leading-snug text-popover-foreground",
-            "shadow-lg backdrop-blur",
           )}
         >
           {fullPath}
@@ -152,7 +151,7 @@ export function splitFilePath(path: string): { directory: string; name: string }
   };
 }
 
-export function fileKindForPath(path: string): FileReferenceKind {
+function fileKindForPath(path: string): FileReferenceKind {
   const normalized = path.toLowerCase();
   const name = normalized.split(/[\\/]/).pop() ?? normalized;
   const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
@@ -194,7 +193,7 @@ export function fileKindForPath(path: string): FileReferenceKind {
   }
 }
 
-export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
+function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
   if (kind === "python") {
     return (
       <svg

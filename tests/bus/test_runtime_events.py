@@ -10,7 +10,9 @@ from nanobot.bus.runtime_events import (
     SessionTurnStarted,
     TurnCompleted,
     TurnRunStatusChanged,
+    TurnRuntimeAdmitted,
 )
+from nanobot.providers.base import LLMUsage
 
 
 @pytest.mark.asyncio
@@ -98,6 +100,7 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     bus.subscribe(seen.append)
     publisher.record_turn_runtime("cli:direct", "runtime")
     publisher.record_turn_latency("cli:direct", 123)
+    publisher.record_turn_usage("cli:direct", LLMUsage.reported(input_tokens=40, output_tokens=2))
 
     await publisher.turn_completed(
         channel="cli",
@@ -118,9 +121,42 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.context.metadata == {"source": "test"}
     assert first.latency_ms == 123
     assert first.runtime == "runtime"
+    assert first.usage == LLMUsage.reported(input_tokens=40, output_tokens=2)
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None
+    assert second.usage is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_publisher_exposes_admitted_runtime() -> None:
+    bus = RuntimeEventBus()
+    seen: list[object] = []
+    publisher = RuntimeEventPublisher(bus)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+    )
+    runtime = object()
+    bus.subscribe(seen.append)
+
+    await publisher.turn_runtime_admitted(msg, "websocket:chat-a", runtime)  # type: ignore[arg-type]
+    await publisher.turn_completed(
+        channel="websocket",
+        chat_id="chat-a",
+        session_key="websocket:chat-a",
+        metadata=None,
+    )
+
+    admitted = seen[0]
+    completed = seen[1]
+    assert isinstance(admitted, TurnRuntimeAdmitted)
+    assert admitted.runtime is runtime
+    assert admitted.context.chat_id == "chat-a"
+    assert isinstance(completed, TurnCompleted)
+    assert completed.runtime is runtime
 
 
 @pytest.mark.asyncio

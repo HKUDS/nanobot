@@ -120,8 +120,6 @@ export function SessionSearchDialog({
         showCloseButton={false}
         className={cn(
           "flex max-h-[min(40rem,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0",
-          "rounded-[22px] border border-border bg-background text-foreground shadow-[0_22px_70px_rgba(0,0,0,0.22)]",
-          "dark:border-white/14 dark:bg-popover dark:shadow-[0_26px_90px_rgba(0,0,0,0.44)] sm:rounded-[22px]",
         )}
       >
         <DialogTitle className="sr-only">{t("sidebar.searchAria")}</DialogTitle>
@@ -184,7 +182,7 @@ export function SessionSearchDialog({
                         onMouseEnter={() => setHighlightedIndex(index)}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "grid min-h-[54px] w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[11px] px-3 py-2 text-left transition-colors",
+                          "grid min-h-[54px] w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-control px-3 py-2 text-left transition-colors",
                           highlighted
                             ? "bg-muted text-foreground"
                             : "text-foreground hover:bg-muted",

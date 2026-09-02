@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import time
 from types import SimpleNamespace
@@ -10,22 +9,21 @@ import httpx
 import pytest
 
 from nanobot.config.schema import Config
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.factory import make_provider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
+from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.xai_grok_provider import (
     DEFAULT_XAI_GROK_MODEL,
-    DEFAULT_XAI_GROK_MODELS_URL,
     XAIGrokProvider,
     _bounded_error_body,
     _build_headers,
-    _build_model_headers,
     _build_reasoning_options,
     _build_xai_http_error,
-    _fetch_xai_model_capabilities,
-    _parse_xai_model_capabilities,
     _request_xai,
     _xai_error_response,
     _XAIHTTPError,
+    _XAIIncompleteHostedToolError,
 )
 
 
@@ -50,22 +48,41 @@ def _mock_model_capabilities(
     *,
     supports_backend_search: bool,
 ) -> None:
-    async def fake_fetch(*_args, **_kwargs):
-        return {"grok-4.5": supports_backend_search}
+    def fake_catalog(*_args, **_kwargs):
+        return OAuthModelCatalogSnapshot(
+            models=(
+                ProviderModelSpec(
+                    id="xai-grok/grok-4.5",
+                    label="Grok 4.5",
+                    supports_backend_search=supports_backend_search,
+                ),
+                ProviderModelSpec(
+                    id="xai-grok/grok-4.6",
+                    label="Grok 4.6",
+                    supports_backend_search=supports_backend_search,
+                ),
+            ),
+            source="remote",
+            fetched_at=1,
+        )
 
     monkeypatch.setattr(
-        "nanobot.providers.xai_grok_provider._fetch_xai_model_capabilities",
-        fake_fetch,
+        "nanobot.providers.xai_grok_provider.get_xai_grok_model_catalog",
+        fake_catalog,
     )
 
 
-def test_xai_grok_registry_exposes_curated_x_search_model() -> None:
+def test_xai_grok_registry_exposes_curated_x_search_models() -> None:
     spec = find_by_name("xai_grok")
 
     assert spec is not None
     assert spec.is_oauth is True
     assert spec.backend == "xai_grok"
     assert spec.builtin_models[0].id == DEFAULT_XAI_GROK_MODEL
+    assert [model.id for model in spec.builtin_models] == [
+        "xai-grok/grok-4.6",
+        "xai-grok/grok-4.5",
+    ]
     assert spec.builtin_models[0].context_window == 500000
     assert "when supported" in spec.builtin_models[0].description
 
@@ -116,7 +133,7 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
     assert response.content == "answer [[1]](https://x.com/example/status/1)"
     url, headers, body = calls[0]
     assert url == "https://cli-chat-proxy.grok.com/v1/responses"
-    assert body["model"] == "grok-4.5"
+    assert body["model"] == "grok-4.6"
     assert body["tools"] == [
         {
             "type": "function",
@@ -131,12 +148,125 @@ async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monke
     assert body["stream_tool_calls"] is True
     assert body["reasoning"] == {"summary": "concise", "effort": "high"}
     assert body["store"] is False
+    assert body["max_turns"] == 5
     assert headers["Authorization"] == "Bearer subscription-token"
     assert headers["X-XAI-Token-Auth"] == "xai-grok-cli"
     assert headers["x-authenticateresponse"] == "authenticate-response"
     assert headers["x-grok-client-identifier"] == "nanobot"
     assert headers["x-grok-client-mode"] == "headless"
-    assert headers["x-grok-model-override"] == "grok-4.5"
+    assert headers["x-grok-model-override"] == "grok-4.6"
+
+
+@pytest.mark.asyncio
+async def test_explicit_parameterized_x_search_is_preserved_without_catalog_lookup(
+    monkeypatch,
+) -> None:
+    _mock_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    def unexpected_catalog_lookup(*_args, **_kwargs):
+        raise AssertionError("explicit raw tools must not depend on model catalog metadata")
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_grok_provider.get_xai_grok_model_catalog",
+        unexpected_catalog_lookup,
+    )
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    hosted_tool = {
+        "type": "x_search",
+        "allowed_x_handles": ["nanobot_ai"],
+        "from_date": "2026-01-01",
+    }
+    provider = XAIGrokProvider(
+        extra_body={
+            "parallel_tool_calls": False,
+            "tools": [hosted_tool, {"type": "code_interpreter", "container": "auto"}],
+        }
+    )
+
+    response = await provider.chat(
+        [{"role": "user", "content": "search"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "x_search",
+                    "description": "A colliding local tool",
+                    "parameters": {"type": "object"},
+                },
+            },
+        ],
+    )
+
+    assert response.content == "ok"
+    assert bodies[0]["parallel_tool_calls"] is False
+    assert bodies[0]["tools"] == [
+        {
+            "type": "function",
+            "name": "read_file",
+            "description": "Read a file",
+            "parameters": {"type": "object"},
+        },
+        hosted_tool,
+        {"type": "code_interpreter", "container": "auto"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_empty_tools_disables_catalog_lookup_and_hosted_tool(monkeypatch) -> None:
+    _mock_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    def unexpected_catalog_lookup(*_args, **_kwargs):
+        raise AssertionError("explicitly disabled X Search must not fetch model capabilities")
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_grok_provider.get_xai_grok_model_catalog",
+        unexpected_catalog_lookup,
+    )
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider(extra_body={"tools": []})
+
+    response = await provider.chat(
+        [{"role": "user", "content": "hello"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
+    )
+
+    assert response.content == "ok"
+    assert bodies[0]["tools"] == [
+        {
+            "type": "function",
+            "name": "read_file",
+            "description": "Read a file",
+            "parameters": {"type": "object"},
+        }
+    ]
+    assert "max_turns" not in bodies[0]
 
 
 @pytest.mark.asyncio
@@ -175,35 +305,8 @@ async def test_provider_keeps_local_x_search_when_model_does_not_support_hosted_
             "parameters": {"type": "object"},
         }
     ]
-
-
-@pytest.mark.asyncio
-async def test_provider_fails_closed_and_caches_model_catalog_failure(monkeypatch) -> None:
-    _mock_token(monkeypatch)
-    fetch_calls = 0
-    bodies: list[dict[str, Any]] = []
-
-    async def failing_fetch(*_args, **_kwargs):
-        nonlocal fetch_calls
-        fetch_calls += 1
-        raise httpx.ConnectError("catalog unavailable")
-
-    async def fake_request(_url, _headers, body, **_kwargs):
-        bodies.append(body)
-        return "ok", [], "stop", {}, None
-
-    monkeypatch.setattr(
-        "nanobot.providers.xai_grok_provider._fetch_xai_model_capabilities",
-        failing_fetch,
-    )
-    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
-    provider = XAIGrokProvider()
-
-    await provider.chat([{"role": "user", "content": "first"}])
-    await provider.chat([{"role": "user", "content": "second"}])
-
-    assert fetch_calls == 1
-    assert all({"type": "x_search"} not in body["tools"] for body in bodies)
+    assert "max_turns" not in bodies[0]
+    assert bodies[0]["instructions"] == ""
 
 
 @pytest.mark.asyncio
@@ -289,7 +392,10 @@ async def test_factory_builds_xai_provider_and_applies_explicit_body_overrides(m
             "providers": {
                 "xaiGrok": {
                     "proxy": "http://127.0.0.1:7890",
-                    "extraBody": {"parallel_tool_calls": False},
+                    "extraBody": {
+                        "parallel_tool_calls": False,
+                        "max_turns": 2,
+                    },
                 }
             },
         }
@@ -302,6 +408,7 @@ async def test_factory_builds_xai_provider_and_applies_explicit_body_overrides(m
     assert provider.proxy == "http://127.0.0.1:7890"
     assert response.content == "ok"
     assert bodies[0]["parallel_tool_calls"] is False
+    assert bodies[0]["max_turns"] == 2
     assert {"type": "x_search"} in bodies[0]["tools"]
 
 
@@ -349,7 +456,7 @@ async def test_raw_response_request_streams_text_usage_and_inline_citations(monk
 
     assert result[0] == "Live result [[1]](https://x.com/example/status/1)"
     assert result[2] == "stop"
-    assert result[3] == {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
+    assert result[3] == LLMUsage.reported(input_tokens=8, output_tokens=4)
     assert deltas == ["Live result ", "[[1]](https://x.com/example/status/1)"]
     assert captured["json"]["tools"] == [{"type": "x_search"}]
 
@@ -421,75 +528,183 @@ async def test_raw_response_request_streams_hosted_x_search_lifecycle(monkeypatc
     assert "large hosted result" not in json.dumps(tool_events)
 
 
-def test_model_capabilities_follow_upstream_aliases_and_default_to_disabled() -> None:
-    capabilities = _parse_xai_model_capabilities(
-        {
-            "data": [
-                {"id": "grok-4.5", "supportsBackendSearch": False},
-                {
-                    "model": "grok-search",
-                    "supports_backend_search": True,
-                },
-                {
-                    "modelId": "grok-meta",
-                    "_meta": {"supportsBackendSearch": True},
-                },
-                {"id": "grok-unknown"},
-            ]
-        }
-    )
-
-    assert capabilities == {
-        "grok-4.5": False,
-        "grok-search": True,
-        "grok-meta": True,
-        "grok-unknown": False,
-    }
-
-
 @pytest.mark.asyncio
-async def test_model_capability_request_uses_subscription_headers(monkeypatch) -> None:
+async def test_raw_response_request_streams_official_x_search_lifecycle(monkeypatch) -> None:
     original_client = httpx.AsyncClient
-    captured: dict[str, Any] = {}
+    events = [
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "type": "x_search_call",
+                "id": "x-search-1",
+                "status": "in_progress",
+                "action": {"query": "nanobot oauth"},
+            },
+        },
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "x_search_call",
+                "id": "x-search-1",
+                "status": "completed",
+                "action": {"query": "nanobot oauth"},
+            },
+        },
+        {
+            "type": "response.completed",
+            "response": {"status": "completed", "usage": {}},
+        },
+    ]
+    content = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["request"] = request
-        return httpx.Response(
-            200,
-            json={"data": [{"id": "grok-search", "supportsBackendSearch": True}]},
-            request=request,
-        )
+        return httpx.Response(200, content=content, request=request)
 
     def fake_client(**kwargs) -> httpx.AsyncClient:
-        captured["kwargs"] = kwargs
         return original_client(
             transport=httpx.MockTransport(handler),
             timeout=kwargs["timeout"],
-            follow_redirects=kwargs["follow_redirects"],
         )
 
     monkeypatch.setattr("nanobot.providers.xai_grok_provider.httpx.AsyncClient", fake_client)
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"sub": "user-42", "email": "user@example.com"}).encode()
-    ).decode().rstrip("=")
-    access_token = f"header.{payload}.signature"
-    headers = _build_model_headers(_token(access_token))
+    tool_events: list[dict[str, Any]] = []
 
-    capabilities = await _fetch_xai_model_capabilities(
-        DEFAULT_XAI_GROK_MODELS_URL,
-        headers,
+    await _request_xai(
+        "https://cli-chat-proxy.grok.com/v1/responses",
+        _build_headers("secret", "grok-4.6"),
+        {"model": "grok-4.6", "tools": [{"type": "x_search"}]},
+        on_tool_call_delta=lambda event: _append(tool_events, event),
     )
 
-    request = captured["request"]
-    assert isinstance(request, httpx.Request)
-    assert request.method == "GET"
-    assert str(request.url) == DEFAULT_XAI_GROK_MODELS_URL
-    assert request.headers["Authorization"] == f"Bearer {access_token}"
-    assert request.headers["X-XAI-Token-Auth"] == "xai-grok-cli"
-    assert request.headers["x-userid"] == "user-42"
-    assert request.headers["x-email"] == "user@example.com"
-    assert captured["kwargs"] == {"timeout": 10.0, "follow_redirects": False}
-    assert capabilities == {"grok-search": True}
+    assert [(event["phase"], event["name"]) for event in tool_events] == [
+        ("start", "x_search"),
+        ("end", "x_search"),
+    ]
+    assert tool_events[-1]["result"] == {"status": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_raw_response_rejects_unfinished_hosted_tool_and_closes_progress(
+    monkeypatch,
+) -> None:
+    original_client = httpx.AsyncClient
+    events = [
+        {
+            "type": "response.custom_tool_call_input.done",
+            "item_id": "x-search-1",
+            "input": '{"query":"nanobot oauth"}',
+        },
+        {"type": "response.output_text.delta", "delta": "I will keep searching."},
+        {
+            "type": "response.completed",
+            "response": {
+                "status": "completed",
+                "usage": {"input_tokens": 8, "output_tokens": 4, "total_tokens": 12},
+            },
+        },
+    ]
+    content = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content, request=request)
+
+    def fake_client(**kwargs) -> httpx.AsyncClient:
+        return original_client(
+            transport=httpx.MockTransport(handler),
+            timeout=kwargs["timeout"],
+        )
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider.httpx.AsyncClient", fake_client)
+    tool_events: list[dict[str, Any]] = []
+
+    with pytest.raises(_XAIIncompleteHostedToolError) as caught:
+        await _request_xai(
+            "https://cli-chat-proxy.grok.com/v1/responses",
+            _build_headers("secret", "grok-4.6"),
+            {"model": "grok-4.6", "tools": [{"type": "x_search"}]},
+            on_tool_call_delta=lambda event: _append(tool_events, event),
+        )
+
+    assert caught.value.usage == LLMUsage.reported(input_tokens=8, output_tokens=4)
+    assert [event["phase"] for event in tool_events] == ["start", "error"]
+    assert "before this hosted tool completed" in tool_events[-1]["error"]
+
+
+@pytest.mark.asyncio
+async def test_provider_recovers_unfinished_hosted_tool_once_and_preserves_usage(
+    monkeypatch,
+) -> None:
+    _mock_token(monkeypatch)
+    _mock_model_capabilities(monkeypatch, supports_backend_search=True)
+    attempts = 0
+    request_ids: list[str] = []
+    streamed: list[str] = []
+    recovered: list[bool] = []
+    first_usage = LLMUsage.reported(input_tokens=10, output_tokens=2)
+    second_usage = LLMUsage.reported(input_tokens=11, output_tokens=4)
+
+    async def fake_request(_url, headers, body, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        request_ids.append(headers["x-grok-req-id"])
+        assert body["max_turns"] == 5
+        if attempts == 1:
+            await kwargs["on_content_delta"]("I will keep searching.")
+            raise _XAIIncompleteHostedToolError(
+                [{"name": "x_search", "call_id": "search-1"}],
+                usage=first_usage,
+            )
+        await kwargs["on_content_delta"]("Final researched answer.")
+        return "Final researched answer.", [], "stop", second_usage, None
+
+    async def on_recover() -> None:
+        recovered.append(True)
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider()
+
+    response = await provider.chat_stream_with_retry(
+        [{"role": "user", "content": "Search X"}],
+        on_content_delta=lambda delta: _append(streamed, delta),
+        on_stream_recover=on_recover,
+    )
+
+    assert attempts == 2
+    assert len(set(request_ids)) == 2
+    assert recovered == [True]
+    assert streamed == ["I will keep searching.", "Final researched answer."]
+    assert response.content == "Final researched answer."
+    assert response.usage == first_usage + second_usage
+
+
+@pytest.mark.asyncio
+async def test_provider_preserves_usage_when_hosted_tool_recovery_also_fails(
+    monkeypatch,
+) -> None:
+    _mock_token(monkeypatch)
+    _mock_model_capabilities(monkeypatch, supports_backend_search=True)
+    attempts = 0
+    usage = LLMUsage.reported(input_tokens=10, output_tokens=2)
+
+    async def fake_request(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise _XAIIncompleteHostedToolError(
+            [{"name": "x_search", "call_id": f"search-{attempts}"}],
+            usage=usage,
+        )
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider()
+
+    response = await provider.chat_stream_with_retry(
+        [{"role": "user", "content": "Search X"}],
+        on_stream_recover=lambda: _append([], True),
+    )
+
+    assert attempts == 2
+    assert response.finish_reason == "error"
+    assert response.usage == usage + usage
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,16 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 
+import { MarkdownText } from "@/components/MarkdownText";
+import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 import {
@@ -49,6 +60,7 @@ export function PromptRail({
   onJumpToPrompt,
   scrollRef,
 }: PromptRailProps) {
+  const { t } = useTranslation();
   const railRef = useRef<HTMLDivElement>(null);
   const measuredPromptsRef = useRef<MeasuredPrompt[]>([]);
   const promptAnchors = useMemo(() => userPromptAnchors(messages), [messages]);
@@ -142,7 +154,7 @@ export function PromptRail({
   return (
     <div
       ref={railRef}
-      aria-label="User prompt navigation"
+      aria-label={t("thread.promptNavigator.railAria")}
       className={cn(
         "thread-prompt-rail group pointer-events-auto absolute top-3 z-20 w-9 opacity-100",
         "transition-opacity duration-200",
@@ -153,62 +165,84 @@ export function PromptRail({
     >
       {markers.map((marker, index) => {
         const active = marker.ids.includes(activePromptId ?? "");
+        const previewVisible = focusedMarkerIndex === index;
         const hoverDistance =
           focusedMarkerIndex === null ? null : Math.abs(index - focusedMarkerIndex);
         return (
-          <button
-            key={marker.ids.join("|")}
-            type="button"
-            aria-label={`Jump to prompt: ${marker.label}`}
-            onClick={() => onJumpToPrompt(marker.ids[marker.ids.length - 1])}
-            onBlur={() => setFocusedMarkerIndex(null)}
-            onFocus={() => setFocusedMarkerIndex(index)}
-            onPointerEnter={() => setFocusedMarkerIndex(index)}
-            onPointerLeave={() => setFocusedMarkerIndex(null)}
-            className={cn(
-              "group/marker absolute left-0 h-4 w-9 -translate-y-1/2 overflow-visible rounded-sm",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
-            )}
-            style={{ top: `${marker.topPercent}%` }}
-          >
-            <span
-              aria-hidden
-              data-testid="prompt-rail-marker"
+          <Fragment key={marker.ids.join("|")}>
+            <button
+              type="button"
+              aria-label={t("thread.promptNavigator.jumpTo", { label: marker.label })}
+              onClick={() => onJumpToPrompt(marker.ids[marker.ids.length - 1])}
+              onBlur={() => setFocusedMarkerIndex(null)}
+              onFocus={() => setFocusedMarkerIndex(index)}
+              onPointerEnter={() => setFocusedMarkerIndex(index)}
+              onPointerLeave={() => setFocusedMarkerIndex(null)}
               className={cn(
-                "absolute left-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full",
-                "transition-[width,background-color,opacity,height] duration-150",
-                railMarkerTone(hoverDistance, active),
+                "absolute left-0 h-4 w-9 -translate-y-1/2 overflow-visible rounded-sm",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
               )}
-              style={{
-                height: markerHeight(hoverDistance),
-                width: markerWidth(hoverDistance),
-              }}
-            />
-            <span
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute left-10 top-1/2 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-[20px] px-4 py-3 text-left",
-                "bg-popover/95 text-popover-foreground shadow-[0_18px_45px_rgba(0,0,0,0.12)] backdrop-blur-xl",
-                "dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)]",
-                "-translate-x-2 scale-[0.98] opacity-0 transition-[opacity,transform] duration-150",
-                "group-hover/marker:translate-x-0 group-hover/marker:scale-100 group-hover/marker:opacity-100",
-                "group-focus-visible/marker:translate-x-0 group-focus-visible/marker:scale-100 group-focus-visible/marker:opacity-100",
-              )}
+              style={{ top: `${marker.topPercent}%` }}
             >
-              <span className="line-clamp-2 whitespace-pre-wrap break-words text-[15px] font-semibold leading-6">
-                {marker.preview}
-              </span>
-              {marker.answerPreview ? (
-                <span className="mt-1.5 line-clamp-3 whitespace-pre-wrap break-words text-[14px] leading-6 text-muted-foreground dark:text-white/55">
-                  {marker.answerPreview}
-                </span>
+              <span
+                aria-hidden
+                data-testid="prompt-rail-marker"
+                className={cn(
+                  "absolute left-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full",
+                  "transition-[width,background-color,opacity,height] duration-150",
+                  railMarkerTone(hoverDistance, active),
+                )}
+                style={{
+                  height: markerHeight(hoverDistance),
+                  width: markerWidth(hoverDistance),
+                }}
+              />
+            </button>
+            <div
+              ref={makeInert}
+              aria-hidden
+              data-testid={previewVisible ? "prompt-rail-preview" : undefined}
+              className={cn(
+                "pointer-events-none absolute left-10 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-panel px-4 py-3 text-left",
+                floatingSurfaceElevationClassName,
+                "transition-[opacity,transform] duration-150",
+                previewVisible
+                  ? "translate-x-0 scale-100 opacity-100"
+                  : "-translate-x-2 scale-[0.98] opacity-0",
+              )}
+              style={{ top: `${marker.topPercent}%` }}
+            >
+              {previewVisible ? (
+                <>
+                  <div className="line-clamp-2 whitespace-pre-wrap break-words text-[15px] font-semibold leading-6">
+                    {marker.preview}
+                  </div>
+                  {marker.answerPreview ? (
+                    <div className="mt-1.5 max-h-[4.5rem] overflow-hidden break-words text-[14px] leading-6 text-muted-foreground dark:text-white/55">
+                      <MarkdownText
+                        className={cn(
+                          "max-w-none text-[14px] leading-6 text-inherit",
+                          "[--tw-prose-body:currentColor] [--tw-prose-headings:currentColor] [--tw-prose-bold:currentColor]",
+                          "prose-headings:my-0 prose-h1:text-[14px] prose-h2:text-[14px] prose-h3:text-[14px] prose-h4:text-[14px]",
+                          "prose-p:my-0 prose-ul:my-0 prose-ol:my-0 prose-li:my-0",
+                        )}
+                      >
+                        {marker.answerPreview}
+                      </MarkdownText>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
-            </span>
-          </button>
+            </div>
+          </Fragment>
         );
       })}
     </div>
   );
+}
+
+function makeInert(node: HTMLDivElement | null): void {
+  if (node) node.inert = true;
 }
 
 function measurePrompts(

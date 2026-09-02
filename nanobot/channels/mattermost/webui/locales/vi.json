@@ -27,10 +27,18 @@
         "placeholder": "ID nhóm tùy chọn"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Hành vi trong kênh",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Hành vi trong thread",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn (không cần nhắc)",
           "allowlist": "Danh sách cho phép"
         }
       },

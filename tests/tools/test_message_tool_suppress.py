@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -24,7 +25,12 @@ class TestMessageToolSuppressLogic:
     """Final reply suppressed only when message tool sends to the same target."""
 
     @pytest.mark.asyncio
-    async def test_suppress_when_sent_to_same_target(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("ephemeral", [False, True])
+    async def test_suppress_when_sent_to_same_target(
+        self,
+        tmp_path: Path,
+        ephemeral: bool,
+    ) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(
             id="call1", name="message",
@@ -43,7 +49,7 @@ class TestMessageToolSuppressLogic:
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send")
-        result = await loop._process_message(msg)
+        result = await loop._process_message(msg, ephemeral=ephemeral)
 
         assert len(sent) == 1
         assert result is None  # suppressed
@@ -86,6 +92,34 @@ class TestMessageToolSuppressLogic:
 
         assert result is not None
         assert "Hello" in result.content
+
+    @pytest.mark.asyncio
+    async def test_internal_message_check_keeps_final_response(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(
+            id="call1", name="message",
+            arguments={"content": "all clear", "channel": "feishu", "chat_id": "chat123"},
+        )
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Heartbeat summary", tool_calls=[]),
+        ])
+        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        mt = loop.tools.get("message")
+        assert isinstance(mt, MessageTool)
+        token = mt.set_suppress_delivery(True)
+        try:
+            msg = InboundMessage(
+                channel="feishu", sender_id="user1", chat_id="chat123", content="Check",
+            )
+            result = await loop._process_message(msg)
+        finally:
+            mt.reset_suppress_delivery(token)
+
+        assert result is not None
+        assert result.content == "Heartbeat summary"
 
     @pytest.mark.asyncio
     async def test_injected_followup_with_message_tool_does_not_emit_empty_fallback(
@@ -144,32 +178,19 @@ class TestMessageToolSuppressLogic:
         async def on_progress(content: str, *, tool_hint: bool = False) -> None:
             progress.append((content, tool_hint))
 
-        final_content, _, _, _, _ = await loop._run_agent_loop(
-            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        result = await loop._run_agent_loop(
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+            on_progress=on_progress,
         )
 
-        assert final_content == "Done"
+        assert result.final_content == "Done"
         assert progress == [
             ("Visible", False),
             ('read foo.txt', True),
         ]
 
-class TestMessageToolTurnTracking:
-
-    def test_sent_in_turn_tracks_same_target(self) -> None:
-        tool = MessageTool()
-        from nanobot.agent.tools.context import RequestContext, request_context
-
-        with request_context(RequestContext(channel="feishu", chat_id="chat1")):
-            assert not tool._sent_in_turn
-            tool._sent_in_turn = True
-            assert tool._sent_in_turn
-
-    def test_start_turn_resets(self) -> None:
-        tool = MessageTool()
-        tool._sent_in_turn = True
-        tool.start_turn()
-        assert not tool._sent_in_turn
+class TestMessageToolSchema:
 
     def test_schema_discourages_current_chat_replies(self) -> None:
         tool = MessageTool()

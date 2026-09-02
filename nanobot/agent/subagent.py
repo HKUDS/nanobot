@@ -5,14 +5,15 @@ import json
 import time
 import uuid
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, NotRequired, TypedDict
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -27,7 +28,8 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
+from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
@@ -42,6 +44,7 @@ class _SubagentOrigin(TypedDict):
     channel: str
     chat_id: str
     session_key: str | None
+    llm_usage_source: NotRequired[LLMUsageSource]
 
 
 @dataclass(slots=True)
@@ -52,10 +55,11 @@ class SubagentStatus:
     label: str
     task_description: str
     started_at: float          # time.monotonic()
-    phase: str = "initializing"  # initializing | awaiting_tools | tools_completed | final_response | done | error
+    # queued | initializing | awaiting_tools | tools_completed | final_response | done | error
+    phase: str = "initializing"
     iteration: int = 0
     tool_events: list[dict[str, str]] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     stop_reason: str | None = None
     error: str | None = None
 
@@ -81,7 +85,7 @@ class _SubagentHook(AgentHook):
             return
         self._status.iteration = context.iteration
         self._status.tool_events = list(context.tool_events)
-        self._status.usage = dict(context.usage)
+        self._status.usage = context.usage
         if context.error:
             self._status.error = str(context.error)
 
@@ -101,7 +105,6 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
-        fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         if workspace is None:
@@ -145,17 +148,17 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
-        self.fail_on_tool_error = (
-            fail_on_tool_error
-            if fail_on_tool_error is not None
-            else defaults.fail_on_tool_error
-        )
+        self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+
+    def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
+        """Return the observable task statuses used by runtime-control snapshots."""
+        return self._task_statuses
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
@@ -247,6 +250,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "llm_usage_source": current_llm_usage_source(),
         }
 
         status = SubagentStatus(
@@ -310,6 +314,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "llm_usage_source": current_llm_usage_source(),
         }
         status = SubagentStatus(
             task_id=task_id,
@@ -337,7 +342,7 @@ class SubagentManager:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
         try:
             result = await inline_task
-            if status.phase == "error" or status.stop_reason in {"error", "tool_error"}:
+            if status.phase == "error" or status.stop_reason == "error":
                 return ToolResult.error(result)
             return result
         finally:
@@ -349,6 +354,35 @@ class SubagentManager:
                     del self._session_tasks[session_key]
 
     async def _run_subagent(
+        self,
+        task_id: str,
+        task: str,
+        label: str,
+        origin: _SubagentOrigin,
+        status: SubagentStatus,
+        runtime: LLMRuntime,
+        origin_message_id: str | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+        *,
+        announce: bool = True,
+    ) -> str:
+        """Wait for capacity, then execute one subagent task."""
+        status.phase = "queued"
+        async with self._run_slots:
+            status.phase = "initializing"
+            return await self._run_admitted_subagent(
+                task_id,
+                task,
+                label,
+                origin,
+                status,
+                runtime,
+                origin_message_id,
+                workspace_scope,
+                announce=announce,
+            )
+
+    async def _run_admitted_subagent(
         self,
         task_id: str,
         task: str,
@@ -407,11 +441,14 @@ class SubagentManager:
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,
                     error_message=None,
-                    fail_on_tool_error=self.fail_on_tool_error,
                     checkpoint_callback=_on_checkpoint,
                     session_key=sess_key,
                     workspace=root,
                     llm_timeout_s=llm_timeout,
+                    llm_usage_source=origin.get(
+                        "llm_usage_source",
+                        current_llm_usage_source(),
+                    ),
                 ))
             finally:
                 if token is not None:
@@ -420,11 +457,7 @@ class SubagentManager:
             status.phase = "done"
             status.stop_reason = result.stop_reason
 
-            if result.stop_reason == "tool_error":
-                status.tool_events = list(result.tool_events)
-                final_result = self._format_partial_progress(result)
-                final_status = "error"
-            elif result.stop_reason == "error":
+            if result.stop_reason == "error":
                 final_result = result.error or "Error: subagent execution failed."
                 final_status = "error"
             else:
@@ -505,27 +538,6 @@ class SubagentManager:
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
-    @staticmethod
-    def _format_partial_progress(result: AgentRunResult) -> str:
-        completed = [e for e in result.tool_events if e["status"] == "ok"]
-        failure = next((e for e in reversed(result.tool_events) if e["status"] == "error"), None)
-        lines: list[str] = []
-        if completed:
-            lines.append("Completed steps:")
-            for event in completed[-3:]:
-                lines.append(f"- {event['name']}: {event['detail']}")
-        if failure:
-            if lines:
-                lines.append("")
-            lines.append("Failure:")
-            lines.append(f"- {failure['name']}: {failure['detail']}")
-        if result.error and not failure:
-            if lines:
-                lines.append("")
-            lines.append("Failure:")
-            lines.append(f"- {result.error}")
-        return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
-
     def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
@@ -535,12 +547,17 @@ class SubagentManager:
         skills_summary = SkillsLoader(
             self.workspace,
             disabled_skills=self.disabled_skills,
-        ).build_skills_summary()
+        ).build_skills_summary(workspace=project_workspace)
+        history_log = (
+            str(agent_workspace / "memory" / "history.jsonl")
+            if agent_workspace != project_workspace
+            else "memory/history.jsonl"
+        )
         return render_template(
             "agent/subagent_system.md",
             workspace=str(project_workspace),
             agent_workspace=str(agent_workspace),
-            history_log=str(agent_workspace / "memory" / "history.jsonl"),
+            history_log=history_log,
             skills_summary=skills_summary or "",
         )
 

@@ -16,6 +16,7 @@ from nanobot.command.builtin import (
     cmd_dream_restore,
 )
 from nanobot.command.router import CommandContext
+from nanobot.session.manager import SessionManager
 from nanobot.utils.gitstore import CommitInfo
 
 
@@ -107,6 +108,13 @@ class _FakeBus:
         self.outbound.append(message)
 
 
+def _make_sessions(tmp_path) -> SessionManager:
+    return SessionManager(
+        tmp_path / "workspace",
+        sessions_root=tmp_path / "runtime",
+    )
+
+
 def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int = 1) -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
     store = _FakeStore(git, last_dream_cursor=last_dream_cursor)
@@ -118,12 +126,10 @@ def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
     store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=None)
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, bus
@@ -169,13 +175,11 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
             metadata={"_stop_reason": "completed"},
         )
 
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     dream_runtime = object()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: dream_runtime,
     )
@@ -224,12 +228,10 @@ def _build_runnable_dream(
         )
 
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
     )
@@ -272,8 +274,8 @@ async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dream_keeps_cursor_when_completed_after_tool_error(tmp_path) -> None:
-    """A soft tool failure must not masquerade as a verified no-op."""
+async def test_dream_advances_cursor_when_completed_after_tool_error(tmp_path) -> None:
+    """A handled tool failure does not invalidate a normally completed run."""
     ctx, store = _build_runnable_dream(
         tmp_path,
         initialized=True,
@@ -282,8 +284,8 @@ async def test_dream_keeps_cursor_when_completed_after_tool_error(tmp_path) -> N
     )
     await cmd_dream(ctx)
     await asyncio.sleep(0)
-    assert store._last_dream_cursor == 5
-    assert "did not complete" in ctx.loop.bus.outbound[0].content
+    assert store._last_dream_cursor == 42
+    assert "no memory changes" in ctx.loop.bus.outbound[0].content
 
 
 @pytest.mark.asyncio
@@ -311,12 +313,10 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
 
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
     bus = _FakeBus()
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
     loop = SimpleNamespace(
         bus=bus,
         context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
     )
@@ -339,7 +339,7 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
-    """Non-git workspaces use the same clean-completion gate."""
+    """Non-git workspaces use the same normal-completion gate."""
     ctx, store = _build_runnable_dream(
         tmp_path, initialized=False, content_diff="", stop_reason="completed",
     )

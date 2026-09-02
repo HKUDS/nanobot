@@ -8,12 +8,13 @@ import subprocess
 import sys
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
+from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -36,6 +37,8 @@ CommandLifecycle = Literal[
     "agent_turn",
     "agent_turn_with_args",
 ]
+
+USER_SHELL_COMMAND = "/__shell"
 
 
 @dataclass(frozen=True)
@@ -263,8 +266,9 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             session,
             runtime=runtime,
         )
+    last_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
     if ctx_est <= 0:
-        ctx_est = loop._last_usage.get("prompt_tokens", 0)  # pyright: ignore[reportPrivateUsage]
+        ctx_est = last_usage.input_tokens if last_usage is not None else 0
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
@@ -286,7 +290,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
             version=__version__, model=runtime.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,  # pyright: ignore[reportPrivateUsage]
+            start_time=loop._start_time, last_usage=last_usage,  # pyright: ignore[reportPrivateUsage]
             context_window_tokens=runtime.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
@@ -302,20 +306,28 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     """Stop active task and start a fresh session."""
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
+    loop.discard_session_file_state(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated:]
+    snapshot = list(session.messages)
+    archive_snapshot = None
     runtime = None
-    if snapshot:
+    if session.last_archived < len(snapshot):
         runtime = ctx.runtime or loop.runtime_for_session(session)
+        archive_snapshot = replace(
+            session,
+            messages=snapshot,
+            metadata=dict(session.metadata),
+            provider_state=None,
+        )
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
-    if snapshot and runtime is not None:
+    if archive_snapshot is not None and runtime is not None:
         loop.schedule_background(
-            loop.consolidator.archive(  # pyright: ignore[reportUnknownMemberType]
-                snapshot,
+            loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
+                archive_snapshot,
+                archive_end=len(snapshot),
                 runtime=runtime,
-                session_key=ctx.key,
             )
         )
     return OutboundMessage(
@@ -374,16 +386,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
-    parts = args.split()
-    if len(parts) != 1:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: `/model [preset]`",
-            metadata=metadata,
-        )
-
-    name = parts[0]
+    name = args
     try:
         runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:
@@ -422,14 +425,16 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import DreamRunProgress, MemoryStore
+        from nanobot.agent.memory import MemoryStore
+
+        async def _silent(*_args: Any, **_kwargs: Any) -> None:
+            pass
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
         prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
-        progress = DreamRunProgress()
         content = ""
         resp = None
         diff_body = ""
@@ -451,17 +456,14 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
-                on_progress=progress,
+                on_progress=_silent,
                 runtime=dream_runtime,
             )
             elapsed = time.monotonic() - t0
-            # The real file delta grounds the audit record; clean completion
+            # The real file delta grounds the audit record; normal completion
             # decides whether this history batch has finished processing.
             diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(
-                resp,
-                had_tool_errors=progress.had_tool_errors,
-            )
+            completed = MemoryStore.dream_run_completed(resp)
             if completed:
                 store.set_last_dream_cursor(last_cursor)
                 if diff_body:
@@ -469,28 +471,22 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 else:
                     content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
+                reason = MemoryStore.dream_incompletion_reason(resp)
                 content = (
-                    f"Dream did not complete after {elapsed:.1f}s; "
+                    f"Dream did not complete after {elapsed:.1f}s ({reason}); "
                     "memory cursor was not advanced."
                 )
         except Exception as e:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
-            from nanobot.webui.token_usage import record_response_token_usage
-
-            record_response_token_usage(
-                resp,
-                source="dream",
-                timezone_name=getattr(loop.context, "timezone", None),
-            )
             if store.git.is_initialized():
                 commit_msg = build_dream_commit_message("dream: manual run", diff_body)
                 sha = store.git.auto_commit(commit_msg)
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()
-            prune_dream_sessions(loop.sessions.sessions_dir)
+            prune_dream_sessions(loop.sessions)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
@@ -1007,6 +1003,30 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
+    """Run a trusted local ``!command`` through nanobot's exec policy."""
+    metadata = dict(ctx.msg.metadata or {})
+    if (
+        ctx.msg.channel != "websocket"
+        or metadata.get("webui") is not True
+        or metadata.get(INBOUND_META_USER_SHELL) is not True
+    ):
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Shell commands are only available from a trusted local client.",
+            metadata={**metadata, "render_as": "text"},
+        )
+    if not ctx.args.strip():
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Type a command after `!`, for example `!pwd`.",
+            metadata={**metadata, "render_as": "text"},
+        )
+    return await ctx.loop.execute_user_shell_command(ctx)
+
+
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = ["🐈 nanobot commands:"]
@@ -1046,3 +1066,5 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
+    router.exact(USER_SHELL_COMMAND, cmd_user_shell)
+    router.prefix(f"{USER_SHELL_COMMAND} ", cmd_user_shell)

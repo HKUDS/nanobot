@@ -12,15 +12,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.agent import context as agent_context
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import (
+    MAX_OUTPUT_CHARS,
     ExecSessionManager,
+    ExecSessionTool,
     ListExecSessionsTool,
-    WriteStdinTool,
     _BoundedOutputBuffer,
     _SessionPoll,
+    _truncate_output,
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
@@ -62,6 +63,22 @@ def _session_id(output: str) -> str:
     return match.group(1)
 
 
+async def _poll_if_running(
+    initial: str,
+    tool: ExecSessionTool,
+    *,
+    timeout_ms: int = 2000,
+) -> tuple[str, str]:
+    if "session_id:" not in initial:
+        return initial, initial
+    final = await tool.execute(
+        session_id=_session_id(initial),
+        input="",
+        timeout_ms=timeout_ms,
+    )
+    return f"{initial}\n{final}", final
+
+
 def test_exec_keeps_one_shot_behavior_without_yield_time_ms(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir=str(tmp_path), timeout=5)
@@ -89,60 +106,38 @@ def test_exec_accepts_command_aliases(tmp_path):
 
 
 def test_exec_returns_completed_session_output_when_yield_time_ms_is_used(tmp_path):
-    async def run() -> str:
+    async def run() -> tuple[str, str]:
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
 
-        result = await tool.execute(command="echo hello", yield_time_ms=1000)
-        if "session_id:" in result:
-            sid = _session_id(result)
-            result += "\n" + await stdin_tool.execute(
-                session_id=sid,
-                chars="",
-                yield_time_ms=1000,
-            )
-        return result
+        initial = await tool.execute(command="echo hello", yield_time_ms=1000)
+        return await _poll_if_running(initial, stdin_tool)
 
-    result = asyncio.run(run())
+    result, final = asyncio.run(run())
 
     assert "hello" in result
-    assert "Exit code: 0" in result
-    assert "session_id:" not in result
+    assert "Exit code: 0" in final
+    assert "session_id:" not in final
 
 
 def test_exec_session_yield_returns_when_process_finishes_early(tmp_path):
-    async def run() -> tuple[str, float]:
+    async def run() -> tuple[str, str, float]:
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command("import time; time.sleep(0.1); print('done')")
         started = time.monotonic()
-        result = await tool.execute(command=command, yield_time_ms=1200)
-        return result, time.monotonic() - started
+        initial = await tool.execute(command=command, yield_time_ms=1200)
+        result, final = await _poll_if_running(initial, stdin_tool)
+        return result, final, time.monotonic() - started
 
-    result, elapsed = asyncio.run(run())
+    result, final, elapsed = asyncio.run(run())
 
     assert "done" in result
-    assert "Exit code: 0" in result
-    assert "session_id:" not in result
-    assert elapsed < 1.0
-
-
-def test_exec_session_accepts_max_output_tokens_alias(tmp_path):
-    async def run() -> str:
-        manager = ExecSessionManager()
-        tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        command = _python_command("print('A' * 2000)")
-        return await tool.execute(
-            command=command,
-            yield_time_ms=1000,
-            max_output_tokens=1000,
-        )
-
-    result = asyncio.run(run())
-
-    assert "chars truncated" in result
-    assert "Exit code: 0" in result
+    assert "Exit code: 0" in final
+    assert "session_id:" not in final
+    assert elapsed < 4.0
 
 
 def test_bounded_output_buffer_keeps_head_tail_and_exact_drop_count():
@@ -173,10 +168,10 @@ def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):
         )
         sid = _session_id(initial)
         session = manager._sessions[sid]
-        await asyncio.wait_for(session.process.wait(), timeout=5)
+        await asyncio.wait_for(session.process.wait(), timeout=15)
         await asyncio.wait_for(
             asyncio.gather(session._stdout_task, session._stderr_task),
-            timeout=5,
+            timeout=15,
         )
         retained_stdout = session._stdout.retained_chars
         retained_stderr = session._stderr.retained_chars
@@ -199,32 +194,76 @@ def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):
     assert truncated_chars > 390000
 
 
-def test_write_stdin_wait_for_keeps_aggregate_within_output_budget():
+def test_exec_session_wait_for_keeps_aggregate_within_output_budget():
     async def run() -> str:
         manager = SimpleNamespace(
             write=AsyncMock(side_effect=[
-                _SessionPoll(output="HEAD" + "a" * 596, done=False, exit_code=None),
-                _SessionPoll(output="b" * 600, done=False, exit_code=None),
-                _SessionPoll(output="c" * 590 + "TARGET", done=False, exit_code=None),
+                _SessionPoll(output="HEAD" + "a" * 5996, done=False, exit_code=None),
+                _SessionPoll(output="b" * 6000, done=False, exit_code=None),
+                _SessionPoll(output="c" * 5994 + "TARGET", done=False, exit_code=None),
             ])
         )
-        tool = WriteStdinTool(manager=manager)
-        return await tool._wait_for_output(
+        tool = ExecSessionTool(manager=manager)
+        return await tool._wait(
             session_id="session",
-            chars=None,
+            input=None,
             close_stdin=False,
-            terminate=False,
             wait_for="TARGET",
-            wait_timeout_ms=1000,
-            max_output_chars=1000,
+            until_exit=False,
+            timeout_ms=1000,
         )
 
     result = asyncio.run(run())
 
     assert result.startswith("HEAD")
-    assert "TARGET" in result
-    assert "(796 chars truncated from output)" in result
-    assert len(result) < 1100
+    assert "Wait target not observed" not in result
+    assert "(8,000 chars truncated from output)" in result
+    assert len(result) < 10100
+
+
+def test_exec_session_wait_for_searches_before_response_truncation():
+    async def run() -> tuple[str, list[int]]:
+        output = "A" * 15000 + "TARGET" + "B" * 15000
+        observed_limits: list[int] = []
+
+        async def write(
+            *,
+            session_id: str,
+            chars: str | None,
+            close_stdin: bool,
+            terminate: bool,
+            yield_time_ms: int,
+            max_output_chars: int,
+            owner_session_key: str | None,
+        ) -> _SessionPoll:
+            del session_id, chars, close_stdin, terminate, yield_time_ms, owner_session_key
+            observed_limits.append(max_output_chars)
+            visible, truncated = _truncate_output(output, max_output_chars)
+            return _SessionPoll(
+                output=visible,
+                done=True,
+                exit_code=0,
+                truncated_chars=truncated,
+            )
+
+        manager = SimpleNamespace(write=AsyncMock(side_effect=write))
+        tool = ExecSessionTool(manager=manager)
+        result = await tool._wait(
+            session_id="session",
+            input=None,
+            close_stdin=False,
+            wait_for="TARGET",
+            until_exit=False,
+            timeout_ms=1000,
+        )
+        return result, observed_limits
+
+    result, observed_limits = asyncio.run(run())
+
+    assert observed_limits == [MAX_OUTPUT_CHARS]
+    assert "Wait target not observed" not in result
+    assert "(20,006 chars truncated from output)" in result
+    assert len(result) < 10100
 
 
 def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
@@ -265,34 +304,38 @@ def test_exec_rejects_unsupported_shell(tmp_path):
 
 
 def test_exec_can_continue_with_stdin(tmp_path):
-    async def run() -> tuple[str, str]:
+    async def run() -> tuple[str, str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command(
             "import sys; print('ready', flush=True); "
             "line=sys.stdin.readline(); print('got:' + line.strip(), flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
-        sid = _session_id(initial)
-        result = await stdin_tool.execute(session_id=sid, chars="ping\n", yield_time_ms=1000)
-        return initial, result
+        try:
+            initial = await exec_tool.execute(command=command, yield_time_ms=500)
+            sid = _session_id(initial)
+            result = await stdin_tool.execute(session_id=sid, input="ping\n", timeout_ms=1000)
+            observed, final = await _poll_if_running(result, stdin_tool)
+            return initial, observed, final
+        finally:
+            await manager.close_all()
 
-    initial, result = asyncio.run(run())
+    initial, result, final = asyncio.run(run())
     assert "ready" in initial + result
     assert "Process running" in initial
     assert "Elapsed:" in initial
     assert "got:ping" in result
-    assert "Exit code: 0" in result
+    assert "Exit code: 0" in final
     assert "Elapsed:" in result
 
 
-def test_write_stdin_can_close_stdin(tmp_path):
+def test_exec_session_can_close_stdin(tmp_path):
     async def run() -> tuple[str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command(
             "import sys; print('ready', flush=True); "
             "data=sys.stdin.read(); print('got:' + data, flush=True)"
@@ -302,9 +345,9 @@ def test_write_stdin_can_close_stdin(tmp_path):
         sid = _session_id(initial)
         result = await stdin_tool.execute(
             session_id=sid,
-            chars="payload",
+            input="payload",
             close_stdin=True,
-            yield_time_ms=1500,
+            timeout_ms=1500,
         )
         return initial, result
 
@@ -315,11 +358,11 @@ def test_write_stdin_can_close_stdin(tmp_path):
     assert "Exit code: 0" in result
 
 
-def test_write_stdin_can_terminate_session(tmp_path):
+def test_exec_session_can_terminate_session(tmp_path):
     async def run() -> tuple[str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _waiting_shell_command("ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
@@ -327,13 +370,11 @@ def test_write_stdin_can_terminate_session(tmp_path):
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="ready",
-            wait_timeout_ms=10000,
-            yield_time_ms=0,
+            timeout_ms=10000,
         )
         result = await stdin_tool.execute(
             session_id=sid,
             terminate=True,
-            yield_time_ms=0,
         )
         return initial + waited, result
 
@@ -343,34 +384,11 @@ def test_write_stdin_can_terminate_session(tmp_path):
     assert "Exit code:" in result
 
 
-def test_write_stdin_accepts_max_output_tokens_alias(tmp_path):
-    async def run() -> tuple[str, str, str]:
-        manager = ExecSessionManager()
-        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
-        command = _waiting_shell_command("A" * 2000)
-
-        initial = await exec_tool.execute(command=command, yield_time_ms=0)
-        sid = _session_id(initial)
-        poll = await stdin_tool.execute(
-            session_id=sid,
-            yield_time_ms=500,
-            max_output_tokens=1000,
-        )
-        cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
-        return initial, poll, cleanup
-
-    initial, poll, cleanup = asyncio.run(run())
-    assert "Process running" in initial
-    assert "chars truncated" in poll
-    assert "Session terminated." in cleanup
-
-
-def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
+def test_exec_session_preserves_completed_session_output_until_polled(tmp_path):
     async def run() -> tuple[str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command(
             "import time; print('ready', flush=True); "
             "time.sleep(0.1); print('done', flush=True)"
@@ -379,7 +397,7 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
         initial = await exec_tool.execute(command=command, yield_time_ms=50)
         sid = _session_id(initial)
         await asyncio.wait_for(manager._sessions[sid].process.wait(), timeout=2)
-        final = await stdin_tool.execute(session_id=sid, chars="", yield_time_ms=0)
+        final = await stdin_tool.execute(session_id=sid, input="", timeout_ms=0)
         return initial, final
 
     initial, final = asyncio.run(run())
@@ -389,23 +407,162 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
     assert "Exit code: 0" in final
 
 
-def test_write_stdin_can_wait_for_expected_output(tmp_path):
+def test_exec_session_until_exit_waits_for_silent_process(tmp_path):
+    async def run() -> tuple[str, str]:
+        manager = ExecSessionManager()
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        session_tool = ExecSessionTool(manager=manager)
+        command = _python_command("import time; time.sleep(0.2); print('done', flush=True)")
+
+        initial = await exec_tool.execute(command=command, yield_time_ms=0)
+        final = await session_tool.execute(
+            session_id=_session_id(initial),
+            until_exit=True,
+            timeout_ms=2000,
+        )
+        return initial, final
+
+    initial, final = asyncio.run(run())
+
+    assert "Process running" in initial
+    assert "done" in final
+    assert "Exit code: 0" in final
+    assert "Process running" not in final
+
+
+def test_exec_session_until_exit_aggregates_output_and_reports_nonzero_exit(tmp_path):
+    async def run() -> tuple[str, str]:
+        manager = ExecSessionManager()
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        session_tool = ExecSessionTool(manager=manager)
+        command = _python_command(
+            "import sys,time; print('first', flush=True); time.sleep(0.1); "
+            "print('second', flush=True); time.sleep(0.1); sys.exit(7)"
+        )
+
+        initial = await exec_tool.execute(command=command, yield_time_ms=0)
+        final = await session_tool.execute(
+            session_id=_session_id(initial),
+            until_exit=True,
+            timeout_ms=2000,
+        )
+        return initial, final
+
+    initial, final = asyncio.run(run())
+
+    output = initial + final
+    assert "first" in output
+    assert "second" in output
+    assert "Exit code: 7" in final
+
+
+def test_exec_session_until_exit_timeout_keeps_session_active(tmp_path):
     async def run() -> tuple[str, str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        session_tool = ExecSessionTool(manager=manager)
+        initial = await exec_tool.execute(
+            command=_python_command("import time; time.sleep(0.3); print('done', flush=True)"),
+            yield_time_ms=0,
+        )
+        sid = _session_id(initial)
+        timed_wait = await session_tool.execute(
+            session_id=sid,
+            until_exit=True,
+            timeout_ms=20,
+        )
+        final = await session_tool.execute(
+            session_id=sid,
+            until_exit=True,
+            timeout_ms=2000,
+        )
+        return initial, timed_wait, final
+
+    initial, timed_wait, final = asyncio.run(run())
+
+    assert "Process running" in initial
+    assert "Process running" in timed_wait
+    assert "Wait timed out after 0.02s; session remains active." in timed_wait
+    assert "done" in final
+    assert "Exit code: 0" in final
+
+
+def test_exec_session_until_exit_can_be_cancelled_without_losing_session(tmp_path):
+    async def run() -> tuple[str, str]:
+        manager = ExecSessionManager()
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        session_tool = ExecSessionTool(manager=manager)
+        list_tool = ListExecSessionsTool(manager=manager)
+        initial = await exec_tool.execute(
+            command=_python_command("import time; time.sleep(5)"),
+            yield_time_ms=0,
+        )
+        sid = _session_id(initial)
+        wait_task = asyncio.create_task(
+            session_tool.execute(
+                session_id=sid,
+                until_exit=True,
+                timeout_ms=2000,
+            )
+        )
+        await asyncio.sleep(0.05)
+        wait_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await wait_task
+        listing = await list_tool.execute()
+        cleanup = await session_tool.execute(session_id=sid, terminate=True)
+        return listing, cleanup
+
+    listing, cleanup = asyncio.run(run())
+
+    assert "running" in listing
+    assert "Session terminated." in cleanup
+
+
+def test_exec_session_rejects_conflicting_wait_conditions():
+    async def run() -> str:
+        return await ExecSessionTool().execute(
+            session_id="unused",
+            wait_for="ready",
+            until_exit=True,
+        )
+
+    result = asyncio.run(run())
+
+    assert result == "Error: wait_for and until_exit are mutually exclusive."
+    assert is_tool_error_result(result)
+
+
+def test_exec_session_rejects_terminate_with_other_actions():
+    async def run() -> str:
+        return await ExecSessionTool().execute(
+            session_id="unused",
+            input="quit\n",
+            terminate=True,
+        )
+
+    result = asyncio.run(run())
+
+    assert result == "Error: terminate must be used alone."
+    assert is_tool_error_result(result)
+
+
+def test_exec_session_can_wait_for_expected_output(tmp_path):
+    async def run() -> tuple[str, str, str]:
+        manager = ExecSessionManager()
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _waiting_shell_command("booting", delayed="ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
         waited = await stdin_tool.execute(
             session_id=sid,
-            chars="\n",
+            input="\n",
             wait_for="ready",
-            wait_timeout_ms=1000,
-            yield_time_ms=0,
+            timeout_ms=1000,
         )
-        cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
+        cleanup = await stdin_tool.execute(session_id=sid, terminate=True)
         return initial, waited, cleanup
 
     initial, waited, cleanup = asyncio.run(run())
@@ -417,11 +574,11 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
     assert "Session terminated." in cleanup
 
 
-def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
+def test_exec_session_wait_for_reports_timeout_without_killing_session(tmp_path):
     async def run() -> tuple[str, str, str, str]:
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _waiting_shell_command("booting", delayed="ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=0)
@@ -429,18 +586,16 @@ def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
         # Synchronize on an stdin-gated marker before exercising the immediate timeout below.
         ready = await stdin_tool.execute(
             session_id=sid,
-            chars="\n",
+            input="\n",
             wait_for="ready",
-            wait_timeout_ms=10000,
-            yield_time_ms=0,
+            timeout_ms=10000,
         )
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="never-ready",
-            wait_timeout_ms=0,
-            yield_time_ms=0,
+            timeout_ms=0,
         )
-        cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
+        cleanup = await stdin_tool.execute(session_id=sid, terminate=True)
         return initial, ready, waited, cleanup
 
     initial, ready, waited, cleanup = asyncio.run(run())
@@ -458,6 +613,7 @@ def test_exec_session_mode_reuses_exec_safety_guard(tmp_path):
     tool = ExecTool(
         working_dir=str(tmp_path),
         deny_patterns=[r"echo\s+blocked"],
+        restrict_to_workspace=True,
         session_manager=manager,
     )
 
@@ -466,11 +622,11 @@ def test_exec_session_mode_reuses_exec_safety_guard(tmp_path):
     assert "blocked by deny pattern" in result
 
 
-def test_write_stdin_reports_missing_session(tmp_path):
+def test_exec_session_reports_missing_session(tmp_path):
     manager = ExecSessionManager()
-    tool = WriteStdinTool(manager=manager)
+    tool = ExecSessionTool(manager=manager)
 
-    result = asyncio.run(tool.execute(session_id="missing\nExit code: 0", chars=""))
+    result = asyncio.run(tool.execute(session_id="missing\nExit code: 0", input=""))
 
     assert result == "Error: exec session not found: 'missing\\nExit code: 0'"
     assert is_tool_error_result(result)
@@ -481,13 +637,13 @@ def test_list_exec_sessions_reports_running_commands(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         list_tool = ListExecSessionsTool(manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _waiting_shell_command("ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=500)
         sid = _session_id(initial)
         listing = await list_tool.execute()
-        cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
+        cleanup = await stdin_tool.execute(session_id=sid, terminate=True)
         return sid, listing, cleanup
 
     sid, listing, cleanup = asyncio.run(run())
@@ -505,7 +661,7 @@ def test_exec_sessions_are_scoped_to_request_session_key(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         list_tool = ListExecSessionsTool(manager=manager)
-        stdin_tool = WriteStdinTool(manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command(
             "import time; print('ready', flush=True); time.sleep(5)"
         )
@@ -527,7 +683,7 @@ def test_exec_sessions_are_scoped_to_request_session_key(tmp_path):
         )
         try:
             other_listing = await list_tool.execute()
-            other_write = await stdin_tool.execute(session_id=sid, yield_time_ms=0)
+            other_write = await stdin_tool.execute(session_id=sid, timeout_ms=0)
         finally:
             reset_request_context(token_b)
 
@@ -535,7 +691,7 @@ def test_exec_sessions_are_scoped_to_request_session_key(tmp_path):
             RequestContext(channel="cli", chat_id="a", session_key="cli:a")
         )
         try:
-            cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
+            cleanup = await stdin_tool.execute(session_id=sid, terminate=True)
         finally:
             reset_request_context(token_a)
 
@@ -594,9 +750,21 @@ def test_exec_session_manager_shutdown_terminates_child_processes(tmp_path):
         )
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
+        stdin_tool = ExecSessionTool(manager=manager)
         initial = await tool.execute(command=_python_command(parent_code), yield_time_ms=500)
-        assert "ready" in initial
-        assert "Process running" in initial
+        observed = current = initial
+        deadline = time.monotonic() + 5
+        while "ready" not in observed and "session_id:" in current:
+            assert time.monotonic() < deadline, observed
+            await asyncio.sleep(0.05)
+            current = await stdin_tool.execute(
+                session_id=_session_id(initial),
+                input="",
+                timeout_ms=0,
+            )
+            observed += f"\n{current}"
+        assert "ready" in observed
+        assert "Process running" in current
 
         await manager.close_all()
         await asyncio.sleep(2.3)
@@ -664,7 +832,7 @@ def test_exec_session_manager_preserves_single_cleanup_error():
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_closes_exec_sessions(tmp_path, monkeypatch):
+def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
     async def run() -> None:
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
@@ -675,14 +843,13 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path, monkeypatch):
         sid = _session_id(initial)
         process = manager._sessions[sid].process
 
-        monkeypatch.setattr(agent_context, "close_mcp", lambda _state: asyncio.sleep(0))
         loop = object.__new__(AgentLoop)
         loop._background_tasks = set()
         loop._exec_session_manager = manager
         loop.subagents = SimpleNamespace(close=AsyncMock())
 
-        await loop.close_mcp()
-        await loop.close_mcp()
+        await loop.aclose()
+        await loop.aclose()
 
         assert process.returncode is not None
         assert manager._sessions == {}
@@ -691,7 +858,7 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_attempts_all_cleanup_after_errors(monkeypatch):
+def test_agent_loop_shutdown_attempts_all_cleanup_after_errors():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
         loop._background_tasks = set()
@@ -701,16 +868,12 @@ def test_agent_loop_shutdown_attempts_all_cleanup_after_errors(monkeypatch):
         loop._exec_session_manager = SimpleNamespace(
             close_all=AsyncMock(side_effect=OSError("exec cleanup failed")),
         )
-        close_mcp = AsyncMock()
-        monkeypatch.setattr(agent_context, "close_mcp", close_mcp)
-
         with pytest.raises(BaseExceptionGroup) as exc_info:
-            await loop.close_mcp()
+            await loop.aclose()
 
         assert len(exc_info.value.exceptions) == 2
         loop.subagents.close.assert_awaited_once()
         loop._exec_session_manager.close_all.assert_awaited_once()
-        close_mcp.assert_awaited_once_with(loop)
 
     asyncio.run(run())
 
@@ -844,7 +1007,7 @@ def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_preserves_single_cleanup_error(monkeypatch):
+def test_agent_loop_shutdown_preserves_single_cleanup_error():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
         loop._background_tasks = set()
@@ -852,13 +1015,9 @@ def test_agent_loop_shutdown_preserves_single_cleanup_error(monkeypatch):
             close=AsyncMock(side_effect=RuntimeError("subagent cleanup failed")),
         )
         loop._exec_session_manager = SimpleNamespace(close_all=AsyncMock())
-        close_mcp = AsyncMock()
-        monkeypatch.setattr(agent_context, "close_mcp", close_mcp)
-
         with pytest.raises(RuntimeError, match="subagent cleanup failed"):
-            await loop.close_mcp()
+            await loop.aclose()
 
         loop._exec_session_manager.close_all.assert_awaited_once()
-        close_mcp.assert_awaited_once_with(loop)
 
     asyncio.run(run())

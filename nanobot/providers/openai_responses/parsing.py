@@ -10,8 +10,11 @@ from typing import Any, AsyncGenerator, cast
 import httpx
 from loguru import logger
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest, parse_tool_arguments
-from nanobot.providers.openai_responses.state import build_responses_state
+from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest, parse_tool_arguments
+from nanobot.providers.openai_responses.state import (
+    build_responses_compaction_state,
+    build_responses_state,
+)
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -89,6 +92,77 @@ def _response_object_list(value: object) -> list[dict[str, Any]]:
     ]
 
 
+def _hosted_web_search_event(
+    event: object,
+    event_type: object,
+) -> dict[str, Any] | None:
+    """Map the official web-search output item pair onto normal tool progress."""
+    if event_type not in {"response.output_item.added", "response.output_item.done"}:
+        return None
+    event_object = _response_object(event) or {}
+    item = _response_object(event_object.get("item")) or {}
+    if item.get("type") != "web_search_call":
+        return None
+    call_id = item.get("id") or item.get("call_id") or event_object.get("item_id")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+
+    action = _response_object(item.get("action")) or {}
+    raw_queries = action.get("queries")
+    queries = (
+        [
+            query.strip()
+            for query in cast(list[object], raw_queries)
+            if isinstance(query, str) and query.strip()
+        ][:4]
+        if isinstance(raw_queries, list)
+        else []
+    )
+    query = " · ".join(queries)
+    if not query:
+        query = next(
+            (
+                value.strip()
+                for key in ("query", "pattern", "url")
+                if isinstance((value := action.get(key)), str) and value.strip()
+            ),
+            "",
+        )
+    arguments = {"query": query[:1000]} if query else {}
+
+    phase = "start" if event_type == "response.output_item.added" else "end"
+    result: dict[str, Any] | None = None
+    if phase == "end":
+        status = item.get("status")
+        result = {"status": status if isinstance(status, str) else "completed"}
+        raw_sources = action.get("sources")
+        if isinstance(raw_sources, list):
+            sources: list[dict[str, str]] = []
+            for raw_source in cast(list[object], raw_sources):
+                source = _response_object(raw_source) or {}
+                url = source.get("url")
+                if not isinstance(url, str) or not url.strip():
+                    continue
+                visible_source = {"url": url.strip()[:2048]}
+                title = source.get("title")
+                if isinstance(title, str) and title.strip():
+                    visible_source["title"] = title.strip()[:300]
+                sources.append(visible_source)
+                if len(sources) == 8:
+                    break
+            if sources:
+                result["sources"] = sources
+
+    return {
+        "kind": "hosted_tool",
+        "phase": phase,
+        "call_id": call_id,
+        "name": "web_search",
+        "arguments": arguments,
+        "result": result,
+    }
+
+
 def map_finish_reason(status: str | None) -> str:
     """Map a Responses API status string to a Chat-Completions-style finish_reason."""
     return FINISH_REASON_MAP.get(status or "completed", "stop")
@@ -115,28 +189,40 @@ def _response_finish_reason(
     return map_finish_reason(terminal_status)
 
 
-def _usage_from_response_obj(response: object) -> dict[str, int]:
+def _usage_from_response_obj(response: object) -> LLMUsage | None:
     response_object = _response_object(response)
     usage_raw: object = (
         response_object.get("usage")
         if response_object is not None
         else getattr(response, "usage", None)
     )
-    if not usage_raw:
-        return {}
+    if usage_raw is None:
+        return None
     usage = _response_object(usage_raw)
     if usage is None:
-        return {}
-    prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-    completion_tokens = int(
-        usage.get("output_tokens") or usage.get("completion_tokens") or 0
+        return None
+
+    def _usage_int(container: dict[str, Any] | None, key: str) -> int | None:
+        if container is None:
+            return None
+        raw = container.get(key)
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    input_tokens = _usage_int(usage, "input_tokens") or 0
+    output_tokens = _usage_int(usage, "output_tokens") or 0
+    input_details = _response_object(usage.get("input_tokens_details"))
+    return LLMUsage.reported(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=_usage_int(usage, "total_tokens"),
+        cache_read_tokens=_usage_int(input_details, "cached_tokens"),
+        cache_write_tokens=_usage_int(input_details, "cache_write_tokens"),
     )
-    total_tokens = int(usage.get("total_tokens") or prompt_tokens + completion_tokens)
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
@@ -173,6 +259,26 @@ def _refusal_event_key(
             else None
         ),
     )
+
+
+def _reasoning_summary_event_key(
+    item_id: object,
+    summary_index: object,
+) -> tuple[str | None, int] | None:
+    """Identify one reasoning summary part across its text deltas."""
+    if not isinstance(summary_index, int) or isinstance(summary_index, bool):
+        return None
+    return (
+        item_id if isinstance(item_id, str) else None,
+        summary_index,
+    )
+
+
+def _separate_reasoning_part(content: str | None, part: str) -> str:
+    """Separate summary parts only when the provider supplied no whitespace."""
+    if content and not content[-1].isspace() and not part[0].isspace():
+        return "\n" + part
+    return part
 
 
 def _remaining_refusal_text(streamed_text: str, refusal_text: str) -> str:
@@ -256,24 +362,28 @@ async def consume_sse_with_reasoning(
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
-    usage: dict[str, int] = {}
+    usage: LLMUsage | None = None
     reasoning_content: str | None = None
     streamed_reasoning = False
+    reasoning_summary_key: tuple[str | None, int] | None = None
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
-
     async for event in iter_sse(response):
         if on_response_event:
             await on_response_event(event)
         event_type = event.get("type")
+        if on_tool_call_delta and (
+            hosted_event := _hosted_web_search_event(event, event_type)
+        ):
+            await on_tool_call_delta(hosted_event)
         if event_type == "response.output_item.added":
             item = _as_json_object(event.get("item")) or {}
             if item.get("type") == "function_call":
@@ -327,6 +437,18 @@ async def consume_sse_with_reasoning(
         elif event_type == "response.reasoning_summary_text.delta":
             delta_text = event.get("delta") or ""
             if delta_text:
+                summary_key = _reasoning_summary_event_key(
+                    event.get("item_id"),
+                    event.get("summary_index"),
+                )
+                if (
+                    summary_key is not None
+                    and reasoning_summary_key is not None
+                    and summary_key != reasoning_summary_key
+                ):
+                    delta_text = _separate_reasoning_part(reasoning_content, delta_text)
+                if summary_key is not None:
+                    reasoning_summary_key = summary_key
                 reasoning_content = (reasoning_content or "") + delta_text
                 streamed_reasoning = True
                 if on_reasoning_delta:
@@ -459,7 +581,10 @@ def _extract_reasoning_summary_from_output(output: object) -> str | None:
                 text = summary.get("text")
                 if isinstance(text, str):
                     parts.append(text)
-    return "".join(parts) or None
+    content = ""
+    for part in parts:
+        content += _separate_reasoning_part(content, part)
+    return content or None
 
 
 def parse_response_output(
@@ -533,6 +658,14 @@ def parse_response_output(
             output_items=output,
             usage=usage,
         )
+        result.provider_compaction_state = build_responses_compaction_state(
+            provider=state_provider,
+            model=state_model,
+            output_items=output,
+        )
+        result.provider_compaction_applied = result.provider_compaction_state is not None
+        if result.provider_compaction_applied:
+            result.provider_compaction_scope = "current_request"
     return result
 
 
@@ -542,23 +675,26 @@ async def consume_sdk_stream(
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
     """Consume an SDK async stream from ``client.responses.create(stream=True)``."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
-    usage: dict[str, int] = {}
+    usage: LLMUsage | None = None
     reasoning_content: str | None = None
     streamed_reasoning = False
     refusal_seen = False
     refusal_deltas: dict[tuple[str | None, int | None], str] = {}
     emitted_refusal_text = ""
-
     async for raw_event in stream:
         event: Any = raw_event
         event_type = getattr(event, "type", None)
+        if on_tool_call_delta and (
+            hosted_event := _hosted_web_search_event(event, event_type)
+        ):
+            await on_tool_call_delta(hosted_event)
         if event_type == "response.output_item.added":
             item = getattr(event, "item", None)
             if item and getattr(item, "type", None) == "function_call":
@@ -705,13 +841,7 @@ async def consume_sdk_stream(
                 if on_content_delta and remaining_text:
                     await on_content_delta(remaining_text)
             if resp:
-                usage_obj = getattr(resp, "usage", None)
-                if usage_obj:
-                    usage = {
-                        "prompt_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-                        "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
-                        "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
-                    }
+                usage = _usage_from_response_obj(resp) or usage
                 if not reasoning_content:
                     reasoning_content = _extract_reasoning_summary_from_output(
                         getattr(resp, "output", None)

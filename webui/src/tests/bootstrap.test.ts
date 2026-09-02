@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  BootstrapAuthRequiredError,
   consumeUrlBootstrapSecret,
   deriveWsUrl,
   fetchBootstrap,
@@ -57,6 +56,12 @@ describe("bootstrap helpers", () => {
     );
   });
 
+  it("does not append a token for trusted-proxy websocket URLs", () => {
+    expect(deriveWsUrl("/", undefined, "wss://proxy.example/")).toBe(
+      "wss://proxy.example/",
+    );
+  });
+
   it("times out when the bootstrap endpoint never responds", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
@@ -69,21 +74,19 @@ describe("bootstrap helpers", () => {
     await pending;
   });
 
-  it("treats bootstrap responses without an API token as auth-required", async () => {
+  it("accepts tokenless trusted-proxy bootstrap responses", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ token: "ws-token", ws_path: "/", expires_in: 300 }),
+        json: async () => ({ ws_path: "/", ws_url: "wss://proxy.example/" }),
       })),
     );
 
-    const promise = fetchBootstrap();
-    await expect(promise).rejects.toMatchObject({
-      name: "BootstrapAuthRequiredError",
-      message: "bootstrap authentication required: missing api_token",
+    await expect(fetchBootstrap()).resolves.toMatchObject({
+      ws_path: "/",
+      ws_url: "wss://proxy.example/",
     });
-    await expect(promise).rejects.toBeInstanceOf(BootstrapAuthRequiredError);
   });
 
   it("consumes bootstrap secrets from the URL fragment", () => {

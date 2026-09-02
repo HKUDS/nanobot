@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -11,6 +20,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { MarkdownText } from "@/components/MarkdownText";
 import { cliAppInitials, mcpPresetInitials } from "@/components/CliAppMentionText";
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
@@ -42,19 +52,21 @@ import {
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import { usePageVisibility } from "@/hooks/usePageVisibility";
 import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 
-export { isAgentActivityMember, isReasoningOnlyAssistant };
+export { isAgentActivityMember };
 
 interface ActivityCounts {
   reasoningSteps: number;
   toolCalls: number;
+  modelSegments: number;
   cliCount: number;
   mcpCount: number;
   fileCount: number;
@@ -91,9 +103,14 @@ function countActivity(
 ): ActivityCounts {
   let reasoningSteps = 0;
   let toolCalls = 0;
+  let modelSegments = 0;
   const cliCount = cliRuns.length;
   const mcpCount = mcpRuns.length;
   for (const m of messages) {
+    if (m.activityKind === "model") {
+      modelSegments += 1;
+      continue;
+    }
     if (isReasoningOnlyAssistant(m)) {
       reasoningSteps += 1;
       continue;
@@ -110,6 +127,7 @@ function countActivity(
   return {
     reasoningSteps,
     toolCalls,
+    modelSegments,
     cliCount,
     mcpCount,
     fileCount: fileEdits.length,
@@ -131,8 +149,8 @@ interface AgentActivityClusterProps {
 }
 
 /**
- * Outer fold wrapping interleaved reasoning-only assistant rows and tool-trace rows.
- * Fixed max height with inner scroll and a single flat list of activity rows.
+ * One fold wrapping the complete middle of a turn: reasoning, model segments,
+ * tool traces, and file edits. The final assistant answer stays outside it.
  */
 export function AgentActivityCluster({
   messages,
@@ -148,9 +166,13 @@ export function AgentActivityCluster({
   const fileEditDisplayMode = useFileEditDisplayMode();
   const pageVisible = usePageVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
-  const fileEdits = useMemo(
-    () => summarizeFileEdits(collectFileEdits(activityMessages), isTurnStreaming),
+  const fileEditsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(activityMessages, isTurnStreaming),
     [activityMessages, isTurnStreaming],
+  );
+  const fileEdits = useMemo(
+    () => [...fileEditsByMessage.values()].flat(),
+    [fileEditsByMessage],
   );
   const cliRuns = useMemo(() => collectCliRuns(activityMessages), [activityMessages]);
   const mcpRuns = useMemo(() => collectMcpRuns(activityMessages), [activityMessages]);
@@ -165,6 +187,7 @@ export function AgentActivityCluster({
   const {
     reasoningSteps,
     toolCalls,
+    modelSegments,
     cliCount,
     mcpCount,
     fileCount,
@@ -174,6 +197,7 @@ export function AgentActivityCluster({
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const activityContentRef = useRef<HTMLDivElement>(null);
   const autoFollowActivityRef = useRef(true);
@@ -185,9 +209,8 @@ export function AgentActivityCluster({
     ? outerOpenLocal
     : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
 
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
+  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
-  const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const durationMs = activityDurationMs(
     activityMessages,
     isTurnStreaming,
@@ -196,28 +219,16 @@ export function AgentActivityCluster({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = hasNonReasoningActivity
-    ? isTurnStreaming
-      ? t("message.activityWorkingFor", {
-          duration: activityDuration,
-          defaultValue: "Working for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityWorked", { defaultValue: "Worked" })
+  const activityLabel = isTurnStreaming
+    ? t("message.activityWorkingFor", {
+        duration: activityDuration,
+        defaultValue: "Working for {{duration}}",
+      })
+    : durationMs <= 0
+      ? t("message.activityWorked", { defaultValue: "Worked" })
       : t("message.activityWorkedFor", {
           duration: activityDuration,
           defaultValue: "Worked for {{duration}}",
-        })
-    : isTurnStreaming
-      ? t("message.activityThinkingFor", {
-          duration: activityDuration,
-          defaultValue: "Thinking for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityThought", { defaultValue: "Thought" })
-      : t("message.activityThoughtFor", {
-          duration: activityDuration,
-          defaultValue: "Thought for {{duration}}",
         });
 
   const cancelActivityScrollFrame = useCallback(() => {
@@ -227,11 +238,26 @@ export function AgentActivityCluster({
     }
   }, []);
 
+  const syncActivityScrollFade = useCallback(() => {
+    const el = activityScrollRef.current;
+    if (!el) return;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop));
+    const next = {
+      top: scrollTop > 1,
+      bottom: maxScrollTop - scrollTop > 1,
+    };
+    setActivityScrollFade((current) =>
+      current.top === next.top && current.bottom === next.bottom ? current : next,
+    );
+  }, []);
+
   const scrollActivityToBottom = useCallback(() => {
     const el = activityScrollRef.current;
     if (!el) return;
     el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-  }, []);
+    syncActivityScrollFade();
+  }, [syncActivityScrollFade]);
 
   const scheduleActivityScrollToBottom = useCallback(() => {
     cancelActivityScrollFrame();
@@ -265,11 +291,13 @@ export function AgentActivityCluster({
     const observer = new ResizeObserver(() => {
       if (autoFollowActivityRef.current) {
         scheduleActivityScrollToBottom();
+      } else {
+        syncActivityScrollFade();
       }
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom]);
+  }, [outerExpanded, scheduleActivityScrollToBottom, syncActivityScrollFade]);
 
   useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
@@ -289,7 +317,7 @@ export function AgentActivityCluster({
     }
     if (!wasStreaming || userToggledOuter) return undefined;
     setCompletionHoldOpen(true);
-    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 900);
+    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 300);
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 
@@ -298,9 +326,10 @@ export function AgentActivityCluster({
     if (!el) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-  }, []);
+    syncActivityScrollFade();
+  }, [syncActivityScrollFade]);
 
-  if (!hasVisibleActivity) return null;
+  if (!hasVisibleActivity && !isTurnStreaming) return null;
 
   if (hasOnlyFileActivity) {
     return (
@@ -319,9 +348,12 @@ export function AgentActivityCluster({
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}
-        label={thoughtLabel}
+        label={activityLabel}
         viewportRef={activityScrollRef}
         contentRef={activityContentRef}
+        fadeTop={activityScrollFade.top}
+        fadeBottom={activityScrollFade.bottom}
+        hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
         onScroll={onActivityScroll}
       >
@@ -330,14 +362,10 @@ export function AgentActivityCluster({
           active={isTurnStreaming}
           cliAppsByName={cliAppsByName}
           mcpPresetsByName={mcpPresetsByName}
+          fileEditsByMessage={fileEditsByMessage}
+          fileEditDisplayMode={fileEditDisplayMode}
+          onOpenFilePreview={onOpenFilePreview}
         />
-        {fileEdits.length ? (
-          <FileEditGroup
-            edits={fileEdits}
-            displayMode={fileEditDisplayMode}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        ) : null}
       </ThinkingReasoningShell>
     </div>
   );
@@ -361,7 +389,13 @@ function activityDurationMs(
   const timestamps = messages
     .map((message) => message.createdAt)
     .filter((value) => Number.isFinite(value));
-  if (!timestamps.length) return 0;
+  if (!timestamps.length) {
+    return active
+      && typeof activeStartedAtMs === "number"
+      && Number.isFinite(activeStartedAtMs)
+      ? Math.max(0, now - activeStartedAtMs)
+      : 0;
+  }
   const first = active && Number.isFinite(activeStartedAtMs)
     ? activeStartedAtMs!
     : Math.min(...timestamps);
@@ -389,15 +423,32 @@ function ActivityMessageTimeline({
   active,
   cliAppsByName,
   mcpPresetsByName,
+  fileEditsByMessage,
+  fileEditDisplayMode,
+  onOpenFilePreview,
 }: {
   messages: UIMessage[];
   active: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
+  fileEditsByMessage: Map<string, FileEditSummary[]>;
+  fileEditDisplayMode: FileEditDisplayMode;
+  onOpenFilePreview?: (path: string) => void;
 }) {
   const items: ReactNode[] = [];
 
   messages.forEach((message, index) => {
+    if (message.activityKind === "model") {
+      items.push(
+        <ActivityModelMessage
+          key={message.id}
+          message={message}
+          active={active}
+          onOpenFilePreview={onOpenFilePreview}
+        />,
+      );
+      return;
+    }
     if (isReasoningOnlyAssistant(message)) {
       items.push(
         <ReasoningRow
@@ -409,18 +460,59 @@ function ActivityMessageTimeline({
       return;
     }
     if (message.kind === "trace") {
+      const fileEdits = fileEditsByMessage.get(message.id) ?? [];
       items.push(
-        <ActivityTraceTimeline
-          key={message.id}
-          message={message}
-          active={active && index === messages.length - 1}
-          cliAppsByName={cliAppsByName}
-          mcpPresetsByName={mcpPresetsByName}
-        />,
+        <Fragment key={message.id}>
+          <ActivityTraceTimeline
+            message={message}
+            active={active && index === messages.length - 1}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+          />
+          <FileEditGroup
+            edits={fileEdits}
+            displayMode={fileEditDisplayMode}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        </Fragment>,
       );
     }
   });
   return <>{items}</>;
+}
+
+/**
+ * Keep an intermediate assistant segment as normal Markdown. The activity
+ * surface owns ordering and lifecycle, not a reduced rendering mode: users
+ * should see the same prose, links, and code treatment before and after the
+ * surrounding turn is folded.
+ */
+function ActivityModelMessage({
+  message,
+  active,
+  onOpenFilePreview,
+}: {
+  message: UIMessage;
+  active: boolean;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  if (!message.content.trim()) return null;
+  return (
+    <div
+      data-testid="activity-model-message"
+      data-assistant-selectable={active && message.isStreaming ? undefined : "true"}
+      className="w-full min-w-0 py-1 text-[15px]"
+      style={{ lineHeight: "var(--cjk-line-height)" }}
+    >
+      <MarkdownText
+        streaming={active && !!message.isStreaming}
+        preserveStreamingLayout
+        onOpenFilePreview={onOpenFilePreview}
+      >
+        {message.content}
+      </MarkdownText>
+    </div>
+  );
 }
 
 function ActivityTraceList({
@@ -989,16 +1081,6 @@ function fileEditCallKey(edit: UIFileEdit): string {
   return `${edit.tool}|${edit.path}`;
 }
 
-function collectFileEdits(messages: UIMessage[]): UIFileEdit[] {
-  const edits: UIFileEdit[] = [];
-  for (const message of messages) {
-    if (message.kind === "trace" && message.fileEdits?.length) {
-      edits.push(...message.fileEdits);
-    }
-  }
-  return edits;
-}
-
 function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   const order: string[] = [];
   const byKey = new Map<string, UIFileEdit>();
@@ -1008,6 +1090,33 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
     byKey.set(key, edit);
   }
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
+}
+
+/** Keep each edit at the point where its call first appeared. Later lifecycle
+ * events update that row in place instead of moving completed edits to the end. */
+function summarizeFileEditsByMessage(
+  messages: UIMessage[],
+  active: boolean,
+): Map<string, FileEditSummary[]> {
+  const messageByEdit = new Map<string, string>();
+  const edits: UIFileEdit[] = [];
+  for (const message of messages) {
+    for (const edit of message.fileEdits ?? []) {
+      const key = fileEditCallKey(edit);
+      if (!messageByEdit.has(key)) messageByEdit.set(key, message.id);
+      edits.push(edit);
+    }
+  }
+
+  const grouped = new Map<string, FileEditSummary[]>();
+  for (const edit of summarizeFileEdits(edits, active)) {
+    const messageId = messageByEdit.get(edit.key);
+    if (!messageId) continue;
+    const group = grouped.get(messageId) ?? [];
+    group.push(edit);
+    grouped.set(messageId, group);
+  }
+  return grouped;
 }
 
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
@@ -1084,7 +1193,7 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
           style={{
@@ -1162,7 +1271,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
           style={{

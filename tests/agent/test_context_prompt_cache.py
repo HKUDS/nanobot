@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as datetime_module
-import re
 from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
@@ -49,6 +48,29 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
+def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
+    """Project paths must not invalidate the stable identity and tool contract prefix."""
+    agent_home = tmp_path / "agent-home"
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+    agent_home.mkdir()
+    project_a.mkdir()
+    project_b.mkdir()
+    builder = ContextBuilder(agent_home)
+
+    prompt_a = builder.build_system_prompt(workspace=project_a)
+    prompt_b = builder.build_system_prompt(workspace=project_b)
+    marker = "# Current Project"
+    prefix_a = prompt_a[: prompt_a.index(marker)]
+    prefix_b = prompt_b[: prompt_b.index(marker)]
+
+    assert prefix_a == prefix_b
+    assert "# Tool Usage Notes" in prefix_a
+    assert str(project_a.resolve()) not in prefix_a
+    assert str(project_b.resolve()) not in prefix_b
+    assert prompt_a == builder.build_system_prompt(workspace=project_a)
+
+
 def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -79,137 +101,6 @@ def test_provider_context_appended_after_user_content(tmp_path) -> None:
     user_pos = content.find("hello world")
     context_pos = content.find("provider context")
     assert user_pos < context_pos, "user content must precede provider context"
-
-
-def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
-    """Entries in history.jsonl not yet consumed by Dream appear with timestamps."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    builder.memory.append_history("User asked about weather in Tokyo")
-    builder.memory.append_history("Agent fetched forecast via web_search")
-
-    prompt = builder.build_system_prompt()
-    assert "# Recent History" in prompt
-    assert "User asked about weather in Tokyo" in prompt
-    assert "Agent fetched forecast via web_search" in prompt
-    assert re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", prompt)
-
-
-def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    builder.memory.append_history("legacy entry without session")
-    builder.memory.append_history("telegram history", session_key="telegram:chat-1")
-    builder.memory.append_history("slack history", session_key="slack:chat-2")
-
-    prompt = builder.build_system_prompt(session_key="telegram:chat-1")
-
-    assert "# Recent History" in prompt
-    assert "telegram history" in prompt
-    assert "slack history" not in prompt
-    assert "legacy entry without session" not in prompt
-
-
-def test_recent_history_injection_unified_excludes_cron_internals(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    builder.memory.append_history("unified user history", session_key="unified:default")
-    builder.memory.append_history("channel user history", session_key="telegram:chat-1")
-    builder.memory.append_history("cron internal history", session_key="cron:job-1")
-
-    prompt = builder.build_system_prompt(
-        session_key="unified:default",
-        unified_session=True,
-    )
-
-    assert "unified user history" in prompt
-    assert "channel user history" in prompt
-    assert "cron internal history" not in prompt
-
-
-def test_cron_recent_history_can_see_own_history_and_unified_context(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    builder.memory.append_history("unified user history", session_key="unified:default")
-    builder.memory.append_history("own cron history", session_key="cron:job-1")
-    builder.memory.append_history("other cron history", session_key="cron:job-2")
-
-    prompt = builder.build_system_prompt(
-        session_key="cron:job-1",
-        unified_session=True,
-    )
-
-    assert "unified user history" in prompt
-    assert "own cron history" in prompt
-    assert "other cron history" not in prompt
-
-
-def test_recent_history_capped_at_max(tmp_path) -> None:
-    """Only the most recent _MAX_RECENT_HISTORY entries are injected."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    for i in range(builder._MAX_RECENT_HISTORY + 20):
-        builder.memory.append_history(f"entry-{i}")
-
-    prompt = builder.build_system_prompt()
-    assert "entry-0" not in prompt
-    assert "entry-19" not in prompt
-    assert f"entry-{builder._MAX_RECENT_HISTORY + 19}" in prompt
-
-
-def test_recent_history_truncated_at_max_tokens(tmp_path) -> None:
-    """Recent History section must be truncated to _MAX_HISTORY_TOKENS."""
-    import tiktoken
-
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    big_entry = "word " * (builder._MAX_HISTORY_TOKENS + 5_000)
-    builder.memory.append_history(big_entry)
-
-    prompt = builder.build_system_prompt()
-    history_section = prompt.split("# Recent History\n\n", 1)
-    assert len(history_section) == 2
-
-    enc = tiktoken.get_encoding("cl100k_base")
-    assert len(enc.encode(history_section[1])) <= builder._MAX_HISTORY_TOKENS
-
-
-def test_no_recent_history_when_dream_has_processed_all(tmp_path) -> None:
-    """If Dream has consumed everything, no Recent History section should appear."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    cursor = builder.memory.append_history("already processed entry")
-    builder.memory.set_last_dream_cursor(cursor)
-
-    prompt = builder.build_system_prompt()
-    assert "# Recent History" not in prompt
-
-
-def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
-    """When Dream has processed some entries, only the unprocessed ones appear."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    builder.memory.append_history("old conversation about Python")
-    c2 = builder.memory.append_history("old conversation about Rust")
-    builder.memory.append_history("recent question about Docker")
-    builder.memory.append_history("recent question about K8s")
-
-    builder.memory.set_last_dream_cursor(c2)
-
-    prompt = builder.build_system_prompt()
-    assert "# Recent History" in prompt
-    assert "old conversation about Python" not in prompt
-    assert "old conversation about Rust" not in prompt
-    assert "recent question about Docker" in prompt
-    assert "recent question about K8s" in prompt
 
 
 def test_execution_rules_in_system_prompt(tmp_path) -> None:

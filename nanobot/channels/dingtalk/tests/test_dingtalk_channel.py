@@ -3,7 +3,7 @@ import json
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -403,6 +403,61 @@ async def test_handler_uses_voice_recognition_text_when_text_is_empty(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_handler_retrieves_background_message_failure(monkeypatch) -> None:
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+    failure = RuntimeError("inbound dispatch failed")
+    mock_logger = MagicMock()
+    channel.logger = mock_logger
+
+    class _FakeChatbotMessage:
+        text = SimpleNamespace(content="hello")
+        extensions = {}
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "text"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeChatbotMessage()
+
+    async def fail(*_args) -> None:
+        raise failure
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_on_message", fail)
+    event_loop = asyncio.get_running_loop()
+    previous_handler = event_loop.get_exception_handler()
+    loop_errors: list[dict[str, object]] = []
+    event_loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+    try:
+        status, body = await handler.process(
+            SimpleNamespace(data={"conversationType": "1", "text": {"content": "hello"}})
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if not channel._background_tasks:
+                break
+    finally:
+        event_loop.set_exception_handler(previous_handler)
+
+    assert (status, body) == ("OK", "OK")
+    assert not channel._background_tasks
+    assert not loop_errors
+    mock_logger.opt.assert_called_once_with(exception=failure)
+    mock_logger.opt.return_value.error.assert_called_once_with(
+        "DingTalk inbound message task failed"
+    )
+
+
+@pytest.mark.asyncio
 async def test_handler_processes_file_message(monkeypatch) -> None:
     """Test that file messages are handled and forwarded with downloaded path."""
     bus = MessageBus()
@@ -449,6 +504,72 @@ async def test_handler_processes_file_message(monkeypatch) -> None:
     assert (status, body) == ("OK", "OK")
     assert "[File]" in msg.content
     assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_handler_does_not_spawn_message_task_after_stop_during_download(
+    monkeypatch,
+) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        MessageBus(),
+    )
+    handler = NanobotDingTalkHandler(channel)
+    download_started = asyncio.Event()
+    release_download = asyncio.Event()
+    message_task_started = asyncio.Event()
+
+    class _FakeFileChatbotMessage:
+        text = None
+        extensions = {}
+        image_content = None
+        rich_text_content = None
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "file"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeFileChatbotMessage()
+
+    async def delayed_download(*_args):
+        download_started.set()
+        await release_download.wait()
+        return "/tmp/nanobot_dingtalk/user1/report.xlsx"
+
+    async def block_message(*_args) -> None:
+        message_task_started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeFileChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_download_dingtalk_file", delayed_download)
+    monkeypatch.setattr(channel, "_on_message", block_message)
+
+    process_task = asyncio.create_task(handler.process(SimpleNamespace(data={
+        "conversationType": "1",
+        "content": {"downloadCode": "abc123", "fileName": "report.xlsx"},
+        "text": {"content": ""},
+    })))
+    await download_started.wait()
+
+    try:
+        await channel.stop()
+        release_download.set()
+        assert await process_task == ("OK", "OK")
+        await asyncio.sleep(0)
+
+        assert not message_task_started.is_set()
+        assert not channel._background_tasks
+    finally:
+        release_download.set()
+        if not process_task.done():
+            process_task.cancel()
+        pending = tuple(channel._background_tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(process_task, *pending, return_exceptions=True)
 
 
 def _rich_text_message(rich_text_list):
@@ -648,6 +769,41 @@ async def test_stop_cancels_stream_client_after_sdk_swallows_first_cancel(monkey
 
     assert client.websocket.closed is True
     assert start_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_for_background_message_tasks() -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    mock_logger = MagicMock()
+    channel.logger = mock_logger
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def wait_forever() -> None:
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    task = asyncio.create_task(wait_forever())
+    channel._background_tasks.add(task)
+    task.add_done_callback(channel._on_background_task_done)
+    await started.wait()
+
+    try:
+        await channel.stop()
+        assert task.done()
+        assert cancelled.is_set()
+        assert not channel._background_tasks
+        mock_logger.opt.assert_not_called()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

@@ -49,11 +49,14 @@ from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.agent.tools.mcp import MCPProvider  # noqa: E402
+from nanobot.agent.tools.registry import ToolRegistry  # noqa: E402
 from nanobot.cli import terminal as cli_terminal  # noqa: E402
 from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
+from nanobot.cli.process_identity import set_cli_process_identity  # noqa: E402
 from nanobot.cli.provider import provider_app  # noqa: E402
 from nanobot.cli.runtime_config import (  # noqa: E402
     _load_inspection_config,
@@ -84,7 +87,12 @@ app = typer.Typer(
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
     help=f"{__logo__} nanobot - Personal AI Assistant",
-    no_args_is_help=True,
+    epilog=(
+        "Run `nanobot` without a subcommand to start the terminal agent. "
+        "Use `nanobot agent --help` for agent options."
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
 )
 
 console = Console()
@@ -95,14 +103,23 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """nanobot - Personal AI Assistant."""
-    pass
+    # Editable/source installs can retain an older generated console script that
+    # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
+    # role identity correct until that launcher is regenerated.
+    command = ctx.invoked_subcommand
+    set_cli_process_identity([command] if command else ["agent"])
+    if command is None:
+        from nanobot.cli.entry import _run_agent
+
+        _run_agent([], prog_name="nanobot")
 
 
 # ============================================================================
@@ -351,12 +368,15 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
+    tools = ToolRegistry()
+    mcp_provider = MCPProvider.from_config(runtime_config, tools)
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
+            tool_registry=tools,
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -378,13 +398,17 @@ def serve(
     api_app = create_app(
         agent_loop, model_name=model_name, request_timeout=timeout,
         api_key=api_key,
+        prepare_agent=mcp_provider.connect,
     )
 
     async def on_startup(_app: Any) -> None:
-        await agent_loop._connect_mcp()
+        await mcp_provider.connect()
 
     async def on_cleanup(_app: Any) -> None:
-        await agent_loop.close_mcp()
+        try:
+            await agent_loop.aclose()
+        finally:
+            await mcp_provider.aclose()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)
@@ -429,6 +453,44 @@ app.add_typer(
 
 
 app.command(name="agent")(agent)
+
+
+# ============================================================================
+# Session Commands
+# ============================================================================
+
+
+sessions_app = typer.Typer(help="Manage persisted session history")
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("restore-workspace")
+def sessions_restore_workspace(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+) -> None:
+    """Copy sessions back into the workspace before downgrading nanobot."""
+    from nanobot.session.manager import SessionManager
+
+    runtime_config = _load_runtime_config(config, workspace)
+    data_dir = runtime_config.runtime_data_dir
+    manager = SessionManager(
+        runtime_config.workspace_path,
+        sessions_root=data_dir / "sessions" if data_dir is not None else None,
+    )
+    result = manager.restore_sessions_to_workspace()
+    console.print(
+        f"Restored {result.restored} session file(s) to "
+        f"{escape(str(runtime_config.workspace_path / 'sessions'))}; "
+        f"{result.unchanged} already matched."
+    )
+    if result.conflicts:
+        console.print(
+            "[red]Rollback is incomplete: existing or invalid files require manual review.[/red]"
+        )
+        for path in result.conflicts:
+            console.print(Text(f"- {path}", style="red"))
+        raise typer.Exit(1)
 
 
 # ============================================================================

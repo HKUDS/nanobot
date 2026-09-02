@@ -1,0 +1,762 @@
+{
+  "cases": [
+    {
+      "name": "reasoning_then_streamed_answer",
+      "chat_id": "fixture-reasoning",
+      "initial_messages": [
+        {
+          "id": "fixture-user-reasoning",
+          "role": "user",
+          "content": "Explain event projection.",
+          "turnId": "turn-reasoning",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "createdAt": 1700000000000
+        }
+      ],
+      "live_events": [
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-reasoning",
+          "text": "Compare ",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "reasoning",
+          "turn_seq": 2
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-reasoning",
+          "text": "state.",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "reasoning",
+          "turn_seq": 3
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-reasoning",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "reasoning",
+          "turn_seq": 4
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-reasoning",
+          "text": "Use one ",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-reasoning",
+          "text": "fold.",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-reasoning",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "answer",
+          "turn_seq": 7
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-reasoning",
+          "latency_ms": 42,
+          "turn_id": "turn-reasoning",
+          "turn_phase": "complete",
+          "turn_seq": 8
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-reasoning",
+          "text": "Explain event projection.",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "user",
+          "turn_seq": 1,
+          "created_at_ms": 1700000000000
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-reasoning",
+          "text": "Compare ",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "reasoning",
+          "turn_seq": 2
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-reasoning",
+          "text": "state.",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "reasoning",
+          "turn_seq": 3
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-reasoning",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "reasoning",
+          "turn_seq": 4
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-reasoning",
+          "text": "Use one ",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-reasoning",
+          "text": "fold.",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-reasoning",
+          "turn_id": "turn-reasoning",
+          "turn_phase": "answer",
+          "turn_seq": 7
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-reasoning",
+          "latency_ms": 42,
+          "turn_id": "turn-reasoning",
+          "turn_phase": "complete",
+          "turn_seq": 8
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Explain event projection.",
+          "turnId": "turn-reasoning",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "assistant",
+          "content": "Use one fold.",
+          "reasoning": "Compare state.",
+          "activitySegmentId": "segment-1",
+          "latencyMs": 42,
+          "turnId": "turn-reasoning",
+          "turnPhase": "answer",
+          "turnSeq": 6
+        }
+      ]
+    },
+    {
+      "name": "length_recovery_merges_answer_segments",
+      "chat_id": "fixture-length",
+      "initial_messages": [
+        {
+          "id": "fixture-user-length",
+          "role": "user",
+          "content": "Continue after the limit.",
+          "turnId": "turn-length",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "createdAt": 1700000001000
+        }
+      ],
+      "live_events": [
+        {
+          "event": "delta",
+          "chat_id": "fixture-length",
+          "text": "first ",
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 2
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length",
+          "text": "first ",
+          "resuming": true,
+          "merge_next": true,
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 3
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length",
+          "text": "second",
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 4
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length",
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-length",
+          "latency_ms": 17,
+          "turn_id": "turn-length",
+          "turn_phase": "complete",
+          "turn_seq": 6
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-length",
+          "text": "Continue after the limit.",
+          "turn_id": "turn-length",
+          "turn_phase": "user",
+          "turn_seq": 1,
+          "created_at_ms": 1700000001000
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length",
+          "text": "first ",
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 2
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length",
+          "text": "first ",
+          "resuming": true,
+          "merge_next": true,
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 3
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length",
+          "text": "second",
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 4
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length",
+          "turn_id": "turn-length",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-length",
+          "latency_ms": 17,
+          "turn_id": "turn-length",
+          "turn_phase": "complete",
+          "turn_seq": 6
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Continue after the limit.",
+          "turnId": "turn-length",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "assistant",
+          "content": "first second",
+          "latencyMs": 17,
+          "turnId": "turn-length",
+          "turnPhase": "answer",
+          "turnSeq": 4
+        }
+      ]
+    },
+    {
+      "name": "tool_activity_then_complete_answer",
+      "chat_id": "fixture-activity",
+      "initial_messages": [
+        {
+          "id": "fixture-user-activity",
+          "role": "user",
+          "content": "Inspect the projection code.",
+          "turnId": "turn-activity",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "createdAt": 1700000002000
+        }
+      ],
+      "live_events": [
+        {
+          "event": "message",
+          "chat_id": "fixture-activity",
+          "kind": "tool_hint",
+          "text": "search projection helpers",
+          "turn_id": "turn-activity",
+          "turn_phase": "activity",
+          "turn_seq": 2
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-activity",
+          "text": "Review results.",
+          "turn_id": "turn-activity",
+          "turn_phase": "reasoning",
+          "turn_seq": 4
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-activity",
+          "turn_id": "turn-activity",
+          "turn_phase": "reasoning",
+          "turn_seq": 5
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-activity",
+          "text": "Projection matches.",
+          "turn_id": "turn-activity",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-activity",
+          "latency_ms": 8,
+          "turn_id": "turn-activity",
+          "turn_phase": "complete",
+          "turn_seq": 7
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-activity",
+          "text": "Inspect the projection code.",
+          "turn_id": "turn-activity",
+          "turn_phase": "user",
+          "turn_seq": 1,
+          "created_at_ms": 1700000002000
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-activity",
+          "kind": "tool_hint",
+          "text": "search projection helpers",
+          "turn_id": "turn-activity",
+          "turn_phase": "activity",
+          "turn_seq": 2
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-activity",
+          "text": "Review results.",
+          "turn_id": "turn-activity",
+          "turn_phase": "reasoning",
+          "turn_seq": 4
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-activity",
+          "turn_id": "turn-activity",
+          "turn_phase": "reasoning",
+          "turn_seq": 5
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-activity",
+          "text": "Projection matches.",
+          "turn_id": "turn-activity",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-activity",
+          "latency_ms": 8,
+          "turn_id": "turn-activity",
+          "turn_phase": "complete",
+          "turn_seq": 7
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Inspect the projection code.",
+          "turnId": "turn-activity",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "tool",
+          "content": "search projection helpers",
+          "kind": "trace",
+          "traces": [
+            "search projection helpers"
+          ],
+          "activitySegmentId": "segment-1",
+          "turnId": "turn-activity",
+          "turnPhase": "activity",
+          "turnSeq": 2
+        },
+        {
+          "role": "assistant",
+          "content": "Projection matches.",
+          "reasoning": "Review results.",
+          "activitySegmentId": "segment-1",
+          "latencyMs": 8,
+          "turnId": "turn-activity",
+          "turnPhase": "answer",
+          "turnSeq": 6
+        }
+      ]
+    },
+    {
+      "name": "file_edit_lifecycle_merges_by_call_and_path",
+      "chat_id": "fixture-file-edit",
+      "initial_messages": [
+        {
+          "id": "fixture-user-file-edit",
+          "role": "user",
+          "content": "Update app.py.",
+          "turnId": "turn-file-edit",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "createdAt": 1700000003000
+        }
+      ],
+      "live_events": [
+        {
+          "event": "file_edit",
+          "chat_id": "fixture-file-edit",
+          "edits": [
+            {
+              "version": 1,
+              "call_id": "call-edit",
+              "tool": "edit_file",
+              "path": "app.py",
+              "phase": "start",
+              "added": 0,
+              "deleted": 0,
+              "status": "editing"
+            }
+          ],
+          "turn_id": "turn-file-edit",
+          "turn_phase": "activity",
+          "turn_seq": 2
+        },
+        {
+          "event": "file_edit",
+          "chat_id": "fixture-file-edit",
+          "edits": [
+            {
+              "version": 1,
+              "call_id": "call-edit",
+              "tool": "edit_file",
+              "path": "app.py",
+              "phase": "end",
+              "added": 3,
+              "deleted": 1,
+              "status": "done"
+            }
+          ],
+          "turn_id": "turn-file-edit",
+          "turn_phase": "activity",
+          "turn_seq": 3
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-file-edit",
+          "text": "Updated app.py.",
+          "turn_id": "turn-file-edit",
+          "turn_phase": "answer",
+          "turn_seq": 4
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-file-edit",
+          "latency_ms": 9,
+          "turn_id": "turn-file-edit",
+          "turn_phase": "complete",
+          "turn_seq": 5
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-file-edit",
+          "text": "Update app.py.",
+          "turn_id": "turn-file-edit",
+          "turn_phase": "user",
+          "turn_seq": 1,
+          "created_at_ms": 1700000003000
+        },
+        {
+          "event": "file_edit",
+          "chat_id": "fixture-file-edit",
+          "edits": [
+            {
+              "version": 1,
+              "call_id": "call-edit",
+              "tool": "edit_file",
+              "path": "app.py",
+              "phase": "start",
+              "added": 0,
+              "deleted": 0,
+              "status": "editing"
+            }
+          ],
+          "turn_id": "turn-file-edit",
+          "turn_phase": "activity",
+          "turn_seq": 2
+        },
+        {
+          "event": "file_edit",
+          "chat_id": "fixture-file-edit",
+          "edits": [
+            {
+              "version": 1,
+              "call_id": "call-edit",
+              "tool": "edit_file",
+              "path": "app.py",
+              "phase": "end",
+              "added": 3,
+              "deleted": 1,
+              "status": "done"
+            }
+          ],
+          "turn_id": "turn-file-edit",
+          "turn_phase": "activity",
+          "turn_seq": 3
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-file-edit",
+          "text": "Updated app.py.",
+          "turn_id": "turn-file-edit",
+          "turn_phase": "answer",
+          "turn_seq": 4
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-file-edit",
+          "latency_ms": 9,
+          "turn_id": "turn-file-edit",
+          "turn_phase": "complete",
+          "turn_seq": 5
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Update app.py.",
+          "turnId": "turn-file-edit",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "tool",
+          "content": "",
+          "kind": "trace",
+          "traces": [],
+          "fileEdits": [
+            {
+              "version": 1,
+              "call_id": "call-edit",
+              "tool": "edit_file",
+              "path": "app.py",
+              "phase": "end",
+              "added": 3,
+              "deleted": 1,
+              "status": "done"
+            }
+          ],
+          "activitySegmentId": "segment-1",
+          "turnId": "turn-file-edit",
+          "turnPhase": "activity",
+          "turnSeq": 3
+        },
+        {
+          "role": "assistant",
+          "content": "Updated app.py.",
+          "latencyMs": 9,
+          "turnId": "turn-file-edit",
+          "turnPhase": "answer",
+          "turnSeq": 4
+        }
+      ]
+    },
+    {
+      "name": "answer_tool_answer_preserves_answer_semantics",
+      "chat_id": "fixture-interleaved-answer",
+      "initial_messages": [
+        {
+          "id": "fixture-user-interleaved-answer",
+          "role": "user",
+          "content": "Inspect and summarize.",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "createdAt": 1700000004000
+        }
+      ],
+      "live_events": [
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 2
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 3
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-interleaved-answer",
+          "kind": "tool_hint",
+          "text": "read_file()",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "activity",
+          "turn_seq": 4
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-interleaved-answer",
+          "latency_ms": 12,
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "complete",
+          "turn_seq": 7
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Inspect and summarize.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "user",
+          "turn_seq": 1,
+          "created_at_ms": 1700000004000
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 2
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "First answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 3
+        },
+        {
+          "event": "message",
+          "chat_id": "fixture-interleaved-answer",
+          "kind": "tool_hint",
+          "text": "read_file()",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "activity",
+          "turn_seq": 4
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 5
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-interleaved-answer",
+          "text": "Final answer segment.",
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "answer",
+          "turn_seq": 6
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-interleaved-answer",
+          "latency_ms": 12,
+          "turn_id": "turn-interleaved-answer",
+          "turn_phase": "complete",
+          "turn_seq": 7
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Inspect and summarize.",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "assistant",
+          "content": "First answer segment.",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "answer",
+          "turnSeq": 3
+        },
+        {
+          "role": "tool",
+          "content": "read_file()",
+          "kind": "trace",
+          "traces": [
+            "read_file()"
+          ],
+          "activitySegmentId": "segment-1",
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "activity",
+          "turnSeq": 4
+        },
+        {
+          "role": "assistant",
+          "content": "Final answer segment.",
+          "latencyMs": 12,
+          "turnId": "turn-interleaved-answer",
+          "turnPhase": "answer",
+          "turnSeq": 6
+        }
+      ]
+    }
+  ]
+}

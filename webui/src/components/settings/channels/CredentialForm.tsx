@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import type { ChannelConfigField } from "@/components/settings/channels/catalog";
 import { cn } from "@/lib/utils";
 
-export function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {
+function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {
   return values[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "";
 }
 
@@ -159,7 +159,7 @@ export function CredentialForm({
               <span
                 role="radiogroup"
                 aria-label={field.label}
-                className="mt-1 grid rounded-[10px] bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
+                className="mt-1 grid rounded-control bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
                 style={{ gridTemplateColumns: `repeat(${field.options.length}, minmax(0, 1fr))` }}
               >
                 {field.options.map((option) => (
@@ -170,7 +170,7 @@ export function CredentialForm({
                     aria-checked={selectedOption === option.value}
                     onClick={() => onChange(field.key, option.value)}
                     className={cn(
-                      "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
+                      "min-h-8 rounded-compact px-2 py-1.5 transition-colors hover:text-foreground",
                       selectedOption === option.value
                         && "bg-background text-foreground ring-1 ring-inset ring-border/45",
                     )}
@@ -200,7 +200,7 @@ export function CredentialForm({
                 value={values[field.key] ?? ""}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={cn(
-                  "h-9 rounded-[10px] border-border/60 bg-muted/35 text-[13px]",
+                  "h-9 rounded-control border-border/60 bg-muted/35 text-[13px]",
                   showSecretToggle && "pr-9",
                 )}
               />

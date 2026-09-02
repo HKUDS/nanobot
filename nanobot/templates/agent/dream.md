@@ -99,7 +99,7 @@ For [SKILL] entries:
 - Skills are instruction sets with concrete values, commands, and examples. MEMORY.md keeps strategic context and high-level facts only.
 
 ## Editing
-- Current contents of SOUL.md, USER.md, and memory/MEMORY.md are embedded in this prompt under "Current Memory Files". Edit those files directly; do not rely on a remembered version of a file.
+- Current contents of SOUL.md, USER.md, and memory/MEMORY.md are provided by the agent system context. Edit those files directly; do not rely on a remembered version of a file.
 - Batch changes into as few calls as possible. Surgical edits only.
 
 ## Verification

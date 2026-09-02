@@ -124,7 +124,7 @@ export function logoFallbackUrls(logoUrl: string | null | undefined): string[] {
   return urls;
 }
 
-export const PROVIDER_BRAND_ALIASES: Record<string, string> = {
+const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   brave_search: "brave",
   byteplus_coding_plan: "byteplus",
   mimo: "xiaomi_mimo",
@@ -137,7 +137,7 @@ export const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   volcengine_coding_plan: "volcengine",
 };
 
-export const PROVIDER_LABEL_ALIASES: Record<string, string> = {
+const PROVIDER_LABEL_ALIASES: Record<string, string> = {
   brave_search: "Brave Search",
   byteplus_coding_plan: "BytePlus",
   minimaxAnthropic: "MiniMax",
@@ -184,6 +184,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   ollama: brand("ollama.com", "#111827", "O"),
   openai: brand("openai.com", "#111827", "AI"),
   openrouter: brand("openrouter.ai", "#111827", "OR"),
+  orcarouter: brand("orcarouter.ai", "#111827", "OR"),
   ovms: brand("openvino.ai", "#0071C5", "OV"),
   qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
   searxng: brand("searxng.org", "#3050FF", "SX"),

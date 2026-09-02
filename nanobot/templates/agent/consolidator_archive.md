@@ -1,24 +1,42 @@
-Extract key facts from this conversation. For each fact, annotate its memory attributes.
+Create a compact replacement checkpoint for this session.
 
-Only SNIP facts deserve a non-[skip] mark:
-- Signal: would the user need to repeat this if forgotten?
-- Novel: not just a restatement of another fact in this same conversation chunk
-- Important: prevents rework or captures preferences / rules
-- Persistent: still relevant after 2 weeks
+When `[Archived Context Summary]` appears in the system prompt, update that previous checkpoint to reflect the current conversation state.
 
-Output one fact per line in this format:
-- [mark] fact content
+## Merge rules
 
-Marks (choose the best match):
-- [permanent] Core preferences, personal traits, habits — never becomes stale
-- [durable] Technical discoveries, project knowledge, config details — valid for months
-- [ephemeral] Active task state, temporary decisions — may change in weeks
-- [correction] Correction to a previous memory — state what changed
-- [skip] Does not meet SNIP criteria, is conversational filler, is code/source facts derivable from the repo, or is only useful as an audit breadcrumb
+- Use the latest correction or decision as the current version of a fact, and merge duplicates.
+- Preserve exact names, identifiers, paths, commands, decisions, results, and unresolved blockers when they are needed to continue the session.
+- Retain a fact already present in long-term memory when it is needed for session continuity.
 
-Priority: user corrections and preferences > solutions > decisions > events > environment facts. The most valuable memory prevents the user from having to repeat themselves.
+## What to retain
 
-Do not mark something [skip] merely because it might already exist in long-term memory; Dream handles cross-file deduplication later.
+Always retain a compact working-state handoff:
+- active objective
+- current status
+- completed results that constrain later work
+- unresolved blockers
+- next action
+- exact identifiers needed for that action
 
-Output concise bullet points only. No preamble, no commentary.
-If nothing noteworthy happened, output: (nothing)
+Mark working-state facts `[ephemeral]`.
+
+For other facts, retain a candidate only when it meets all four SNIP criteria:
+- Signal: remembering it saves the user from repeating it
+- Novel: it adds a distinct fact to this checkpoint
+- Important: losing it would cause rework or discard a preference or rule
+- Persistent: it is expected to remain useful for at least two weeks
+
+Assign each retained fact its best current mark:
+- `[permanent]` for core preferences, personal traits, and habits that remain relevant indefinitely
+- `[durable]` for technical discoveries, project knowledge, and configuration that remains valid for months
+- `[ephemeral]` for active task state and temporary decisions that may change within weeks
+- `[correction]` for the current fact that supersedes conflicting earlier long-term memory
+
+When space is limited, prioritize user corrections and preferences, then solutions, decisions, events, and environment facts.
+
+## Output
+
+Return one concise retained fact per line in this form:
+- [mark] fact
+
+Use `(nothing)` when no fact qualifies and there is no active working state.

@@ -1,5 +1,6 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -98,6 +99,18 @@ class TestAutoCommit:
         assert len(commits) == 2
         assert commits[0].sha == sha
 
+    def test_commits_same_size_rewrite_with_unchanged_mtime(self, git_ready):
+        path = git_ready._workspace / "SOUL.md"
+        path.write_text("v1", encoding="utf-8")
+        git_ready.auto_commit("v1")
+        previous_stat = path.stat()
+
+        path.write_text("v2", encoding="utf-8")
+        os.utime(path, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+
+        assert git_ready.auto_commit("v2") is not None
+        assert [commit.message for commit in git_ready.log()[:2]] == ["v2", "v1"]
+
     def test_does_not_create_empty_commits(self, git_ready):
         git_ready.auto_commit("nothing 1")
         git_ready.auto_commit("nothing 2")
@@ -167,19 +180,6 @@ class TestDiffCommits:
 
     def test_invalid_sha_returns_empty(self, git_ready):
         assert git_ready.diff_commits("deadbeef", "cafebabe") == ""
-
-
-class TestFindCommit:
-    def test_finds_by_prefix(self, git_ready):
-        ws = git_ready._workspace
-        (ws / "SOUL.md").write_text("v2", encoding="utf-8")
-        sha = git_ready.auto_commit("v2")
-        found = git_ready.find_commit(sha[:4])
-        assert found is not None
-        assert found.sha == sha
-
-    def test_returns_none_for_unknown(self, git_ready):
-        assert git_ready.find_commit("deadbeef") is None
 
 
 class TestShowCommitDiff:

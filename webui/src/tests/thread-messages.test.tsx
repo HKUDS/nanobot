@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,6 +16,54 @@ afterEach(() => {
 });
 
 describe("ThreadMessages", () => {
+  it("shows optimistic turn progress in the thread before the first agent output", () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-13T10:00:05.000Z").getTime();
+    vi.setSystemTime(now);
+    const prompt: UIMessage = {
+      id: "u-optimistic",
+      role: "user",
+      content: "check this",
+      turnId: "turn-optimistic",
+      turnPhase: "user",
+      deliveryStatus: "sending",
+      createdAt: now - 5_000,
+    };
+    const { rerender } = render(
+      <ThreadMessages
+        messages={[prompt]}
+        isStreaming
+        activeTurnId="turn-optimistic"
+        runStartedAt={(now - 5_000) / 1000}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Working for 5s" })).toBeInTheDocument();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          { ...prompt, deliveryStatus: "accepted" },
+          {
+            id: "t-optimistic",
+            role: "tool",
+            kind: "trace",
+            content: "web_search()",
+            traces: ["web_search()"],
+            turnId: "turn-optimistic",
+            turnPhase: "activity",
+            createdAt: now,
+          },
+        ]}
+        isStreaming
+        activeTurnId="turn-optimistic"
+        runStartedAt={(now - 5_000) / 1000}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Working for 5s" })).toBeInTheDocument();
+  });
+
   it("does not move a mounted tail answer into offscreen rendering on the next turn", () => {
     const completed: UIMessage[] = [
       { id: "u1", role: "user", content: "question", createdAt: 1 },
@@ -56,7 +104,9 @@ describe("ThreadMessages", () => {
   });
 
   it("preserves an answer's markdown tree across completion and the next prompt", async () => {
-    await preloadMarkdownText();
+    await act(async () => {
+      await preloadMarkdownText();
+    });
     const turnId = "turn-1";
     const streaming: UIMessage[] = [
       {
@@ -126,6 +176,304 @@ describe("ThreadMessages", () => {
     );
 
     expect(screen.getByText("stable final answer").closest("p")).toBe(paragraph);
+  });
+
+  it("keeps live Markdown mounted when a later tool activity arrives", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+    const turnId = "turn-live-order";
+    const prompt: UIMessage = {
+      id: "u-live",
+      role: "user",
+      content: "research this",
+      createdAt: 1,
+      turnId,
+      turnPhase: "prompt",
+      turnSeq: 0,
+    };
+    const commentary: UIMessage = {
+      id: "a-commentary",
+      role: "assistant",
+      content: "**I will check that.**",
+      createdAt: 2,
+      isStreaming: false,
+      turnId,
+      turnPhase: "answer",
+      turnSeq: 1,
+    };
+    const { rerender } = render(
+      <ThreadMessages
+        messages={[prompt, commentary]}
+        isStreaming
+        activeTurnId={turnId}
+      />,
+    );
+    const paragraph = await screen.findByText("I will check that.");
+    expect(paragraph.closest("[data-testid='activity-model-message']")).toBeNull();
+
+    rerender(
+      <ThreadMessages
+        messages={[
+          prompt,
+          commentary,
+          {
+            id: "tool-live",
+            role: "tool",
+            kind: "trace",
+            content: "web_search()",
+            traces: ["web_search()"],
+            createdAt: 3,
+            turnId,
+            turnPhase: "activity",
+            turnSeq: 2,
+          },
+        ]}
+        isStreaming
+        activeTurnId={turnId}
+      />,
+    );
+
+    expect(screen.getByText("I will check that.")).toBe(paragraph);
+    expect(screen.getByText(/working/i)).toBeInTheDocument();
+  });
+
+  it("projects a turn in causal order independently of streaming state", () => {
+    const turnId = "turn-causal-order";
+    const messages: UIMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "inspect this",
+        turnId,
+        turnPhase: "user",
+        turnSeq: 0,
+        createdAt: 1,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "I will inspect it.",
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 1,
+        createdAt: 2,
+      },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "Inspection complete.",
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 4,
+        createdAt: 5,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "shell()",
+        traces: ["shell()"],
+        turnId,
+        turnPhase: "activity",
+        turnSeq: 2,
+        createdAt: 3,
+      },
+      {
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "checking output",
+        turnId,
+        turnPhase: "reasoning",
+        turnSeq: 3,
+        createdAt: 4,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+    const order = (units: ReturnType<typeof buildDisplayUnits>) => units.map((unit) => (
+      unit.type === "activity"
+        ? `activity:${unit.messages.map((message) => message.id).join(",")}`
+        : unit.message.id
+    ));
+
+    expect(order(units)).toEqual([
+      "u1",
+      "a1",
+      "activity:t1,r1",
+      "a2",
+    ]);
+
+    const { rerender } = render(
+      <ThreadMessages messages={messages} isStreaming activeTurnId={turnId} />,
+    );
+    const firstAnswer = screen.getByText("I will inspect it.");
+    const finalAnswer = screen.getByText("Inspection complete.");
+    const liveActivity = screen.getByRole("button", { name: /working/i });
+    expect(firstAnswer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(liveActivity.compareDocumentPosition(finalAnswer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+
+    rerender(<ThreadMessages messages={messages} isStreaming={false} activeTurnId={null} />);
+    const completedActivity = screen.getByRole("button", { name: /worked/i });
+    expect(firstAnswer.compareDocumentPosition(completedActivity) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(completedActivity.compareDocumentPosition(finalAnswer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it("ignores a completed empty answer frame without splitting contiguous activity", () => {
+    const turnId = "turn-empty-answer-frame";
+    const segmentId = "activity-1";
+    const messages: UIMessage[] = [
+      {
+        id: "user",
+        role: "user",
+        content: "reply ok, then check",
+        turnId,
+        turnPhase: "user",
+        turnSeq: 1,
+        createdAt: 1,
+      },
+      {
+        id: "reasoning-before",
+        role: "assistant",
+        content: "",
+        reasoning: "Planning confirmation",
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "reasoning",
+        turnSeq: 3,
+        createdAt: 2,
+      },
+      {
+        id: "ok",
+        role: "assistant",
+        content: "ok",
+        reasoning: "Preparing first query",
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 7,
+        createdAt: 3,
+      },
+      {
+        id: "first-tool",
+        role: "tool",
+        kind: "trace",
+        content: "first()",
+        traces: ["first()"],
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "activity",
+        turnSeq: 9,
+        createdAt: 4,
+      },
+      {
+        id: "empty-answer-frame",
+        role: "assistant",
+        content: "",
+        isStreaming: false,
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 10,
+        createdAt: 5,
+      },
+      {
+        id: "second-tool",
+        role: "tool",
+        kind: "trace",
+        content: "second()",
+        traces: ["second()"],
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "activity",
+        turnSeq: 12,
+        createdAt: 6,
+      },
+      {
+        id: "final",
+        role: "assistant",
+        content: "finished",
+        reasoning: "Summarizing result",
+        activitySegmentId: segmentId,
+        turnId,
+        turnPhase: "answer",
+        turnSeq: 113,
+        createdAt: 7,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+    expect(units.map((unit) => (
+      unit.type === "activity"
+        ? `activity:${unit.messages.map((message) => message.id).join(",")}`
+        : unit.message.id
+    ))).toEqual([
+      "user",
+      "activity:reasoning-before,ok-reasoning",
+      "ok",
+      "activity:first-tool,second-tool,final-reasoning",
+      "final",
+    ]);
+    expect(units.map((unit) => unit.sourceMessageCount)).toEqual([1, 1, 1, 3, 1]);
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+
+    const activityShells = screen.getAllByRole("button", { name: /worked/i });
+    const ok = screen.getByText("ok");
+    const final = screen.getByText("finished");
+    expect(activityShells).toHaveLength(2);
+    expect(activityShells[0].compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(ok.compareDocumentPosition(activityShells[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(activityShells[1].compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it("keeps empty frame source counts on the nearest visible unit", () => {
+    const emptyFrame: UIMessage = {
+      id: "empty",
+      role: "assistant",
+      content: "",
+      isStreaming: false,
+      turnPhase: "answer",
+      createdAt: 2,
+    };
+    const answerUnits = buildDisplayUnits([
+      { id: "a1", role: "assistant", content: "first", createdAt: 1 },
+      emptyFrame,
+      { id: "a2", role: "assistant", content: "second", createdAt: 3 },
+    ]);
+    expect(answerUnits).toMatchObject([{
+      type: "message",
+      message: { content: "first\n\nsecond" },
+      sourceMessageCount: 3,
+    }]);
+
+    const emptyTurnUnits = buildDisplayUnits([
+      { id: "user", role: "user", content: "hello", createdAt: 1 },
+      emptyFrame,
+    ]);
+    expect(emptyTurnUnits).toMatchObject([{
+      type: "message",
+      message: { id: "user" },
+      sourceMessageCount: 2,
+    }]);
+
+    const streamingUnits = buildDisplayUnits([{
+      ...emptyFrame,
+      id: "streaming-placeholder",
+      isStreaming: true,
+    }]);
+    expect(streamingUnits).toMatchObject([{
+      type: "activity",
+      messages: [{ id: "streaming-placeholder" }],
+      sourceMessageCount: 1,
+    }]);
   });
 
   it("offers a follow-up action for text selected within one completed answer", async () => {
@@ -224,18 +572,31 @@ describe("ThreadMessages", () => {
   it("renders a fork boundary divider after the copied history", () => {
     const messages: UIMessage[] = [
       { id: "u1", role: "user", content: "original", createdAt: 1 },
-      { id: "a1", role: "assistant", content: "answer", createdAt: 2 },
-      { id: "u2", role: "user", content: "branch prompt", createdAt: 3 },
+      { id: "a1", role: "assistant", content: "first answer", createdAt: 2 },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        createdAt: 3,
+      },
+      { id: "a2", role: "assistant", content: "second answer", createdAt: 4 },
+      { id: "u2", role: "user", content: "branch prompt", createdAt: 5 },
     ];
 
-    render(
+    const { container } = render(
       <ThreadMessages
         messages={messages}
-        forkBoundaryMessageCount={2}
+        forkBoundaryMessageCount={4}
       />,
     );
 
-    expect(screen.getByText("Forked from history")).toBeInTheDocument();
+    const rows = Array.from(container.firstElementChild?.children ?? []);
+    const dividerIndex = rows.findIndex((row) => row.textContent?.includes("Forked from history"));
+    const branchPromptIndex = rows.findIndex((row) => row.textContent?.includes("branch prompt"));
+    expect(dividerIndex).toBeGreaterThan(0);
+    expect(dividerIndex).toBe(branchPromptIndex - 1);
   });
 
   it("keeps turn unit keys stable across replayed ids and mutable turn sequence", () => {
@@ -270,11 +631,10 @@ describe("ThreadMessages", () => {
     expect(unitKeysForDisplay(liveUnits)).toEqual([
       "turn-turn-1-user",
       "turn-turn-1-answer-1",
-      "turn-turn-1-answer-2",
     ]);
   });
 
-  it("keeps file edits as their own activity row inside a turn", () => {
+  it("keeps file edits inside the single activity surface for a turn", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -314,14 +674,16 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units.map((unit) => unit.type)).toEqual(["activity", "activity", "activity"]);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["r2"]);
+    expect(units).toHaveLength(1);
+    expect(units[0].type).toBe("activity");
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "r1",
+      "t1",
+      "r2",
+    ]);
   });
 
-  it("keeps ordinary tool activity in one Thought block across segment ids", () => {
+  it("keeps ordinary tool activity in one activity block across segment ids", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -370,7 +732,7 @@ describe("ThreadMessages", () => {
     ]);
   });
 
-  it("moves orphan trailing activity before the completed assistant answer", () => {
+  it("keeps trailing activity after the completed assistant answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -400,15 +762,19 @@ describe("ThreadMessages", () => {
     const units = buildDisplayUnits(messages);
 
     expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2]).toMatchObject({
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "r1",
+    ]);
+    expect(units[1]).toMatchObject({
       type: "message",
       message: {
         id: "a1",
         content: "Let me search the latest data.",
       },
     });
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual([
+      "t1",
+    ]);
   });
 
   it("only marks the current activity timeline as live while streaming", () => {
@@ -454,8 +820,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
-    expect(screen.getByLabelText(/edited foo\.txt/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/editing foo\.txt/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/editing foo\.txt/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/edited foo\.txt/i)).not.toBeInTheDocument();
   });
 
   it("times live activity from the user turn start", () => {
@@ -485,7 +851,7 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    const units = buildDisplayUnits(messages, true);
+    const units = buildDisplayUnits(messages);
 
     expect(
       units[1].type === "activity" ? units[1].startedAtMs : undefined,
@@ -495,6 +861,66 @@ describe("ThreadMessages", () => {
 
     expect(screen.getByText("Working for 3m 50s")).toBeInTheDocument();
     expect(screen.queryByText("Working for 10s")).not.toBeInTheDocument();
+  });
+
+  it("keeps a guided run's timer on its original activity cluster", () => {
+    vi.useFakeTimers();
+    const startedAt = 1_700_000_000_000;
+    vi.setSystemTime(startedAt + 215_000);
+    const messages: UIMessage[] = [
+      {
+        id: "u-original",
+        role: "user",
+        content: "research this",
+        turnId: "turn-original",
+        turnPhase: "user",
+        turnSeq: 0,
+        createdAt: startedAt,
+      },
+      {
+        id: "t-original",
+        role: "tool",
+        kind: "trace",
+        content: "web_search()",
+        traces: ["web_search()"],
+        turnId: "turn-original",
+        turnPhase: "activity",
+        turnSeq: 1,
+        createdAt: startedAt + 500,
+      },
+      {
+        id: "a-original",
+        role: "assistant",
+        content: "Continuing the search.",
+        latencyMs: 1_000,
+        turnId: "turn-original",
+        turnPhase: "answer",
+        turnSeq: 2,
+        createdAt: startedAt + 1_000,
+      },
+      {
+        id: "u-guidance",
+        role: "user",
+        content: "How is it going?",
+        turnId: "turn-guidance",
+        turnPhase: "user",
+        turnSeq: 0,
+        createdAt: startedAt + 215_000,
+      },
+    ];
+
+    render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming
+        activeTurnId="turn-original"
+        runStartedAt={startedAt / 1000}
+      />,
+    );
+
+    expect(screen.getByText("Working for 3m 35s")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 1s")).not.toBeInTheDocument();
+    expect(screen.queryByText("Thinking for 3m 35s")).not.toBeInTheDocument();
   });
 
   it("folds final answer reasoning into the preceding activity timeline", () => {
@@ -590,7 +1016,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
   });
 
-  it("keeps late activity after the live assistant answer while streaming", () => {
+  it("keeps a streamed answer outside late activity when the prompt snapshot is absent", () => {
     const messages: UIMessage[] = [
       {
         id: "t0",
@@ -619,27 +1045,29 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    const units = buildDisplayUnits(messages, true);
+    const units = buildDisplayUnits(messages);
 
     expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["t0"]);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "t0",
+    ]);
     expect(units[1]).toMatchObject({
       type: "message",
-      message: {
-        id: "a1",
-        content: "partial answer",
-      },
+      message: { id: "a1", content: "partial answer" },
     });
-    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["t1"]);
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual([
+      "t1",
+    ]);
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
     const answer = screen.getByText("partial answer");
     const liveActivity = screen.getByRole("button", { name: /working/i });
+    expect(answer.closest("[data-testid='activity-model-message']")).toBeNull();
     expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("moves late activity before a completed assistant answer", () => {
+  it("keeps late activity after a completed assistant answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -671,24 +1099,24 @@ describe("ThreadMessages", () => {
 
     expect(units).toHaveLength(3);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2]).toMatchObject({
+    expect(units[1]).toMatchObject({
       type: "message",
       message: {
         id: "a1",
         content: "Hong Kong is hot today.",
       },
     });
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["t1"]);
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
     const answer = screen.getByText("Hong Kong is hot today.");
-    const laterActivity = screen.getAllByText(/thought/i).at(-1);
+    const laterActivity = screen.getAllByRole("button", { name: /worked/i }).at(-1);
     expect(laterActivity).toBeTruthy();
-    expect(laterActivity!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(answer.compareDocumentPosition(laterActivity!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("does not leave a completed web-search thought below the final answer", () => {
+  it("keeps completed web-search activity on both sides of an answer", () => {
     const messages: UIMessage[] = [
       {
         id: "user",
@@ -724,13 +1152,14 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    const thought = screen.getAllByText(/thought/i).at(-1);
+    const activities = screen.getAllByRole("button", { name: /worked/i });
     const answer = screen.getByText("知道，IEM Cologne Major 2026 今天开打了。");
-    expect(thought).toBeTruthy();
-    expect(thought!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(activities).toHaveLength(2);
+    expect(activities[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(answer.compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("normalizes completed prior turns while the next user turn is streaming", () => {
+  it("preserves a completed prior turn's order while the next turn is streaming", () => {
     const messages: UIMessage[] = [
       {
         id: "thought",
@@ -764,19 +1193,19 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    const units = buildDisplayUnits(messages, true);
+    const units = buildDisplayUnits(messages);
 
     expect(units).toHaveLength(4);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
       "thought",
     ]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
-      "web",
-    ]);
-    expect(units[2]).toMatchObject({
+    expect(units[1]).toMatchObject({
       type: "message",
       message: { id: "answer" },
     });
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual([
+      "web",
+    ]);
     expect(units[3]).toMatchObject({
       type: "message",
       message: { id: "next-user" },
@@ -818,7 +1247,7 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    const units = buildDisplayUnits(messages, true);
+    const units = buildDisplayUnits(messages);
 
     expect(units).toHaveLength(2);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
@@ -908,7 +1337,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
-  it("shows copy on every assistant slice while keeping fork on the last slice", () => {
+  it("keeps answer slices on either side of activity in generation order", () => {
     const messages: UIMessage[] = [
       {
         id: "early",
@@ -932,6 +1361,23 @@ describe("ThreadMessages", () => {
       },
     ];
 
+    const units = buildDisplayUnits(messages);
+    expect(units).toHaveLength(3);
+    expect(units[0]).toMatchObject({
+      type: "message",
+      message: { id: "early", content: "starting…" },
+      sourceMessageCount: 1,
+    });
+    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
+      "t1",
+    ]);
+    expect(units[1].sourceMessageCount).toBe(1);
+    expect(units[2]).toMatchObject({
+      type: "message",
+      message: { id: "late", content: "final reply" },
+      sourceMessageCount: 1,
+    });
+
     render(
       <ThreadMessages
         messages={messages}
@@ -942,16 +1388,210 @@ describe("ThreadMessages", () => {
 
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
-    expect(screen.getByText("final reply")).toBeInTheDocument();
+    expect(screen.getByText("starting…").closest("[data-testid='activity-model-message']")).toBeNull();
+    expect(screen.getByText("final reply").closest("[data-testid='activity-model-message']")).toBeNull();
   });
 
-  it("shows copy on adjacent assistant text slices", () => {
+  it("keeps a media-only answer slice outside the activity surface", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "early",
+        role: "assistant",
+        content: "generated the file",
+        turnPhase: "answer",
+        createdAt: 1,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "write_file()",
+        traces: ["write_file()"],
+        turnPhase: "activity",
+        createdAt: 2,
+      },
+      {
+        id: "attachment",
+        role: "assistant",
+        content: "",
+        media: [{ kind: "file", url: "/api/media/result.csv", name: "result.csv" }],
+        turnPhase: "answer",
+        isStreaming: false,
+        createdAt: 3,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+
+    expect(units).toHaveLength(3);
+    expect(units[0]).toMatchObject({
+      type: "message",
+      message: { id: "early", content: "generated the file" },
+      sourceMessageCount: 1,
+    });
+    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
+      "t1",
+    ]);
+    expect(units[2]).toMatchObject({
+      type: "message",
+      message: {
+        id: "attachment",
+        content: "",
+        media: [{ kind: "file", url: "/api/media/result.csv", name: "result.csv" }],
+      },
+      sourceMessageCount: 1,
+    });
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    expect(screen.getByText("result.csv")).toBeInTheDocument();
+  });
+
+  it("hides current turn actions until turn_end", () => {
+    const activeTurnId = "turn-2";
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
+      { id: "u2", role: "user", content: "new question", turnId: activeTurnId, createdAt: 3 },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "first answer slice",
+        turnId: activeTurnId,
+        createdAt: 4,
+      },
+      {
+        id: "t2",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        turnId: activeTurnId,
+        createdAt: 5,
+      },
+      {
+        id: "a3",
+        role: "assistant",
+        content: "second answer slice",
+        turnId: activeTurnId,
+        createdAt: 6,
+      },
+    ];
+    const props = { messages, onForkFromMessage: vi.fn() };
+    const { container, rerender } = render(
+      <ThreadMessages {...props} isStreaming activeTurnId={activeTurnId} />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+
+    rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(2);
+  });
+
+  it("keeps active turn actions hidden across guidance and failed user rows", () => {
+    const activeTurnId = "turn-active";
+    const messages: UIMessage[] = [
+      { id: "old-user", role: "user", content: "old question", turnId: "turn-old", createdAt: 1 },
+      { id: "old", role: "assistant", content: "old answer", turnId: "turn-old", createdAt: 2 },
+      { id: "active-user", role: "user", content: "new question", turnId: activeTurnId, createdAt: 3 },
+      { id: "live", role: "assistant", content: "live slice", createdAt: 4 },
+      { id: "guide", role: "user", content: "focus", turnId: "turn-guide", createdAt: 5 },
+      {
+        id: "failed",
+        role: "user",
+        content: "retry",
+        turnId: "turn-failed",
+        deliveryStatus: "failed",
+        createdAt: 6,
+      },
+    ];
+    const { container } = render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming
+        activeTurnId={activeTurnId}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+  });
+
+  it("only hides the active assistant-only automation turn", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "old", role: "assistant", content: "old answer", turnId: "turn-old", createdAt: 1 },
+          {
+            id: "automation",
+            role: "assistant",
+            content: "automation result",
+            turnId: "turn-automation",
+            createdAt: 2,
+          },
+        ]}
+        isStreaming
+        activeTurnId="turn-automation"
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(0);
+  });
+
+  it("falls back to the latest user boundary for untagged active slices", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "user", role: "user", content: "question", createdAt: 1 },
+          { id: "live", role: "assistant", content: "live slice", createdAt: 2 },
+        ]}
+        isStreaming
+        activeTurnId="turn-active"
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-assistant-footer] [aria-label="Copy"]'))
+      .not.toBeInTheDocument();
+    expect(container.querySelector('[data-assistant-footer] [aria-label="Fork"]'))
+      .not.toBeInTheDocument();
+  });
+
+  it("falls back to the latest user boundary while the active turn id is pending", () => {
+    const { container } = render(
+      <ThreadMessages
+        messages={[
+          { id: "old-user", role: "user", content: "old question", turnId: "old", createdAt: 1 },
+          { id: "old", role: "assistant", content: "old answer", turnId: "old", createdAt: 2 },
+          { id: "new-user", role: "user", content: "new question", turnId: "new", createdAt: 3 },
+          { id: "live", role: "assistant", content: "live slice", turnId: "new", createdAt: 4 },
+        ]}
+        isStreaming
+        activeTurnId={null}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]'))
+      .toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]'))
+      .toHaveLength(1);
+  });
+
+  it("projects adjacent assistant text slices into one answer", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getByText("part one")).toBeInTheDocument();
+    expect(screen.getByText("part two")).toBeInTheDocument();
   });
 
   it("does not count failed optimistic messages in assistant fork indices", () => {

@@ -430,7 +430,13 @@ class EmailChannel(BaseChannel):
         skipped_uids: set[str],
         cycle_uids: set[str],
     ) -> list[dict[str, Any]] | None:
-        """Fetch messages by arbitrary IMAP search criteria."""
+        """Fetch messages by arbitrary IMAP search criteria.
+
+        Uses UID SEARCH so already-processed UIDs are recognized before any
+        FETCH at all, then fetches headers only to evaluate every filter — the
+        full body (and any attachments) is downloaded only for messages that
+        pass every check and are actually going to be delivered.
+        """
         mailbox = self.config.imap_mailbox or "INBOX"
 
         client = self._open_imap_client(mailbox=mailbox, missing_mailbox_ok=True)
@@ -438,29 +444,30 @@ class EmailChannel(BaseChannel):
             return messages
 
         try:
-            status, data = client.search(None, *search_criteria)
-            if status != "OK" or not data:
+            status, data = client.uid("SEARCH", None, *search_criteria)
+            if status != "OK" or not data or not data[0]:
                 return messages
 
-            ids = data[0].split()
-            if limit > 0 and len(ids) > limit:
-                ids = ids[-limit:]
-            for imap_id in ids:
-                status, fetched = client.fetch(imap_id, "(BODY.PEEK[] UID)")
+            uids = [raw.decode("ascii", errors="ignore") for raw in data[0].split()]
+            if limit > 0 and len(uids) > limit:
+                uids = uids[-limit:]
+
+            features: _ServerFeatures | None = None
+
+            for uid in uids:
+                if not uid or uid in cycle_uids:
+                    continue
+                if dedupe and uid in self._processed_uids:
+                    continue
+
+                status, fetched = client.uid("FETCH", uid, "(BODY.PEEK[HEADER])")
                 if status != "OK" or not fetched:
                     continue
-
-                raw_bytes = self._extract_message_bytes(fetched)
-                if raw_bytes is None:
+                header_bytes = self._extract_message_bytes(fetched)
+                if header_bytes is None:
                     continue
 
-                uid = self._extract_uid(fetched)
-                if uid and uid in cycle_uids:
-                    continue
-                if dedupe and uid and uid in self._processed_uids:
-                    continue
-
-                parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
+                parsed = BytesParser(policy=policy.default).parsebytes(header_bytes)
                 sender = parseaddr(parsed.get("From", ""))[1].strip().lower()
                 if not sender:
                     continue
@@ -468,9 +475,8 @@ class EmailChannel(BaseChannel):
                     self.logger.info("From {} ignored: matches bot-owned address", sender)
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
-                        client.store(imap_id, "+FLAGS", "\\Seen")
-                    if uid:
-                        skipped_uids.add(uid)
+                        features = self._mark_seen_uid(client, uid, features)
+                    skipped_uids.add(uid)
                     continue
 
                 # --- Anti-spoofing: verify Authentication-Results ---
@@ -482,8 +488,7 @@ class EmailChannel(BaseChannel):
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
-                    if uid:
-                        skipped_uids.add(uid)
+                    skipped_uids.add(uid)
                     continue
                 if self.config.verify_dkim and not dkim_pass:
                     self.logger.warning(
@@ -492,17 +497,25 @@ class EmailChannel(BaseChannel):
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
-                    if uid:
-                        skipped_uids.add(uid)
+                    skipped_uids.add(uid)
                     continue
 
                 if not self.is_allowed(sender):
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
-                        client.store(imap_id, "+FLAGS", "\\Seen")
-                    if uid:
-                        skipped_uids.add(uid)
+                        features = self._mark_seen_uid(client, uid, features)
+                    skipped_uids.add(uid)
                     continue
+
+                # Passed every filter — only now fetch the full message body
+                # (and any attachments) for the message we're actually delivering.
+                status, full_fetched = client.uid("FETCH", uid, "(BODY.PEEK[])")
+                if status != "OK" or not full_fetched:
+                    continue
+                raw_bytes = self._extract_message_bytes(full_fetched)
+                if raw_bytes is None:
+                    continue
+                parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
 
                 subject = self._decode_header_value(parsed.get("Subject", ""))
                 date_value = parsed.get("Date", "")
@@ -556,9 +569,18 @@ class EmailChannel(BaseChannel):
                 self._remember_processed_uid(uid, dedupe, cycle_uids)
 
                 if mark_seen:
-                    client.store(imap_id, "+FLAGS", "\\Seen")
+                    features = self._mark_seen_uid(client, uid, features)
         finally:
             self._close_imap_client(client)
+
+    def _mark_seen_uid(
+        self, client: Any, uid: str, features: _ServerFeatures | None
+    ) -> _ServerFeatures:
+        """Mark a single UID \\Seen, reusing session-learned STORE support."""
+        if features is None:
+            features = self._server_features(client)
+        self._uid_store_flag(client, uid, "\\Seen", features)
+        return features
 
     def _open_imap_client(self, mailbox: str, *, missing_mailbox_ok: bool = False) -> Any | None:
         if self.config.imap_use_ssl:
@@ -714,11 +736,14 @@ class EmailChannel(BaseChannel):
         return data[0].split()[0]
 
     def _uid_store_deleted(self, client: Any, uid: str, features: _ServerFeatures) -> bool:
+        return self._uid_store_flag(client, uid, "\\Deleted", features)
+
+    def _uid_store_flag(self, client: Any, uid: str, flag: str, features: _ServerFeatures) -> bool:
         # Optimistic path: try UID STORE first because UID is stable and avoids
         # sequence-number lookup. If this fails once for the session, remember it
         # and use the sequence STORE fallback directly for remaining UIDs.
         if features.uid_store is not False:
-            status, _ = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+            status, _ = client.uid("STORE", uid, "+FLAGS", f"({flag})")
             if status == "OK":
                 features.uid_store = True
                 return True
@@ -728,12 +753,12 @@ class EmailChannel(BaseChannel):
         # unreliable: resolve the current sequence number from UID and use STORE.
         imap_id = self._lookup_imap_id_by_uid(client, uid)
         if not imap_id:
-            self.logger.warning("Post-action skipped: UID {} not found", uid)
+            self.logger.warning("Could not locate UID {} to set flag {}", uid, flag)
             return False
 
-        status, _ = client.store(imap_id, "+FLAGS", "\\Deleted")
+        status, _ = client.store(imap_id, "+FLAGS", flag)
         if status != "OK":
-            self.logger.warning("Post-action failed: could not mark UID {} as deleted", uid)
+            self.logger.warning("Failed to set flag {} on UID {}", flag, uid)
             return False
         return True
 
@@ -772,16 +797,6 @@ class EmailChannel(BaseChannel):
                 if len(fetched_item) >= 2 and isinstance(fetched_item[1], (bytes, bytearray)):
                     return bytes(fetched_item[1])
         return None
-
-    @staticmethod
-    def _extract_uid(fetched: list[Any]) -> str:
-        for item in fetched:
-            if isinstance(item, tuple) and item and isinstance(item[0], (bytes, bytearray)):
-                head = bytes(item[0]).decode("utf-8", errors="ignore")
-                m = re.search(r"UID\s+(\d+)", head)
-                if m:
-                    return m.group(1)
-        return ""
 
     @staticmethod
     def _decode_header_value(value: str) -> str:

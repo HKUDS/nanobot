@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         STREAM_EVENT_TOOL_FAILED,
         STREAM_EVENT_TOOL_STARTED,
         STREAM_EVENT_TYPES,
+        LLMUsage,
         Nanobot,
         RunResult,
         RunStream,
@@ -56,6 +57,7 @@ __logo__ = "🐈"
 
 _LAZY_EXPORTS = {
     "Nanobot": ".nanobot",
+    "LLMUsage": ".nanobot",
     "RunStream": ".nanobot",
     "RunResult": ".nanobot",
     "RequestContext": ".agent.tools.context",
@@ -93,6 +95,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "Nanobot",
+    "LLMUsage",
     "RunResult",
     "RequestContext",
     "RuntimeContextBlock",

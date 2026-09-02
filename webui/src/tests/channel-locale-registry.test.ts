@@ -105,8 +105,11 @@ describe("channel locale registry", () => {
     const i18nEntry = readFileSync(resolve(process.cwd(), "src/i18n/index.ts"), "utf8");
 
     expect(localeRegistry).toContain("webui/locales/*.json");
+    expect(localeRegistry).not.toContain("eager: true");
     expect(localeRegistry).not.toMatch(/channel-plugins\/registry|\.tsx|\breact\b/i);
     expect(i18nEntry).toContain("channel-plugins/locale-registry");
+    expect(i18nEntry).toContain("import.meta.glob");
+    expect(i18nEntry).not.toMatch(/import\s+\w+Common\s+from/);
     expect(i18nEntry).not.toContain("channel-plugins/registry");
   });
 });

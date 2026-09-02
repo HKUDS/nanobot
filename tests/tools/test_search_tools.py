@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +20,11 @@ from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
 from nanobot.providers.base import GenerationSettings
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    default_workspace_scope,
+    reset_workspace_scope,
+)
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -98,6 +106,152 @@ async def test_find_files_rejects_paths_outside_workspace(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_find_files_worker_preserves_current_workspace_scope(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "inside.txt").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("nope\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, restrict_to_workspace=False)
+    token = bind_workspace_scope(default_workspace_scope(project, True))
+    try:
+        result = await tool.execute(path=".")
+    finally:
+        reset_workspace_scope(token)
+
+    assert result == "inside.txt"
+
+
+@pytest.mark.asyncio
+async def test_find_files_scan_keeps_event_loop_responsive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "match.txt"
+    target.write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    original_iter_paths = tool._iter_paths
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_iter_paths(root: Path, *, include_dirs: bool, budget):
+        started.set()
+        if not release.wait(timeout=1):
+            raise TimeoutError("test did not release find_files traversal")
+        yield from original_iter_paths(root, include_dirs=include_dirs, budget=budget)
+
+    monkeypatch.setattr(tool, "_iter_paths", blocking_iter_paths)
+    task = asyncio.create_task(tool.execute(path="."))
+    try:
+        assert await asyncio.to_thread(started.wait, 0.5)
+        for _ in range(3):
+            await asyncio.sleep(0.01)
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert await asyncio.wait_for(task, timeout=0.5) == "match.txt"
+
+
+@pytest.mark.asyncio
+async def test_find_files_cancellation_stops_worker_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def cancellable_iter_paths(root: Path, *, include_dirs: bool, budget):
+        del root, include_dirs
+        started.set()
+        if not budget.cancelled.wait(timeout=1):
+            raise TimeoutError("find_files worker did not receive cancellation")
+        stopped.set()
+        if False:
+            yield
+
+    monkeypatch.setattr(tool, "_iter_paths", cancellable_iter_paths)
+    task = asyncio.create_task(tool.execute(path="."))
+    assert await asyncio.to_thread(started.wait, 0.5)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.2)
+
+    assert await asyncio.to_thread(stopped.wait, 0.5)
+
+
+@pytest.mark.asyncio
+async def test_find_files_path_limit_stops_after_pagination_lookahead(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = [tmp_path / name for name in ("a.txt", "b.txt", "c.txt")]
+    for path in paths:
+        path.write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    visited: list[str] = []
+
+    def ordered_iter_paths(root: Path, *, include_dirs: bool, budget):
+        del include_dirs
+        for path in paths:
+            budget.checkpoint()
+            visited.append(path.name)
+            yield tool._entry(path, root, is_dir=False)
+
+    monkeypatch.setattr(tool, "_iter_paths", ordered_iter_paths)
+    result = await tool.execute(path=".", head_limit=1)
+
+    assert result.splitlines()[0] == "a.txt"
+    assert "pagination: limit=1, offset=0" in result
+    assert visited == ["a.txt", "b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_files_path_budget_counts_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_PATHS", 1)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".")
+
+    assert result.startswith("Error: find_files scan exceeded 1 paths")
+
+
+@pytest.mark.asyncio
+async def test_find_files_enforces_time_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "match.txt").write_text("ok\n", encoding="utf-8")
+    monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_SECONDS", 0.0)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".")
+
+    assert result.startswith("Error: find_files scan exceeded 0 seconds")
+
+
+@pytest.mark.asyncio
+async def test_find_files_path_sort_matches_existing_lexicographic_contract(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "inside.txt").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "a+").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text("ok\n", encoding="utf-8")
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(path=".", head_limit=0)
+
+    assert result.splitlines() == ["a+", "a.py", "a/inside.txt"]
+
+
+@pytest.mark.asyncio
 async def test_grep_respects_glob_filter_and_context(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text(
@@ -124,9 +278,14 @@ async def test_grep_respects_glob_filter_and_context(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_grep_defaults_to_files_with_matches(tmp_path: Path) -> None:
+async def test_grep_defaults_to_match_context(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "main.py").write_text("match_here\n", encoding="utf-8")
+    (tmp_path / "src" / "main.py").write_text(
+        "\n".join(f"line {line}" for line in range(1, 6))
+        + "\nmatch_here\n"
+        + "\n".join(f"line {line}" for line in range(7, 13)),
+        encoding="utf-8",
+    )
 
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
     result = await tool.execute(
@@ -134,8 +293,230 @@ async def test_grep_defaults_to_files_with_matches(tmp_path: Path) -> None:
         path="src",
     )
 
-    assert result.splitlines() == ["src/main.py"]
-    assert "1|" not in result
+    assert "src/main.py:6" in result
+    assert "  1| line 1" in result
+    assert "> 6| match_here" in result
+    assert "  11| line 11" in result
+    assert "line 12" not in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_xlsx_with_sheet_cell_locator(tmp_path: Path) -> None:
+    from openpyxl import Workbook
+
+    workbook_path = tmp_path / "people.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "People"
+    sheet.append(["Name", "Role"])
+    sheet.append(["Ada", "Engineer"])
+    workbook.save(workbook_path)
+    workbook.close()
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="Engineer",
+        path="people.xlsx",
+        fixed_strings=True,
+    )
+
+    assert "people.xlsx:3" in result
+    assert "sheet='People',row=2,cell=B2" in result
+    assert "Ada\tEngineer" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_docx_with_paragraph_locator(tmp_path: Path) -> None:
+    from docx import Document
+
+    document_path = tmp_path / "notes.docx"
+    document = Document()
+    document.add_paragraph("Introduction")
+    document.add_paragraph("late needle")
+    document.save(document_path)
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="late needle",
+        path="notes.docx",
+        fixed_strings=True,
+    )
+
+    assert "notes.docx:3 [paragraph=2]" in result
+    assert "late needle" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_pptx_with_slide_locator(tmp_path: Path) -> None:
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    presentation_path = tmp_path / "deck.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(
+        Inches(1), Inches(1), Inches(4), Inches(1)
+    )
+    textbox.text_frame.text = "slide needle"
+    presentation.save(presentation_path)
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="slide needle",
+        path="deck.pptx",
+        fixed_strings=True,
+    )
+
+    assert "deck.pptx:2 [slide=1,line=1]" in result
+    assert "slide needle" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_pdf_with_page_locator(tmp_path: Path) -> None:
+    import fitz
+
+    pdf_path = tmp_path / "notes.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "pdf needle")
+    document.save(pdf_path)
+    document.close()
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="pdf needle",
+        path="notes.pdf",
+        fixed_strings=True,
+    )
+
+    assert "notes.pdf:2 [page=1,line=1]" in result
+    assert "pdf needle" in result
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_xlsx_beyond_attachment_preview_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openpyxl import Workbook
+
+    from nanobot.utils import document as document_utils
+
+    workbook_path = tmp_path / "long.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    for row in range(1, 20):
+        sheet.append([f"ordinary-row-{row}"])
+    sheet.append(["late-needle"])
+    workbook.save(workbook_path)
+    workbook.close()
+    monkeypatch.setattr(document_utils, "_MAX_TEXT_LENGTH", 50)
+
+    preview = document_utils.extract_text(workbook_path)
+    assert preview is not None
+    assert "late-needle" not in preview
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        pattern="late-needle",
+        path="long.xlsx",
+        fixed_strings=True,
+    )
+
+    assert "late-needle" in result
+    assert "sheet='Data',row=20,cell=A20" in result
+    assert "No matches found" not in result
+
+
+@pytest.mark.asyncio
+async def test_grep_keeps_an_oversized_matching_line_visible(tmp_path: Path) -> None:
+    long_line = "x" * 130_000 + "needle" + "y" * 10_000
+    (tmp_path / "huge-line.txt").write_text(long_line, encoding="utf-8")
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(
+        pattern="needle",
+        path="huge-line.txt",
+        fixed_strings=True,
+        context_before=0,
+        context_after=0,
+    )
+
+    assert "huge-line.txt:1" in result
+    assert "needle" in result
+    assert "No matches found" not in result
+    assert len(result) < GrepTool._MAX_RESULT_CHARS
+
+
+@pytest.mark.asyncio
+async def test_grep_size_limit_returns_a_resumable_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = "\n".join(f"needle-{line}-" + "x" * 80 for line in range(1, 11))
+    (tmp_path / "many.txt").write_text(content, encoding="utf-8")
+    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 350)
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    first = await tool.execute(
+        pattern="needle",
+        path="many.txt",
+        fixed_strings=True,
+        context_before=0,
+        context_after=0,
+        head_limit=10,
+    )
+    continuation = re.search(r"use offset=(\d+) to continue", first)
+
+    assert continuation is not None
+    next_offset = int(continuation.group(1))
+    assert next_offset > 0
+
+    second = await tool.execute(
+        pattern="needle",
+        path="many.txt",
+        fixed_strings=True,
+        context_before=0,
+        context_after=0,
+        head_limit=10,
+        offset=next_offset,
+    )
+    first_headers = {
+        line for line in first.splitlines() if line.startswith("many.txt:")
+    }
+    second_headers = {
+        line for line in second.splitlines() if line.startswith("many.txt:")
+    }
+    assert second_headers
+    assert first_headers.isdisjoint(second_headers)
+
+
+@pytest.mark.asyncio
+async def test_grep_reports_an_invalid_pdf_page_range(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+
+    pdf_path = tmp_path / "one-page.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    with pdf_path.open("wb") as output:
+        writer.write(output)
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(pattern="needle", path="one-page.pdf", pages="bad")
+
+    assert result.startswith("Error: Invalid PDF page range 'bad'")
+    assert "binary/unreadable" not in result
+
+    out_of_bounds = await tool.execute(
+        pattern="needle",
+        path="one-page.pdf",
+        pages="99",
+    )
+    assert out_of_bounds == (
+        "Error: Invalid PDF page range '99': document has 1 page; "
+        "use a page number or range within 1-1."
+    )
 
 
 @pytest.mark.asyncio
@@ -169,6 +550,7 @@ async def test_grep_type_filter_limits_files(tmp_path: Path) -> None:
         pattern="needle",
         path="src",
         type="py",
+        output_mode="files_with_matches",
     )
 
     assert result.splitlines() == ["src/a.py"]
@@ -224,6 +606,7 @@ async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: 
     result = await tool.execute(
         pattern="needle",
         path="src",
+        output_mode="files_with_matches",
         head_limit=1,
         offset=1,
     )
@@ -319,12 +702,16 @@ async def test_grep_uses_a_larger_bounded_limit_for_an_explicit_file(
     assert "skipped 1 large files" in capped_result
 
 
-def test_grep_description_keeps_size_thresholds_implementation_specific(tmp_path: Path) -> None:
+def test_grep_schema_is_concise_and_keeps_legacy_aliases_hidden(tmp_path: Path) -> None:
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    properties = tool.parameters["properties"]
 
-    assert "limits are enforced by the tool" in tool.description
+    assert len(tool.description) < 150
     assert "2 MB" not in tool.description
     assert "100 MB" not in tool.description
+    assert "head_limit" in properties
+    assert "max_matches" not in properties
+    assert "max_results" not in properties
 
 
 @pytest.mark.asyncio

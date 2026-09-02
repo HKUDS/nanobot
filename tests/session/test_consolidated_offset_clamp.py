@@ -57,7 +57,39 @@ def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
 def test_valid_offset_is_preserved():
     session = _session(10, 4)
     assert session.last_consolidated == 4
-    assert len(session.get_history()) == 6
+    assert session.last_archived == 4
+    assert len(session.get_history()) == 8
+
+
+def test_last_archived_field_migrates_with_legacy_alias(tmp_path: Path):
+    manager = SessionManager(tmp_path)
+    path = manager._get_session_path("chan:chat")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    path.write_text(
+        "\n".join([
+            json.dumps({
+                "_type": "metadata",
+                "key": "chan:chat",
+                "metadata": {},
+                "last_archived": 1,
+            }),
+            *(json.dumps(message) for message in messages),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    session = manager.get_or_create("chan:chat")
+
+    assert session.last_archived == 1
+    assert session.last_consolidated == 1
+    manager.save(session)
+    metadata = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert metadata["last_archived"] == 1
+    assert metadata["last_consolidated"] == 1
 
 
 def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):

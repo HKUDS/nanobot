@@ -20,12 +20,15 @@ from pydantic.alias_generators import to_snake
 
 @dataclass(frozen=True)
 class ProviderModelSpec:
-    """A curated model exposed by providers without a model-list endpoint."""
+    """Curated model metadata used for fixed catalogs or online fallback."""
 
     id: str
     label: str = ""
     description: str = ""
+    owned_by: str = ""
     context_window: int | None = None
+    reasoning_efforts: tuple[str, ...] = ()
+    supports_backend_search: bool = False
 
 
 @dataclass(frozen=True)
@@ -42,7 +45,7 @@ class ProviderSpec:
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
     display_name: str = ""  # shown in `nanobot status`
-    model_catalog: str = "auto"  # WebUI model-list source
+    model_catalog: str = "auto"  # WebUI model-list source, including builtin/hybrid
     builtin_models: tuple[ProviderModelSpec, ...] = ()
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
@@ -112,9 +115,12 @@ class ProviderSpec:
     implicit_reasoning_models: tuple[str, ...] = ()
 
     # Models that expose the OpenAI Responses wire format.  This is model-level
-    # because providers may add Responses support incrementally (DeepSeek V4
-    # Flash is supported before V4 Pro).
+    # because providers may add Responses support incrementally.
     responses_models: tuple[str, ...] = ()
+
+    # Provider-hosted Responses tools sent unless extraBody.tools explicitly
+    # supplies the hosted-tool selection. Values are raw Responses tool types.
+    responses_default_tools: tuple[str, ...] = ()
 
     # When the model returns content as a list of {"type":"thinking",...} +
     # {"type":"text",...} blocks, extract the thinking text into
@@ -195,6 +201,30 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
+    ),
+    # OrcaRouter: global gateway, keys start with "sk-orca-"
+    ProviderSpec(
+        name="orcarouter",
+        keywords=("orcarouter",),
+        env_key="ORCAROUTER_API_KEY",
+        display_name="OrcaRouter",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="sk-orca-",
+        detect_by_base_keyword="orcarouter",
+        default_api_base="https://api.orcarouter.ai/v1",
+    ),
+    # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
+    # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
+    ProviderSpec(
+        name="edenai",
+        keywords=("edenai",),
+        env_key="EDENAI_API_KEY",
+        display_name="Eden AI",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="edenai",
+        default_api_base="https://api.edenai.run/v3",
     ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
@@ -380,45 +410,56 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("openai-codex",),
         env_key="",
         display_name="OpenAI Codex",
-        model_catalog="builtin",
+        model_catalog="hybrid",
         builtin_models=(
             ProviderModelSpec(
                 id="openai-codex/gpt-5.6-sol",
                 label="GPT-5.6-Sol",
                 description="Latest frontier agentic coding model.",
-                context_window=372000,
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.6-terra",
                 label="GPT-5.6-Terra",
                 description="Balanced agentic coding model for everyday work.",
-                context_window=372000,
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.6-luna",
                 label="GPT-5.6-Luna",
                 description="Fast and affordable agentic coding model.",
-                context_window=372000,
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.5",
                 label="GPT-5.5",
                 description="Frontier model for complex coding, research, and real-world work.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.4",
                 label="GPT-5.4",
                 description="Strong model for everyday coding.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.4-mini",
                 label="GPT-5.4-Mini",
                 description="Small, fast, and cost-efficient model for simpler coding tasks.",
+                context_window=272_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
             ProviderModelSpec(
                 id="openai-codex/gpt-5.3-codex-spark",
                 label="GPT-5.3-Codex-Spark",
                 description="Ultra-fast coding model.",
+                context_window=128_000,
+                reasoning_efforts=("low", "medium", "high", "xhigh"),
             ),
         ),
         backend="openai_codex",
@@ -432,13 +473,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("xai-grok", "xai_grok"),
         env_key="",
         display_name="xAI Grok",
-        model_catalog="builtin",
+        model_catalog="hybrid",
         builtin_models=(
+            ProviderModelSpec(
+                id="xai-grok/grok-4.6",
+                label="Grok 4.6",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500_000,
+            ),
             ProviderModelSpec(
                 id="xai-grok/grok-4.5",
                 label="Grok 4.5",
                 description="Grok via xAI subscription; X Search is enabled when supported.",
-                context_window=500000,
+                context_window=500_000,
             ),
         ),
         backend="xai_grok",
@@ -451,6 +498,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("github_copilot", "copilot"),
         env_key="",
         display_name="Github Copilot",
+        model_catalog="hybrid",
+        builtin_models=(
+            ProviderModelSpec(
+                id="github-copilot/gpt-5.4-mini",
+                label="GPT-5.4 Mini",
+                description="GitHub Copilot Responses model.",
+            ),
+            ProviderModelSpec(
+                id="github-copilot/gpt-4.1",
+                label="GPT-4.1",
+                description="GitHub Copilot chat model.",
+            ),
+        ),
         backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
         strip_model_prefix=True,
@@ -466,7 +526,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
-        responses_models=("deepseek-v4-flash",),
+        responses_models=(
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash-vision-exp",
+        ),
+        responses_default_tools=("web_search",),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(

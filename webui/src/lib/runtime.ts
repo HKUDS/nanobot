@@ -10,7 +10,7 @@ export interface RuntimeHost {
   exportDiagnostics?: () => Promise<string>;
 }
 
-export interface HostRuntimeInfo {
+interface HostRuntimeInfo {
   surface: "native";
   app_version: string;
   engine_status: "starting" | "ready" | "restarting" | "stopped" | "crashed";
@@ -23,7 +23,7 @@ export interface HostRuntimeInfo {
   engine_transport?: "unix_socket";
 }
 
-export interface NanobotHostApi {
+interface NanobotHostApi {
   getRuntimeInfo?(): Promise<HostRuntimeInfo>;
   restartEngine?(): Promise<void>;
   pickFolder?(): Promise<string | null>;
@@ -40,7 +40,7 @@ export interface NanobotHostApi {
   ): () => void;
 }
 
-export type HostSocketEvent =
+type HostSocketEvent =
   | { id: string; type: "open" }
   | { data: string; id: string; type: "message" }
   | { id: string; message: string; type: "error" }

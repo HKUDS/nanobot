@@ -16,6 +16,8 @@ webui/node_modules/
 webui/dist/
 webui/coverage/
 webui/.vite/
+tui/node_modules/
+tui/dist/
 *.tsbuildinfo
 
 # Python bytecode & caches

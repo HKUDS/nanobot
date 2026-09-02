@@ -62,28 +62,14 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "skill-creator" in prompt
 
-    def test_prompt_embeds_current_memory_file_contents(self, store):
-        """Dream must see the real current file contents (Tier 4) so it edits the
-        files, not a stale mental model."""
+    def test_prompt_does_not_duplicate_current_memory_file_contents(self, store):
         store.append_history("hello")
         result = store.build_dream_prompt()
         assert result is not None
         prompt, _ = result
-        assert "## Current Memory Files" in prompt
-        assert "### SOUL.md" in prompt
-        assert "### USER.md" in prompt
-        assert "### memory/MEMORY.md" in prompt
-        # Real current contents are embedded verbatim.
-        assert "Project X active" in prompt
-        assert "Helpful" in prompt
-
-    def test_prompt_renders_missing_files_as_empty(self, tmp_path):
-        store = MemoryStore(tmp_path)  # no durable files written
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-        assert "(empty)" in prompt
+        assert "## Current Memory Files" not in prompt
+        assert "Project X active" not in prompt
+        assert "Helpful" not in prompt
 
     def test_workspace_dream_prompt_overrides_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -184,6 +170,35 @@ class TestBuildDreamPrompt:
         assert "[skip]: audit-only" in prompt
         assert "[correction]: replace the older conflicting fact" in prompt
         assert "Always strip these bracketed tags from saved memory content" in prompt
+
+
+class TestDreamRunCompletion:
+    """The runner's terminal state gates Dream cursor advancement."""
+
+    class _Resp:
+        def __init__(self, stop_reason: str = "completed") -> None:
+            self.metadata = {"_stop_reason": stop_reason}
+
+    def test_completed_stop_reason_completes(self):
+        assert MemoryStore.dream_run_completed(self._Resp())
+
+    @pytest.mark.parametrize(
+        "stop_reason",
+        ["error", "tool_error", "max_iterations", "cancelled"],
+    )
+    def test_non_completed_stop_reason_blocks(self, stop_reason: str):
+        assert not MemoryStore.dream_run_completed(self._Resp(stop_reason))
+
+    def test_missing_response_metadata_blocks(self):
+        assert not MemoryStore.dream_run_completed(None)
+
+    def test_incompletion_reason_names_the_cause(self):
+        assert MemoryStore.dream_incompletion_reason(
+            self._Resp("max_iterations")
+        ) == "stop_reason: max_iterations"
+        assert MemoryStore.dream_incompletion_reason(None) == (
+            "stop_reason: missing response metadata"
+        )
 
 
 class TestDreamTools:
@@ -383,21 +398,20 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage={})
+            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage=None)
         )
 
         with (
             patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
             )
 
         return loop, store
@@ -478,20 +492,6 @@ class TestEphemeralDirect:
 
         assert captured.get("ephemeral") is False
 
-    async def test_ephemeral_skips_consolidator(self, tmp_path, _make_loop):
-        """When ephemeral=True, consolidator.maybe_consolidate_by_tokens is not called."""
-        from unittest.mock import patch
-
-        loop, store = _make_loop
-
-        with patch.object(
-            loop.consolidator, "maybe_consolidate_by_tokens",
-        ) as mock_consolidate:
-            await loop.process_direct(
-                "test", session_key="dream:consolidate-test", ephemeral=True,
-            )
-            mock_consolidate.assert_not_called()
-
     async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
         loop, store = _make_loop
         loop.provider.chat_with_retry.return_value = LLMResponse(
@@ -506,6 +506,45 @@ class TestEphemeralDirect:
         assert resp is not None
         assert resp.metadata["_stop_reason"] == "error"
         assert MemoryStore.dream_run_completed(resp) is False
+
+    async def test_completed_response_after_tool_error_is_success(self, _make_loop):
+        """A soft tool error is model input, not a second run-level failure state."""
+        from unittest.mock import AsyncMock
+
+        from nanobot.providers.base import ToolCallRequest
+
+        loop, store = _make_loop
+        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+            LLMResponse(
+                content="trying an edit",
+                finish_reason="tool_calls",
+                tool_calls=[ToolCallRequest(
+                    id="call_edit",
+                    name="edit_file",
+                    arguments={
+                        "path": "SOUL.md",
+                        "old_text": "text that is not present",
+                        "new_text": "replacement",
+                    },
+                )],
+                usage=None,
+            ),
+            LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage=None),
+        ])
+
+        resp = await loop.process_direct(
+            "test",
+            session_key="dream:handled-tool-error",
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        assert resp is not None
+        assert resp.metadata["_stop_reason"] == "completed"
+        assert MemoryStore.dream_run_completed(resp) is True
+        second_request = loop.provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        tool_result = next(message for message in second_request if message["role"] == "tool")
+        assert "Error" in tool_result["content"]
 
     async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
         """Dream must only see the batch selected by build_dream_prompt."""
@@ -538,7 +577,7 @@ class TestEphemeralDirect:
             bus=MessageBus(),
             provider=provider,
             workspace=tmp_path,
-            context_window_tokens=8000,
+            context_window_tokens=32_000,
         )
 
         await loop.process_direct(
@@ -557,6 +596,63 @@ class TestEphemeralDirect:
         assert "entry-21" not in request_text
         assert "entry-60" not in request_text
 
+    async def test_dream_turn_injects_memory_files_once_and_persists_session(self, tmp_path):
+        """Dream gets durable files from system context without losing its session record."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        markers = {
+            "SOUL.md": "DREAM_SOUL_MARKER",
+            "USER.md": "DREAM_USER_MARKER",
+            "memory/MEMORY.md": "DREAM_MEMORY_MARKER",
+        }
+        store = MemoryStore(tmp_path)
+        store.write_soul(markers["SOUL.md"])
+        store.write_user(markers["USER.md"])
+        store.write_memory(markers["memory/MEMORY.md"])
+        store.append_history("history-marker")
+        (tmp_path / "AGENTS.md").write_text("DREAM_AGENTS_MARKER", encoding="utf-8")
+
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+
+        captured: dict[str, list[dict]] = {}
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+
+        async def chat_with_retry(**kwargs):
+            captured["messages"] = kwargs["messages"]
+            return LLMResponse(content="done", finish_reason="stop")
+
+        provider.chat_with_retry = chat_with_retry
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            context_window_tokens=32_000,
+        )
+        session_key = "dream:single-memory-copy"
+
+        await loop.process_direct(
+            prompt,
+            session_key=session_key,
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        messages = captured["messages"]
+        system_prompt = str(messages[0]["content"])
+        request_text = "\n".join(str(message.get("content", "")) for message in messages)
+        for marker in [*markers.values(), "DREAM_AGENTS_MARKER"]:
+            assert marker in system_prompt
+            assert request_text.count(marker) == 1
+        assert loop.sessions._get_session_path(session_key).exists()
+
 
 class TestEphemeralHooks:
     """When ephemeral=True, extra hooks must not fire."""
@@ -569,6 +665,7 @@ class TestEphemeralHooks:
         from nanobot.agent.hook import AgentHook
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -576,8 +673,8 @@ class TestEphemeralHooks:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=MagicMock(
-                content="done", finish_reason="stop", tool_calls=[], usage={},
+            return_value=LLMResponse(
+                content="done", finish_reason="stop", tool_calls=[], usage=None,
             )
         )
 
@@ -589,15 +686,14 @@ class TestEphemeralHooks:
         with (
             patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
                 hooks=[spy],
             )
 

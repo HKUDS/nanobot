@@ -2,11 +2,13 @@
 
 import json
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from loguru import logger
 
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
@@ -156,7 +158,10 @@ class TestConvertMessages:
         ], preserve_reasoning=True)
 
         assert items == [
-            {"type": "reasoning", "content": "think first"},
+            {
+                "type": "reasoning",
+                "content": [{"type": "output_text", "text": "think first"}],
+            },
             {
                 "type": "message",
                 "role": "assistant",
@@ -165,6 +170,32 @@ class TestConvertMessages:
                 "id": "msg_0",
             },
         ]
+
+    def test_reasoning_content_serialized_as_array_for_deepseek(self):
+        # Regression for PR #5214: DeepSeek's Responses gateway rejects
+        # reasoning items whose ``content`` is a plain string with
+        # "input: invalid type: string ..., expected a sequence" (observed
+        # after context consolidation cleared provider state and forced
+        # full-history conversion). ``content`` must be a list of parts,
+        # matching both the OpenAI Responses schema and DeepSeek's accepted
+        # wire shape.
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "reasoning_content": "Michael topped up DeepSeek with $10.",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_1|fc_1",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                }],
+            },
+        ], preserve_reasoning=True)
+
+        assert items[0]["type"] == "reasoning"
+        assert items[0]["content"] == [
+            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+        ]
+        assert items[1]["type"] == "function_call"
 
     def test_assistant_empty_content_skipped(self):
         _, items = convert_messages([{"role": "assistant", "content": ""}])
@@ -454,7 +485,7 @@ class TestParseResponseOutput:
         result = parse_response_output(resp)
         assert result.content == "Hello!"
         assert result.finish_reason == "stop"
-        assert result.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert result.tool_calls == []
 
     def test_refusal_response_surfaces_text_without_advancing_state(self):
@@ -622,7 +653,8 @@ class TestParseResponseOutput:
         }
         result = parse_response_output(mock)
         assert result.content == "sdk"
-        assert result.usage["prompt_tokens"] == 1
+        assert result.usage is not None
+        assert result.usage.input_tokens == 1
 
     def test_usage_maps_responses_api_keys(self):
         """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
@@ -632,9 +664,20 @@ class TestParseResponseOutput:
             "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
         }
         result = parse_response_output(resp)
-        assert result.usage["prompt_tokens"] == 100
-        assert result.usage["completion_tokens"] == 50
-        assert result.usage["total_tokens"] == 150
+        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
+
+    def test_non_stream_preserves_provider_reported_total(self):
+        result = parse_response_output({
+            "output": [],
+            "status": "completed",
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 999},
+        })
+
+        assert result.usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=999,
+        )
 
     def test_preserves_every_output_item_as_opaque_state(self):
         input_items = [{"role": "user", "content": "inspect the repo"}]
@@ -669,6 +712,45 @@ class TestParseResponseOutput:
         assert result.provider_state is not None
         assert responses_state_items(result.provider_state) == [*input_items, *output]
 
+    def test_marks_only_a_new_response_compaction(self):
+        compacted = parse_response_output(
+            {
+                "output": [
+                    {"type": "compaction", "encrypted_content": "opaque"},
+                    {"type": "message", "role": "assistant", "content": "done"},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "old"}],
+        )
+        replayed = parse_response_output(
+            {
+                "output": [
+                    {"type": "message", "role": "assistant", "content": "continued"},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[
+                {"type": "compaction", "encrypted_content": "opaque"},
+            ],
+        )
+
+        assert compacted.provider_compaction_applied is True
+        assert compacted.provider_compaction_state is not None
+        assert compacted.provider_compaction_scope == "current_request"
+        assert responses_state_items(compacted.provider_compaction_state) == [
+            {"type": "compaction", "encrypted_content": "opaque"},
+        ]
+        assert replayed.provider_compaction_applied is False
+        assert replayed.provider_compaction_state is None
+        assert replayed.provider_compaction_scope is None
+
 
 class TestResponsesConversationState:
     def test_server_compaction_prunes_superseded_prefix(self):
@@ -683,18 +765,18 @@ class TestResponsesConversationState:
                 {"type": "compaction", "encrypted_content": "compact"},
                 {"type": "message", "role": "assistant", "content": "new"},
             ],
-            usage={
-                "prompt_tokens": 90,
-                "completion_tokens": 10,
-                "total_tokens": 100,
-            },
+            usage=LLMUsage.reported(
+                input_tokens=90,
+                output_tokens=10,
+                total_tokens=175,
+            ),
         )
 
         assert responses_state_items(state) == [
             {"type": "compaction", "encrypted_content": "compact"},
             {"type": "message", "role": "assistant", "content": "new"},
         ]
-        assert responses_state_context_tokens(state) == 100
+        assert responses_state_context_tokens(state) == 175
 
     def test_existing_compaction_keeps_canonical_retained_prefix(self):
         canonical_input = [
@@ -823,6 +905,59 @@ class TestResponsesConversationState:
             "content": [{"type": "input_text", "text": "continue"}],
         }
         assert "lossy public transcript" not in str(items)
+
+    def test_replayed_and_delta_reasoning_items_keep_array_content(self):
+        # Regression for PR #5214: token consolidation clears
+        # ``provider_state``, so the next turn converts the full history
+        # (including assistant reasoning) instead of replaying server items.
+        # Both paths must keep reasoning ``content`` as a list - DeepSeek's
+        # Responses gateway rejects the string form with a serde error.
+        prior_items = [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "content": [{"type": "output_text", "text": "prior reasoning"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "prior answer"}],
+                "status": "completed",
+                "id": "msg_0",
+            },
+        ]
+        state = build_responses_state(
+            provider="openai:test",
+            model="deepseek-v4-flash",
+            input_items=prior_items,
+            output_items=[],
+        ).with_pending_messages([
+            {
+                "role": "assistant",
+                "reasoning_content": "think before acting",
+                "content": "answer",
+            },
+            {"role": "user", "content": "audit the tools"},
+        ])
+
+        instructions, items, replayed = prepare_responses_input(
+            [
+                {"role": "system", "content": "You are KITT."},
+                {"role": "user", "content": "audit the tools"},
+            ],
+            state=state,
+            provider="openai:test",
+            model="deepseek-v4-flash",
+            preserve_reasoning=True,
+        )
+
+        assert instructions == "You are KITT."
+        assert replayed is True
+        reasoning_items = [item for item in items if item.get("type") == "reasoning"]
+        assert len(reasoning_items) == 2  # one replayed, one converted delta
+        for item in reasoning_items:
+            assert isinstance(item["content"], list)
+            assert item["content"][0]["type"] == "output_text"
 
 
 # ======================================================================
@@ -973,8 +1108,24 @@ class TestConsumeSse:
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
         response = _SseResponse([
-            {"type": "response.reasoning_summary_text.delta", "delta": "thinking "},
-            {"type": "response.reasoning_summary_text.delta", "delta": "briefly"},
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "thinking ",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "briefly",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 1,
+                "delta": "Checking result",
+            },
             {"type": "response.output_text.delta", "delta": "answer"},
             {"type": "response.completed", "response": {"status": "completed"}},
         ])
@@ -991,9 +1142,9 @@ class TestConsumeSse:
         assert content == "answer"
         assert tool_calls == []
         assert finish_reason == "stop"
-        assert usage == {}
-        assert reasoning == "thinking briefly"
-        assert deltas == ["thinking ", "briefly"]
+        assert usage is None
+        assert reasoning == "thinking briefly\nChecking result"
+        assert deltas == ["thinking ", "briefly", "\nChecking result"]
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_completed_response(self):
@@ -1004,7 +1155,7 @@ class TestConsumeSse:
                     "status": "completed",
                     "output": [
                         {"type": "reasoning", "summary": [
-                            {"type": "summary_text", "text": "cached "},
+                            {"type": "summary_text", "text": "cached"},
                             {"type": "summary_text", "text": "summary"},
                         ]},
                     ],
@@ -1014,7 +1165,7 @@ class TestConsumeSse:
 
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
-        assert reasoning == "cached summary"
+        assert reasoning == "cached\nsummary"
 
     @pytest.mark.asyncio
     async def test_capture_commits_exact_items_only_after_completed_event(self):
@@ -1125,7 +1276,7 @@ class TestConsumeSse:
 
         assert content == "partial"
         assert finish_reason == expected_finish_reason
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert capture.completed is True
         assert capture.response == terminal_response
         assert capture.output_items == output
@@ -1195,14 +1346,83 @@ class TestConsumeSse:
                 "type": "response.completed",
                 "response": {
                     "status": "completed",
-                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {
+                            "cached_tokens": 8,
+                            "cache_write_tokens": 0,
+                        },
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
                 },
             },
         ])
 
         _, _, _, usage, _ = await consume_sse_with_reasoning(response)
 
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=8,
+            cache_write_tokens=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_and_non_stream_share_usage_normalization(self):
+        terminal = {
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 15,
+                "input_tokens_details": {
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 7,
+                },
+                "output_tokens": 18,
+                "total_tokens": 175,
+            },
+        }
+        non_stream = parse_response_output(terminal).usage
+        sse = _SseResponse([
+            {"type": "response.completed", "response": terminal},
+        ])
+        _, _, _, streamed, _ = await consume_sse_with_reasoning(sse)
+
+        sdk_response = SimpleNamespace(**terminal)
+        sdk_response.usage = SimpleNamespace(
+            input_tokens=15,
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=0,
+                cache_write_tokens=7,
+            ),
+            output_tokens=18,
+            total_tokens=175,
+        )
+
+        async def sdk_stream():
+            yield SimpleNamespace(type="response.completed", response=sdk_response)
+
+        _, _, _, sdk_streamed, _ = await consume_sdk_stream(sdk_stream())
+        expected = LLMUsage.reported(
+            input_tokens=15,
+            output_tokens=18,
+            total_tokens=175,
+            cache_read_tokens=0,
+            cache_write_tokens=7,
+        )
+        assert non_stream == streamed == sdk_streamed == expected
+
+    def test_missing_usage_is_not_explicit_zero_usage(self):
+        missing = parse_response_output({"status": "completed", "output": []})
+        explicit_zero = parse_response_output({
+            "status": "completed",
+            "output": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        })
+
+        assert missing.usage is None
+        assert explicit_zero.usage == LLMUsage.reported(input_tokens=0, output_tokens=0)
 
     @pytest.mark.asyncio
     async def test_tool_call_done_arguments_callback(self):
@@ -1304,6 +1524,91 @@ class TestConsumeSdkStream:
         assert content == "Hello world"
         assert tool_calls == []
         assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_hosted_web_search_lifecycle_is_streamed_as_tool_progress(self):
+        search_added = SimpleNamespace(
+            type="web_search_call",
+            id="ws_1",
+            status="in_progress",
+            action=SimpleNamespace(type="search"),
+        )
+        search_done = SimpleNamespace(
+            type="web_search_call",
+            id="ws_1",
+            status="completed",
+            action=SimpleNamespace(
+                type="search",
+                queries=["nanobot DeepSeek", "nanobot latest release"],
+                sources=[
+                    SimpleNamespace(
+                        title="DeepSeek Responses API",
+                        url="https://api-docs.deepseek.com/guides/responses_api/",
+                    ),
+                ],
+            ),
+        )
+        response = SimpleNamespace(status="completed", usage=None, output=[search_done])
+        events = [
+            SimpleNamespace(
+                type="response.output_item.added",
+                output_index=0,
+                item=search_added,
+            ),
+            SimpleNamespace(
+                type="response.web_search_call.searching",
+                item_id="ws_1",
+                output_index=0,
+            ),
+            SimpleNamespace(
+                type="response.web_search_call.completed",
+                item_id="ws_1",
+                output_index=0,
+            ),
+            SimpleNamespace(
+                type="response.output_item.done",
+                output_index=0,
+                item=search_done,
+            ),
+            SimpleNamespace(type="response.completed", response=response),
+        ]
+        tool_events: list[dict] = []
+
+        async def stream():
+            for event in events:
+                yield event
+
+        async def on_tool_event(event: dict) -> None:
+            tool_events.append(event)
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=on_tool_event)
+
+        assert tool_events == [
+            {
+                "kind": "hosted_tool",
+                "phase": "start",
+                "call_id": "ws_1",
+                "name": "web_search",
+                "arguments": {},
+                "result": None,
+            },
+            {
+                "kind": "hosted_tool",
+                "phase": "end",
+                "call_id": "ws_1",
+                "name": "web_search",
+                "arguments": {
+                    "query": "nanobot DeepSeek · nanobot latest release",
+                },
+                "result": {
+                    "status": "completed",
+                    "sources": [{
+                        "title": "DeepSeek Responses API",
+                        "url": "https://api-docs.deepseek.com/guides/responses_api/",
+                    }],
+                },
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_refusal_events_reconcile_parts_and_terminal_output(self):
@@ -1584,15 +1889,24 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_usage_extracted(self):
-        usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
-        resp_obj = MagicMock(status="completed", usage=usage_obj, output=[])
-        ev = MagicMock(type="response.completed", response=resp_obj)
+        usage_obj = SimpleNamespace(
+            input_tokens=10,
+            input_tokens_details=SimpleNamespace(cached_tokens=8),
+            output_tokens=5,
+            total_tokens=15,
+        )
+        resp_obj = SimpleNamespace(status="completed", usage=usage_obj, output=[])
+        ev = SimpleNamespace(type="response.completed", response=resp_obj)
 
         async def stream():
             yield ev
 
         _, _, _, usage, _ = await consume_sdk_stream(stream())
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=8,
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1647,7 +1961,7 @@ class TestConsumeSdkStream:
 
         assert content == "partial"
         assert finish_reason == expected_finish_reason
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert capture.completed is True
         assert capture.response == terminal_response
         assert capture.output_items == output

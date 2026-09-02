@@ -12,7 +12,7 @@ These repository docs follow current `main`. The recommended installer uses the 
 - Access to one supported AI provider, company endpoint, or local model server.
 - The credential, endpoint URL, and model ID required by that service. Local providers such as Ollama may not require a key.
 
-Git is only needed for a source install. The published package already contains the WebUI. A current-source install needs `bun` or `npm` so its WebUI bundle can be built.
+Git and [Bun](https://bun.sh/) are only needed for a source install. The published package already contains the WebUI and fetches a checksummed, version-matched TUI archive with its licenses, notices, corresponding application source, source offer, and relinking instructions on first use.
 
 ## 1. Install nanobot
 
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`. At the end it prints the exact command it used to run nanobot; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
+The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release. At the end it prints the exact command it used to run nanobot; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
 
 If you prefer to inspect the scripts first, open [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1).
 
@@ -48,7 +48,8 @@ The WebUI launcher creates or updates:
 | Path | Purpose |
 |---|---|
 | `~/.nanobot/config.json` | Provider, model, WebUI, channel, tool, and runtime settings |
-| `~/.nanobot/workspace/` | Sessions, memory, skills, automations, and generated files |
+| `~/.nanobot/workspace/` | Memory, skills, automations, and generated files |
+| `~/.nanobot/sessions/<workspace-id>/` | Recent session history stored outside the workspace; the ID remains stable across workspace moves |
 
 If the installer did not open the browser, run:
 
@@ -78,7 +79,7 @@ Most other providers can say `not set`. This command validates local setup but d
 
 ## 4. Get the First Reply
 
-If the installer-started WebUI is no longer running, run `nanobot webui` again. Leave that terminal open; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it.
+If the installer-started WebUI is no longer running, run `nanobot webui` again. Leave that launcher open; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it.
 
 Send:
 
@@ -88,7 +89,7 @@ Hello!
 
 Any normal assistant answer is success. It proves that nanobot can load the config, reach the selected model, use the workspace, and serve the browser UI.
 
-Leave the terminal open while using the WebUI. If you prefer a managed background process, stop the foreground process with `Ctrl+C`, then run:
+Interactive WebUI and TUI launchers share one on-demand gateway. Closing one launcher leaves it running for the others; closing the last launcher stops it. If you prefer a persistent background process, press `Ctrl+C`, then run:
 
 ```bash
 nanobot gateway --background
@@ -102,16 +103,20 @@ Use `nanobot gateway logs`, `restart`, and `stop` to manage that background gate
 If you do not want the browser or need to isolate a WebUI problem, send one message directly:
 
 ```bash
-nanobot agent -m "Hello!"
+nanobot -m "Hello!"
 ```
 
 Then start an interactive terminal chat with:
 
 ```bash
-nanobot agent
+nanobot
 ```
 
-In interactive mode, `Enter` sends and `Alt+Enter` inserts a newline. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
+In interactive mode, `Enter` sends and `Shift+Enter` inserts a newline (`Ctrl+J` is the
+universal fallback). While nanobot is working, `Enter` sends immediately, `Tab` waits until the
+current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) edits the
+latest waiting message. Exit
+with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
 ## Choose One Next Step
 
@@ -150,18 +155,28 @@ If pip reports `externally-managed-environment`, use the recommended installer, 
 
 **Current source**
 
-`bun` or `npm` must be available. Activate a virtual environment first, then run:
+Clone the repository and install it in editable mode. Bun is required so the checkout can run
+its matching native TUI instead of mixing current Python with an older release binary.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
-python -m pip install .
+python -m venv .venv
+```
+
+Activate it with `source .venv/bin/activate` on macOS/Linux or
+`.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
+
+```bash
+python -m pip install -e .
 nanobot webui
 ```
 
-On Windows, if `python -m pip install .` reports that it cannot launch `npm`, run `cd webui`, `npm.cmd install --package-lock=false`, `npm.cmd run build`, and `cd ..` in order, then retry the install.
-
-The source path follows current `main` and can be newer than the published package. A non-editable install triggers the build hook that bundles the current WebUI. For editable Python or frontend development, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`../webui/README.md`](../webui/README.md).
+The source path follows current `main` and can be newer than the published package. The editable
+install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and
+`nanobot webui` automatically rebuilds `webui/` when its bundled assets are stale. All normal
+commands remain the same as a stable install. For development details, follow
+[`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 If the package is installed but the shell cannot find `nanobot`, use the runner that owns the installation. The recommended installer prints the exact command to reuse. Common forms are:
 
@@ -220,11 +235,15 @@ python -m pip install -U nanobot-ai
 For a source checkout:
 
 ```bash
-git pull
-python -m pip install .
+git pull --ff-only
+python -m pip install -e .
 ```
 
-Then check `nanobot --version`. Run `nanobot onboard --refresh` when you want to add newly introduced default fields while preserving existing settings.
+Because the install is editable, normal source changes are visible immediately. Re-running the
+install synchronizes any changed Python dependencies; the TUI and WebUI refresh their own
+dependencies/assets when launched. Then check `nanobot --version`. Run
+`nanobot onboard --refresh` when you want to add newly introduced default fields while preserving
+existing settings.
 
 ## If the First Reply Fails
 

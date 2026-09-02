@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import sys
 import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 import nanobot.channels.whatsapp.runtime as whatsapp_module
@@ -78,7 +80,21 @@ def _make_channel(config: dict | None = None) -> WhatsAppChannel:
     return ch
 
 
-def _patch_neonize_api(monkeypatch) -> None:
+def _make_send_client() -> SimpleNamespace:
+    return SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+
+
+def _patch_neonize_api(monkeypatch, detect_mime=None, detect_buffer=None) -> None:
+    detect_mime = detect_mime or (
+        lambda path, *, mime: mimetypes.guess_type(path)[0] or "application/octet-stream"
+    )
+    detect_buffer = detect_buffer or (lambda data, *, mime: "application/octet-stream")
     monkeypatch.setattr(
         whatsapp_module,
         "_NEONIZE_API",
@@ -89,6 +105,8 @@ def _patch_neonize_api(monkeypatch) -> None:
             MessageEv=object(),
             PairStatusEv=object(),
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
+            detect_mime=detect_mime,
+            detect_buffer=detect_buffer,
         ),
     )
 
@@ -178,13 +196,7 @@ async def test_login_fails_when_connect_task_fails(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
-    client = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_image=AsyncMock(),
-        send_video=AsyncMock(),
-        send_audio=AsyncMock(),
-        send_document=AsyncMock(),
-    )
+    client = _make_send_client()
     ch = _make_channel()
     ch._client = client
     ch._connected = True
@@ -197,13 +209,7 @@ async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
-    client = SimpleNamespace(
-        send_message=AsyncMock(),
-        send_image=AsyncMock(),
-        send_video=AsyncMock(),
-        send_audio=AsyncMock(),
-        send_document=AsyncMock(),
-    )
+    client = _make_send_client()
     ch = _make_channel()
     ch._client = client
     ch._connected = True
@@ -213,20 +219,205 @@ async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
             channel="whatsapp",
             chat_id="12345@s.whatsapp.net",
             content="",
-            media=["photo.jpg", "clip.mp4", "voice.ogg", "report.pdf"],
+            media=["photo.jpg", "clip.mp4", "voice.mp3", "report.pdf"],
         )
     )
 
     jid = ("12345", "s.whatsapp.net")
     client.send_image.assert_awaited_once_with(jid, "photo.jpg")
     client.send_video.assert_awaited_once_with(jid, "clip.mp4")
-    client.send_audio.assert_awaited_once_with(jid, "voice.ogg")
+    client.send_audio.assert_awaited_once_with(jid, "voice.mp3")
     client.send_document.assert_awaited_once_with(
         jid,
         "report.pdf",
         filename="report.pdf",
         mimetype="application/pdf",
     )
+
+
+@pytest.mark.asyncio
+async def test_send_mislabeled_audio_as_document(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch, detect_mime=lambda path, *, mime: "audio/x-wav")
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=["recording.mpeg"],
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_document.assert_awaited_once_with(
+        jid,
+        "recording.mpeg",
+        filename="recording.mpeg",
+        mimetype="audio/x-wav",
+    )
+    client.send_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_remote_mislabeled_audio_as_document(monkeypatch) -> None:
+    payload = b"remote wav payload"
+    media_url = "https://cdn.example/recording.mpeg?token=secret"
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == media_url
+        return httpx.Response(200, content=payload)
+
+    monkeypatch.setattr(
+        whatsapp_module,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(handle_request),
+    )
+
+    def detect_buffer(data: bytes, *, mime: bool) -> str:
+        assert data == payload
+        assert mime is True
+        return "audio/x-wav"
+
+    _patch_neonize_api(
+        monkeypatch,
+        detect_buffer=detect_buffer,
+    )
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[media_url],
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_document.assert_awaited_once_with(
+        jid,
+        payload,
+        filename="recording.mpeg",
+        mimetype="audio/x-wav",
+    )
+    client.send_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_remote_media_blocks_private_url(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    with pytest.raises(httpx.RequestError, match="private/internal"):
+        await ch.send(
+            OutboundMessage(
+                channel="whatsapp",
+                chat_id="12345@s.whatsapp.net",
+                content="",
+                media=["http://127.0.0.1/recording.mpeg"],
+            )
+        )
+
+    client.send_video.assert_not_awaited()
+    client.send_document.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_remote_media_enforces_download_limit(monkeypatch) -> None:
+    monkeypatch.setattr(whatsapp_module, "_REMOTE_MEDIA_MAX_BYTES", 3)
+    monkeypatch.setattr(
+        whatsapp_module,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, content=b"1234")),
+    )
+    _patch_neonize_api(monkeypatch)
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    with pytest.raises(ValueError, match="exceeds the 3-byte limit"):
+        await ch.send(
+            OutboundMessage(
+                channel="whatsapp",
+                chat_id="12345@s.whatsapp.net",
+                content="",
+                media=["https://cdn.example/recording.mpeg"],
+            )
+        )
+
+    client.send_video.assert_not_awaited()
+    client.send_document.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_unsupported_ogg_audio_as_document(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch, detect_mime=lambda path, *, mime: "audio/ogg")
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=["voice.ogg"],
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_document.assert_awaited_once_with(
+        jid,
+        "voice.ogg",
+        filename="voice.ogg",
+        mimetype="audio/ogg",
+    )
+    client.send_audio.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("detected_mimetype", "filename"),
+    [
+        ("audio/x-m4a", "recording.m4a"),
+        ("audio/x-hx-aac-adts", "recording.aac"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_send_supported_audio_magic_aliases_inline(
+    monkeypatch, detected_mimetype: str, filename: str
+) -> None:
+    _patch_neonize_api(
+        monkeypatch,
+        detect_mime=lambda path, *, mime: detected_mimetype,
+    )
+    client = _make_send_client()
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[filename],
+        )
+    )
+
+    client.send_audio.assert_awaited_once_with(("12345", "s.whatsapp.net"), filename)
+    client.send_document.assert_not_awaited()
 
 
 @pytest.mark.asyncio

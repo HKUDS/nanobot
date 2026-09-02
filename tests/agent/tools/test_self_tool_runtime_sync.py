@@ -4,23 +4,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
+from nanobot.bus.queue import MessageBus
 
 
 @pytest.mark.asyncio
-async def test_my_tool_max_iterations_syncs_subagent_limit() -> None:
-    loop = MagicMock()
-    loop.max_iterations = 40
-    loop._runtime_vars = {}
-    loop.subagents = MagicMock()
-    loop.subagents.max_iterations = loop.max_iterations
-
-    def _sync_subagent_runtime_limits() -> None:
-        loop.subagents.max_iterations = loop.max_iterations
-
-    loop._sync_subagent_runtime_limits = _sync_subagent_runtime_limits
-
-    tool = MyTool(runtime_state=loop)
+async def test_my_tool_max_iterations_syncs_subagent_limit(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        max_iterations=40,
+    )
+    tool = MyTool(runtime_control=AgentRuntimeControl(loop))
 
     result = await tool.execute(action="set", key="max_iterations", value=80)
 

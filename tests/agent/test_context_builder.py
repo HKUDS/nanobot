@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
+from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.runtime_context import RuntimeContextBlock
 
 # ---------------------------------------------------------------------------
@@ -133,10 +133,7 @@ class TestLoadBootstrapFiles:
         (project / "SOUL.md").write_text("project soul collision", encoding="utf-8")
         (project / "USER.md").write_text("project user collision", encoding="utf-8")
 
-        result = ContextBuilder(agent_home).build_system_prompt(
-            workspace=project,
-            include_memory_recent_history=False,
-        )
+        result = ContextBuilder(agent_home).build_system_prompt(workspace=project)
 
         assert "selected project rules" in result
         assert "global project rules" not in result
@@ -152,10 +149,7 @@ class TestLoadBootstrapFiles:
         project.mkdir()
         (agent_home / "AGENTS.md").write_text("default workspace rules", encoding="utf-8")
 
-        result = ContextBuilder(agent_home).build_system_prompt(
-            workspace=project,
-            include_memory_recent_history=False,
-        )
+        result = ContextBuilder(agent_home).build_system_prompt(workspace=project)
 
         assert "default workspace rules" not in result
 
@@ -223,6 +217,8 @@ class TestBundledToolContract:
         assert "Use the narrowest structured tool" in content
         assert "Do not use `exec` as a universal workaround" in content
         assert "## File and Coding Workflows" in content
+        assert "`grep` returns matches with five context lines by default" in content
+        assert 'defaults to `output_mode="files_with_matches"`' not in content
         assert "apply_patch" in content
         assert "acceptance criteria into concrete checks" in content
         assert "visual evidence reaches the model" in content
@@ -309,6 +305,14 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
         assert "workspace" in result.lower() or "python" in result.lower()
 
+    def test_default_identity_uses_relative_agent_paths(self, tmp_path):
+        result = ContextBuilder(tmp_path)._get_identity()
+
+        assert str(tmp_path.resolve()) not in result
+        assert "Agent profile: SOUL.md and USER.md" in result
+        assert "History log: memory/history.jsonl" in result
+        assert "Custom skills: skills/{skill-name}/SKILL.md" in result
+
     def test_selected_project_identity_keeps_agent_data_in_agent_workspace(self, tmp_path):
         agent_home = tmp_path / "agent-home"
         project = tmp_path / "project"
@@ -317,7 +321,7 @@ class TestBuildSystemPrompt:
 
         result = ContextBuilder(agent_home)._get_identity(workspace=project)
 
-        assert f"current project workspace is at: {project.resolve()}" in result
+        assert str(project.resolve()) not in result
         assert f"agent workspace is at: {agent_home.resolve()}" in result
         assert f"{agent_home.resolve()}/SOUL.md" in result
         assert f"{project.resolve()}/SOUL.md" not in result
@@ -330,14 +334,19 @@ class TestBuildSystemPrompt:
 
     def test_includes_session_summary(self, tmp_path):
         builder = _builder(tmp_path)
-        result = builder.build_system_prompt(session_summary="Previous chat about Python.")
+        summary = {
+            "text": "Previous chat about Python.",
+            "last_active": "2026-08-19T10:00:00",
+        }
+        result = builder.build_system_prompt(session_summary=summary)
         assert "Previous chat about Python." in result
         assert "[Archived Context Summary]" in result
 
     def test_sections_separated_by_separator(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
         builder = _builder(tmp_path)
-        result = builder.build_system_prompt(session_summary="Summary.")
+        summary = {"text": "Summary.", "last_active": "2026-08-19T10:00:00"}
+        result = builder.build_system_prompt(session_summary=summary)
         assert "\n\n---\n\n" in result
 
     def test_no_bootstrap_no_summary(self, tmp_path):
@@ -388,6 +397,15 @@ class TestBuildMessages:
         assert "user-only runtime context" not in messages[-1]["content"]
         assert "_meta" not in messages[-1]
 
+    def test_compatibility_builder_merges_system_role_without_history(self, tmp_path):
+        builder = _builder(tmp_path)
+
+        messages = builder.build_messages([], "system event", current_role="system")
+
+        assert len(messages) == 1
+        assert messages[0]["role"] == "system"
+        assert str(messages[0]["content"]).endswith("system event")
+
     def test_explicit_skill_reference_loads_full_instructions_for_this_turn(self, tmp_path):
         skill_dir = tmp_path / "skills" / "review"
         skill_dir.mkdir(parents=True)
@@ -402,15 +420,20 @@ class TestBuildMessages:
         builder = _builder(tmp_path)
 
         messages = builder.build_messages([], "Please $review this patch and use $review carefully.")
+        plain_messages = builder.build_messages([], "Please review this patch carefully.")
 
         system_prompt = messages[0]["content"]
-        assert "# Active Skills" in system_prompt
-        assert "### Skill: review" in system_prompt
-        assert "Follow the unique review checklist." in system_prompt
-        assert system_prompt.count("### Skill: review") == 1
-        assert messages[-1]["content"] == (
-            "Please $review this patch and use $review carefully."
-        )
+        user_prompt = messages[-1]["content"]
+        assert system_prompt == plain_messages[0]["content"]
+        assert "Follow the unique review checklist." not in system_prompt
+        assert "Please $review this patch" in user_prompt
+        assert "[Active Skills — instructions for this user turn]" in user_prompt
+        assert "### Skill: review" in user_prompt
+        assert "Follow the unique review checklist." in user_prompt
+        assert user_prompt.count("### Skill: review") == 1
+        assert messages[-1]["_meta"]["runtime_context"]["sources"] == [
+            "explicit_skills"
+        ]
 
     def test_unknown_skill_reference_does_not_change_active_skills(self, tmp_path):
         messages = _builder(tmp_path).build_messages([], "Keep the shell literal $HOME.")
@@ -451,6 +474,20 @@ class TestBuildMessages:
         assert len(messages) == 2  # system + merged user
         assert "previous user message" in str(messages[1]["content"])
         assert "new message" in str(messages[1]["content"])
+
+    def test_structured_transcript_preserves_fresh_turn_boundary(self, tmp_path):
+        builder = _builder(tmp_path)
+        transcript = TranscriptInput(
+            history=[{"role": "user", "content": "previous user message"}],
+            current_message="new message",
+        )
+
+        messages = builder.build_transcript(transcript)
+
+        assert [message["role"] for message in messages] == ["system", "user", "user"]
+        assert messages[-2]["content"] == "previous user message"
+        assert messages[-1]["content"] == "new message"
+        assert transcript.message_count == 3
 
     def test_current_message_can_be_built_without_history_merge(self, tmp_path):
         builder = _builder(tmp_path)

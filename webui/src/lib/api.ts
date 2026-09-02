@@ -10,6 +10,7 @@ import type {
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  McpOAuthFlowPayload,
   MarketplaceProvider,
   NanobotFeaturesPayload,
   ModelConfigurationCreate,
@@ -21,7 +22,9 @@ import type {
   ProviderOAuthCompletionResult,
   ProviderOAuthLoginResult,
   ProviderSettingsUpdate,
+  RecoveryState,
   SessionDeleteResult,
+  SessionHandle,
   SessionAutomationsPayload,
   SettingsPayload,
   SettingsUpdate,
@@ -44,6 +47,8 @@ import type {
 import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
+const API_MUTATION_TIMEOUT_MS = 20_000;
+const PACKAGE_MUTATION_TIMEOUT_MS = 150_000;
 const SLASH_COMMAND_LIFECYCLES = new Set<SlashCommandLifecycle>([
   "side_channel",
   "finalize_active_turn",
@@ -58,12 +63,6 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
     && SLASH_COMMAND_LIFECYCLES.has(value as SlashCommandLifecycle)
   );
 }
-const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
-const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
-const OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code";
-const OAUTH_CALLBACK_HEADER = "X-Nanobot-OAuth-Callback";
-const PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values";
-
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -71,6 +70,14 @@ export class ApiError extends Error {
     this.status = status;
     this.name = "ApiError";
   }
+}
+
+export interface WebUIMutationTransport {
+  requestMutation<T>(
+    action: string,
+    payload?: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<T>;
 }
 
 async function request<T>(
@@ -93,7 +100,19 @@ async function request<T>(
   );
   if (!res.ok) {
     const text = typeof res.text === "function" ? (await res.text()).trim() : "";
-    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+    let message = text;
+    if (text.startsWith("{")) {
+      try {
+        const payload: unknown = JSON.parse(text);
+        if (payload && typeof payload === "object") {
+          const error = (payload as { error?: unknown }).error;
+          if (typeof error === "string" && error.trim()) message = error.trim();
+        }
+      } catch {
+        // Preserve non-JSON error bodies exactly as returned by the gateway.
+      }
+    }
+    throw new ApiError(res.status, message || `HTTP ${res.status}`);
   }
   const contentType = res.headers?.get?.("content-type") ?? "";
   if (contentType && !contentType.toLowerCase().includes("application/json")) {
@@ -109,7 +128,27 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
-function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefined {
+async function mutation<T>(
+  transport: WebUIMutationTransport,
+  action: string,
+  payload: Record<string, unknown> = {},
+  timeoutMs: number = API_MUTATION_TIMEOUT_MS,
+): Promise<T> {
+  try {
+    return await transport.requestMutation<T>(action, payload, timeoutMs);
+  } catch (reason) {
+    const status = (
+      typeof reason === "object"
+      && reason !== null
+      && "status" in reason
+      && typeof reason.status === "number"
+    ) ? reason.status : 500;
+    const message = reason instanceof Error ? reason.message : "WebUI mutation failed";
+    throw new ApiError(status, message);
+  }
+}
+
+function compactMcpValues(values: Record<string, unknown>): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   Object.entries(values).forEach(([key, value]) => {
     if (value === null || value === undefined) return;
@@ -120,18 +159,26 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
     }
     payload[key] = value;
   });
-  if (!Object.keys(payload).length) return undefined;
-  return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
-}
-
-function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
-  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
+  return payload;
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
   const idx = key.indexOf(":");
   if (idx === -1) return { channel: "", chatId: key };
   return { channel: key.slice(0, idx), chatId: key.slice(idx + 1) };
+}
+
+function normalizeSessionHandle(value: unknown): SessionHandle | null {
+  if (!value || typeof value !== "object") return null;
+  const handle = value as Partial<SessionHandle>;
+  const id = typeof handle.id === "string" ? handle.id.trim() : "";
+  const name = typeof handle.name === "string" ? handle.name.trim() : "";
+  if (
+    !/^handle_[a-f0-9]{32}$/i.test(id)
+    || !name
+    || !/^[\p{L}\p{N}_-]+$/u.test(name)
+  ) return null;
+  return { id, name };
 }
 
 export async function listSessions(
@@ -146,7 +193,9 @@ export async function listSessions(
     preview?: string;
     model_preset?: string | null;
     run_started_at?: number | null;
+    recovery_state?: RecoveryState | null;
     workspace_scope?: WorkspaceScopePayload | null;
+    handle?: SessionHandle | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -154,17 +203,22 @@ export async function listSessions(
     undefined,
     API_READ_TIMEOUT_MS,
   );
-  return body.sessions.map((s) => ({
-    key: s.key,
-    ...splitKey(s.key),
-    createdAt: s.created_at,
-    updatedAt: s.updated_at,
-    title: s.title ?? "",
-    preview: s.preview ?? "",
-    modelPreset: s.model_preset ?? null,
-    runStartedAt: s.run_started_at ?? null,
-    workspaceScope: s.workspace_scope ?? null,
-  }));
+  return body.sessions.map((s) => {
+    const handle = normalizeSessionHandle(s.handle);
+    return {
+      key: s.key,
+      ...splitKey(s.key),
+      createdAt: s.created_at,
+      updatedAt: s.updated_at,
+      title: s.title ?? "",
+      preview: s.preview ?? "",
+      modelPreset: s.model_preset ?? null,
+      runStartedAt: s.run_started_at ?? null,
+      recoveryState: s.recovery_state ?? null,
+      workspaceScope: s.workspace_scope ?? null,
+      handle,
+    };
+  });
 }
 
 /** Disk-backed WebUI display thread snapshot (separate from agent session). */
@@ -261,37 +315,19 @@ export async function fetchAutomations(
 }
 
 export async function runAutomationAction(
-  token: string,
+  transport: WebUIMutationTransport,
   action: "enable" | "disable" | "delete" | "run",
   id: string,
-  base: string = "",
 ): Promise<AutomationsPayload> {
-  const query = new URLSearchParams();
-  query.set("id", id);
-  return request<AutomationsPayload>(
-    `${base}/api/webui/automations/${action}?${query}`,
-    token,
-    undefined,
-    API_READ_TIMEOUT_MS,
-  );
+  return mutation<AutomationsPayload>(transport, `automation.${action}`, { id });
 }
 
 export async function updateAutomation(
-  token: string,
+  transport: WebUIMutationTransport,
   id: string,
   values: AutomationUpdatePayload,
-  base: string = "",
 ): Promise<AutomationsPayload> {
-  const query = new URLSearchParams();
-  query.set("id", id);
-  return request<AutomationsPayload>(
-    `${base}/api/webui/automations/update?${query}`,
-    token,
-    {
-      headers: automationValuesHeader(values),
-    },
-    API_READ_TIMEOUT_MS,
-  );
+  return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
 }
 
 export async function fetchSkills(
@@ -320,28 +356,18 @@ export async function fetchSkillDetail(
 }
 
 export async function updateSkillEnabled(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
   enabled: boolean,
-  base: string = "",
 ): Promise<SkillActionPayload> {
-  const params = new URLSearchParams({ name, enabled: String(enabled) });
-  return request<SkillActionPayload>(
-    `${base}/api/webui/skills/update?${params}`,
-    token,
-  );
+  return mutation<SkillActionPayload>(transport, "skill.update", { name, enabled });
 }
 
 export async function deleteSkill(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
-  base: string = "",
 ): Promise<SkillActionPayload> {
-  const params = new URLSearchParams({ name });
-  return request<SkillActionPayload>(
-    `${base}/api/webui/skills/delete?${params}`,
-    token,
-  );
+  return mutation<SkillActionPayload>(transport, "skill.delete", { name });
 }
 
 export async function searchMarketplaceSkills(
@@ -389,37 +415,33 @@ export async function fetchMarketplaceSkillTrends(
 }
 
 export async function installMarketplaceSkill(
-  token: string,
+  transport: WebUIMutationTransport,
   provider: Exclude<MarketplaceProvider, "all">,
   source: string,
   skill: string,
   version: string = "",
-  base: string = "",
 ): Promise<SkillInstallPayload> {
-  const params = new URLSearchParams({ provider, source, skill });
-  if (version) params.set("version", version);
-  return request<SkillInstallPayload>(
-    `${base}/api/webui/skills/install?${params}`,
-    token,
-    undefined,
-    150_000,
+  return mutation<SkillInstallPayload>(
+    transport,
+    "skill.install",
+    { provider, source, skill, ...(version ? { version } : {}) },
+    PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
 
 export async function deleteSession(
-  token: string,
+  transport: WebUIMutationTransport,
   key: string,
   optionsOrBase?: { deleteAutomations?: boolean } | string,
-  base: string = "",
 ): Promise<SessionDeleteResult> {
   const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
-  const resolvedBase = typeof optionsOrBase === "string" ? optionsOrBase : base;
-  const query = new URLSearchParams();
-  if (options?.deleteAutomations) query.set("delete_automations", "true");
-  const suffix = query.toString() ? `?${query}` : "";
-  return request<SessionDeleteResult>(
-    `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
-    token,
+  return mutation<SessionDeleteResult>(
+    transport,
+    "session.delete",
+    {
+      key,
+      ...(options?.deleteAutomations ? { delete_automations: true } : {}),
+    },
   );
 }
 
@@ -520,56 +542,50 @@ export async function fetchApiService(token: string, base: string = ""): Promise
 }
 
 export async function startApiService(
-  token: string,
+  transport: WebUIMutationTransport,
   values: { host: string; port: number; timeout: number; apiKey?: string },
-  base: string = "",
 ): Promise<ApiServicePayload> {
-  const query = new URLSearchParams({
-    host: values.host,
-    port: String(values.port),
-    timeout: String(values.timeout),
-  });
-  const headers = values.apiKey === undefined
-    ? undefined
-    : { [API_SERVICE_VALUES_HEADER]: JSON.stringify({ api_key: values.apiKey }) };
-  return request<ApiServicePayload>(
-    `${base}/api/settings/api-service/start?${query}`,
-    token,
-    { headers },
+  return mutation<ApiServicePayload>(
+    transport,
+    "settings.api_service.start",
+    {
+      host: values.host,
+      port: values.port,
+      timeout: values.timeout,
+      ...(values.apiKey !== undefined ? { api_key: values.apiKey } : {}),
+    },
+    PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
 
-export async function stopApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
-  return request<ApiServicePayload>(`${base}/api/settings/api-service/stop`, token);
+export async function stopApiService(
+  transport: WebUIMutationTransport,
+): Promise<ApiServicePayload> {
+  return mutation<ApiServicePayload>(transport, "settings.api_service.stop");
 }
 
 export async function enableNanobotFeature(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
   options: { instanceId?: string } = {},
-  base: string = "",
 ): Promise<NanobotFeaturesPayload> {
-  const query = new URLSearchParams();
-  query.set("name", name);
-  if (options.instanceId) query.set("instance_id", options.instanceId);
-  return request<NanobotFeaturesPayload>(
-    `${base}/api/settings/nanobot-features/enable?${query}`,
-    token,
+  return mutation<NanobotFeaturesPayload>(
+    transport,
+    "settings.feature.enable",
+    { name, ...(options.instanceId ? { instance_id: options.instanceId } : {}) },
+    PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
 
 export async function disableNanobotFeature(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
   options: { instanceId?: string } = {},
-  base: string = "",
 ): Promise<NanobotFeaturesPayload> {
-  const query = new URLSearchParams();
-  query.set("name", name);
-  if (options.instanceId) query.set("instance_id", options.instanceId);
-  return request<NanobotFeaturesPayload>(
-    `${base}/api/settings/nanobot-features/disable?${query}`,
-    token,
+  return mutation<NanobotFeaturesPayload>(
+    transport,
+    "settings.feature.disable",
+    { name, ...(options.instanceId ? { instance_id: options.instanceId } : {}) },
   );
 }
 
@@ -586,21 +602,15 @@ export async function fetchPairingRequests(
 }
 
 export async function runPairingAction(
-  token: string,
+  transport: WebUIMutationTransport,
   action: "approve" | "deny",
   code: string,
-  base: string = "",
 ): Promise<PairingPayload> {
-  const query = new URLSearchParams();
-  query.set("code", code);
-  return request<PairingPayload>(
-    `${base}/api/settings/pairing/${action}?${query}`,
-    token,
-  );
+  return mutation<PairingPayload>(transport, `settings.pairing.${action}`, { code });
 }
 
 export async function startChannelConnect(
-  token: string,
+  transport: WebUIMutationTransport,
   channel: string,
   options: {
     domain?: string;
@@ -608,100 +618,95 @@ export async function startChannelConnect(
     mode?: "replace" | "create";
     force?: boolean;
   } = {},
-  base: string = "",
 ): Promise<ChannelConnectPayload> {
-  const query = new URLSearchParams();
-  if (options.domain) query.set("domain", options.domain);
-  if (options.instanceId) query.set("instance_id", options.instanceId);
-  if (options.mode) query.set("mode", options.mode);
-  if (options.force) query.set("force", "true");
-  const suffix = query.toString();
-  return request<ChannelConnectPayload>(
-    `${base}/api/settings/channels/${channel}/connect/start${suffix ? `?${suffix}` : ""}`,
-    token,
+  return mutation<ChannelConnectPayload>(
+    transport,
+    "settings.channel.connect.start",
+    {
+      channel,
+      ...(options.domain ? { domain: options.domain } : {}),
+      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
+      ...(options.mode ? { mode: options.mode } : {}),
+      ...(options.force ? { force: true } : {}),
+    },
+    PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
 
 export async function pollChannelConnect(
-  token: string,
+  transport: WebUIMutationTransport,
   channel: string,
   sessionId: string,
-  base: string = "",
+  params: Readonly<Record<string, string>> = {},
 ): Promise<ChannelConnectPayload> {
-  const query = new URLSearchParams();
-  query.set("session_id", sessionId);
-  return request<ChannelConnectPayload>(
-    `${base}/api/settings/channels/${channel}/connect/poll?${query}`,
-    token,
+  const values = Object.fromEntries(
+    Object.entries(params).filter(([key]) => key !== "session_id"),
+  );
+  return mutation<ChannelConnectPayload>(
+    transport,
+    "settings.channel.connect.poll",
+    { channel, session_id: sessionId, ...values },
+    PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
 
 export async function cancelChannelConnect(
-  token: string,
+  transport: WebUIMutationTransport,
   channel: string,
   sessionId: string,
-  base: string = "",
 ): Promise<ChannelConnectPayload> {
-  const query = new URLSearchParams();
-  query.set("session_id", sessionId);
-  return request<ChannelConnectPayload>(
-    `${base}/api/settings/channels/${channel}/connect/cancel?${query}`,
-    token,
+  return mutation<ChannelConnectPayload>(
+    transport,
+    "settings.channel.connect.cancel",
+    { channel, session_id: sessionId },
   );
 }
 
 export async function configureChannel(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
   values: Record<string, string>,
   options: { enable?: boolean; instanceId?: string } = {},
-  base: string = "",
 ): Promise<ChannelConfigurePayload> {
-  const query = new URLSearchParams();
-  query.set("name", name);
-  if (options.enable !== undefined) query.set("enable", String(options.enable));
-  if (options.instanceId) query.set("instance_id", options.instanceId);
-  return request<ChannelConfigurePayload>(
-    `${base}/api/settings/channels/configure?${query}`,
-    token,
+  return mutation<ChannelConfigurePayload>(
+    transport,
+    "settings.channel.configure",
     {
-      headers: {
-        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
-      },
+      name,
+      values,
+      ...(options.enable !== undefined ? { enable: options.enable } : {}),
+      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
     },
+    PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
 
 export async function validateChannel(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
   values: Record<string, string> = {},
   options: { instanceId?: string } = {},
-  base: string = "",
 ): Promise<ChannelValidationPayload> {
-  const query = new URLSearchParams();
-  query.set("name", name);
-  if (options.instanceId) query.set("instance_id", options.instanceId);
-  return request<ChannelValidationPayload>(
-    `${base}/api/settings/channels/validate?${query}`,
-    token,
-    {
-      headers: {
-        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
-      },
-    },
+  return mutation<ChannelValidationPayload>(
+    transport,
+    "settings.channel.validate",
+    { name, values, ...(options.instanceId ? { instance_id: options.instanceId } : {}) },
   );
 }
 
 export async function runCliAppAction(
-  token: string,
+  transport: WebUIMutationTransport,
   action: "install" | "update" | "uninstall" | "test",
   name: string,
-  base: string = "",
 ): Promise<CliAppsPayload> {
-  const query = new URLSearchParams();
-  query.set("name", name);
-  return request<CliAppsPayload>(`${base}/api/settings/cli-apps/${action}?${query}`, token);
+  return mutation<CliAppsPayload>(
+    transport,
+    `settings.cli_app.${action}`,
+    { name },
+    action === "install" || action === "update"
+      ? PACKAGE_MUTATION_TIMEOUT_MS
+      : API_MUTATION_TIMEOUT_MS,
+  );
 }
 
 export async function fetchMcpPresets(
@@ -713,6 +718,56 @@ export async function fetchMcpPresets(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function startMcpOAuth(
+  transport: WebUIMutationTransport,
+  name: string,
+  reset: boolean = false,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_start",
+    { name, ...(reset ? { reset: true } : {}) },
+    30_000,
+  );
+}
+
+export async function fetchMcpOAuthStatus(
+  token: string,
+  flowId: string,
+  base: string = "",
+): Promise<McpOAuthFlowPayload> {
+  const query = new URLSearchParams({ flow_id: flowId });
+  return request<McpOAuthFlowPayload>(
+    `${base}/api/settings/mcp-oauth/status?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function completeMcpOAuth(
+  transport: WebUIMutationTransport,
+  flowId: string,
+  callbackUrl: string,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_complete",
+    { flow_id: flowId, callback_url: callbackUrl },
+  );
+}
+
+export async function cancelMcpOAuth(
+  transport: WebUIMutationTransport,
+  flowId: string,
+): Promise<McpOAuthFlowPayload> {
+  return mutation<McpOAuthFlowPayload>(
+    transport,
+    "settings.mcp.oauth_cancel",
+    { flow_id: flowId },
   );
 }
 
@@ -732,55 +787,45 @@ export async function fetchProviderModels(
 }
 
 export async function runMcpPresetAction(
-  token: string,
-  action: "enable" | "remove" | "test",
+  transport: WebUIMutationTransport,
+  action: "enable" | "disable" | "remove" | "test" | "reconnect",
   name: string,
   values: Record<string, string> = {},
-  base: string = "",
 ): Promise<McpPresetsPayload> {
-  const query = new URLSearchParams();
-  query.set("name", name);
-  return request<McpPresetsPayload>(
-    `${base}/api/settings/mcp-presets/${action}?${query}`,
-    token,
-    { headers: mcpValuesHeader(values) },
+  return mutation<McpPresetsPayload>(
+    transport,
+    `settings.mcp.${action}`,
+    { name, ...compactMcpValues(values) },
   );
 }
 
 export async function saveCustomMcpServer(
-  token: string,
+  transport: WebUIMutationTransport,
   values: Record<string, string>,
-  base: string = "",
 ): Promise<McpPresetsPayload> {
-  return request<McpPresetsPayload>(
-    `${base}/api/settings/mcp-presets/custom`,
-    token,
-    { headers: mcpValuesHeader(values) },
+  return mutation<McpPresetsPayload>(
+    transport,
+    "settings.mcp.custom",
+    compactMcpValues(values),
   );
 }
 
 export async function importMcpConfig(
-  token: string,
+  transport: WebUIMutationTransport,
   config: string,
-  base: string = "",
 ): Promise<McpPresetsPayload> {
-  return request<McpPresetsPayload>(
-    `${base}/api/settings/mcp-presets/import`,
-    token,
-    { headers: mcpValuesHeader({ config }) },
-  );
+  return mutation<McpPresetsPayload>(transport, "settings.mcp.import", { config });
 }
 
 export async function updateMcpServerTools(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
   enabledTools: string[],
-  base: string = "",
 ): Promise<McpPresetsPayload> {
-  return request<McpPresetsPayload>(
-    `${base}/api/settings/mcp-presets/tools`,
-    token,
-    { headers: mcpValuesHeader({ name, enabled_tools: enabledTools }) },
+  return mutation<McpPresetsPayload>(
+    transport,
+    "settings.mcp.tools",
+    { name, enabled_tools: enabledTools },
   );
 }
 
@@ -831,282 +876,227 @@ export async function fetchSidebarState(
 }
 
 export async function updateSidebarState(
-  token: string,
+  transport: WebUIMutationTransport,
   state: SidebarStatePayload,
-  base: string = "",
 ): Promise<SidebarStatePayload> {
-  const query = new URLSearchParams();
-  query.set("state", JSON.stringify(state));
-  return request<SidebarStatePayload>(
-    `${base}/api/webui/sidebar-state/update?${query}`,
-    token,
-  );
+  return mutation<SidebarStatePayload>(transport, "sidebar.update", { state });
 }
 
 export async function updateSettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: SettingsUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
+  const payload: Record<string, unknown> = {};
   if (update.modelPreset !== undefined) {
-    query.set("model_preset", update.modelPreset ?? "default");
+    payload.model_preset = update.modelPreset ?? "default";
   }
-  if (update.model !== undefined) query.set("model", update.model);
-  if (update.provider !== undefined) query.set("provider", update.provider);
+  if (update.model !== undefined) payload.model = update.model;
+  if (update.provider !== undefined) payload.provider = update.provider;
   if (update.contextWindowTokens !== undefined) {
-    query.set("context_window_tokens", String(update.contextWindowTokens));
+    payload.context_window_tokens = update.contextWindowTokens;
   }
-  if (update.timezone !== undefined) query.set("timezone", update.timezone);
-  if (update.botName !== undefined) query.set("bot_name", update.botName);
-  if (update.botIcon !== undefined) query.set("bot_icon", update.botIcon);
+  if (update.timezone !== undefined) payload.timezone = update.timezone;
   if (update.toolHintMaxLength !== undefined) {
-    query.set("tool_hint_max_length", String(update.toolHintMaxLength));
+    payload.tool_hint_max_length = update.toolHintMaxLength;
   }
-  return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
+  return mutation<SettingsPayload>(transport, "settings.agent.update", payload);
 }
 
-function appendModelGenerationSettings(
-  query: URLSearchParams,
+function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,
     "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
   >,
-): void {
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
   if (configuration.maxTokens !== undefined) {
-    query.set("max_tokens", String(configuration.maxTokens));
+    payload.max_tokens = configuration.maxTokens;
   }
   if (configuration.contextWindowTokens !== undefined) {
-    query.set("context_window_tokens", String(configuration.contextWindowTokens));
+    payload.context_window_tokens = configuration.contextWindowTokens;
   }
   if (configuration.temperature !== undefined) {
-    query.set("temperature", String(configuration.temperature));
+    payload.temperature = configuration.temperature;
   }
   if (configuration.reasoningEffort !== undefined) {
-    query.set("reasoning_effort", configuration.reasoningEffort ?? "");
+    payload.reasoning_effort = configuration.reasoningEffort ?? "";
   }
+  return payload;
 }
 
 export async function createModelConfiguration(
-  token: string,
+  transport: WebUIMutationTransport,
   configuration: ModelConfigurationCreate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  if (configuration.name !== undefined) query.set("name", configuration.name);
-  query.set("label", configuration.label);
-  query.set("provider", configuration.provider);
-  query.set("model", configuration.model);
-  appendModelGenerationSettings(query, configuration);
-  return request<SettingsPayload>(
-    `${base}/api/settings/model-configurations/create?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.model_configuration.create",
+    {
+      name: configuration.name,
+      provider: configuration.provider,
+      model: configuration.model,
+      ...modelGenerationSettingsPayload(configuration),
+    },
   );
 }
 
 export async function updateModelConfiguration(
-  token: string,
+  transport: WebUIMutationTransport,
   configuration: ModelConfigurationUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("name", configuration.name);
-  if (configuration.label !== undefined) query.set("label", configuration.label);
-  if (configuration.provider !== undefined) query.set("provider", configuration.provider);
-  if (configuration.model !== undefined) query.set("model", configuration.model);
-  appendModelGenerationSettings(query, configuration);
-  return request<SettingsPayload>(
-    `${base}/api/settings/model-configurations/update?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.model_configuration.update",
+    {
+      name: configuration.name,
+      ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
+      ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
+      ...(configuration.model !== undefined ? { model: configuration.model } : {}),
+      ...modelGenerationSettingsPayload(configuration),
+    },
   );
 }
 
 export async function deleteModelConfiguration(
-  token: string,
+  transport: WebUIMutationTransport,
   name: string,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams({ name });
-  return request<SettingsPayload>(
-    `${base}/api/settings/model-configurations/delete?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.model_configuration.delete",
+    { name },
   );
 }
 
 export async function migrateModelConfigurations(
-  token: string,
-  base: string = "",
+  transport: WebUIMutationTransport,
 ): Promise<SettingsPayload> {
-  return request<SettingsPayload>(
-    `${base}/api/settings/model-configurations/migrate`,
-    token,
-  );
+  return mutation<SettingsPayload>(transport, "settings.model_configuration.migrate");
 }
 
 export async function updateModelCallOrder(
-  token: string,
+  transport: WebUIMutationTransport,
   order: string[],
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams({ order: JSON.stringify(order) });
-  return request<SettingsPayload>(
-    `${base}/api/settings/model-call-order/update?${query}`,
-    token,
-  );
+  return mutation<SettingsPayload>(transport, "settings.model_call_order.update", { order });
 }
 
 export async function updateProviderSettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: ProviderSettingsUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const { provider, ...values } = update;
-  const query = new URLSearchParams({ provider });
-  return request<SettingsPayload>(
-    `${base}/api/settings/provider/update?${query}`,
-    token,
-    {
-      headers: {
-        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(values)),
-      },
-    },
-  );
+  return mutation<SettingsPayload>(transport, "settings.provider.update", { ...update });
 }
 
 export async function createProviderSettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: ProviderCreationUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  return request<SettingsPayload>(
-    `${base}/api/settings/provider/create`,
-    token,
-    {
-      headers: {
-        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(update)),
-      },
-    },
-  );
+  return mutation<SettingsPayload>(transport, "settings.provider.create", { ...update });
 }
 
 export async function loginProviderOAuth(
-  token: string,
+  transport: WebUIMutationTransport,
   provider: string,
-  base: string = "",
   remoteBrowserAccess: boolean = false,
 ): Promise<ProviderOAuthLoginResult> {
-  const query = new URLSearchParams();
-  query.set("provider", provider);
-  if (remoteBrowserAccess) query.set("remote_browser", "true");
-  return request<ProviderOAuthLoginResult>(
-    `${base}/api/settings/provider/oauth-login?${query}`,
-    token,
-    { cache: "no-store" },
+  return mutation<ProviderOAuthLoginResult>(
+    transport,
+    "settings.provider.oauth_login",
+    { provider, ...(remoteBrowserAccess ? { remote_browser: true } : {}) },
   );
 }
 
 export async function completeProviderOAuth(
-  token: string,
+  transport: WebUIMutationTransport,
   provider: string,
   flowId: string,
   authorizationResponse?: string,
-  base: string = "",
 ): Promise<ProviderOAuthCompletionResult> {
-  const query = new URLSearchParams();
-  query.set("provider", provider);
-  query.set("flow_id", flowId);
-  const responseHeader = provider === "openai_codex"
-    ? OAUTH_CALLBACK_HEADER
-    : OAUTH_CODE_HEADER;
-  const headers = authorizationResponse
-    ? { [responseHeader]: authorizationResponse }
-    : undefined;
-  return request<ProviderOAuthCompletionResult>(
-    `${base}/api/settings/provider/oauth-login/complete?${query}`,
-    token,
-    { cache: "no-store", ...(headers ? { headers } : {}) },
+  return mutation<ProviderOAuthCompletionResult>(
+    transport,
+    "settings.provider.oauth_complete",
+    {
+      provider,
+      flow_id: flowId,
+      ...(authorizationResponse ? { authorization_response: authorizationResponse } : {}),
+    },
   );
 }
 
 export async function logoutProviderOAuth(
-  token: string,
+  transport: WebUIMutationTransport,
   provider: string,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("provider", provider);
-  return request<SettingsPayload>(
-    `${base}/api/settings/provider/oauth-logout?${query}`,
-    token,
-  );
+  return mutation<SettingsPayload>(transport, "settings.provider.oauth_logout", { provider });
 }
 
 export async function updateWebSearchSettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: WebSearchSettingsUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("provider", update.provider);
-  if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
-  if (update.baseUrl !== undefined) query.set("base_url", update.baseUrl);
-  if (update.maxResults !== undefined) query.set("max_results", String(update.maxResults));
-  if (update.timeout !== undefined) query.set("timeout", String(update.timeout));
-  if (update.useJinaReader !== undefined) {
-    query.set("use_jina_reader", String(update.useJinaReader));
-  }
-  return request<SettingsPayload>(
-    `${base}/api/settings/web-search/update?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.web_search.update",
+    {
+      provider: update.provider,
+      ...(update.apiKey !== undefined ? { api_key: update.apiKey } : {}),
+      ...(update.baseUrl !== undefined ? { base_url: update.baseUrl } : {}),
+      ...(update.maxResults !== undefined ? { max_results: update.maxResults } : {}),
+      ...(update.timeout !== undefined ? { timeout: update.timeout } : {}),
+      ...(update.useJinaReader !== undefined
+        ? { use_jina_reader: update.useJinaReader }
+        : {}),
+    },
   );
 }
 
 export async function updateNetworkSafetySettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: NetworkSafetySettingsUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("webui_allow_local_service_access", String(update.webuiAllowLocalServiceAccess));
-  query.set("webui_default_access_mode", update.webuiDefaultAccessMode);
-  return request<SettingsPayload>(
-    `${base}/api/settings/network-safety/update?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.network_safety.update",
+    {
+      webui_allow_local_service_access: update.webuiAllowLocalServiceAccess,
+      webui_default_access_mode: update.webuiDefaultAccessMode,
+    },
   );
 }
 
 export async function updateImageGenerationSettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: ImageGenerationSettingsUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("enabled", String(update.enabled));
-  query.set("provider", update.provider);
-  query.set("model", update.model);
-  query.set("default_aspect_ratio", update.defaultAspectRatio);
-  query.set("default_image_size", update.defaultImageSize);
-  query.set("max_images_per_turn", String(update.maxImagesPerTurn));
-  return request<SettingsPayload>(
-    `${base}/api/settings/image-generation/update?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.image_generation.update",
+    {
+      enabled: update.enabled,
+      provider: update.provider,
+      model: update.model,
+      default_aspect_ratio: update.defaultAspectRatio,
+      default_image_size: update.defaultImageSize,
+      max_images_per_turn: update.maxImagesPerTurn,
+    },
   );
 }
 
 export async function updateTranscriptionSettings(
-  token: string,
+  transport: WebUIMutationTransport,
   update: TranscriptionSettingsUpdate,
-  base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("enabled", String(update.enabled));
-  query.set("provider", update.provider);
-  query.set("model", update.model);
-  query.set("language", update.language);
-  query.set("max_duration_sec", String(update.maxDurationSec));
-  query.set("max_upload_mb", String(update.maxUploadMb));
-  return request<SettingsPayload>(
-    `${base}/api/settings/transcription/update?${query}`,
-    token,
+  return mutation<SettingsPayload>(
+    transport,
+    "settings.transcription.update",
+    {
+      enabled: update.enabled,
+      provider: update.provider,
+      model: update.model,
+      language: update.language,
+      max_duration_sec: update.maxDurationSec,
+      max_upload_mb: update.maxUploadMb,
+    },
   );
 }

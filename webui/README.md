@@ -40,7 +40,26 @@ python -m pip install -e .
 
 > Editable installs intentionally **skip** the WebUI bundle step — Vite HMR is faster than rebuilding `dist/` on every change.
 
-### 2. Enable the WebSocket channel
+### 2. Start the gateway and Vite
+
+From the repository root:
+
+```bash
+nanobot webui --dev
+```
+
+The command safely prepares the local WebSocket channel, starts both the gateway and Vite,
+and opens `http://127.0.0.1:5173`. Vite proxies to the configured WebSocket channel and applies
+frontend changes with HMR. Press Ctrl+C in that terminal to stop both processes.
+
+Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined
+with `--background`.
+
+## Manual development setup
+
+The two-terminal workflow remains available when you want to manage each process separately.
+
+### 1. Enable the WebSocket channel
 
 In `~/.nanobot/config.json`, merge:
 
@@ -48,7 +67,7 @@ In `~/.nanobot/config.json`, merge:
 { "channels": { "websocket": { "enabled": true } } }
 ```
 
-### 3. Start the gateway
+### 2. Start the gateway
 
 In one terminal:
 
@@ -56,7 +75,7 @@ In one terminal:
 nanobot gateway
 ```
 
-### 4. Start the WebUI dev server
+### 3. Start the WebUI dev server
 
 In another terminal:
 

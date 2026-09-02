@@ -404,6 +404,7 @@ async def test_goal_state_events_publish_active_then_inactive(tmp_path):
     assert isinstance(call.event, GoalStateSyncEvent)
     assert call.event.goal_state == {
         "active": True,
+        "status": "active",
         "ui_summary": "alpha",
         "objective": "Objective alpha",
     }

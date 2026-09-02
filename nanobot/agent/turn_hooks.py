@@ -32,7 +32,6 @@ class AgentTurnHookSpec:
     session_key: str | None = None
     workspace: Path | None = None
     tool_hint_max_length: int = 40
-    on_iteration: Callable[[int], None] | None = None
     registered_hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     turn_hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     registered_hooks: list[AgentHook] = field(default_factory=list)
@@ -50,7 +49,6 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         on_stream_end=spec.on_stream_end,
         session_key=spec.session_key,
         tool_hint_max_length=spec.tool_hint_max_length,
-        on_iteration=spec.on_iteration,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
         return progress_hook

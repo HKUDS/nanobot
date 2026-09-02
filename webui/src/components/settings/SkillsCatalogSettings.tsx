@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
@@ -36,9 +37,6 @@ import { useClient } from "@/providers/ClientProvider";
 
 export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const { t } = useTranslation();
-  const availableCount = skills.filter(
-    (skill) => skill.enabled !== false && skill.available,
-  ).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [view, setView] = useState<"installed" | "discover">("installed");
   const [installingSkill, setInstallingSkill] = useState("");
@@ -80,51 +78,28 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
 
   return (
     <div className="space-y-7">
-      <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
-          {t("settings.skills.description", {
-            defaultValue:
-              "Review installed skills or discover new capabilities from the skills.sh catalog.",
-          })}
-        </p>
-        <span className="text-[12px] font-medium text-muted-foreground">
-          {t("settings.skills.caption", {
-            available: availableCount,
-            total: skills.length,
-            defaultValue: "{{available}} available · {{total}} total",
-          })}
-        </span>
-      </section>
-
-      <div
-        className="inline-flex rounded-[12px] bg-muted/65 p-1"
-        role="tablist"
-        aria-label={t("settings.skills.views", { defaultValue: "Skills views" })}
-      >
-        {(["installed", "discover"] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            role="tab"
-            aria-selected={view === item}
-            onClick={() => setView(item)}
-            className={cn(
-              "inline-flex items-center rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
-              view === item
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {item === "installed"
-              ? t("settings.skills.installedTab", { defaultValue: "Installed" })
-              : t("settings.skills.discoverTab", { defaultValue: "Discover" })}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        value={view}
+        mode="tabs"
+        ariaLabel={t("settings.skills.views", { defaultValue: "Skills views" })}
+        className="w-fit text-[13px]"
+        itemClassName="px-3.5"
+        options={[
+          {
+            value: "installed",
+            label: t("settings.skills.installedTab", { defaultValue: "Installed" }),
+          },
+          {
+            value: "discover",
+            label: t("settings.skills.discoverTab", { defaultValue: "Discover" }),
+          },
+        ]}
+        onChange={setView}
+      />
 
       {view === "installed" ? (
-        <section className="overflow-hidden rounded-[22px] bg-settings-surface">
-          <div className="flex flex-col gap-3 border-b border-border/45 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <section className="overflow-hidden rounded-panel bg-settings-surface">
+          <div className="flex flex-col gap-3 px-4 pb-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-[320px]">
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -139,16 +114,14 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 aria-label={t("settings.skills.searchInstalled", {
                   defaultValue: "Search installed skills",
                 })}
-                className="h-9 rounded-[11px] bg-background pl-9 text-[13px]"
+                className="h-9 bg-background pl-9 text-[13px]"
               />
             </div>
-            <div
-              className={cn(
-                "flex max-w-full items-center gap-1 overflow-x-auto rounded-[10px] bg-muted/65 p-1",
-                "scrollbar-thin scrollbar-track-transparent sm:w-auto",
-              )}
-            >
-              {([
+            <SegmentedControl
+              value={installedFilter}
+              className="sm:w-auto"
+              itemClassName="px-2.5 text-[11px]"
+              options={([
                 ["all", t("settings.skills.filterAll", { defaultValue: "All" }), skills.length],
                 [
                   "enabled",
@@ -160,28 +133,22 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                   t("settings.skills.filterDisabled", { defaultValue: "Disabled" }),
                   disabledCount,
                 ],
-              ] as const).map(([filter, label, count]) => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => setInstalledFilter(filter)}
-                  className={cn(
-                    "shrink-0 whitespace-nowrap rounded-[8px] px-2.5 py-1 text-[11px] font-medium transition-colors",
-                    installedFilter === filter
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
-                </button>
-              ))}
-            </div>
+              ] as const).map(([value, label, count]) => ({
+                value,
+                label: (
+                  <>
+                    {label} <span className="ml-0.5 tabular-nums opacity-65">{count}</span>
+                  </>
+                ),
+              }))}
+              onChange={setInstalledFilter}
+            />
           </div>
           {groupedSkills.length ? (
-            <div className="pb-2">
+            <div className="space-y-5 px-3 pb-3 pt-2 sm:px-4">
               {groupedSkills.map((group) => (
-                <section key={group.key}>
-                  <div className="flex items-center gap-2 bg-muted/20 px-5 py-2.5">
+                <section key={group.key} className="space-y-1">
+                  <div className="flex items-center gap-2 px-2 py-1.5">
                     <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                       {group.label}
                     </h2>
@@ -189,7 +156,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                       {group.skills.length}
                     </span>
                   </div>
-                  <div className="divide-y divide-border/40 px-3 sm:px-4">
+                  <div className="space-y-1">
                     {group.skills.map((skill) => (
                       <SkillCatalogRow
                         key={`${skill.source}:${skill.name}`}
@@ -253,9 +220,9 @@ function SkillCatalogRow({
       })}
       onClick={() => onSelect(skill)}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] px-2 py-3 text-left",
-        "transition-[background-color,box-shadow] duration-150",
-        "hover:bg-muted/70 hover:shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]",
+        "group flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-3 text-left",
+        "transition-colors duration-150",
+        "hover:bg-muted/70",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
@@ -302,7 +269,7 @@ function SkillDetailSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { getToken } = useClient();
+  const { client, getToken } = useClient();
   const { t } = useTranslation();
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -354,7 +321,7 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await updateSkillEnabled(getToken(), activeSkill.name, !enabled);
+      const payload = await updateSkillEnabled(client, activeSkill.name, !enabled);
       notifySkillsChanged(payload);
       const updated = payload.skills.find((item) => item.name === activeSkill.name);
       if (updated) {
@@ -378,7 +345,7 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await deleteSkill(getToken(), activeSkill.name);
+      const payload = await deleteSkill(client, activeSkill.name);
       notifySkillsChanged(payload);
       onOpenChange(false);
     } catch (reason) {
@@ -469,23 +436,15 @@ function SkillDetailSheet({
                 {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
               </div>
             ) : loadFailed ? (
-              <div className="mt-8 rounded-[16px] bg-destructive/10 px-3 py-3 text-sm text-destructive">
+              <div className="mt-8 rounded-floating bg-destructive/10 px-3 py-3 text-sm text-destructive">
                 {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
               </div>
             ) : (
               <div className="mt-6 space-y-5">
                 <div className="flex min-h-16 items-start justify-between gap-3 border-y border-border/45 px-1 py-3.5">
-                  <div>
-                    <p className="text-[13px] font-medium text-foreground">
-                      {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
-                    </p>
-                    <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                      {t("settings.skills.enabledDescription", {
-                        defaultValue:
-                          "Allow the agent to load this skill when its requirements are ready.",
-                      })}
-                    </p>
-                  </div>
+                  <p className="text-[13px] font-medium text-foreground">
+                    {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
+                  </p>
                   <button
                     type="button"
                     role="switch"
@@ -525,7 +484,7 @@ function SkillDetailSheet({
                 </div>
 
                 {actionError ? (
-                  <div className="rounded-[14px] bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+                  <div className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
                     {actionError}
                   </div>
                 ) : null}
@@ -574,7 +533,7 @@ function SkillDetailSheet({
       </Sheet>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent className="rounded-[20px]">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("settings.skills.deleteConfirmTitle", {
@@ -615,7 +574,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
     });
 
   return (
-    <details className="group rounded-[18px] border border-border/45 bg-muted/20 px-3 py-3">
+    <details className="group rounded-floating border border-border/45 bg-muted/20 px-3 py-3">
       <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
@@ -624,7 +583,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
           SKILL.md
         </code>
       </summary>
-      <div className="mt-3 overflow-hidden rounded-[14px] border border-border/35 bg-background/70">
+      <div className="mt-3 overflow-hidden rounded-control border border-border/35 bg-background/70">
         <pre
           className={cn(
             "max-h-[min(42vh,32rem)] overflow-auto overscroll-contain px-3.5 py-3 pr-4",
@@ -666,7 +625,7 @@ function RequirementsSection({
   };
 
   return (
-    <section className="rounded-[18px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
+    <section className="rounded-floating border border-amber-500/20 bg-amber-500/[0.06] p-4">
       <div className="flex items-start gap-2.5">
         <CircleAlert
           className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
@@ -689,7 +648,7 @@ function RequirementsSection({
         {installOptions.map((option) => (
           <div
             key={`${option.id}:${option.command}`}
-            className="flex min-w-0 items-center gap-2 rounded-[12px] bg-background/80 px-3 py-2"
+            className="flex min-w-0 items-center gap-2 rounded-control bg-background/80 px-3 py-2"
           >
             <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-foreground/80">
@@ -702,7 +661,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />

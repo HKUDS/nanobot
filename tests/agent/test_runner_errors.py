@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent.runner_helpers import make_run_spec
+from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools import ToolResult
+from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -16,14 +19,17 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 @pytest.mark.asyncio
-async def test_runner_returns_structured_tool_error():
+async def test_runner_returns_tool_exception_to_model_for_recovery():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
-    ))
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        ),
+        LLMResponse(content="recovered", tool_calls=[]),
+    ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
@@ -36,23 +42,46 @@ async def test_runner_returns_structured_tool_error():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
     ))
 
-    assert result.stop_reason == "tool_error"
-    assert result.error == "Error: RuntimeError: boom"
+    assert provider.chat_with_retry.await_count == 2
+    assert result.stop_reason == "completed"
+    assert result.error is None
+    assert result.final_content == "recovered"
     assert result.tool_events == [
         {"name": "list_dir", "status": "error", "detail": "boom"}
     ]
+    tool_message = next(message for message in result.messages if message.get("role") == "tool")
+    retry_hint = "[Analyze the error above and try a different approach.]"
+    assert "Error: RuntimeError: boom" in tool_message["content"]
+    assert tool_message["content"].count(retry_hint) == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_does_not_duplicate_existing_retry_hint():
+    retry_hint = "\n\n[Analyze the error above and try a different approach.]"
+    tools = SimpleNamespace(
+        execute=AsyncMock(return_value=ToolResult.error("Error: boom" + retry_hint)),
+    )
+
+    results, events = await execute_tool_calls(
+        tools,
+        [ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        concurrent=False,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+    )
+
+    assert results == ["Error: boom" + retry_hint]
+    assert results[0].count(retry_hint) == 1
+    assert events[0]["status"] == "error"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("control_error", [KeyboardInterrupt, SystemExit])
-async def test_runner_propagates_tool_control_flow_exceptions(control_error: type[BaseException]):
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock(spec=LLMProvider)
-
+async def test_tool_execution_propagates_control_flow_exceptions(control_error: type[BaseException]):
     async def execute(_name, _args):
         raise control_error("stop")
 
@@ -60,22 +89,15 @@ async def test_runner_propagates_tool_control_flow_exceptions(control_error: typ
         get_definitions=lambda: [],
         execute=execute,
     )
-    runner = AgentRunner()
-    spec = make_run_spec(
-        provider,
-        initial_messages=[],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    )
-
     with pytest.raises(control_error):
-        await runner._run_tool(
-            spec,
-            ToolCallRequest(id="call_1", name="list_dir", arguments={}),
+        await execute_tool_calls(
+            tools,
+            [ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+            concurrent=False,
             external_lookup_counts={},
             workspace_violation_counts={},
+            hook=AgentHook(),
+            context=AgentHookContext(iteration=0, messages=[]),
         )
 
 
@@ -90,7 +112,7 @@ async def test_llm_error_not_appended_to_session_messages():
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={},
+        content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -158,7 +180,7 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
         content="Request blocked by provider policy.",
         finish_reason=finish_reason,
         tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={"command": "echo nope"})],
-        usage={},
+        usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -180,35 +202,38 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
 
 
 @pytest.mark.asyncio
-async def test_runner_tool_error_sets_final_content():
+async def test_runner_returns_structured_tool_error_to_model_for_recovery():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
 
-    async def chat_with_retry(*, messages, **kwargs):
-        return LLMResponse(
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
             content="working",
             tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
-            usage={},
-        )
-
-    provider.chat_with_retry = chat_with_retry
+            usage=None,
+        ),
+        LLMResponse(content="used another path", tool_calls=[], usage=None),
+    ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
+    tools.execute = AsyncMock(return_value=ToolResult.error("Error: File not found: x"))
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
-        max_iterations=1,
+        max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
     ))
 
-    assert result.final_content == "Error: RuntimeError: boom"
-    assert result.stop_reason == "tool_error"
+    assert provider.chat_with_retry.await_count == 2
+    assert result.final_content == "used another path"
+    assert result.stop_reason == "completed"
+    assert result.tool_events == [
+        {"name": "read_file", "status": "error", "detail": "Error: File not found: x"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -224,9 +249,9 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
                 tool_calls=[
                     ToolCallRequest(id="call_1", name="exec", arguments={"command": "report"})
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", usage={})
+        return LLMResponse(content="done", usage=None)
 
     provider.chat_with_retry = chat_with_retry
     output = "Error: generated report successfully\n\nExit code: 0"
@@ -241,7 +266,6 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
     ))
 
     assert result.final_content == "done"
@@ -252,9 +276,8 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
 
 
 @pytest.mark.asyncio
-async def test_runner_tool_error_preserves_tool_results_in_messages():
-    """When a tool raises a fatal error, its results must still be appended
-    to messages so the session never contains orphan tool_calls (#2943)."""
+async def test_runner_preserves_tool_error_results_in_messages():
+    """Tool errors stay paired with their calls so the model can recover (#2943)."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -266,7 +289,7 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
                 ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a"}),
                 ToolCallRequest(id="tc2", name="exec", arguments={"cmd": "bad"}),
             ],
-            usage={},
+            usage=None,
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -292,11 +315,10 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
     ))
 
-    assert result.stop_reason == "tool_error"
-    # Both tool results must be in messages even though tc2 had a fatal error.
+    assert result.stop_reason == "max_iterations"
+    # Both tool results must be in messages even though tc2 returned an error.
     tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 2
     assert tool_msgs[0]["tool_call_id"] == "tc1"
@@ -333,9 +355,9 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
             content="",
             finish_reason="length",
             tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={})],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage={}),
+        LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage=None),
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []

@@ -41,7 +41,7 @@ function ReasoningMarker({ streaming }: { streaming: boolean }) {
   useEffect(() => {
     if (wasStreamingRef.current && !streaming) {
       setJustCompleted(true);
-      const timeout = window.setTimeout(() => setJustCompleted(false), 650);
+      const timeout = window.setTimeout(() => setJustCompleted(false), 300);
       wasStreamingRef.current = streaming;
       return () => window.clearTimeout(timeout);
     }

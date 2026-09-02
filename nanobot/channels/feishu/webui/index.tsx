@@ -1,7 +1,13 @@
+import { lazy } from "react";
+
 import type { ChannelUiContribution } from "@/channel-plugins/types";
 import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
-import { FeishuAssistantsPanel } from "./FeishuAssistantsPanel";
+const FeishuAssistantsPanel = lazy(() =>
+  import("./FeishuAssistantsPanel").then(({ FeishuAssistantsPanel: component }) => ({
+    default: component,
+  })),
+);
 
 export default {
   Panel: FeishuAssistantsPanel,

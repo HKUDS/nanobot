@@ -15,6 +15,9 @@ import httpx
 import pytest
 import websockets
 
+from nanobot.session.manager import SessionManager
+from nanobot.session.recovery import PENDING_USER_TURN_KEY, RUNTIME_CHECKPOINT_KEY
+
 _BOOTSTRAP_SECRET = "smoke-secret"
 
 
@@ -176,6 +179,19 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             assert "Current model: `custom/smoke-model`" in answer["text"]
             await _recv_until(ws, "turn_end")
 
+            await ws.send(json.dumps({
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "!printf shell-ok",
+                "webui": True,
+                "user_shell": True,
+                "turn_id": "shell-turn",
+            }))
+            shell = await _recv_until(ws, "message")
+            assert "shell-ok" in shell["text"]
+            assert shell["turn_id"] == "shell-turn"
+            await _recv_until(ws, "turn_end")
+
         api_token = _wait_for_bootstrap(base_url, process, log_path)["api_token"]
         sessions = _get_json(f"{base_url}/api/sessions", token=api_token)
         key = f"websocket:{chat_id}"
@@ -189,5 +205,88 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         contents = [str(message.get("content") or "") for message in thread["messages"]]
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
+        assert "!printf shell-ok" in contents
+        assert any("shell-ok" in text for text in contents)
     finally:
         _stop_gateway(process)
+
+
+def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
+    tmp_path: Path,
+) -> None:
+    """Exercise recovery through two real gateway processes and durable files."""
+    ws_port = _free_port()
+    gateway_port = _free_port()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config_path = tmp_path / "config.json"
+    first_log = tmp_path / "gateway-first.log"
+    second_log = tmp_path / "gateway-second.log"
+    _write_smoke_config(
+        config_path,
+        workspace=workspace,
+        ws_port=ws_port,
+        gateway_port=gateway_port,
+    )
+    base_url = f"http://127.0.0.1:{ws_port}"
+
+    first = _start_gateway(config_path, first_log)
+    try:
+        _wait_for_bootstrap(base_url, first, first_log)
+    finally:
+        _stop_gateway(first)
+
+    sessions_root = tmp_path / "sessions"
+    sessions = SessionManager(workspace, sessions_root=sessions_root)
+    session = sessions.get_or_create("websocket:recovery-smoke")
+    session.messages.append({"role": "user", "content": "recover this answer"})
+    session.metadata["webui"] = True
+    session.metadata[PENDING_USER_TURN_KEY] = True
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = {
+        "phase": "final_response",
+        "assistant_message": {
+            "role": "assistant",
+            "content": "restored without another model request",
+        },
+        "completed_tool_results": [],
+        "pending_tool_calls": [],
+    }
+    sessions.save(session, fsync=True)
+
+    second = _start_gateway(config_path, second_log)
+    try:
+        bootstrap = _wait_for_bootstrap(base_url, second, second_log)
+        deadline = time.monotonic() + 20
+        restored = None
+        while time.monotonic() < deadline:
+            restored = SessionManager(
+                workspace,
+                sessions_root=sessions_root,
+            ).get_or_create("websocket:recovery-smoke")
+            if any(
+                message.get("content") == "restored without another model request"
+                for message in restored.messages
+            ):
+                break
+            time.sleep(0.1)
+        else:
+            logs = second_log.read_text(encoding="utf-8", errors="replace")
+            raise AssertionError(f"answer was not recovered after restart\n{logs}")
+
+        assert restored is not None
+        assert PENDING_USER_TURN_KEY not in restored.metadata
+        assert RUNTIME_CHECKPOINT_KEY not in restored.metadata
+        assert restored.metadata["webui_recovery"]["reason"] == "answer_restored"
+
+        async def assert_attach_state() -> None:
+            ws_url = f'{bootstrap["ws_url"]}?token={bootstrap["token"]}&client_id=recovery-smoke'
+            async with websockets.connect(ws_url) as ws:
+                await _recv_until(ws, "ready")
+                await ws.send(json.dumps({"type": "attach", "chat_id": "recovery-smoke"}))
+                attached = await _recv_until(ws, "attached")
+                assert attached["recovery_state"]["status"] == "recovered"
+                assert attached["recovery_state"]["reason"] == "answer_restored"
+
+        asyncio.run(assert_attach_state())
+    finally:
+        _stop_gateway(second)

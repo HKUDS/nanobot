@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
+from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
@@ -48,13 +50,13 @@ async def test_ephemeral_runner_enters_and_restores_turn_scopes(tmp_path):
 
     async def chat_with_retry(**_kwargs):
         assert goal_mutation_allowed() is True
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     loop.provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
         ephemeral=True,
         turn_scopes=[goal_mutation_permission(True)],
@@ -83,7 +85,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     },
                 )
             ],
-            usage={},
+            usage=None,
         ),
         LLMResponse(
             content="closing goal",
@@ -94,7 +96,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     arguments={"action": "complete", "recap": "Implemented and tested."},
                 )
             ],
-            usage={},
+            usage=None,
         ),
         LLMResponse(
             content="trying to start another goal",
@@ -105,12 +107,11 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
                     arguments={"objective": "Start an unrelated follow-up."},
                 )
             ],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", tool_calls=[], usage={}),
+        LLMResponse(content="done", tool_calls=[], usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     session = loop.sessions.get_or_create("cli:direct")
     session.add_message("user", "Let's agree on the migration implementation.")
     session.add_message("assistant", "Use the staged migration plan and run integration tests.")
@@ -146,15 +147,24 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
+    skill_dir = tmp_path / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: review\n"
+        "description: Review changes.\n"
+        "---\n\n"
+        "Follow the unique review checklist.",
+        encoding="utf-8",
+    )
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="first answer", usage={}),
-        LLMResponse(content="second answer", usage={}),
+        LLMResponse(content="first answer", usage=None),
+        LLMResponse(content="second answer", usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     session = loop.sessions.get_or_create("cli:direct")
     provider_calls: list[str | None] = []
 
@@ -169,7 +179,7 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
         channel="cli",
         sender_id="user",
         chat_id="direct",
-        content="first turn",
+        content="first turn $review",
     ))
     await loop._process_message(InboundMessage(
         channel="cli",
@@ -184,6 +194,9 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     second_wire = LLMProvider._sanitize_empty_content(second_request)
     assert second_wire[: len(first_wire)] == first_wire
     assert first_wire[1] == second_wire[1]
+    assert first_wire[0] == second_wire[0]
+    assert "Follow the unique review checklist." not in first_wire[0]["content"]
+    assert "Follow the unique review checklist." in first_wire[1]["content"]
     assert second_wire[2]["role"] == "assistant"
     assert second_wire[2]["content"] == "first answer"
     assert second_wire[3]["content"].startswith("second turn")
@@ -191,7 +204,7 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
 
     persisted_first_user = session.messages[0]
     assert persisted_first_user["content"] == first_wire[1]["content"]
-    assert public_history_message(persisted_first_user)["content"] == "first turn"
+    assert public_history_message(persisted_first_user)["content"] == "first turn $review"
 
 
 @pytest.mark.asyncio
@@ -203,9 +216,8 @@ async def test_webui_quote_reaches_model_without_leaking_into_public_history(tmp
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="answer", usage={}))
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="answer", usage=None))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     session = loop.sessions.get_or_create("websocket:chat")
     quote = webui_quote_runtime_context({
         WEBUI_QUOTE_METADATA: "the selected answer excerpt",
@@ -245,12 +257,11 @@ async def test_runtime_context_provider_runs_once_across_tool_iterations(tmp_pat
                 name="read_file",
                 arguments={"path": "note.txt"},
             )],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="done", usage={}),
+        LLMResponse(content="done", usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     provider_calls = 0
 
     async def provide_context(_request):
@@ -290,12 +301,11 @@ async def test_non_goal_direct_turn_cannot_reuse_prior_goal_command(tmp_path):
                     arguments={"objective": "Unauthorized persistent objective."},
                 )
             ],
-            usage={},
+            usage=None,
         ),
-        LLMResponse(content="handled as a one-time task", tool_calls=[], usage={}),
+        LLMResponse(content="handled as a one-time task", tool_calls=[], usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
     session = loop.sessions.get_or_create("api:default")
     session.add_message("user", "/goal old completed request")
     session.add_message("assistant", "The old request is complete.")
@@ -325,11 +335,12 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    final_content, _, _, _, _ = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
     )
 
-    assert final_content == (
+    assert result.final_content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."
     )
@@ -346,16 +357,22 @@ async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    final_content, _, _, stop_reason, _ = await loop._run_agent_loop(
-        [],
-        runtime=loop.llm_runtime(),
-        metadata={"original_command": "/goal"},
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=runtime,
+        request_context=RequestContext(
+            channel="cli",
+            chat_id="direct",
+            runtime=runtime,
+            metadata={"original_command": "/goal"},
+        ),
     )
 
-    assert stop_reason == "max_iterations"
+    assert result.stop_reason == "max_iterations"
     assert loop.provider.chat_with_retry.await_count == 3
     assert loop.provider.chat_with_retry.await_args_list[-1].kwargs["tools"] is None
-    assert final_content == (
+    assert result.final_content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."
     )
@@ -370,7 +387,7 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("<think>hidden")
         await on_content_delta("</think>Hello")
-        return LLMResponse(content="<think>hidden</think>Hello", tool_calls=[], usage={})
+        return LLMResponse(content="<think>hidden</think>Hello", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry
 
@@ -380,14 +397,14 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     async def on_stream_end(*, resuming: bool = False) -> None:
         endings.append(resuming)
 
-    final_content, _, _, _, _ = await loop._run_agent_loop(
-        [],
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
         on_stream=on_stream,
         on_stream_end=on_stream_end,
     )
 
-    assert final_content == "Hello"
+    assert result.final_content == "Hello"
     assert deltas == ["Hello"]
     assert endings == [False]
 
@@ -400,18 +417,20 @@ async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("Hello <thin")
         await on_content_delta("k>hidden</think>World")
-        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry
 
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _, _, _ = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime(), on_stream=on_stream
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+        on_stream=on_stream,
     )
 
-    assert final_content == "Hello World"
+    assert result.final_content == "Hello World"
     assert deltas == ["Hello", " World"]
 
 
@@ -423,18 +442,20 @@ async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("Hello <think>")
         await on_content_delta("hidden</think>World")
-        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry
 
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _, _, _ = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime(), on_stream=on_stream
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+        on_stream=on_stream,
     )
 
-    assert final_content == "Hello World"
+    assert result.final_content == "Hello World"
     assert deltas == ["Hello", " World"]
 
 
@@ -446,16 +467,17 @@ async def test_loop_retries_think_only_final_response(tmp_path):
     async def chat_with_retry(**kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            return LLMResponse(content="<think>hidden</think>", tool_calls=[], usage={})
-        return LLMResponse(content="Recovered answer", tool_calls=[], usage={})
+            return LLMResponse(content="<think>hidden</think>", tool_calls=[], usage=None)
+        return LLMResponse(content="Recovered answer", tool_calls=[], usage=None)
 
     loop.provider.chat_with_retry = chat_with_retry
 
-    final_content, _, _, _, _ = await loop._run_agent_loop(
-        [], runtime=loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
     )
 
-    assert final_content == "Recovered answer"
+    assert result.final_content == "Recovered answer"
     assert call_count["n"] == 2
 
 
@@ -472,7 +494,7 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     error_resp = LLMResponse(
-        content="503 service unavailable", finish_reason="error", tool_calls=[], usage={},
+        content="503 service unavailable", finish_reason="error", tool_calls=[], usage=None,
     )
     loop.provider.chat_with_retry = AsyncMock(return_value=error_resp)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=error_resp)
@@ -510,14 +532,14 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
             name="exec",
             arguments={"command": "curl http://169.254.169.254/latest/meta-data/"},
         )],
-        usage={},
+        usage=None,
     )
     responses = iter([
         tool_call_resp,
         LLMResponse(
             content="I cannot access private URLs. Please share the local file.",
             tool_calls=[],
-            usage={},
+            usage=None,
         ),
     ])
 
@@ -556,13 +578,12 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={}),
-        LLMResponse(content="Recovered answer", tool_calls=[], usage={}),
+        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage=None),
+        LLMResponse(content="Recovered answer", tool_calls=[], usage=None),
     ])
 
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     first = await loop._process_message(
         InboundMessage(channel="cli", sender_id="user", chat_id="test", content="first question")

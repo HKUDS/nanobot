@@ -4,7 +4,7 @@ Uses the ilinkai.weixin.qq.com API for personal WeChat messaging.
 No WebSocket, no local WeChat client needed — just HTTP requests with a
 bot token obtained via QR code login.
 
-Protocol reverse-engineered from ``@tencent-weixin/openclaw-weixin`` v1.0.3.
+Protocol aligned with ``@tencent-weixin/openclaw-weixin`` v2.4.6.
 """
 
 from __future__ import annotations
@@ -20,21 +20,23 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import suppress
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, model_validator
 
+from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
-from nanobot.utils.helpers import split_message
 
 # ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)
@@ -46,6 +48,8 @@ ITEM_IMAGE = 2
 ITEM_VOICE = 3
 ITEM_FILE = 4
 ITEM_VIDEO = 5
+ITEM_TOOL_CALL_START = 11
+ITEM_TOOL_CALL_RESULT = 12
 
 # MessageType  (1 = inbound from user, 2 = outbound from bot)
 MESSAGE_TYPE_BOT = 2
@@ -53,8 +57,8 @@ MESSAGE_TYPE_BOT = 2
 # MessageState
 MESSAGE_STATE_FINISH = 2
 
-WEIXIN_MAX_MESSAGE_LEN = 4000
-WEIXIN_CHANNEL_VERSION = "2.1.1"
+WEIXIN_MAX_MESSAGE_LEN = 1800
+WEIXIN_CHANNEL_VERSION = "2.4.6"
 ILINK_APP_ID = "bot"
 
 
@@ -74,11 +78,17 @@ def _build_client_version(version: str) -> int:
     return ((major & 0xFF) << 16) | ((minor & 0xFF) << 8) | (patch & 0xFF)
 
 ILINK_APP_CLIENT_VERSION = _build_client_version(WEIXIN_CHANNEL_VERSION)
-BASE_INFO: dict[str, str] = {"channel_version": WEIXIN_CHANNEL_VERSION}
+BASE_INFO: dict[str, str] = {
+    "channel_version": WEIXIN_CHANNEL_VERSION,
+    "bot_agent": f"nanobot/{__version__} (python)",
+}
 
-# Session-expired error code
-ERRCODE_SESSION_EXPIRED = -14
-SESSION_PAUSE_DURATION_S = 60 * 60
+# Business error codes observed in the public iLink protocol.
+ERRCODE_CONTEXT_RESTRICTED = -2
+ERRCODE_INVALID_ARGUMENT = -3
+ERRCODE_STALE_TOKEN = -14
+WEIXIN_AUTH_EXPIRED_MESSAGE = "WeChat login expired. Scan again to reconnect."
+_REPLACED_CONFIG_TOKEN_HASH_KEY = "replaced_config_token_sha256"
 
 # iLink context_token is observed to expire server-side after ~90-160s of
 # agent inactivity (openclaw/openclaw#61174). Proactively refresh before
@@ -100,6 +110,11 @@ CONFIG_CACHE_MAX_RETRY_S = 60 * 60
 
 # Default long-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
+DEFAULT_API_TIMEOUT_S = 15
+DEFAULT_CONFIG_TIMEOUT_S = 10
+QR_POLL_TIMEOUT_S = 60
+MAX_DEFERRED_MESSAGES_PER_CHAT = 3
+_RETRYABLE_HTTP_STATUS_CODES = {408, 425, 429}
 
 # Media-type codes for getuploadurl  (1=image, 2=video, 3=file, 4=voice)
 UPLOAD_MEDIA_IMAGE = 1
@@ -119,6 +134,68 @@ def _has_downloadable_media_locator(media: dict[str, Any] | None) -> bool:
     return bool(str(media.get("encrypt_query_param", "") or "") or str(media.get("full_url", "") or "").strip())
 
 
+def sanitize_weixin_markdown(content: str) -> str:
+    """Remove constructs known to render badly in the WeChat iLink client."""
+    if not content:
+        return content
+
+    # Keep complete fenced and inline code regions byte-for-byte. WeChat treats
+    # a bare angle bracket in normal text as markup and may hide everything
+    # after it, so use full-width forms outside code.
+    code_pattern = re.compile(r"(```[\s\S]*?```|`[^`\n]*`)")
+    parts = code_pattern.split(content)
+    for index in range(0, len(parts), 2):
+        text = parts[index]
+        text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+        text = text.replace("<", "＜").replace(">", "＞")
+        text = text.replace("~~", "")
+        text = re.sub(r"(?m)^#{5,6}\s+", "", text)
+        parts[index] = text
+    return "".join(parts)
+
+
+def split_weixin_message(
+    content: str,
+    max_len: int = WEIXIN_MAX_MESSAGE_LEN,
+) -> list[str]:
+    """Split sanitized text while balancing fenced code blocks per message."""
+    content = sanitize_weixin_markdown(content).strip()
+    if not content:
+        return []
+    if max_len <= 0 or len(content) <= max_len:
+        return [content]
+
+    chunks: list[str] = []
+    remaining = content
+    in_fence = False
+    while remaining:
+        prefix = "```\n" if in_fence else ""
+        suffix_budget = 4  # ``\n``` `` when the raw slice leaves a fence open.
+        available = max_len - len(prefix) - suffix_budget
+        if available <= 0:
+            return [content]
+        if len(remaining) <= available:
+            raw_piece = remaining
+        else:
+            candidate = remaining[:available]
+            cut = candidate.rfind("\n\n")
+            if cut <= 0:
+                cut = candidate.rfind("\n")
+            if cut <= 0:
+                punctuation = max(candidate.rfind(mark) for mark in "。！？；.!?; ")
+                cut = punctuation + 1 if punctuation >= 0 else available
+            raw_piece = remaining[:cut]
+        remaining = remaining[len(raw_piece):].lstrip()
+        toggles = raw_piece.count("```")
+        next_in_fence = in_fence ^ bool(toggles % 2)
+        rendered = prefix + raw_piece.rstrip()
+        if next_in_fence:
+            rendered += "\n```"
+        chunks.append(rendered)
+        in_fence = next_in_fence
+    return chunks
+
+
 class WeixinConfig(Base):
     """Personal WeChat channel configuration."""
 
@@ -130,6 +207,13 @@ class WeixinConfig(Base):
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    # Extra progress messages consume the same undocumented iLink send quota as
+    # final replies. Keep them off unless an operator explicitly opts in.
+    send_progress: bool = False
+    send_tool_hints: bool = False
+    reply_progress_messages: bool = False
+    reply_progress_max_messages: int = Field(default=2, ge=0, le=4)
+    context_message_budget: int = Field(default=8, ge=1, le=10)
     # Default on: WeChat iLink has no native incremental delivery (send_delta is
     # buffered and the final answer is still sent in one shot), so streaming has
     # zero user-facing effect here — it only switches the LLM call to the
@@ -137,6 +221,71 @@ class WeixinConfig(Base):
     # id/name/input on the non-streaming Messages path (a common third-party
     # relay bug). Set to false only if a relay's streaming/SSE path is broken.
     streaming: bool = True
+    # Optional user-visible block streaming. Disabled by default because every
+    # block is a separate iLink message and consumes the context send budget.
+    block_streaming: bool = False
+    block_streaming_min_chars: int = Field(default=1200, ge=200, le=1800)
+    block_streaming_max_messages: int = Field(default=3, ge=1, le=4)
+
+    @model_validator(mode="after")
+    def _enable_tool_event_transport(self) -> WeixinConfig:
+        if self.reply_progress_messages:
+            self.send_progress = True
+            self.send_tool_hints = True
+        return self
+
+
+class WeixinAPIError(RuntimeError):
+    """A parsed WeChat API failure with an explicit retry contract."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        ret: int = 0,
+        errcode: int = 0,
+        errmsg: str = "",
+        retryable: bool = False,
+    ) -> None:
+        self.endpoint = endpoint
+        self.ret = ret
+        self.errcode = errcode
+        self.errmsg = errmsg
+        self.retryable = retryable
+        code = errcode or ret
+        super().__init__(
+            f"WeChat {endpoint} failed (code={code}, ret={ret}, errcode={errcode}): "
+            f"{errmsg or 'no error message'}"
+        )
+
+
+class WeixinQuotaError(WeixinAPIError):
+    """The current context token cannot send more messages right now."""
+
+
+class WeixinAuthError(WeixinAPIError):
+    """The persisted bot token is stale and interactive login is required."""
+
+
+@dataclass(slots=True)
+class _DeliveryState:
+    completed_parts: set[str] = field(default_factory=set)
+    media_aes_keys: dict[str, bytes] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class _SendOptions:
+    client_id: str
+    run_id: str = ""
+    file_key: str | None = None
+    aes_key_raw: bytes | None = None
+    reserve_budget: int = 0
+
+
+_SEND_OPTIONS: ContextVar[_SendOptions | None] = ContextVar(
+    "weixin_send_options",
+    default=None,
+)
 
 
 class WeixinChannel(BaseChannel):
@@ -150,6 +299,8 @@ class WeixinChannel(BaseChannel):
 
     name = "weixin"
     display_name = "WeChat"
+    send_progress = False
+    send_tool_hints = False
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -168,9 +319,10 @@ class WeixinChannel(BaseChannel):
         self._processed_ids: OrderedDict[str, None] = OrderedDict()
         self._state_dir: Path | None = None
         self._token: str = ""
+        self._replaced_config_token_hash: str = ""
         self._poll_task: asyncio.Task[None] | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
-        self._session_pause_until: float = 0.0
+        self._auth_required = False
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._typing_tickets: dict[str, dict[str, Any]] = {}
         self._context_token_at: dict[str, float] = {}
@@ -179,6 +331,37 @@ class WeixinChannel(BaseChannel):
         # incremental delivery, so when streaming is enabled we accumulate the
         # deltas and flush the full reply in one shot at _stream_end.
         self._stream_buffers: dict[str, list[str]] = {}
+        self._stream_sent_counts: dict[str, int] = {}
+        self._stream_live_disabled: set[str] = set()
+        self._delivery_states: OrderedDict[str, _DeliveryState] = OrderedDict()
+        self._deferred_outbound: dict[str, OrderedDict[str, OutboundMessage]] = {}
+        self._context_send_counts: dict[str, int] = {}
+        self._reply_run_ids: dict[str, str] = {}
+        self._reply_progress_counts: dict[str, int] = {}
+
+    def progress_transport_defaults(self) -> tuple[bool, bool]:
+        return self.config.send_progress, self.config.send_tool_hints
+
+    def should_retry_send_error(self, error: Exception) -> bool:
+        if isinstance(error, WeixinAPIError):
+            return error.retryable
+        if isinstance(error, httpx.HTTPStatusError):
+            return self._is_retryable_http_status(error.response.status_code)
+        return True
+
+    def start_error_message(self, error: Exception) -> str | None:
+        if isinstance(error, WeixinAuthError):
+            return WEIXIN_AUTH_EXPIRED_MESSAGE
+        return None
+
+    @staticmethod
+    def _new_http_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
+        """Create a direct-route client shared by login, connect, and polling."""
+        return httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            trust_env=False,
+        )
 
     # ------------------------------------------------------------------
     # State persistence
@@ -195,14 +378,27 @@ class WeixinChannel(BaseChannel):
         self._state_dir = d
         return d
 
-    def _load_state(self) -> bool:
+    @staticmethod
+    def _token_fingerprint(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest() if token else ""
+
+    def _load_state(self, *, required_replaced_config_token: str | None = None) -> bool:
         """Load saved account state. Returns True if a valid token was found."""
         state_file = self._get_state_dir() / "account.json"
         if not state_file.exists():
             return False
         try:
             data = cast(dict[str, Any], json.loads(state_file.read_text()))
+            replaced_config_token_hash = data.get(_REPLACED_CONFIG_TOKEN_HASH_KEY, "")
+            if not isinstance(replaced_config_token_hash, str):
+                replaced_config_token_hash = ""
+            if required_replaced_config_token is not None and (
+                replaced_config_token_hash
+                != self._token_fingerprint(required_replaced_config_token)
+            ):
+                return False
             self._token = data.get("token", "")
+            self._replaced_config_token_hash = replaced_config_token_hash
             self._get_updates_buf = data.get("get_updates_buf", "")
             context_tokens = data.get("context_tokens", {})
             if isinstance(context_tokens, dict):
@@ -240,11 +436,23 @@ class WeixinChannel(BaseChannel):
                 except Exception:
                     persisted = None
                 persisted_token = ""
+                persisted_replaced_config_token_hash = ""
                 if isinstance(persisted, dict):
                     persisted_mapping = cast(dict[str, object], persisted)
                     persisted_token = str(persisted_mapping.get("token", "") or "")
+                    persisted_hash = persisted_mapping.get(
+                        _REPLACED_CONFIG_TOKEN_HASH_KEY,
+                        "",
+                    )
+                    if isinstance(persisted_hash, str):
+                        persisted_replaced_config_token_hash = persisted_hash
+                persisted_replaces_config_token = bool(self.config.token) and (
+                    persisted_replaced_config_token_hash
+                    == self._token_fingerprint(self.config.token)
+                )
                 configured_token_is_authoritative: bool = bool(self.config.token) and (
                     self._token == self.config.token
+                    and not persisted_replaces_config_token
                 )
                 if (
                     persisted_token
@@ -261,7 +469,52 @@ class WeixinChannel(BaseChannel):
                 "typing_tickets": self._typing_tickets,
                 "base_url": self.config.base_url,
             }
+            if self._replaced_config_token_hash:
+                data[_REPLACED_CONFIG_TOKEN_HASH_KEY] = self._replaced_config_token_hash
             state_file.write_text(json.dumps(data, ensure_ascii=False))
+
+    def _commit_account(self, *, token: str, base_url: str) -> None:
+        self._token = token
+        self._auth_required = False
+        # A successful QR scan replaces only the configured token it was started
+        # against. A later manual token edit must become authoritative again.
+        self._replaced_config_token_hash = (
+            self._token_fingerprint(self.config.token)
+            if self.config.token and self.config.token != token
+            else ""
+        )
+        if base_url:
+            self.config.base_url = base_url
+        self._save_state(force=True)
+        self._persist_connect_credentials(token=token, base_url=base_url)
+
+    def _persist_connect_credentials(self, *, token: str, base_url: str) -> None:
+        """Write the QR-login token and base_url back to config.json.
+
+        The connect flow saves account state to ``account.json`` (via
+        ``_save_state``), but the WebUI's post-connect ``enable`` step calls
+        ``set_channel_config_enabled`` which reads config.json. Without
+        persisting the token here, that step would overwrite it with the
+        default empty value, losing the freshly obtained credential.
+        """
+        from nanobot.config.loader import get_config_path, load_config, save_config
+
+        try:
+            full_config = load_config()
+            section = getattr(full_config.channels, "weixin", None)
+            if section is not None and hasattr(section, "model_dump"):
+                values = section.model_dump(mode="json", by_alias=True)
+            elif isinstance(section, dict):
+                values = dict(cast(dict[str, Any], section))
+            else:
+                values = {}
+            values["token"] = token
+            if base_url:
+                values["baseUrl"] = base_url
+            setattr(full_config.channels, "weixin", values)
+            save_config(full_config, get_config_path())
+        except Exception:
+            self.logger.exception("Failed to persist WeChat credentials to config.json")
 
     # ------------------------------------------------------------------
     # HTTP helpers  (matches api.ts buildHeaders / apiFetch)
@@ -293,6 +546,123 @@ class WeixinChannel(BaseChannel):
         return headers
 
     @staticmethod
+    def _network_error_category(err: Exception) -> str:
+        if isinstance(err, httpx.TimeoutException):
+            return "timeout"
+        message = str(err).lower()
+        if any(value in message for value in ("name or service", "nodename", "getaddrinfo", "dns")):
+            return "dns"
+        if any(value in message for value in ("ssl", "tls", "certificate")):
+            return "tls"
+        if isinstance(err, httpx.TransportError):
+            return "tcp"
+        return "unknown"
+
+    @staticmethod
+    def _is_retryable_http_status(status_code: int) -> bool:
+        return status_code in _RETRYABLE_HTTP_STATUS_CODES or status_code >= 500
+
+    @staticmethod
+    def _response_int(data: dict[str, Any], key: str) -> int:
+        value = data.get(key, 0)
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        try:
+            return int(str(value or "0"))
+        except ValueError:
+            return 0
+
+    @classmethod
+    def _raise_for_api_error(cls, endpoint: str, data: dict[str, Any]) -> None:
+        ret = cls._response_int(data, "ret")
+        errcode = cls._response_int(data, "errcode")
+        if ret == 0 and errcode == 0:
+            return
+        errmsg = str(data.get("errmsg", "") or "")
+        if ERRCODE_CONTEXT_RESTRICTED in {ret, errcode}:
+            raise WeixinQuotaError(
+                endpoint,
+                ret=ret,
+                errcode=errcode,
+                errmsg=errmsg or "context token expired, quota exhausted, or sending restricted",
+            )
+        if ERRCODE_STALE_TOKEN in {ret, errcode}:
+            raise WeixinAuthError(
+                endpoint,
+                ret=ret,
+                errcode=errcode,
+                errmsg=errmsg or "bot token is stale; scan a new QR code",
+            )
+        raise WeixinAPIError(
+            endpoint,
+            ret=ret,
+            errcode=errcode,
+            errmsg=errmsg,
+        )
+
+    def _request_timeout(self, endpoint: str) -> float:
+        if endpoint.endswith("getupdates"):
+            return self._next_poll_timeout_s + 10
+        if endpoint.endswith(("getconfig", "sendtyping", "notifystart", "notifystop")):
+            return DEFAULT_CONFIG_TIMEOUT_S
+        if endpoint.endswith("get_qrcode_status"):
+            return QR_POLL_TIMEOUT_S
+        return DEFAULT_API_TIMEOUT_S
+
+    async def _request_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        assert self._client is not None
+        try:
+            response = await self._client.request(
+                method,
+                url,
+                params=params,
+                json=body,
+                headers=headers,
+                timeout=self._request_timeout(endpoint),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            self.logger.warning(
+                "WeChat request failed endpoint={} category={} error={}",
+                endpoint,
+                self._network_error_category(exc),
+                type(exc).__name__,
+            )
+            raise
+        except httpx.HTTPStatusError as exc:
+            self.logger.warning(
+                "WeChat request failed endpoint={} category=http status={}",
+                endpoint,
+                exc.response.status_code,
+            )
+            raise
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise WeixinAPIError(
+                endpoint,
+                errmsg="server returned invalid JSON",
+                retryable=True,
+            ) from exc
+        if not isinstance(data, dict):
+            raise WeixinAPIError(
+                endpoint,
+                errmsg="server returned a non-object JSON payload",
+                retryable=True,
+            )
+        return cast(dict[str, Any], data)
+
+    @staticmethod
     def _is_retryable_media_download_error(err: Exception) -> bool:
         if isinstance(err, httpx.TimeoutException | httpx.TransportError):
             return True
@@ -302,7 +672,7 @@ class WeixinChannel(BaseChannel):
                 if cast(object, err.response) is not None
                 else 0
             )
-            return status_code >= 500
+            return WeixinChannel._is_retryable_http_status(status_code)
         return False
 
     async def _api_get(
@@ -318,9 +688,9 @@ class WeixinChannel(BaseChannel):
         hdrs = self._make_headers(auth=auth)
         if extra_headers:
             hdrs.update(extra_headers)
-        resp = await self._client.get(url, params=params, headers=hdrs)
-        resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
+        return await self._request_json(
+            "GET", url, endpoint=endpoint, params=params, headers=hdrs,
+        )
 
     async def _api_get_with_base(
         self,
@@ -337,9 +707,9 @@ class WeixinChannel(BaseChannel):
         hdrs = self._make_headers(auth=auth)
         if extra_headers:
             hdrs.update(extra_headers)
-        resp = await self._client.get(url, params=params, headers=hdrs)
-        resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
+        return await self._request_json(
+            "GET", url, endpoint=endpoint, params=params, headers=hdrs,
+        )
 
     async def _api_post(
         self,
@@ -347,47 +717,91 @@ class WeixinChannel(BaseChannel):
         body: dict[str, Any] | None = None,
         *,
         auth: bool = True,
+        include_base_info: bool = True,
     ) -> dict[str, Any]:
         assert self._client is not None
         url = f"{self.config.base_url}/{endpoint}"
-        payload = body or {}
-        if "base_info" not in payload:
+        payload = dict(body or {})
+        if include_base_info and "base_info" not in payload:
             payload["base_info"] = BASE_INFO
-        resp = await self._client.post(url, json=payload, headers=self._make_headers(auth=auth))
-        resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
+        return await self._request_json(
+            "POST",
+            url,
+            endpoint=endpoint,
+            body=payload,
+            headers=self._make_headers(auth=auth),
+        )
 
     # ------------------------------------------------------------------
     # QR Code Login  (matches login-qr.ts)
     # ------------------------------------------------------------------
 
-    async def _fetch_qr_code(self) -> tuple[str, str]:
-        """Fetch a fresh QR code. Returns (qrcode_id, scan_url)."""
-        data = await self._api_get(
-            "ilink/bot/get_bot_qrcode",
-            params={"bot_type": "3"},
+    def _local_token_list(self) -> list[str]:
+        """Return known local bot tokens, newest first, without exposing them."""
+        candidates = [self._token, self.config.token]
+        state_file = self._get_state_dir() / "account.json"
+        if state_file.exists():
+            with suppress(Exception):
+                persisted = json.loads(state_file.read_text())
+                if isinstance(persisted, dict):
+                    persisted_data = cast(dict[str, Any], persisted)
+                    candidates.append(str(persisted_data.get("token", "") or ""))
+        tokens: list[str] = []
+        for candidate in candidates:
+            token = str(candidate or "").strip()
+            if token and token not in tokens:
+                tokens.append(token)
+            if len(tokens) >= 10:
+                break
+        return tokens
+
+    async def _fetch_qr_code(self, *, force: bool = False) -> tuple[str, str]:
+        """Fetch a QR code without existing credentials when forced."""
+        local_tokens = [] if force else self._local_token_list()
+        data = await self._api_post(
+            "ilink/bot/get_bot_qrcode?bot_type=3",
+            {"local_token_list": local_tokens},
             auth=False,
+            include_base_info=False,
         )
+        if local_tokens and ERRCODE_INVALID_ARGUMENT in {
+            self._response_int(data, "ret"),
+            self._response_int(data, "errcode"),
+        }:
+            self.logger.info(
+                "WeChat rejected saved login credentials; retrying QR login without them"
+            )
+            data = await self._api_post(
+                "ilink/bot/get_bot_qrcode?bot_type=3",
+                {"local_token_list": []},
+                auth=False,
+                include_base_info=False,
+            )
+        self._raise_for_api_error("get_bot_qrcode", data)
         qrcode_img_content = cast(str, data.get("qrcode_img_content", ""))
         qrcode_id = cast(str, data.get("qrcode", ""))
         if not qrcode_id:
             raise RuntimeError(f"Failed to get QR code from WeChat API: {data}")
         return qrcode_id, (qrcode_img_content or qrcode_id)
 
-    async def _qr_login(self) -> bool:
-        """Perform QR code login flow. Returns True on success."""
+    async def _qr_login(self, *, force: bool = False) -> bool:
+        """Perform QR login; forced flows accept only newly confirmed credentials."""
         try:
             refresh_count = 0
-            qrcode_id, scan_url = await self._fetch_qr_code()
+            qrcode_id, scan_url = await self._fetch_qr_code(force=force)
             self._print_qr_code(scan_url)
             current_poll_base_url = self.config.base_url
+            verify_code = ""
 
             while self._running:
                 try:
                     status_data = await self._api_get_with_base(
                         base_url=current_poll_base_url,
                         endpoint="ilink/bot/get_qrcode_status",
-                        params={"qrcode": qrcode_id},
+                        params={
+                            "qrcode": qrcode_id,
+                            **({"verify_code": verify_code} if verify_code else {}),
+                        },
                         auth=False,
                     )
                 except Exception as e:
@@ -407,10 +821,7 @@ class WeixinChannel(BaseChannel):
                     base_url = status_data.get("baseurl", "")
                     user_id = status_data.get("ilink_user_id", "")
                     if token:
-                        self._token = token
-                        if base_url:
-                            self.config.base_url = base_url
-                        self._save_state()
+                        self._commit_account(token=token, base_url=base_url)
                         self.logger.info(
                             "login successful! bot_id={} user_id={}",
                             bot_id,
@@ -429,6 +840,37 @@ class WeixinChannel(BaseChannel):
                             redirected_base = f"https://{redirect_host}"
                         if redirected_base != current_poll_base_url:
                             current_poll_base_url = redirected_base
+                elif status == "need_verifycode":
+                    prompt = (
+                        "The previous code did not match. Enter the number shown in WeChat: "
+                        if verify_code
+                        else "Enter the number shown in WeChat to continue: "
+                    )
+                    verify_code = (await asyncio.to_thread(input, prompt)).strip()
+                    continue
+                elif status == "verify_code_blocked":
+                    verify_code = ""
+                    refresh_count += 1
+                    if refresh_count > MAX_QR_REFRESH_COUNT:
+                        self.logger.warning("WeChat verification failed too many times")
+                        return False
+                    qrcode_id, scan_url = await self._fetch_qr_code(force=force)
+                    current_poll_base_url = self.config.base_url
+                    self._print_qr_code(scan_url)
+                    continue
+                elif status == "binded_redirect":
+                    if force:
+                        self.logger.error(
+                            "Forced WeChat login returned an existing binding without new credentials"
+                        )
+                        return False
+                    if self._token or self._load_state():
+                        self.logger.info("WeChat account is already connected")
+                        return True
+                    self.logger.error(
+                        "WeChat reports an existing binding but no local credentials were found"
+                    )
+                    return False
                 elif status == "expired":
                     refresh_count += 1
                     if refresh_count > MAX_QR_REFRESH_COUNT:
@@ -438,8 +880,9 @@ class WeixinChannel(BaseChannel):
                             MAX_QR_REFRESH_COUNT,
                         )
                         return False
-                    qrcode_id, scan_url = await self._fetch_qr_code()
+                    qrcode_id, scan_url = await self._fetch_qr_code(force=force)
                     current_poll_base_url = self.config.base_url
+                    verify_code = ""
                     self._print_qr_code(scan_url)
                     continue
                 # status == "wait" — keep polling
@@ -461,7 +904,7 @@ class WeixinChannel(BaseChannel):
                 if cast(object, err.response) is not None
                 else 0
             )
-            if status_code >= 500:
+            if WeixinChannel._is_retryable_http_status(status_code):
                 return True
         return False
 
@@ -481,25 +924,26 @@ class WeixinChannel(BaseChannel):
 
     def connect_open_client(self) -> None:
         """Open the short-lived HTTP client used by WebUI QR login."""
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(60, connect=30),
-            follow_redirects=True,
-        )
+        self._client = self._new_http_client(httpx.Timeout(60, connect=30))
         self._running = True
 
-    async def connect_fetch_qr_code(self) -> tuple[str, str]:
-        return await self._fetch_qr_code()
+    async def connect_fetch_qr_code(self, *, force: bool = False) -> tuple[str, str]:
+        return await self._fetch_qr_code(force=force)
 
     async def connect_poll_qr_code(
         self,
         *,
         base_url: str,
         qrcode_id: str,
+        verify_code: str = "",
     ) -> dict[str, Any]:
         return await self._api_get_with_base(
             base_url=base_url,
             endpoint="ilink/bot/get_qrcode_status",
-            params={"qrcode": qrcode_id},
+            params={
+                "qrcode": qrcode_id,
+                **({"verify_code": verify_code} if verify_code else {}),
+            },
             auth=False,
         )
 
@@ -507,10 +951,7 @@ class WeixinChannel(BaseChannel):
         return self._is_retryable_qr_poll_error(err)
 
     def connect_commit_account(self, *, token: str, base_url: str) -> None:
-        self._token = token
-        if base_url:
-            self.config.base_url = base_url
-        self._save_state(force=True)
+        self._commit_account(token=token, base_url=base_url)
 
     async def connect_close_client(self) -> None:
         self._running = False
@@ -540,20 +981,14 @@ class WeixinChannel(BaseChannel):
         if force:
             self._token = ""
             self._get_updates_buf = ""
-            state_file = self._get_state_dir() / "account.json"
-            if state_file.exists():
-                state_file.unlink()
-        if self._token or self._load_state():
+        if self._token or (not force and self._load_state()):
             return True
 
         # Initialize HTTP client for the login flow
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(60, connect=30),
-            follow_redirects=True,
-        )
+        self._client = self._new_http_client(httpx.Timeout(60, connect=30))
         self._running = True  # Enable polling loop in _qr_login()
         try:
-            return await self._qr_login()
+            return await self._qr_login(force=force)
         finally:
             self._running = False
             if self._client:
@@ -563,29 +998,39 @@ class WeixinChannel(BaseChannel):
     async def start(self) -> None:
         self._running = True
         self._next_poll_timeout_s = self.config.poll_timeout
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(self._next_poll_timeout_s + 10, connect=30),
-            follow_redirects=True,
+        self._client = self._new_http_client(
+            httpx.Timeout(self._next_poll_timeout_s + 10, connect=30)
         )
 
         if self.config.token:
-            self._token = self.config.token
+            if not self._load_state(required_replaced_config_token=self.config.token):
+                self._token = self.config.token
+                self._replaced_config_token_hash = ""
         elif not self._load_state():
             if not await self._qr_login():
                 self.logger.error("login failed. Run 'nanobot channels login weixin' to authenticate.")
                 self._running = False
                 return
 
+        await self._notify_lifecycle("start")
         self.logger.info("channel starting with long-poll...")
 
         consecutive_failures = 0
         while self._running:
             try:
-                await self._poll_once()
+                self._poll_task = asyncio.create_task(self._poll_once())
+                await self._poll_task
                 consecutive_failures = 0
+            except asyncio.CancelledError:
+                if not self._running:
+                    break
+                raise
             except httpx.TimeoutException:
                 # Normal for long-poll, just retry
                 continue
+            except WeixinAuthError:
+                self._running = False
+                raise
             except Exception:
                 if not self._running:
                     break
@@ -596,78 +1041,91 @@ class WeixinChannel(BaseChannel):
                     await asyncio.sleep(BACKOFF_DELAY_S)
                 else:
                     await asyncio.sleep(RETRY_DELAY_S)
+            finally:
+                self._poll_task = None
 
     async def stop(self) -> None:
         self._running = False
         self._pending_tool_hints.clear()
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
+        self._stream_buffers.clear()
+        self._stream_sent_counts.clear()
+        self._stream_live_disabled.clear()
+        self._reply_run_ids.clear()
+        self._reply_progress_counts.clear()
+        poll_task = self._poll_task
+        if poll_task and not poll_task.done():
+            poll_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await poll_task
+        self._poll_task = None
         for chat_id in list(self._typing_tasks):
             await self._stop_typing(chat_id, clear_remote=False)
         if self._client:
+            await self._notify_lifecycle("stop")
             await self._client.aclose()
             self._client = None
         self._save_state()
+
+    async def _notify_lifecycle(self, action: str) -> None:
+        """Best-effort upstream online-state reconciliation."""
+        if not self._client or not self._token:
+            return
+        endpoint = f"ilink/bot/msg/notify{action}"
+        try:
+            data = await self._api_post(endpoint, {})
+            self._raise_for_api_error(f"notify{action}", data)
+        except Exception as exc:
+            self.logger.warning("WeChat notify{} failed (ignored): {}", action, exc)
+
     # ------------------------------------------------------------------
     # Polling  (matches monitor.ts monitorWeixinProvider)
     # ------------------------------------------------------------------
 
-    def _pause_session(self, duration_s: int = SESSION_PAUSE_DURATION_S) -> None:
-        self._session_pause_until = time.time() + duration_s
-
-    def _session_pause_remaining_s(self) -> int:
-        remaining = int(self._session_pause_until - time.time())
-        if remaining <= 0:
-            self._session_pause_until = 0.0
-            return 0
-        return remaining
-
     def _assert_session_active(self) -> None:
-        remaining = self._session_pause_remaining_s()
-        if remaining > 0:
-            remaining_min = max((remaining + 59) // 60, 1)
-            raise RuntimeError(
-                f"WeChat session paused, {remaining_min} min remaining (errcode {ERRCODE_SESSION_EXPIRED})"
+        if self._auth_required:
+            raise WeixinAuthError(
+                "sendmessage",
+                errcode=ERRCODE_STALE_TOKEN,
+                errmsg="bot token is stale; run 'nanobot channels login weixin --force'",
             )
 
-    async def _poll_once(self) -> None:
-        remaining = self._session_pause_remaining_s()
-        if remaining > 0:
-            await asyncio.sleep(remaining)
-            if not self.config.token:
-                self._load_state()
-            return
+    def _reload_replacement_token(self) -> bool:
+        """Reload credentials only when QR login persisted a newer token."""
+        previous_token = self._token
+        loaded = (
+            self._load_state(required_replaced_config_token=self.config.token)
+            if self.config.token
+            else self._load_state()
+        )
+        if not loaded or self._token == previous_token:
+            self._token = previous_token
+            return False
+        self._auth_required = False
+        self.logger.info("Loaded replacement WeChat credentials after stale-token response")
+        return True
 
+    async def _poll_once(self) -> None:
         body: dict[str, Any] = {
             "get_updates_buf": self._get_updates_buf,
             "base_info": BASE_INFO,
         }
 
-        # Adjust httpx timeout to match the current poll timeout
-        assert self._client is not None
-        self._client.timeout = httpx.Timeout(self._next_poll_timeout_s + 10, connect=30)
-
         data = await self._api_post("ilink/bot/getupdates", body)
-
-        # Check for API-level errors (monitor.ts checks both ret and errcode)
-        ret = data.get("ret", 0)
-        errcode = data.get("errcode", 0)
-
-        is_error = (ret is not None and ret != 0) or (errcode is not None and errcode != 0)
-
-        if is_error:
-            if errcode == ERRCODE_SESSION_EXPIRED or ret == ERRCODE_SESSION_EXPIRED:
-                self._pause_session()
-                remaining = self._session_pause_remaining_s()
-                self.logger.warning(
-                    "session expired (errcode {}). Pausing {} min.",
-                    errcode,
-                    max((remaining + 59) // 60, 1),
-                )
+        try:
+            self._raise_for_api_error("getupdates", data)
+        except WeixinAuthError:
+            if self._reload_replacement_token():
+                await self._notify_lifecycle("start")
                 return
-            raise RuntimeError(
-                f"getUpdates failed: ret={ret} errcode={errcode} errmsg={data.get('errmsg', '')}"
-            )
+            self._auth_required = True
+            raise WeixinAuthError(
+                "getupdates",
+                errcode=ERRCODE_STALE_TOKEN,
+                errmsg=(
+                    "bot token is stale and no replacement credentials were found; "
+                    "run 'nanobot channels login weixin --force'"
+                ),
+            ) from None
 
         # Honour server-suggested poll timeout (monitor.ts:102-105)
         server_timeout_ms = data.get("longpolling_timeout_ms")
@@ -759,9 +1217,13 @@ class WeixinChannel(BaseChannel):
 
         # Cache context_token (required for all replies — inbound.ts:23-27)
         if ctx_token:
+            previous_token = self._context_tokens.get(from_user_id, "")
             self._context_tokens[from_user_id] = ctx_token
             self._context_token_at[from_user_id] = time.time()
+            if ctx_token != previous_token:
+                self._context_send_counts[ctx_token] = 0
             self._save_state()
+            await self._retry_deferred_messages(from_user_id)
 
         # Parse item_list (WeixinMessage.item_list — types.ts:161)
         item_list = cast(list[dict[str, Any]], msg.get("item_list") or [])
@@ -1048,6 +1510,138 @@ class WeixinChannel(BaseChannel):
     # Outbound  (matches send.ts buildTextMessageReq + sendMessageWeixin)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _delivery_id(msg: OutboundMessage) -> str:
+        existing = msg.metadata.get("_weixin_delivery_id")
+        if isinstance(existing, str) and existing:
+            return existing
+        delivery_id = uuid.uuid4().hex
+        msg.metadata["_weixin_delivery_id"] = delivery_id
+        return delivery_id
+
+    def _delivery_state(self, delivery_id: str) -> _DeliveryState:
+        state = self._delivery_states.get(delivery_id)
+        if state is None:
+            state = _DeliveryState()
+            self._delivery_states[delivery_id] = state
+            while len(self._delivery_states) > 256:
+                self._delivery_states.popitem(last=False)
+        else:
+            self._delivery_states.move_to_end(delivery_id)
+        return state
+
+    @staticmethod
+    def _part_client_id(delivery_id: str, part: str) -> str:
+        digest = hashlib.sha256(f"{delivery_id}:{part}".encode()).hexdigest()[:20]
+        return f"nanobot-{digest}"
+
+    async def _send_text_part(
+        self,
+        to_user_id: str,
+        text: str,
+        context_token: str,
+        *,
+        client_id: str,
+        run_id: str = "",
+        reserve_budget: int = 0,
+    ) -> None:
+        token = _SEND_OPTIONS.set(
+            _SendOptions(
+                client_id=client_id,
+                run_id=run_id,
+                reserve_budget=reserve_budget,
+            )
+        )
+        try:
+            await self._send_text(to_user_id, text, context_token)
+        finally:
+            _SEND_OPTIONS.reset(token)
+
+    async def _send_media_part(
+        self,
+        to_user_id: str,
+        media_path: str,
+        context_token: str,
+        *,
+        client_id: str,
+        file_key: str,
+        aes_key_raw: bytes,
+        run_id: str = "",
+    ) -> None:
+        token = _SEND_OPTIONS.set(
+            _SendOptions(
+                client_id=client_id,
+                run_id=run_id,
+                file_key=file_key,
+                aes_key_raw=aes_key_raw,
+            )
+        )
+        try:
+            await self._send_media_file(to_user_id, media_path, context_token)
+        finally:
+            _SEND_OPTIONS.reset(token)
+
+    def _ensure_context_budget(self, context_token: str, *, reserve: int = 0) -> None:
+        used = self._context_send_counts.get(context_token, 0)
+        if used + 1 + reserve <= self.config.context_message_budget:
+            return
+        raise WeixinQuotaError(
+            "sendmessage",
+            ret=ERRCODE_CONTEXT_RESTRICTED,
+            errmsg=(
+                "local safety budget exhausted for this context token; "
+                "wait for the user to send another message"
+            ),
+        )
+
+    def _record_context_send(self, context_token: str) -> None:
+        if context_token:
+            self._context_send_counts[context_token] = (
+                self._context_send_counts.get(context_token, 0) + 1
+            )
+
+    def _defer_outbound(self, msg: OutboundMessage) -> None:
+        delivery_id = self._delivery_id(msg)
+        pending = self._deferred_outbound.setdefault(msg.chat_id, OrderedDict())
+        pending[delivery_id] = msg
+        pending.move_to_end(delivery_id)
+        while len(pending) > MAX_DEFERRED_MESSAGES_PER_CHAT:
+            dropped_id, _ = pending.popitem(last=False)
+            self._delivery_states.pop(dropped_id, None)
+            self.logger.warning(
+                "Dropped oldest deferred WeChat delivery for {} after queue reached {} items",
+                msg.chat_id,
+                MAX_DEFERRED_MESSAGES_PER_CHAT,
+            )
+
+    async def _retry_deferred_messages(self, chat_id: str) -> None:
+        pending = self._deferred_outbound.get(chat_id)
+        if not pending:
+            return
+        self.logger.info(
+            "Retrying {} deferred WeChat delivery item(s) after a fresh inbound message",
+            len(pending),
+        )
+        for delivery_id, msg in list(pending.items()):
+            try:
+                await self.send(msg)
+            except WeixinQuotaError:
+                break
+            except Exception:
+                self.logger.exception(
+                    "Deferred WeChat delivery {} failed and will not be retried automatically",
+                    delivery_id,
+                )
+                pending.pop(delivery_id, None)
+                self._delivery_states.pop(delivery_id, None)
+            else:
+                pending.pop(delivery_id, None)
+                stream_buffer_key = msg.metadata.get("_weixin_stream_buffer_key")
+                if isinstance(stream_buffer_key, str):
+                    self._clear_stream_state(stream_buffer_key, chat_id=chat_id)
+        if not pending:
+            self._deferred_outbound.pop(chat_id, None)
+
     async def _get_typing_ticket(self, user_id: str, context_token: str = "") -> str:
         """Get typing ticket with per-user refresh + failure backoff cache."""
         now = time.time()
@@ -1061,7 +1655,7 @@ class WeixinChannel(BaseChannel):
             "base_info": BASE_INFO,
         }
         data = await self._api_post("ilink/bot/getconfig", body)
-        if data.get("ret", 0) == 0:
+        if self._response_int(data, "ret") == 0 and self._response_int(data, "errcode") == 0:
             ticket = str(data.get("typing_ticket", "") or "")
             self._typing_tickets[user_id] = {
                 "ticket": ticket,
@@ -1122,10 +1716,11 @@ class WeixinChannel(BaseChannel):
             self.logger.warning("WeChat getconfig failed for {}: {}", chat_id, e)
             return context_token
 
-        if data.get("ret", 0) != 0:
+        if self._response_int(data, "ret") != 0 or self._response_int(data, "errcode") != 0:
             self.logger.warning(
-                "WeChat getconfig returned ret={} for {}: {}",
+                "WeChat getconfig returned ret={} errcode={} for {}: {}",
                 data.get("ret"),
+                data.get("errcode"),
                 chat_id,
                 data.get("errmsg", ""),
             )
@@ -1189,7 +1784,8 @@ class WeixinChannel(BaseChannel):
             "status": status,
             "base_info": BASE_INFO,
         }
-        await self._api_post("ilink/bot/sendtyping", body)
+        data = await self._api_post("ilink/bot/sendtyping", body)
+        self._raise_for_api_error("sendtyping", data)
 
     async def _typing_keepalive_loop(self, user_id: str, typing_ticket: str, stop_event: asyncio.Event) -> None:
         try:
@@ -1202,19 +1798,127 @@ class WeixinChannel(BaseChannel):
         finally:
             pass
 
+    async def _send_structured_progress(
+        self,
+        msg: OutboundMessage,
+        event: ProgressEvent,
+        context_token: str,
+        delivery_id: str,
+        state: _DeliveryState,
+    ) -> None:
+        if not self.config.reply_progress_messages or not event.tool_events:
+            return
+        run_id = self._reply_run_ids.setdefault(msg.chat_id, uuid.uuid4().hex)
+        sent = self._reply_progress_counts.get(msg.chat_id, 0)
+        for tool_event in event.tool_events:
+            if sent >= self.config.reply_progress_max_messages:
+                break
+            phase = str(tool_event.get("phase", "") or "")
+            if phase not in {"start", "end", "error"}:
+                continue
+            call_id = str(tool_event.get("call_id", "") or "")
+            tool_name = str(tool_event.get("name", "") or "tool")
+            part = f"progress:{phase}:{call_id or tool_name}"
+            if part in state.completed_parts:
+                continue
+            if phase == "start":
+                item: dict[str, Any] = {
+                    "type": ITEM_TOOL_CALL_START,
+                    "create_time_ms": int(time.time() * 1000),
+                    "is_completed": False,
+                    "tool_call_start_item": {
+                        "tool_name": tool_name,
+                        "tool_call_id": call_id or None,
+                    },
+                }
+            else:
+                item = {
+                    "type": ITEM_TOOL_CALL_RESULT,
+                    "create_time_ms": int(time.time() * 1000),
+                    "is_completed": True,
+                    "tool_call_result_item": {
+                        "tool_name": tool_name,
+                        "tool_call_id": call_id or None,
+                        "status": "completed" if phase == "end" else "failed",
+                    },
+                }
+            await self._send_message_item(
+                msg.chat_id,
+                item,
+                context_token,
+                client_id=self._part_client_id(delivery_id, part),
+                run_id=run_id,
+                reserve_budget=1,
+            )
+            state.completed_parts.add(part)
+            sent += 1
+        self._reply_progress_counts[msg.chat_id] = sent
+
+    async def _send_message_item(
+        self,
+        to_user_id: str,
+        item: dict[str, Any],
+        context_token: str,
+        *,
+        client_id: str,
+        run_id: str = "",
+        reserve_budget: int = 0,
+    ) -> None:
+        self._ensure_context_budget(context_token, reserve=reserve_budget)
+        weixin_msg: dict[str, Any] = {
+            "from_user_id": "",
+            "to_user_id": to_user_id,
+            "client_id": client_id,
+            "message_type": MESSAGE_TYPE_BOT,
+            "message_state": MESSAGE_STATE_FINISH,
+            "item_list": [item],
+            "context_token": context_token,
+        }
+        if run_id:
+            weixin_msg["run_id"] = run_id
+        data = await self._api_post("ilink/bot/sendmessage", {"msg": weixin_msg})
+        self._raise_for_api_error("sendmessage", data)
+        self._record_context_send(context_token)
+
     async def send(self, msg: OutboundMessage) -> None:
         if not self._client or not self._token:
             raise RuntimeError("WeChat client not initialized or not authenticated")
         self._assert_session_active()
 
+        delivery_id = self._delivery_id(msg)
+        delivery_state = self._delivery_state(delivery_id)
         event = getattr(msg, "event", None)
         progress_event = event if isinstance(event, ProgressEvent) else None
         is_progress = progress_event is not None
 
+        if progress_event and progress_event.tool_events and self.config.reply_progress_messages:
+            ctx_token = self._context_tokens.get(msg.chat_id, "")
+            if not ctx_token:
+                self.logger.warning(
+                    "Dropped structured WeChat progress for {}: no context_token",
+                    msg.chat_id,
+                )
+                self._delivery_states.pop(delivery_id, None)
+                return
+            try:
+                await self._send_structured_progress(
+                    msg,
+                    progress_event,
+                    ctx_token,
+                    delivery_id,
+                    delivery_state,
+                )
+            except Exception:
+                raise
+            else:
+                self._delivery_states.pop(delivery_id, None)
+            return
+
         # Buffer tool hints to coalesce consecutive ones and avoid burning
-        # WeChat iLink rate-limit quota (~7 msgs / 5 min).
+        # WeChat iLink's undocumented per-context message quota.
         if progress_event and progress_event.tool_hint:
             if not self.send_tool_hints:
+                self._delivery_states.pop(delivery_id, None)
                 return
             self._pending_tool_hints.setdefault(msg.chat_id, []).append(msg.content)
             self.logger.debug(
@@ -1222,6 +1926,7 @@ class WeixinChannel(BaseChannel):
                 msg.chat_id,
                 len(self._pending_tool_hints[msg.chat_id]),
             )
+            self._delivery_states.pop(delivery_id, None)
             return
 
         # Reasoning deltas are invisible in WeChat (there is no reasoning
@@ -1230,6 +1935,7 @@ class WeixinChannel(BaseChannel):
             self.logger.debug(
                 "Dropped invisible reasoning delta for {}", msg.chat_id
             )
+            self._delivery_states.pop(delivery_id, None)
             return
 
         content = msg.content.strip()
@@ -1241,41 +1947,68 @@ class WeixinChannel(BaseChannel):
                 "Skipped empty progress message for {} (no visible content)",
                 msg.chat_id,
             )
+            self._delivery_states.pop(delivery_id, None)
             return
 
-        # Flush buffered hints before sending any visible message.
-        await self._flush_tool_hints(msg.chat_id)
-
-        if not is_progress:
-            await self._stop_typing(msg.chat_id, clear_remote=True)
-
-        ctx_token = self._context_tokens.get(msg.chat_id, "")
-        ctx_token = await self._refresh_context_token_if_stale(msg.chat_id, ctx_token)
-        if not ctx_token:
-            raise RuntimeError(
-                f"WeChat context_token missing for chat_id={msg.chat_id}, cannot send"
-            )
-
         typing_ticket = ""
-        with suppress(Exception):
-            typing_ticket = await self._get_typing_ticket(msg.chat_id, ctx_token)
-
-        if typing_ticket:
-            with suppress(Exception):
-                await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_TYPING)
-
         typing_keepalive_stop = asyncio.Event()
         typing_keepalive_task: asyncio.Task[None] | None = None
-        if typing_ticket:
-            typing_keepalive_task = asyncio.create_task(
-                self._typing_keepalive_loop(msg.chat_id, typing_ticket, typing_keepalive_stop)
-            )
+        completed = False
 
         try:
+            # Flush buffered legacy hints before visible content. Structured
+            # progress messages bypass this text path entirely.
+            await self._flush_tool_hints(msg.chat_id)
+
+            if not is_progress:
+                await self._stop_typing(msg.chat_id, clear_remote=True)
+
+            ctx_token = self._context_tokens.get(msg.chat_id, "")
+            ctx_token = await self._refresh_context_token_if_stale(msg.chat_id, ctx_token)
+            if not ctx_token:
+                raise WeixinQuotaError(
+                    "sendmessage",
+                    ret=ERRCODE_CONTEXT_RESTRICTED,
+                    errmsg=f"context_token missing for chat_id={msg.chat_id}",
+                )
+
+            with suppress(Exception):
+                typing_ticket = await self._get_typing_ticket(msg.chat_id, ctx_token)
+
+            if typing_ticket:
+                with suppress(Exception):
+                    await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_TYPING)
+                typing_keepalive_task = asyncio.create_task(
+                    self._typing_keepalive_loop(
+                        msg.chat_id,
+                        typing_ticket,
+                        typing_keepalive_stop,
+                    )
+                )
+
+            run_id = self._reply_run_ids.get(msg.chat_id, "")
             # --- Send media files first (following Telegram channel pattern) ---
-            for media_path in (msg.media or []):
+            for media_index, media_path in enumerate(msg.media or []):
+                media_part = f"media:{media_index}"
+                if media_part in delivery_state.completed_parts:
+                    continue
                 try:
-                    await self._send_media_file(msg.chat_id, media_path, ctx_token)
+                    aes_key_raw = delivery_state.media_aes_keys.setdefault(
+                        media_part,
+                        os.urandom(16),
+                    )
+                    await self._send_media_part(
+                        msg.chat_id,
+                        media_path,
+                        ctx_token,
+                        client_id=self._part_client_id(delivery_id, media_part),
+                        file_key=hashlib.sha256(
+                            f"{delivery_id}:{media_part}:file".encode()
+                        ).hexdigest()[:32],
+                        aes_key_raw=aes_key_raw,
+                        run_id=run_id,
+                    )
+                    delivery_state.completed_parts.add(media_part)
                 except (httpx.TimeoutException, httpx.TransportError):
                     # Network/transport errors: do NOT fall back to text —
                     # the text send would also likely fail, and the outer
@@ -1291,7 +2024,7 @@ class WeixinChannel(BaseChannel):
                         if cast(object, http_err.response) is not None
                         else 0
                     )
-                    if status_code >= 500:
+                    if self._is_retryable_http_status(status_code):
                         # Server-side / retryable HTTP error — same as network.
                         self.logger.exception(
                             "Server error ({} {}) sending media {}",
@@ -1305,26 +2038,72 @@ class WeixinChannel(BaseChannel):
                     # 4xx client errors are NOT retryable — fall back to text.
                     filename = Path(media_path).name
                     self.logger.exception("Failed to send media {}", media_path)
-                    await self._send_text(
-                        msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
+                    fallback_part = f"{media_part}:fallback"
+                    await self._send_text_part(
+                        msg.chat_id,
+                        f"[Failed to send: {filename}]",
+                        ctx_token,
+                        client_id=self._part_client_id(delivery_id, fallback_part),
+                        run_id=run_id,
                     )
+                    delivery_state.completed_parts.add(media_part)
+                except WeixinQuotaError:
+                    raise
+                except WeixinAuthError:
+                    self._auth_required = True
+                    raise
+                except WeixinAPIError:
+                    filename = Path(media_path).name
+                    self.logger.exception("WeChat rejected media {}", media_path)
+                    fallback_part = f"{media_part}:fallback"
+                    await self._send_text_part(
+                        msg.chat_id,
+                        f"[Failed to send: {filename}]",
+                        ctx_token,
+                        client_id=self._part_client_id(delivery_id, fallback_part),
+                        run_id=run_id,
+                    )
+                    delivery_state.completed_parts.add(media_part)
                 except Exception:
                     # Non-network errors (format, file-not-found, etc.):
                     # notify the user via text fallback.
                     filename = Path(media_path).name
                     self.logger.exception("Failed to send media {}", media_path)
-                    # Notify user about failure via text
-                    await self._send_text(
-                        msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
+                    fallback_part = f"{media_part}:fallback"
+                    await self._send_text_part(
+                        msg.chat_id,
+                        f"[Failed to send: {filename}]",
+                        ctx_token,
+                        client_id=self._part_client_id(delivery_id, fallback_part),
+                        run_id=run_id,
                     )
+                    delivery_state.completed_parts.add(media_part)
 
             # --- Send text content ---
-            if not content:
-                return
-
-            chunks = split_message(content, WEIXIN_MAX_MESSAGE_LEN)
-            for chunk in chunks:
-                await self._send_text(msg.chat_id, chunk, ctx_token)
+            for chunk_index, chunk in enumerate(split_weixin_message(content)):
+                text_part = f"text:{chunk_index}"
+                if text_part in delivery_state.completed_parts:
+                    continue
+                await self._send_text_part(
+                    msg.chat_id,
+                    chunk,
+                    ctx_token,
+                    client_id=self._part_client_id(delivery_id, text_part),
+                    run_id=run_id,
+                )
+                delivery_state.completed_parts.add(text_part)
+            completed = True
+        except WeixinQuotaError:
+            if not is_progress:
+                self._defer_outbound(msg)
+                self.logger.warning(
+                    "Deferred WeChat reply for {} until a fresh inbound context is available",
+                    msg.chat_id,
+                )
+            raise
+        except WeixinAuthError:
+            self._auth_required = True
+            raise
         except Exception:
             self.logger.exception("Error sending message")
             raise
@@ -1338,6 +2117,11 @@ class WeixinChannel(BaseChannel):
             if typing_ticket and not is_progress:
                 with suppress(Exception):
                     await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_CANCEL)
+            if completed:
+                self._delivery_states.pop(delivery_id, None)
+                if not is_progress:
+                    self._reply_run_ids.pop(msg.chat_id, None)
+                    self._reply_progress_counts.pop(msg.chat_id, None)
 
     async def send_delta(
         self,
@@ -1372,19 +2156,85 @@ class WeixinChannel(BaseChannel):
         # recomputes the same `full` from an unchanged buffer rather than
         # double-counting that delta.
         if delta and not is_end:
+            previous_parts = list(self._stream_buffers.get(buffer_key, []))
             self._stream_buffers.setdefault(buffer_key, []).append(delta)
+            try:
+                await self._flush_stream_block(chat_id, buffer_key)
+            except Exception:
+                self._stream_buffers[buffer_key] = previous_parts
+                raise
         if not is_end:
             return
         full = ("".join(self._stream_buffers.get(buffer_key, [])) + (delta or "")).strip()
-        await self._flush_tool_hints(chat_id)
         if full:
             # Send before clearing the buffer: if the send raises, the buffer is
             # left intact so ChannelManager._send_with_retry can re-deliver the
             # same stream_end message instead of silently losing the reply.
             await self.send(
-                OutboundMessage(channel=self.name, chat_id=chat_id, content=full)
+                OutboundMessage(
+                    channel=self.name,
+                    chat_id=chat_id,
+                    content=full,
+                    metadata={
+                        "_weixin_delivery_id": f"stream-{buffer_key}",
+                        "_weixin_stream_buffer_key": buffer_key,
+                    },
+                )
             )
+        else:
+            await self._flush_tool_hints(chat_id)
+        self._clear_stream_state(buffer_key, chat_id=chat_id)
+
+    def _clear_stream_state(self, buffer_key: str, *, chat_id: str = "") -> None:
         self._stream_buffers.pop(buffer_key, None)
+        self._stream_sent_counts.pop(buffer_key, None)
+        self._stream_live_disabled.discard(buffer_key)
+        if chat_id:
+            self._reply_run_ids.pop(chat_id, None)
+            self._reply_progress_counts.pop(chat_id, None)
+
+    async def _flush_stream_block(self, chat_id: str, buffer_key: str) -> None:
+        """Optionally send one bounded live block while reserving the final slot."""
+        if not self.config.block_streaming or buffer_key in self._stream_live_disabled:
+            return
+        sent = self._stream_sent_counts.get(buffer_key, 0)
+        if sent >= self.config.block_streaming_max_messages - 1:
+            return
+        buffered = "".join(self._stream_buffers.get(buffer_key, []))
+        if len(buffered) < self.config.block_streaming_min_chars:
+            return
+        context_token = self._context_tokens.get(chat_id, "")
+        context_token = await self._refresh_context_token_if_stale(chat_id, context_token)
+        if not context_token:
+            return
+        chunks = split_weixin_message(
+            buffered,
+            self.config.block_streaming_min_chars,
+        )
+        if not chunks:
+            return
+        block = chunks[0]
+        remainder = "\n".join(chunks[1:])
+        delivery_id = f"stream-{buffer_key}"
+        run_id = self._reply_run_ids.setdefault(chat_id, uuid.uuid4().hex)
+        try:
+            await self._send_text_part(
+                chat_id,
+                block,
+                context_token,
+                client_id=self._part_client_id(delivery_id, f"block:{sent}"),
+                run_id=run_id,
+                reserve_budget=1,
+            )
+        except WeixinQuotaError:
+            self._stream_live_disabled.add(buffer_key)
+            self.logger.warning(
+                "Disabled live WeChat blocks for {} after context quota rejection",
+                chat_id,
+            )
+            return
+        self._stream_buffers[buffer_key] = [remainder] if remainder else []
+        self._stream_sent_counts[buffer_key] = sent + 1
 
     async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
         """Start typing indicator immediately when a message is received."""
@@ -1443,9 +2293,19 @@ class WeixinChannel(BaseChannel):
         to_user_id: str,
         text: str,
         context_token: str,
+        *,
+        client_id: str | None = None,
+        run_id: str = "",
     ) -> None:
         """Send a text message matching the exact protocol from send.ts."""
-        client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
+        options = _SEND_OPTIONS.get()
+        self._ensure_context_budget(
+            context_token,
+            reserve=options.reserve_budget if options else 0,
+        )
+        client_id = client_id or (options.client_id if options else None)
+        client_id = client_id or f"nanobot-{uuid.uuid4().hex[:12]}"
+        run_id = run_id or (options.run_id if options else "")
 
         item_list: list[dict[str, Any]] = []
         if text:
@@ -1462,6 +2322,8 @@ class WeixinChannel(BaseChannel):
             weixin_msg["item_list"] = item_list
         if context_token:
             weixin_msg["context_token"] = context_token
+        if run_id:
+            weixin_msg["run_id"] = run_id
 
         body: dict[str, Any] = {
             "msg": weixin_msg,
@@ -1469,18 +2331,19 @@ class WeixinChannel(BaseChannel):
         }
 
         data = await self._api_post("ilink/bot/sendmessage", body)
-        ret = data.get("ret", 0)
-        errcode = data.get("errcode", 0)
-        if (ret is not None and ret != 0) or (errcode is not None and errcode != 0):
-            raise RuntimeError(
-                f"WeChat send text error (ret={ret}, errcode={errcode}): {data.get('errmsg', '')}"
-            )
+        self._raise_for_api_error("sendmessage", data)
+        self._record_context_send(context_token)
 
     async def _send_media_file(
         self,
         to_user_id: str,
         media_path: str,
         context_token: str,
+        *,
+        client_id: str | None = None,
+        file_key: str | None = None,
+        aes_key_raw: bytes | None = None,
+        run_id: str = "",
     ) -> None:
         """Upload a local file to WeChat CDN and send it as a media message.
 
@@ -1494,6 +2357,7 @@ class WeixinChannel(BaseChannel):
         p = Path(media_path)
         if not p.is_file():
             raise FileNotFoundError(f"Media file not found: {media_path}")
+        self._ensure_context_budget(context_token)
 
         raw_data = p.read_bytes()
         raw_size = len(raw_data)
@@ -1519,7 +2383,9 @@ class WeixinChannel(BaseChannel):
             item_key = "file_item"
 
         # Generate client-side AES-128 key (16 random bytes)
-        aes_key_raw = os.urandom(16)
+        options = _SEND_OPTIONS.get()
+        aes_key_raw = aes_key_raw or (options.aes_key_raw if options else None)
+        aes_key_raw = aes_key_raw or os.urandom(16)
         aes_key_hex = aes_key_raw.hex()
 
         # Compute encrypted size: PKCS7 padding to 16-byte boundary
@@ -1527,7 +2393,8 @@ class WeixinChannel(BaseChannel):
         padded_size = ((raw_size + 1 + 15) // 16) * 16
 
         # Step 1: Get upload URL from server (prefer upload_full_url, fallback to upload_param)
-        file_key = os.urandom(16).hex()
+        file_key = file_key or (options.file_key if options else None)
+        file_key = file_key or os.urandom(16).hex()
         upload_body: dict[str, Any] = {
             "filekey": file_key,
             "media_type": upload_type,
@@ -1541,6 +2408,7 @@ class WeixinChannel(BaseChannel):
 
         assert self._client is not None
         upload_resp = await self._api_post("ilink/bot/getuploadurl", upload_body)
+        self._raise_for_api_error("getuploadurl", upload_resp)
 
         upload_full_url = str(upload_resp.get("upload_full_url", "") or "").strip()
         upload_param = str(upload_resp.get("upload_param", "") or "")
@@ -1600,7 +2468,9 @@ class WeixinChannel(BaseChannel):
             media_item["len"] = str(raw_size)
 
         # Send each media item as its own message (matching reference plugin)
-        client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
+        client_id = client_id or (options.client_id if options else None)
+        client_id = client_id or f"nanobot-{uuid.uuid4().hex[:12]}"
+        run_id = run_id or (options.run_id if options else "")
         item_list: list[dict[str, Any]] = [
             {"type": item_type, item_key: media_item}
         ]
@@ -1615,19 +2485,18 @@ class WeixinChannel(BaseChannel):
         }
         if context_token:
             weixin_msg["context_token"] = context_token
+        if run_id:
+            weixin_msg["run_id"] = run_id
 
         body: dict[str, Any] = {
             "msg": weixin_msg,
             "base_info": BASE_INFO,
         }
 
+        self._ensure_context_budget(context_token)
         data = await self._api_post("ilink/bot/sendmessage", body)
-        ret = data.get("ret", 0)
-        errcode = data.get("errcode", 0)
-        if (ret is not None and ret != 0) or (errcode is not None and errcode != 0):
-            raise RuntimeError(
-                f"WeChat send media error (ret={ret}, errcode={errcode}): {data.get('errmsg', '')}"
-            )
+        self._raise_for_api_error("sendmessage", data)
+        self._record_context_send(context_token)
 
 
 # ---------------------------------------------------------------------------
@@ -1683,7 +2552,10 @@ def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
         encryptor = cipher_obj.encryptor()
         return encryptor.update(padded) + encryptor.finalize()
     except ImportError:
-        logger.warning("Cannot encrypt media: install 'pycryptodome' or 'cryptography'")
+        logger.warning(
+            "Cannot encrypt media. Run `nanobot plugins enable weixin` "
+            "to install WeChat support."
+        )
         return data
 
 
@@ -1715,7 +2587,10 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
             decryptor = cipher_obj.decryptor()
             decrypted = decryptor.update(data) + decryptor.finalize()
         except ImportError:
-            logger.warning("Cannot decrypt media: install 'pycryptodome' or 'cryptography'")
+            logger.warning(
+                "Cannot decrypt media. Run `nanobot plugins enable weixin` "
+                "to install WeChat support."
+            )
             return data
 
     return _pkcs7_unpad_safe(decrypted)

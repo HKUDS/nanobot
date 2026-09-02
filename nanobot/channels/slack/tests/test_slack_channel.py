@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -837,3 +839,120 @@ def test_to_mrkdwn_still_converts_unfenced_markdown_tables() -> None:
 
     assert "| a | b |" not in out
     assert "a" in out and "1" in out and "b" in out and "2" in out
+
+
+# ── file download SSRF ─────────────────────────────────────────────
+
+
+def _patch_download_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    handler: Callable[[httpx.Request], httpx.Response],
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.slack.runtime.PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(handler),
+    )
+    monkeypatch.setattr("nanobot.channels.slack.runtime.httpx_env_proxy_mounts", lambda: {})
+
+
+def _patch_download_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    validated: list[str],
+) -> None:
+    def validate(url: str) -> tuple[bool, str]:
+        validated.append(url)
+        if "169.254.169.254" in url:
+            return False, "blocked metadata address"
+        return True, ""
+
+    monkeypatch.setattr("nanobot.channels.slack.runtime.validate_url_target", validate)
+
+
+@pytest.mark.asyncio
+async def test_download_blocks_ssrf_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An internal file URL is rejected before the transport sees it."""
+    requests: list[httpx.Request] = []
+    validated: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"should not be fetched")
+
+    _patch_download_transport(monkeypatch, handler)
+    _patch_download_validation(monkeypatch, validated)
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    url = "http://169.254.169.254/latest/meta-data/"
+
+    path, _marker = await channel._download_slack_file(
+        {"id": "F1", "name": "x.bin", "url_private_download": url}
+    )
+
+    assert path is None
+    assert requests == []
+    assert validated == [url]
+
+
+@pytest.mark.asyncio
+async def test_download_blocks_unsafe_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect targets are validated before the redirected request is sent."""
+    requests: list[httpx.Request] = []
+    validated: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            302,
+            headers={"location": "http://169.254.169.254/latest/meta-data/"},
+        )
+
+    _patch_download_transport(monkeypatch, handler)
+    _patch_download_validation(monkeypatch, validated)
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    url = "https://files.slack.com/files-pri/x"
+
+    path, _marker = await channel._download_slack_file(
+        {"id": "F1", "name": "x.bin", "url_private_download": url}
+    )
+
+    assert path is None
+    assert len(requests) == 1
+    assert validated == [url, "http://169.254.169.254/latest/meta-data/"]
+
+
+@pytest.mark.asyncio
+async def test_download_follows_safe_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Public redirects still download the file without forwarding cross-host auth."""
+    requests: list[httpx.Request] = []
+    validated: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "files.slack.com":
+            return httpx.Response(302, headers={"location": "https://cdn.example/file.bin"})
+        return httpx.Response(
+            200,
+            content=b"filedata",
+            headers={"content-type": "application/octet-stream"},
+        )
+
+    _patch_download_transport(monkeypatch, handler)
+    _patch_download_validation(monkeypatch, validated)
+    monkeypatch.setattr(
+        "nanobot.channels.slack.runtime.get_media_dir", lambda _channel=None: str(tmp_path)
+    )
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    url = "https://files.slack.com/files-pri/x"
+
+    path, marker = await channel._download_slack_file(
+        {"id": "F1", "name": "x.bin", "url_private_download": url}
+    )
+
+    assert path is not None
+    assert Path(path).read_bytes() == b"filedata"
+    assert marker == "[file: x.bin]"
+    assert validated == [url, "https://cdn.example/file.bin"]
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-test"
+    assert "Authorization" not in requests[1].headers

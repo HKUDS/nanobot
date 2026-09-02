@@ -14,7 +14,6 @@ export function SlashCommandText({
     <InlineTokenHighlight
       testId="message-slash-command"
       color={INLINE_TOKEN_HIGHLIGHT_COLOR}
-      className="font-medium"
     >
       {command}
     </InlineTokenHighlight>

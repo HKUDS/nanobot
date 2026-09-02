@@ -9,10 +9,10 @@ import type { WebUIIngressLimits } from "@/lib/types";
  * - ``ready``     — ``dataUrl`` available; safe to submit
  * - ``error``     — validation / decode failure; chip shows inline error
  */
-export type AttachmentStatus = "encoding" | "ready" | "error";
+type AttachmentStatus = "encoding" | "ready" | "error";
 export type AttachmentKind = "image" | "file";
 
-export interface AttachedAttachment {
+interface AttachedAttachment {
   id: string;
   kind: AttachmentKind;
   file: File;
@@ -32,7 +32,7 @@ export interface AttachedAttachment {
 
 export type AttachedImage = AttachedAttachment;
 
-export interface RestoredReadyAttachment {
+interface RestoredReadyAttachment {
   dataUrl: string;
   name?: string;
   kind?: AttachmentKind;
@@ -55,9 +55,8 @@ export type AttachmentError =
   | "io";                // file read failed at the browser layer
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
-export const MAX_IMAGES_PER_MESSAGE = MAX_ATTACHMENTS_PER_MESSAGE;
-export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-export const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 
 /** MIME whitelist — mirrors the server's and the ``<input accept>`` attr. */
 const ACCEPTED_IMAGE_MIMES: ReadonlySet<string> = new Set([

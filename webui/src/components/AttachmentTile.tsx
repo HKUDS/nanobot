@@ -31,7 +31,9 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
           target="_blank"
           rel="noreferrer noopener"
           className="block bg-muted/20"
-          aria-label={attachment.name ? `Open ${attachment.name}` : t("lightbox.open", { defaultValue: "Open image" })}
+          aria-label={attachment.name
+            ? t("message.openAttachment", { name: attachment.name })
+            : t("lightbox.open", { defaultValue: "Open image" })}
         >
           <img
             src={attachment.url}
@@ -92,7 +94,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         title={attachment.name ?? undefined}
         aria-label={label}
         className={cn(
-          "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
+          "flex max-w-[18rem] items-center gap-2 rounded-control",
           "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
           "transition-colors hover:bg-muted/55 hover:text-foreground",
           variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
@@ -107,7 +109,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
   return (
     <div
       className={cn(
-        "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
+        "flex max-w-[18rem] items-center gap-2 rounded-control",
         "border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
         variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
         className,
@@ -137,7 +139,7 @@ function AttachmentFrame({
   variant?: "default" | "compact";
 }) {
   const frameClassName = cn(
-    "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
+    "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-control",
     "border border-border/60 bg-muted/40",
     attachment.kind === "image" && "bg-background/85",
     attachment.kind === "video" ? "w-[min(100%,32rem)]" : "",

@@ -12,6 +12,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.mattermost.manifest import SETUP_SPEC
 from nanobot.channels.mattermost.runtime import (
     MATTERMOST_MAX_MESSAGE_LEN,
     MattermostChannel,
@@ -30,8 +31,6 @@ class _FakeHTTPClient:
         self.delete_calls: list[dict[str, Any]] = []
         self._get_responses: dict[str, Any] = {}
         self._post_responses: dict[str, Any] = {}
-        self._put_responses: dict[str, Any] = {}
-        self._delete_status: int | None = None
 
     def _req(self, method: str, path: str) -> httpx.Request:
         return httpx.Request(method, f"https://chat.example.com{path}")
@@ -44,12 +43,6 @@ class _FakeHTTPClient:
 
     def set_post_response(self, path: str, data: Any) -> None:
         self._post_responses[path] = data
-
-    def set_put_response(self, path: str, data: Any) -> None:
-        self._put_responses[path] = data
-
-    def set_delete_status(self, status: int) -> None:
-        self._delete_status = status
 
     async def get(self, path: str, **kwargs) -> httpx.Response:
         self.get_calls.append({"path": path, **kwargs})
@@ -70,13 +63,11 @@ class _FakeHTTPClient:
 
     async def put(self, path: str, *, json: dict[str, Any] | None = None, **kwargs) -> httpx.Response:
         self.put_calls.append({"path": path, "json": json})
-        data = self._put_responses.get(path, {"id": path.split("/")[-1]})
-        return self._resp(200, data, "PUT", path)
+        return self._resp(200, {"id": path.split("/")[-1]}, "PUT", path)
 
     async def delete(self, path: str, **kwargs) -> httpx.Response:
         self.delete_calls.append({"path": path})
-        status = self._delete_status if self._delete_status is not None else 200
-        return self._resp(status, {}, "DELETE", path)
+        return self._resp(200, {}, "DELETE", path)
 
     async def aclose(self) -> None:
         pass
@@ -118,11 +109,29 @@ def test_config_defaults():
     assert config.server_url == ""
     assert config.token == ""
     assert config.streaming is True
-    assert config.streaming_max_chars == 16000
     assert config.send_tool_hints is True
     assert config.dm.enabled is True
     assert config.dm.policy == "open"
     assert config.reply_in_thread is True
+    assert config.group_policy_in_thread == "mention"
+
+
+def test_thread_policy_inherits_group_policy_when_omitted():
+    config = MattermostConfig.model_validate({"groupPolicy": "open"})
+    assert config.group_policy_in_thread == "open"
+
+    explicit = MattermostConfig.model_validate({
+        "groupPolicy": "open",
+        "groupPolicyInThread": "mention",
+    })
+    assert explicit.group_policy_in_thread == "mention"
+
+
+def test_setup_contract_exposes_thread_policy():
+    field = SETUP_SPEC.fields["groupPolicyInThread"]
+    assert field.kind == "enum"
+    assert field.choices == {"open", "mention", "allowlist"}
+    assert field.default == "mention"
 
 
 def test_config_camelcase_aliases():
@@ -130,7 +139,6 @@ def test_config_camelcase_aliases():
         "serverUrl": "https://mm.example.com",
         "token": "abc123",
         "allowFromMatchMode": "username",
-        "streamingMaxChars": 8000,
         "replyInThread": False,
         "sendToolHints": False,
     }
@@ -138,7 +146,6 @@ def test_config_camelcase_aliases():
     assert config.server_url == "https://mm.example.com"
     assert config.token == "abc123"
     assert config.allow_from_match_mode == "username"
-    assert config.streaming_max_chars == 8000
     assert config.reply_in_thread is False
     assert config.send_tool_hints is False
 
@@ -174,7 +181,6 @@ async def test_start_identifies_bot():
 
     assert channel._self_id == "botuserid123"
     assert channel._self_username == "nanobot"
-    assert channel._self_email == "bot@example.com"
     assert not start_task.done()
     user_me_calls = [c for c in fake.get_calls[calls_before:] if "/api/v4/users/me" in c["path"]]
     assert len(user_me_calls) == 1
@@ -375,6 +381,112 @@ async def test_group_policy_allowlist():
     assert channel._should_respond_in_channel("msg", "c2") is False
 
 
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_defaults_to_group_policy():
+    """Existing configs keep their main-channel behavior in threads."""
+    channel, fake = _make_channel({"groupPolicy": "mention"})
+    channel._self_username = "nanobot"
+    # In a main channel (not thread), mention is required
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=False) is False
+    assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=False) is True
+    # In a thread, the omitted override inherits mention policy.
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is False
+    assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=True) is True
+
+
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_mention():
+    """Thread can also use mention policy when configured."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "mention",
+    })
+    channel._self_username = "nanobot"
+    # In a thread with mention policy, mention is required
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is False
+    assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=True) is True
+
+
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_open():
+    """Thread uses open policy when explicitly configured."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "open",
+    })
+    assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is True
+
+
+@pytest.mark.asyncio
+async def test_posted_thread_event_uses_thread_policy():
+    """A real posted event derives thread policy from its root_id."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "open",
+        "includeThreadContext": False,
+    })
+    channel._self_id = "bot_id"
+    channel._self_username = "nanobot"
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "posted",
+            "data": {
+                "channel_type": "O",
+                "post": json.dumps({
+                    "id": "reply_1",
+                    "user_id": "user_1",
+                    "channel_id": "channel_1",
+                    "message": "follow up without a mention",
+                    "root_id": "root_1",
+                }),
+            },
+            "broadcast": {},
+        }
+
+        await channel._handle_ws_message(ws_msg)
+
+    mock_handle.assert_awaited_once()
+    assert mock_handle.call_args.kwargs["session_key"] == "mattermost:channel_1:root_1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("post_type", ["system_join_channel", "system_leave_channel"])
+async def test_posted_event_ignores_system_posts(post_type: str):
+    channel, _ = _make_channel({"groupPolicy": "open"})
+    channel._self_id = "bot_id"
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "posted",
+            "data": {
+                "channel_type": "O",
+                "post": json.dumps({
+                    "id": "system_post_1",
+                    "user_id": "user_1",
+                    "channel_id": "channel_1",
+                    "message": "A user joined or left the channel.",
+                    "type": post_type,
+                }),
+            },
+            "broadcast": {},
+        }
+
+        await channel._handle_ws_message(ws_msg)
+
+    mock_handle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_policy_in_thread_allowlist():
+    """Thread uses allowlist policy when configured."""
+    channel, fake = _make_channel({
+        "groupPolicy": "mention",
+        "groupPolicyInThread": "allowlist",
+        "groupAllowFrom": ["c1"],
+    })
+    assert channel._should_respond_in_channel("msg", "c1", in_thread=True) is True
+    assert channel._should_respond_in_channel("msg", "c2", in_thread=True) is False
+
+
 # ---------------------------------------------------------------------------
 # Match mode: id / username / email
 # ---------------------------------------------------------------------------
@@ -548,7 +660,7 @@ async def test_stream_end_adds_done_emoji():
 
 @pytest.mark.asyncio
 async def test_stream_chunk_boundary_finalizes_and_creates_new():
-    channel, fake = _make_channel({"streamingMaxChars": 10})
+    channel, fake = _make_channel()
     channel._self_id = "bot_id"
     fake.set_post_response("/api/v4/posts", {"id": "post_1"})
 

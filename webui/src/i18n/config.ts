@@ -51,7 +51,7 @@ export function normalizeLocale(
   return baseMatch?.code ?? defaultLocale;
 }
 
-export function readStoredLocale(): SupportedLocale | null {
+function readStoredLocale(): SupportedLocale | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(LOCALE_STORAGE_KEY);

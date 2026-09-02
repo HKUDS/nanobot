@@ -3,13 +3,13 @@ cached-token propagation, and hook context."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -30,7 +30,7 @@ async def test_runner_calls_hooks_in_order():
                 content="thinking",
                 tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -110,7 +110,7 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("he")
         await on_content_delta("llo")
-        return LLMResponse(content="hello", tool_calls=[], usage={})
+        return LLMResponse(content="hello", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -141,6 +141,51 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
     assert streamed == ["he", "llo"]
     assert endings == [False]
     provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runner_measures_stream_generation_without_time_to_first_token():
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await on_content_delta("he")
+        await on_content_delta("llo")
+        return LLMResponse(
+            content="hello",
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=12),
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class StreamingHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+    with patch(
+        "nanobot.agent.runner.time.perf_counter",
+        side_effect=[10.0, 10.2, 10.4, 10.8],
+    ):
+        result = await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=StreamingHook(),
+        ))
+
+    assert result.usage is not None
+    assert result.usage.generation_ms == 600
+    assert result.usage.measured_output_tokens == 12
+    assert result.usage.ttft_ms == 200
+    assert result.usage.timed_requests == 1
 
 
 @pytest.mark.asyncio
@@ -196,23 +241,24 @@ async def test_runner_length_recovery_streams_segments_once_and_returns_all_cont
 
 
 @pytest.mark.asyncio
-async def test_runner_passes_cached_tokens_to_hook_context():
-    """Hook context.usage should contain cached_tokens."""
+async def test_runner_passes_cache_read_tokens_to_hook_context():
+    """Hook context usage preserves a reported cache-read count."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    captured_usage: list[dict] = []
+    captured_usage: list[LLMUsage] = []
 
     class UsageHook(AgentHook):
         async def after_iteration(self, context: AgentHookContext) -> None:
-            captured_usage.append(dict(context.usage))
+            assert context.usage is not None
+            captured_usage.append(context.usage)
 
     async def chat_with_retry(**kwargs):
         return LLMResponse(
             content="done",
             tool_calls=[],
-            usage={"prompt_tokens": 200, "completion_tokens": 20, "cached_tokens": 150},
+            usage=LLMUsage.reported(input_tokens=200, output_tokens=20, cache_read_tokens=150),
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -230,8 +276,8 @@ async def test_runner_passes_cached_tokens_to_hook_context():
     ))
 
     assert len(captured_usage) == 1
-    assert captured_usage[0]["cached_tokens"] == 150
-    assert captured_usage[0]["provider_tokens"] == 220
+    assert captured_usage[0].cache_read_tokens == 150
+    assert captured_usage[0].reported_tokens == 220
 
 
 @pytest.mark.asyncio
@@ -240,14 +286,15 @@ async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    captured_usage: list[dict] = []
+    captured_usage: list[LLMUsage] = []
 
     class UsageHook(AgentHook):
         async def after_iteration(self, context: AgentHookContext) -> None:
-            captured_usage.append(dict(context.usage))
+            assert context.usage is not None
+            captured_usage.append(context.usage)
 
     async def chat_with_retry(**kwargs):
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -268,11 +315,8 @@ async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
         hook=UsageHook(),
     ))
 
-    assert result.usage["prompt_tokens"] == 123
-    assert result.usage["completion_tokens"] == 7
-    assert result.usage["total_tokens"] == 130
-    assert result.usage["estimated_tokens"] == 130
-    assert captured_usage[0]["estimated_tokens"] == 130
+    assert result.usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
+    assert captured_usage[0].estimated_tokens == 130
 
 
 @pytest.mark.asyncio
@@ -288,7 +332,7 @@ async def test_runner_calls_run_level_hooks_on_success():
         return LLMResponse(
             content="done",
             tool_calls=[],
-            usage={"prompt_tokens": 3, "completion_tokens": 2},
+            usage=LLMUsage.reported(input_tokens=3, output_tokens=2),
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -306,7 +350,7 @@ async def test_runner_calls_run_level_hooks_on_success():
                 context.final_content,
                 context.stop_reason,
                 context.error,
-                dict(context.usage),
+                context.usage,
                 [msg["role"] for msg in context.messages],
             ))
 
@@ -335,12 +379,7 @@ async def test_runner_calls_run_level_hooks_on_success():
             "done",
             "completed",
             None,
-            {
-                "prompt_tokens": 3,
-                "completion_tokens": 2,
-                "total_tokens": 5,
-                "provider_tokens": 5,
-            },
+            LLMUsage.reported(input_tokens=3, output_tokens=2),
             ["user", "assistant"],
         ),
         ("on_finally", "completed", None),
@@ -364,7 +403,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
                 content="thinking",
                 tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()

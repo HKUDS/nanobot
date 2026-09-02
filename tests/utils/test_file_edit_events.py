@@ -9,7 +9,6 @@ from nanobot.utils.file_edit_events import (
     build_file_edit_start_event,
     build_unified_diff_payload,
     line_diff_stats,
-    prepare_file_edit_tracker,
     prepare_file_edit_trackers,
     read_file_snapshot,
 )
@@ -44,15 +43,14 @@ def test_write_file_start_tracks_snapshot_and_end_emits_exact_diff(tmp_path: Pat
     target = tmp_path / "notes.txt"
     target.write_text("old\nkeep\n", encoding="utf-8")
     params = {"path": "notes.txt", "content": "new\nkeep\nextra\n"}
-    tracker = prepare_file_edit_tracker(
+    trackers = prepare_file_edit_trackers(
         call_id="call-write",
         tool_name="write_file",
         tool=_write_tool(tmp_path),
         workspace=tmp_path,
         params=params,
     )
-
-    assert tracker is not None
+    [tracker] = trackers
     start = build_file_edit_start_event(tracker)
     assert start == {
         "version": 1,
@@ -103,15 +101,14 @@ def test_unified_diff_payload_truncates_large_diffs() -> None:
 def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     target = tmp_path / "data.bin"
     target.write_bytes(b"\x00\x01before")
-    tracker = prepare_file_edit_tracker(
+    trackers = prepare_file_edit_trackers(
         call_id="call-bin",
         tool_name="edit_file",
         tool=_edit_tool(tmp_path),
         workspace=tmp_path,
         params={"path": "data.bin", "old_text": "before", "new_text": "after"},
     )
-
-    assert tracker is not None
+    [tracker] = trackers
     assert not read_file_snapshot(target).countable
     target.write_bytes(b"\x00\x01after")
     event = build_file_edit_end_event(tracker)
@@ -123,15 +120,14 @@ def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
 def test_binary_before_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     target = tmp_path / "data.bin"
     target.write_bytes(b"\x00\x01before")
-    tracker = prepare_file_edit_tracker(
+    trackers = prepare_file_edit_trackers(
         call_id="call-bin",
         tool_name="write_file",
         tool=_write_tool(tmp_path),
         workspace=tmp_path,
         params={"path": "data.bin", "content": "after\n"},
     )
-
-    assert tracker is not None
+    [tracker] = trackers
     target.write_text("after\n", encoding="utf-8")
     event = build_file_edit_end_event(tracker)
     assert event["binary"] is True
@@ -215,15 +211,14 @@ def test_apply_patch_dry_run_does_not_prepare_file_edit_trackers(tmp_path: Path)
 def test_oversized_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     target = tmp_path / "large.txt"
     params = {"path": "large.txt", "content": "x"}
-    tracker = prepare_file_edit_tracker(
+    trackers = prepare_file_edit_trackers(
         call_id="call-large",
         tool_name="write_file",
         tool=_write_tool(tmp_path),
         workspace=tmp_path,
         params=params,
     )
-
-    assert tracker is not None
+    [tracker] = trackers
     target.write_text("x" * (2 * 1024 * 1024 + 1), encoding="utf-8")
     event = build_file_edit_end_event(tracker)
     assert event["binary"] is True
@@ -232,11 +227,11 @@ def test_oversized_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     assert "diff" not in event
 
 
-def test_untracked_tools_do_not_prepare_file_edit_tracker(tmp_path: Path) -> None:
-    assert prepare_file_edit_tracker(
+def test_untracked_tools_do_not_prepare_file_edit_trackers(tmp_path: Path) -> None:
+    assert prepare_file_edit_trackers(
         call_id="call-exec",
         tool_name="exec",
         tool=None,
         workspace=tmp_path,
         params={"path": "created-by-shell.txt"},
-    ) is None
+    ) == []

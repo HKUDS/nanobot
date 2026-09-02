@@ -7,7 +7,7 @@ import { displayWebHost, formatCompactWebUrl, parseSafeActivityHttpUrl } from ".
 export type WebSearchStatus = "running" | "done" | "error";
 export type WebSearchTarget = "web" | "x";
 
-export interface WebSearchSource {
+interface WebSearchSource {
   title: string;
   href: string;
   host: string;
@@ -105,7 +105,7 @@ export function presentWebSearchAction(
   if (target === "x") {
     return queryTarget ? `${verb} X · ${queryTarget}` : `${verb} X`;
   }
-  return queryTarget ? `${verb} ${queryTarget}` : verb;
+  return queryTarget ? `${verb} ${queryTarget}` : `${verb} the web`;
 }
 
 function mergeWebSearchRun(

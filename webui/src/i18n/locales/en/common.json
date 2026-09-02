@@ -10,11 +10,12 @@
       "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
     },
     "auth": {
-      "title": "Authentication required",
-      "hint": "Enter the secret configured as tokenIssueSecret in your gateway config.",
-      "placeholder": "Password",
+      "label": "Password",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
       "submit": "Connect",
-      "invalid": "Invalid password. Try again."
+      "required": "Enter your password.",
+      "invalid": "Incorrect password. Try again."
     },
     "account": {
       "section": "Account",
@@ -38,7 +39,25 @@
     },
     "meta": {
       "description": "nanobot web UI — chat with your nanobot workspace."
+    },
+    "pairing": {
+      "title": "Pair a chat user",
+      "description": "Enter the pairing code shown in the chat.",
+      "code": "Pairing code",
+      "matched": "Matched {{channel}}. Connecting...",
+      "expiresInline": "Code expires {{expires}}.",
+      "queueCount": "{{count}} pending",
+      "noMatch": "No pending request matches this code."
     }
+  },
+  "temporaryChat": {
+    "title": "Temporary chat",
+    "retention": "Not saved to history or memory.",
+    "expiration": "Reloading, closing, or losing the connection ends these chats.",
+    "externalEffects": "Requests still go to your model provider, and tool actions may leave changes.",
+    "clear": "Clear temporary chat",
+    "sectionTitle": "Temporary chats",
+    "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
     "navigation": "Sidebar navigation",
@@ -99,7 +118,7 @@
       "webBehavior": "Behavior",
       "cliApps": "CLI apps",
       "mcp": "MCP services",
-      "identity": "Identity",
+      "regional": "Regional",
       "webuiSafety": "Web safety",
       "capabilities": "Capabilities",
       "apps": "Apps",
@@ -124,8 +143,9 @@
       "presets": "Model presets",
       "editPreset": "Edit preset",
       "presetName": "Preset name",
-      "presetNameHelp": "A short name used throughout model settings.",
-      "presetNamePlaceholder": "Fast writing",
+      "presetNameHelp": "Used in the interface and /model commands. Names must be unique.",
+      "presetNameDuplicate": "A preset with this name already exists.",
+      "presetNamePlaceholder": "e.g. Fast writing",
       "advancedOptions": "Advanced options",
       "advancedSummary": "Context {{context}} · Max {{max}} tokens",
       "maxTokens": "Max output tokens",
@@ -178,6 +198,7 @@
       "fileEditDisplay": "File edit display",
       "codeWrap": "Code wrapping",
       "brandLogos": "Brand logos",
+      "browserNotifications": "Task notifications",
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
@@ -190,8 +211,6 @@
       "defaultImageSize": "Default size",
       "maxImagesPerTurn": "Max images per turn",
       "imageSaveDir": "Save directory",
-      "botName": "Bot name",
-      "botIcon": "Bot icon",
       "timezone": "Timezone",
       "workspacePath": "Default workspace",
       "localServiceAccess": "Local services",
@@ -225,6 +244,7 @@
       "fileEditDisplay": "Choose whether file edit activity opens as line counts or a diff.",
       "codeWrap": "Keep long code lines readable on smaller screens.",
       "brandLogos": "Show third-party provider and CLI logos in Settings.",
+      "browserNotifications": "Notify only when this page is in the background. Off by default.",
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
@@ -235,8 +255,6 @@
       "defaultAspectRatio": "Used when the prompt does not choose an aspect ratio.",
       "defaultImageSize": "Size hint sent to providers that support it.",
       "maxImagesPerTurn": "Upper bound for one generate_image request.",
-      "botName": "Shown wherever nanobot uses a display name.",
-      "botIcon": "Short emoji or text shown with the bot name.",
       "timezone": "Used for schedules and time-aware replies.",
       "cliAppsCatalog": "Install only the app-specific CLI adapters nanobot can run locally; native apps stay untouched.",
       "cliAppsFilter": "Search by app, category, or capability.",
@@ -304,8 +322,8 @@
       "filterInstalled": "Enabled",
       "filterNotInstalled": "Not enabled",
       "searchPlaceholder": "Search MCP presets",
-      "moreOptions": "Add integration",
-      "moreOptionsSubtitle": "Connect a custom tool server or import an existing configuration.",
+      "moreOptions": "Add MCP server",
+      "moreOptionsSubtitle": "Connect a custom MCP server or import an existing configuration.",
       "customTitle": "Custom MCP",
       "customSubtitle": "Add any stdio, HTTP, or SSE MCP server.",
       "customAction": "Custom",
@@ -313,9 +331,14 @@
       "serverName": "Server name",
       "serverUrl": "URL",
       "transport": "Transport",
+      "authentication": "Authentication",
+      "authNone": "None",
+      "authHeaders": "Headers",
       "command": "Command",
       "args": "Args JSON",
       "headers": "Headers JSON",
+      "oauthAfterSave": "Save the server, then select Connect to sign in.",
+      "headersHelp": "Add the request headers used by this server.",
       "env": "Env JSON",
       "timeout": "Tool timeout",
       "advancedOptions": "Advanced options",
@@ -334,7 +357,10 @@
       "enabled": "Enabled",
       "setup": "Connect",
       "configure": "Connect",
+      "reconnect": "Reconnect",
       "connectTitle": "Connect {{name}}",
+      "reconnectTitle": "Reconnect {{name}}",
+      "actionsTitle": "Actions for {{name}}",
       "connectHint": "Add the key from your account settings.",
       "saveAndEnable": "Save and enable",
       "updateSetup": "Update setup",
@@ -342,13 +368,68 @@
       "keepExisting": "Leave blank to keep existing",
       "statusConfigured": "Configured",
       "statusMissingCredentials": "Needs key",
+      "connectingAccount": "Connecting {{name}}",
+      "connectingLabel": "Connecting…",
+      "continueSignIn": "Continue sign-in",
+      "preparingSignIn": "Preparing secure sign-in…",
+      "openSignInToContinue": "Open the sign-in page to continue.",
+      "finishSignInInBrowser": "Finish signing in in the browser window.",
+      "manualCallbackRequired": "Finish signing in, then paste the callback URL into nanobot.",
+      "manualCallbackHelp": "After approving access, the localhost page will not load. Copy its full URL from the address bar and paste it here.",
+      "finishingConnection": "Finishing connection…",
+      "activatingTools": "Activating tools…",
+      "connected": "Connected.",
+      "connectionFailed": "Connection failed.",
+      "connectionCancelled": "Connection cancelled.",
+      "reloadFailed": "Signed in, but nanobot could not connect the tools. Try restarting nanobot.",
+      "oauthFailed": "Unable to connect. Try signing in again.",
       "statusMissingDependency": "Needs dependency",
       "statusComingSoon": "Coming soon",
+      "comingSoon": "Coming soon",
       "statusNotInstalled": "Not enabled",
+      "manage": "Manage",
+      "manageTitle": "Manage {{name}}",
+      "fixConnection": "Fix connection",
+      "overviewTab": "Overview",
+      "connectionTab": "Connection",
+      "manageTabs": "MCP management sections",
+      "about": "About",
+      "statusLabel": "Status",
+      "transportLabel": "Transport",
+      "endpointLabel": "Endpoint",
+      "toolPreview": "Tools",
+      "noToolsAvailable": "No tools available",
+      "searchTools": "Search tools",
+      "searchToolsPlaceholder": "Search tools",
+      "selectedCount": "{{count}} enabled",
+      "noMatchingTools": "No tools match this search.",
+      "applyChanges": "Save changes",
+      "connectionDetails": "Connection details",
+      "credentials": "Credentials",
+      "none": "None",
+      "dangerZone": "Remove connection",
       "toolScope": "Tools",
-      "allTools": "All",
-      "noTools": "None",
-      "testForTools": "Run Test to inspect and choose individual tools."
+      "allTools": "Enable all",
+      "noTools": "Disable all",
+      "reloadTools": "Reload tools",
+      "presetDescriptions": {
+        "browserbase": "Automate cloud browsers with Browserbase.",
+        "playwright": "Inspect and automate local browsers with Playwright.",
+        "context7": "Fetch current library docs and code examples.",
+        "firecrawl": "Scrape, crawl, search, and extract web content.",
+        "parallel-search": "Search the web and read relevant pages.",
+        "exa": "Search the web and extract clean page content.",
+        "microsoft-learn": "Search and read Microsoft Learn documentation.",
+        "aws-docs": "Search AWS documentation and service guidance.",
+        "brave-search": "Search the web, news, images, videos, and local results with Brave Search.",
+        "postman": "Inspect and manage Postman APIs, collections, and workspaces.",
+        "figma": "Read Figma design context through the local Dev Mode MCP.",
+        "xmind": "Create, read, and edit Xmind cloud mind maps.",
+        "notion": "Read and update your Notion workspace.",
+        "linear": "Find and manage Linear issues, projects, and comments.",
+        "github": "Manage GitHub repositories, issues, and pull requests.",
+        "supabase": "Inspect and manage Supabase projects."
+      }
     },
     "values": {
       "light": "Light",
@@ -376,7 +457,10 @@
       "configured": "Configured",
       "notConfigured": "Not configured",
       "pending": "Pending",
-      "restartingEngine": "Restarting"
+      "restartingEngine": "Restarting",
+      "checking": "Checking",
+      "running": "Running",
+      "needsSetup": "Needs setup"
     },
     "status": {
       "loading": "Loading settings...",
@@ -399,11 +483,12 @@
       "save": "Save",
       "saving": "Saving",
       "saveOrder": "Save order",
-      "savePreset": "Save preset",
+      "savePreset": "Save",
       "edit": "Edit",
       "delete": "Delete",
       "deleting": "Deleting...",
       "cancel": "Cancel",
+      "dismiss": "Dismiss",
       "open": "Open",
       "export": "Export",
       "opening": "Opening...",
@@ -504,7 +589,15 @@
       "profile": "Profile",
       "extraHeaders": "Extra headers",
       "extraBody": "Extra body",
-      "extraQuery": "Extra query"
+      "extraQuery": "Extra query",
+      "capabilityFastMode": "Fast mode",
+      "capabilityFastModeHelp": "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
+      "capabilityDeepSeekSearch": "DeepSeek web search",
+      "capabilityDeepSeekSearchHelp": "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
+      "capabilityXSearch": "X Search",
+      "capabilityXSearchHelp": "Allow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
+      "capabilityOpenAISearch": "OpenAI web search",
+      "capabilityOpenAISearchHelp": "Allow compatible Responses API models to search the web. Search activity appears in chat."
     },
     "legal": {
       "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."
@@ -513,8 +606,18 @@
       "selectProvider": "Select provider",
       "selectAspect": "Select aspect",
       "selectSize": "Select size",
+      "selectModel": "Select image model",
+      "searchOrTypeModel": "Search or type model ID",
+      "typeModelId": "Type the model ID supported by this provider.",
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
+    },
+    "capabilities": {
+      "providerSupport": "Provider support",
+      "providerInstallOnSave": "Required support will be installed automatically when you save this provider.",
+      "searchSupport": "Search provider support",
+      "searchInstallOnSave": "Olostep support will be installed automatically when you save.",
+      "installing": "Installing support..."
     },
     "api": {
       "title": "API server",
@@ -546,20 +649,28 @@
     "apps": {
       "description": "Add tools to nanobot, then @ them in chat.",
       "cliLabel": "App",
-      "mcpLabel": "Integration",
+      "mcpLabel": "MCP",
       "channelLabel": "Channel",
       "featureLabel": "Feature",
       "filterAll": "Ready",
       "filterPlugins": "Plugins",
       "filterCli": "Apps",
-      "filterMcp": "Integrations",
+      "filterMcp": "MCP",
       "enabledSummary": "{{count}} ready",
-      "caption": "{{cli}} apps · {{mcp}} integrations",
+      "caption": "{{cli}} apps · {{mcp}} MCP tools",
       "searchPlaceholder": "Search tools",
       "featured": "Tools",
+      "mcpTools": "MCP tools",
       "loading": "Loading Apps...",
-      "empty": "No tools match this view.",
-      "restartRequired": "Restart nanobot to apply updated apps and integrations."
+      "empty": "No tools match your search.",
+      "emptyApps": "No apps available.",
+      "emptyIntegrations": "No MCP tools available.",
+      "emptyReady": "No tools are ready yet.",
+      "clearSearch": "Clear search",
+      "browseApps": "Browse apps",
+      "browseIntegrations": "Browse MCP tools",
+      "emptyIntegrationsHint": "Add a custom MCP server below.",
+      "restartRequired": "Restart nanobot to apply updated apps and MCP tools."
     },
     "channels": {
       "description": "Connect chat apps, email, and WebUI to nanobot.",
@@ -583,6 +694,8 @@
       "advanced": "Advanced",
       "checkAndEnable": "Check and enable",
       "checkConnection": "Check connection",
+      "connectionChecks": "Connection checks",
+      "open": "Open",
       "checkedAndEnabled": "Checked and enabled.",
       "checking": "Checking...",
       "checkOnly": "Check only",
@@ -659,7 +772,9 @@
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
       "empty": "No automations yet.",
-      "emptyHint": "Create one from where it should run so nanobot keeps the right context.",
+      "emptyHint": "Create automations in a chat so they keep the right context.",
+      "emptyAction": "Open a chat",
+      "clearFilters": "Clear filters",
       "oneShot": "One-time",
       "systemTask": "System-managed automation",
       "localTrigger": "Local trigger",
@@ -678,6 +793,8 @@
       "protected": "Protected",
       "editTitle": "Edit automation",
       "save": "Save",
+      "commandCopied": "Copied",
+      "copyCommand": "Copy",
       "deleteTitle": "Delete automation",
       "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
       "cancel": "Cancel",
@@ -737,6 +854,7 @@
       "fields": {
         "name": "Name",
         "message": "Message",
+        "command": "Command",
         "scheduleType": "Schedule type",
         "every": "Every",
         "unit": "Unit",
@@ -897,7 +1015,8 @@
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished",
-      "updated": "New activity"
+      "updated": "New activity",
+      "recovery": "This conversation needs your attention"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -913,6 +1032,10 @@
     "unarchive": "Unarchive",
     "showArchived": "Show archived",
     "hideArchived": "Hide archived",
+    "select": "Select",
+    "cancelSelection": "Cancel selection",
+    "selectedCount": "{{count}} selected",
+    "deleteSelected": "Delete",
     "delete": "Delete",
     "newChat": "New topic",
     "groups": {
@@ -927,10 +1050,13 @@
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
+    "titleMany": "Delete {{count}} conversations?",
     "description": "This action cannot be undone.",
+    "descriptionMany": "This action cannot be undone.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "automationsDescription": "This chat has scheduled automations. Deleting it will also delete them.",
+    "automationsDescriptionMany": "Linked automations will also be deleted.",
     "moreAutomations": "+ {{count}} more",
     "confirmWithAutomations": "Delete",
     "schedule": {
@@ -1069,6 +1195,13 @@
       "removeQuotedContext": "Remove quoted context",
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
+      "chooseAI": "Choose your AI",
+      "switchModel": "Switch model for this chat",
+      "manageModels": "Manage models",
+      "context": {
+        "tooltip": "Context · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}. {{percent}}% used."
+      },
       "queued": {
         "label": "Queued guidance",
         "guide": "Guide",
@@ -1105,6 +1238,7 @@
         "recordingStatus": "Recording {{time}}"
       },
       "voiceErrors": {
+        "insecureContext": "Chrome and other browsers block microphone access on remote HTTP pages for security. Open this WebUI over HTTPS to use voice input.",
         "unsupported": "Voice input is not supported in this browser.",
         "permission": "Allow microphone access in the address bar, then retry.",
         "notConfigured": "Configure a transcription provider first.",
@@ -1190,14 +1324,19 @@
         }
       },
       "mentions": {
-        "ariaLabel": "Apps",
+        "ariaLabel": "Mentions",
         "label": "Apps",
         "cliGroup": "CLI apps",
         "mcpGroup": "MCP services",
+        "sessionGroup": "Nanobot conversations",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Use @{{name}} as a local CLI app",
-        "mcpDescription": "Use @{{name}} as an MCP server"
+        "mcpDescription": "Use @{{name}} as an MCP server",
+        "cliTitle": "CLI app: {{name}}",
+        "mcpTitle": "MCP server: {{name}}",
+        "sessionBadge": "Nanobot conversation",
+        "sessionDescription": "Reference @{{name}} as a previous chat"
       },
       "encoding": "Encoding…",
       "remove": "Remove attachment",
@@ -1233,7 +1372,8 @@
       "title": "Prompts",
       "search": "Search prompts",
       "noResults": "No matching prompts.",
-      "jumpTo": "Jump to prompt: {{label}}"
+      "jumpTo": "Jump to prompt: {{label}}",
+      "railAria": "User prompt navigation"
     }
   },
   "message": {
@@ -1272,6 +1412,14 @@
     "cliRunRan": "Used",
     "cliRunFailed": "Failed",
     "imageAttachment": "Image attachment",
+    "videoAttachment": "Video attachment",
+    "fileAttachment": "File attachment",
+    "attachmentUnavailable": "Attachment unavailable",
+    "dataTable": "Data table",
+    "fileEditPreparing": "Preparing file edit…",
+    "openLink": "Open link: {{label}}",
+    "openAttachment": "Open {{name}}",
+    "skill": "Skill: {{name}}",
     "automationSourceFallback": "Automation",
     "automationTriggered": "Triggered automatically",
     "askAboutSelection": "Ask about this",
@@ -1286,7 +1434,24 @@
     "fileEditShowMoreLines": "Show {{count}} more lines",
     "fileEditShowFewerLines": "Show fewer lines",
     "fileEditOpenFile": "Open file",
-    "fileEditDiffTruncated": "Diff truncated. Open the file for the full change."
+    "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
+    "usage": {
+      "context": "Context now: {{tokens}}{{capacity}}",
+      "requests": "{{count}} calls this turn",
+      "estimated": "Includes estimated usage"
+    }
+  },
+  "recovery": {
+    "actionFailed": "Recovery action failed. Try again.",
+    "interrupted": "Task interrupted",
+    "completed": "Task completed",
+    "failed": "Task recovery failed",
+    "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
+    "resuming": "Restoring interrupted task…",
+    "review": "Review the task before continuing. Tools will not be replayed automatically.",
+    "safeResume": "Continuing from saved conversation context.",
+    "dismiss": "Dismiss",
+    "continue": "Continue"
   },
   "lightbox": {
     "title": "Image preview",
@@ -1297,6 +1462,7 @@
   },
   "filePreview": {
     "aria": "File preview",
+    "breadcrumb": "File path",
     "close": "Close file preview",
     "loading": "Loading preview...",
     "failed": "Could not preview this file.",
@@ -1310,8 +1476,44 @@
     "copy": "Copy",
     "copied": "Copied"
   },
+  "workbench": {
+    "aria": "Conversation workbench",
+    "panes": "Panes",
+    "tabAria": "Group: {{title}}",
+    "panesInTab": "Panes in {{title}}",
+    "collapseTabGroup": "Collapse panes in {{title}}",
+    "expandTabGroup": "Expand panes in {{title}}",
+    "dropPane": "Move {{pane}} into {{tab}}",
+    "createGroup": "Create group",
+    "moveTo": "Move to",
+    "renameGroupTitle": "Rename group",
+    "renameGroupDescription": "Give this group a name.",
+    "renameGroupPlaceholder": "Group name",
+    "dissolveTab": "Dissolve group",
+    "layout": "Pane layout",
+    "addPane": "Add pane",
+    "paneLimit": "Maximum {{count}} panes",
+    "deleteConversations": "Delete all chats",
+    "movePane": "Move {{title}} pane",
+    "movePaneHint": "Drag to move · Arrow keys also work",
+    "resizePaneBoundary": "Resize pane boundary {{index}}",
+    "promotePane": "Make {{title}} the primary pane",
+    "paneActions": "{{title}} pane actions",
+    "detachPane": "Remove",
+    "composerAria": "Message {{title}}",
+    "layouts": {
+      "columns": "Columns",
+      "rows": "Rows",
+      "grid": "Grid",
+      "bsp": "BSP",
+      "main-stack": "Main and stack"
+    }
+  },
   "common": {
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "close": "Close",
+    "current": "Current",
+    "cancel": "Cancel"
   },
   "errors": {
     "messageTooBig": {
@@ -1320,7 +1522,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again."
     },
     "turnRejected": {
       "title": "Message was not sent",

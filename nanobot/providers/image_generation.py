@@ -808,7 +808,12 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
         generation_config: dict[str, Any] = {"responseModalities": ["TEXT", "IMAGE"]}
         image_config = _gemini_flash_image_config(model, aspect_ratio, image_size)
         if image_config:
-            generation_config["responseFormat"] = {"image": image_config}
+            # Gemini Flash image models accept plain-string values under
+            # ``generationConfig.imageConfig``. The legacy
+            # ``responseFormat.image`` block is rejected with INVALID_ARGUMENT
+            # by gemini-3.1-flash-lite-image (enum-based fields), so it is not
+            # used here.
+            generation_config["imageConfig"] = image_config
 
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": parts}],
@@ -864,11 +869,13 @@ def _gemini_flash_image_config(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> dict[str, str]:
-    """Build the ``responseFormat.image`` config for Gemini Flash image models.
+    """Build the ``generationConfig.imageConfig`` config for Gemini Flash image models.
 
-    Capabilities are model-specific: Gemini 3.1 Flash variants support four
-    additional extreme ratios, while configurable image sizes are limited to
-    the documented Gemini 3 image model families.
+    Values are the documented plain strings (e.g. ``16:9``, ``1K``) that the
+    live v1beta API accepts under ``imageConfig``. Capabilities are
+    model-specific: Gemini 3.1 Flash variants support four additional extreme
+    ratios, while configurable image sizes are limited to the documented
+    Gemini 3 image model families.
     """
     config: dict[str, str] = {}
     if aspect_ratio and aspect_ratio in _gemini_flash_supported_aspect_ratios(model):

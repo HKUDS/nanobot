@@ -1,10 +1,11 @@
-from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -136,67 +137,15 @@ def test_legitimate_tool_pairs_preserved_after_trim():
     assert history[0]["role"] == "user"
 
 
-def test_retain_recent_legal_suffix_keeps_recent_messages():
-    session = Session(key="test:trim")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
+# --- last_archived > 0 ---
 
-    session.retain_recent_legal_suffix(4)
-
-    assert len(session.messages) == 4
-    assert session.messages[0]["content"] == "msg6"
-    assert session.messages[-1]["content"] == "msg9"
-
-
-def test_retain_recent_legal_suffix_adjusts_last_consolidated():
-    session = Session(key="test:trim-cons")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 7
-
-    session.retain_recent_legal_suffix(4)
-
-    assert len(session.messages) == 4
-    assert session.last_consolidated == 1
-
-
-def test_retain_recent_legal_suffix_zero_clears_session():
-    session = Session(key="test:trim-zero")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 5
-
-    session.retain_recent_legal_suffix(0)
-
-    assert session.messages == []
-    assert session.last_consolidated == 0
-
-
-def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
-    session = Session(key="test:trim-tools")
-    session.messages.append({"role": "user", "content": "old"})
-    session.messages.extend(_tool_turn("old", 0))
-    session.messages.append({"role": "user", "content": "keep"})
-    session.messages.extend(_tool_turn("keep", 0))
-    session.messages.append({"role": "assistant", "content": "done"})
-
-    session.retain_recent_legal_suffix(4)
-
-    history = session.get_history(max_messages=500)
-    _assert_no_orphans(history)
-    assert history[0]["role"] == "user"
-    assert history[0]["content"] == "keep"
-
-
-# --- last_consolidated > 0 ---
-
-def test_orphan_trim_with_last_consolidated():
-    """Orphan trimming works correctly when session is partially consolidated."""
+def test_orphan_trim_with_last_archived():
+    """Orphan trimming works correctly when a session is partially archived."""
     session = Session(key="test:consolidated")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"old {i}"})
         session.messages.extend(_tool_turn("cons", i))
-    session.last_consolidated = 30
+    session.last_archived = 30
 
     session.messages.append({"role": "user", "content": "recent"})
     for i in range(15):
@@ -206,6 +155,71 @@ def test_orphan_trim_with_last_consolidated():
     history = session.get_history(max_messages=20)
     _assert_no_orphans(history)
     assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
+
+
+def test_get_history_replays_recent_messages_after_full_archive():
+    session = Session(key="test:fully-archived")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert [message["content"] for message in history] == [
+        "u6",
+        "a6",
+        "u7",
+        "a7",
+        "u8",
+        "a8",
+        "u9",
+        "a9",
+    ]
+
+
+def test_get_history_extends_archived_replay_to_preceding_user():
+    session = Session(key="test:archived-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run tools"},
+            *_tool_turn("keep", 0),
+            *_tool_turn("keep", 1),
+            *_tool_turn("keep", 2),
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert history[0]["content"] == "run tools"
+    assert history[-1]["content"] == "done"
+    _assert_no_orphans(history)
+
+
+def test_archived_tool_turn_can_extend_past_message_cap():
+    session = Session(key="test:long-archived-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run many tools"},
+        ]
+    )
+    for i in range(50):
+        session.messages.extend(_tool_turn("keep", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=120)
+
+    assert len(history) > 120
+    assert history[0]["content"] == "run many tools"
+    assert history[-1]["content"] == "done"
+    _assert_no_orphans(history)
 
 
 # --- Edge: no tool messages at all ---
@@ -570,7 +584,41 @@ def test_fork_session_allows_index_equal_to_user_count(tmp_path):
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
 
 
-def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefix(tmp_path):
+def test_fork_session_user_index_ignores_hidden_checkpoint_anchor(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2")
+    source.add_message(
+        "user",
+        SUMMARY_CONTINUATION_TEXT,
+        **{HIDDEN_HISTORY_META: True},
+    )
+    source.add_message("assistant", "answer2")
+    source.last_archived = 3
+    source.metadata["_last_summary"] = {"text": "round1 and round2"}
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        2,
+    )
+
+    assert forked is not None
+    assert [message["content"] for message in forked.messages] == [
+        "round1",
+        "answer1",
+        "round2",
+        SUMMARY_CONTINUATION_TEXT,
+        "answer2",
+    ]
+    assert forked.last_archived == 3
+    assert forked.metadata["_last_summary"]["text"] == "round1 and round2"
+
+
+def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")
     source.messages = [
@@ -579,7 +627,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
         {"role": "user", "content": "round2 fork me"},
         {"role": "assistant", "content": "answer2"},
     ]
-    source.last_consolidated = 4
+    source.last_archived = 4
     source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
     manager.save(source)
 
@@ -591,7 +639,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
 
     assert forked is not None
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
-    assert forked.last_consolidated == 0
+    assert forked.last_archived == 0
     assert "_last_summary" not in forked.metadata
 
 
@@ -691,44 +739,6 @@ def test_get_history_recovers_user_when_token_slice_would_be_assistant_only(monk
     assert [m["content"] for m in history] == ["u2", "a2"]
 
 
-def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
-    session = Session(key="test:hard-cap-chain")
-    session.messages.append({"role": "user", "content": "u0"})
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
-            ],
-        }
-    )
-    for i in range(12):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-
-    session.retain_recent_legal_suffix(6)
-
-    assert len(session.messages) <= 6
-
-
-def test_retain_recent_legal_suffix_can_extend_to_user_for_long_recent_turn():
-    session = Session(key="test:extend-to-user")
-    session.messages.append({"role": "user", "content": "old"})
-    session.messages.append({"role": "assistant", "content": "old answer"})
-    session.messages.append({"role": "user", "content": "record this"})
-    for i in range(4):
-        session.messages.extend(_tool_turn("recent", i))
-    session.messages.append({"role": "assistant", "content": "done"})
-
-    session.retain_recent_legal_suffix(8, extend_to_user=True)
-
-    assert len(session.messages) > 8
-    assert session.messages[0]["content"] == "record this"
-    assert session.messages[-1]["content"] == "done"
-    history = session.get_history(max_messages=500)
-    _assert_no_orphans(history)
-
-
 def test_get_history_can_extend_to_user_for_long_recent_turn():
     session = Session(key="test:history-extend-to-user")
     session.messages.append({"role": "user", "content": "old"})
@@ -763,175 +773,3 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
 
     assert [m["content"] for m in history] == ["new question", "new answer"]
     _assert_no_orphans(history)
-
-
-# --- enforce_file_cap archive correctness (issue #4128) ---
-
-
-def test_retain_recent_legal_suffix_returns_dropped_messages():
-    """retain_recent_legal_suffix returns the actually-dropped messages."""
-    session = Session(
-        key="test:return-dropped",
-        provider_state=ProviderConversationState(
-            kind="openai_responses",
-            provider="openai:test",
-            model="test-model",
-            version=1,
-            payload={"items": []},
-        ),
-    )
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    result = session.retain_recent_legal_suffix(4)
-
-    assert len(result.dropped) == 6
-    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
-    assert len(session.messages) == 4
-    assert result.already_consolidated_count == 0
-    assert session.provider_state is None
-
-
-def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
-    """No messages dropped → empty list returned."""
-    state = ProviderConversationState(
-        kind="openai_responses",
-        provider="openai:test",
-        model="test-model",
-        version=1,
-        payload={"items": []},
-    )
-    session = Session(key="test:no-drop", provider_state=state)
-    for i in range(3):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    result = session.retain_recent_legal_suffix(4)
-
-    assert result.dropped == []
-    assert result.already_consolidated_count == 0
-    assert len(session.messages) == 3
-    assert session.provider_state is state
-
-
-def test_retain_recent_legal_suffix_returns_all_on_zero():
-    """max_messages=0 clears session and returns all messages."""
-    session = Session(key="test:zero-return")
-    for i in range(5):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 3
-
-    result = session.retain_recent_legal_suffix(0)
-
-    assert len(result.dropped) == 5
-    assert result.already_consolidated_count == 3
-    assert session.messages == []
-
-
-def test_enforce_file_cap_no_duplicate_archive_in_else_branch():
-    """When the tail is assistant-only, enforce_file_cap must not archive
-    messages that are also retained (the bug from issue #4128)."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-archive")
-    # Build: 15 user messages, then 10 assistant messages (no user in tail)
-    for i in range(15):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=6)
-
-    assert len(session.messages) <= 6
-
-    # Verify archived messages have NO overlap with retained
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        archived_ids = set(id(m) for m in archived)
-        retained_ids = set(id(m) for m in session.messages)
-        assert not archived_ids & retained_ids, (
-            f"Duplicate messages in archive and retained: "
-            f"overlap contents = {[m['content'] for m in archived if id(m) in retained_ids]}"
-        )
-
-
-def test_enforce_file_cap_no_message_loss_in_else_branch():
-    """In the else branch, no messages should silently disappear — every
-    message must be either retained or archived."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-no-loss")
-    all_messages = []
-    for i in range(15):
-        msg = {"role": "user", "content": f"u{i}"}
-        session.messages.append(msg)
-        all_messages.append(msg)
-    for i in range(10):
-        msg = {"role": "assistant", "content": f"a{i}"}
-        session.messages.append(msg)
-        all_messages.append(msg)
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=6)
-
-    # Collect all messages accounted for (retained + archived)
-    accounted = set(id(m) for m in session.messages)
-    if archive_fn.called:
-        for m in archive_fn.call_args.args[0]:
-            accounted.add(id(m))
-
-    all_ids = set(id(m) for m in all_messages)
-    missing = all_ids - accounted
-    assert not missing, (
-        f"Lost {len(missing)} message(s) — neither retained nor archived"
-    )
-
-
-def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch():
-    """When last_consolidated > 0 and the else branch fires, only the
-    unconsolidated dropped messages should be raw-archived.  Messages in the
-    consolidated prefix that are dropped do NOT need raw archiving."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-lc-archive")
-    # 20 messages total: u0..u9 (user), a0..a9 (assistant)
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-    # First 8 messages already consolidated
-    session.last_consolidated = 8
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=4)
-
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        # Archived messages should NOT include any from the consolidated prefix
-        # (u0..u7). They should only be unconsolidated dropped messages.
-        archived_contents = [m["content"] for m in archived]
-        for c in archived_contents:
-            assert c not in [f"u{i}" for i in range(8)], (
-                f"Consolidated message {c!r} should not be raw-archived"
-            )
-
-
-def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
-    """last_consolidated after retain_recent_legal_suffix should reflect how
-    many retained messages were inside the old consolidated prefix."""
-    session = Session(key="test:else-lc-correct")
-    # 20 messages: u0..u9, a0..a9
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-    session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
-
-    result = session.retain_recent_legal_suffix(4)
-
-    # Retained messages start from latest user (u9) + max_messages forward
-    # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
-    # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
-    assert session.last_consolidated == 3
-    # already_cons should count dropped messages with original index < 12
-    assert result.already_consolidated_count == 9

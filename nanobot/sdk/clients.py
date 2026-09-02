@@ -15,7 +15,6 @@ from nanobot.sdk.types import (
     snapshot_from_payload,
     snapshot_from_session,
 )
-from nanobot.session.manager import replay_max_messages_for_context
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -138,6 +137,7 @@ class SessionClient:
 
     def clear(self, session_key: str) -> SessionSnapshot:
         """Clear one session and persist the empty session."""
+        self._loop.discard_session_file_state(session_key)
         session = self._loop.sessions.get_or_create(session_key)
         session.clear()
         self._loop.sessions.save(session)
@@ -209,15 +209,12 @@ class RuntimeClient:
         return self._loop.runtime_events.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
-        """Run token/replay-window consolidation for one session."""
+        """Archive one session through the shared idle-compaction path."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
-        await self._loop.consolidator.maybe_consolidate_by_tokens(
-            session,
+        await self._loop.consolidator.compact_idle_session(
+            session_key,
             runtime=runtime,
-            replay_max_messages=replay_max_messages_for_context(
-                runtime.context_window_tokens
-            ),
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 

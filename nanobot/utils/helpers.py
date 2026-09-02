@@ -1,5 +1,7 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -12,10 +14,13 @@ from contextlib import suppress
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 import tiktoken
 from loguru import logger
+
+if TYPE_CHECKING:
+    from nanobot.providers.base import LLMUsage
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
@@ -349,18 +354,6 @@ def ensure_dir(path: Path) -> Path:
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
-
-
-def current_time_str(timezone: str | None = None) -> str:
-    """Return the current time string."""
-    from zoneinfo import ZoneInfo
-
-    tz = ZoneInfo(timezone) if timezone else None
-    now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
-    offset = now.strftime("%z")
-    offset_fmt = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
-    tz_name = timezone or (time.strftime("%Z") or "UTC")
-    return f"{now.strftime('%Y-%m-%d %H:%M (%A)')} ({tz_name}, UTC{offset_fmt})"
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -805,7 +798,7 @@ def build_status_content(
     version: str,
     model: str,
     start_time: float,
-    last_usage: dict[str, int],
+    last_usage: LLMUsage | None,
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
@@ -826,9 +819,9 @@ def build_status_content(
         if uptime_s >= 3600
         else f"{uptime_s // 60}m {uptime_s % 60}s"
     )
-    last_in = last_usage.get("prompt_tokens", 0)
-    last_out = last_usage.get("completion_tokens", 0)
-    cached = last_usage.get("cached_tokens", 0)
+    last_in = last_usage.input_tokens if last_usage else 0
+    last_out = last_usage.output_tokens if last_usage else 0
+    cached = last_usage.cache_read_tokens if last_usage else None
     ctx_total = max(context_window_tokens, 0)
     # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
     ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)

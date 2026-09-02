@@ -1,4 +1,4 @@
-"""Tests for provider progress delta routing in the shared runner."""
+"""Tests for runner progress hooks and provider event routing."""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent.runner_helpers import make_run_spec
-from nanobot.agent.hook import CompositeHook
 from nanobot.agent.hooks import FileEditActivityHook
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
@@ -18,77 +17,8 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 @pytest.mark.asyncio
-async def test_runner_can_disable_provider_progress_delta_streaming():
-    """AgentLoop disables token progress streaming for non-streaming channels."""
-    provider = MagicMock()
-    provider.supports_progress_deltas = True
-    provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="done", tool_calls=[], usage={})
-    )
-    provider.chat_stream_with_retry = AsyncMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    progress_cb = AsyncMock()
-
-    runner = AgentRunner()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "hi"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
-        stream_progress_deltas=False,
-    ))
-
-    assert result.final_content == "done"
-    provider.chat_with_retry.assert_awaited_once()
-    provider.chat_stream_with_retry.assert_not_awaited()
-    progress_cb.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_runner_streams_provider_progress_deltas_by_default():
-    """Direct runner users keep the existing opt-in provider progress behavior."""
-    provider = MagicMock()
-    provider.supports_progress_deltas = True
-
-    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await on_content_delta("he")
-        await on_content_delta("llo")
-        return LLMResponse(content="hello", tool_calls=[], usage={})
-
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    progress_cb = AsyncMock()
-
-    runner = AgentRunner()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "hi"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
-    ))
-
-    assert result.final_content == "hello"
-    assert [call.args[0] for call in progress_cb.await_args_list] == ["he", "llo"]
-    provider.chat_with_retry.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_runner_routes_hosted_tool_events_to_structured_progress():
     provider = MagicMock()
-    provider.supports_progress_deltas = True
 
     async def chat_stream_with_retry(*, on_content_delta, on_tool_call_delta, **kwargs):
         await on_tool_call_delta({
@@ -113,7 +43,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
             "result": {"name": "x_semantic_search"},
         })
         await on_content_delta("done")
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -121,13 +51,17 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
     tools.get_definitions.return_value = []
     progress_events: list[dict] = []
     progress_text: list[str] = []
+    streamed_text: list[str] = []
 
     async def progress_cb(content, *, tool_events=None, **kwargs):
         progress_text.append(content)
         if tool_events:
             progress_events.extend(tool_events)
 
-    hook = CompositeHook([AgentProgressHook(on_progress=progress_cb)])
+    async def stream_cb(content: str) -> None:
+        streamed_text.append(content)
+
+    hook = AgentProgressHook(on_progress=progress_cb, on_stream=stream_cb)
     result = await AgentRunner().run(make_run_spec(
         provider,
         initial_messages=[{"role": "user", "content": "search X"}],
@@ -135,7 +69,6 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
         hook=hook,
     ))
 
@@ -166,14 +99,14 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
             "embeds": [],
         },
     ]
-    assert progress_text == ['search X "nanobot oauth"', "", "done"]
+    assert progress_text == ['search X "nanobot oauth"', ""]
+    assert streamed_text == ["done"]
     provider.chat_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
     provider = MagicMock()
-    provider.supports_progress_deltas = True
 
     async def chat_stream_with_retry(*, on_tool_call_delta, **kwargs):
         await on_tool_call_delta({
@@ -199,7 +132,10 @@ async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
         if tool_events:
             progress_events.extend(tool_events)
 
-    hook = CompositeHook([AgentProgressHook(on_progress=progress_cb)])
+    async def stream_cb(_content: str) -> None:
+        pass
+
+    hook = AgentProgressHook(on_progress=progress_cb, on_stream=stream_cb)
     result = await AgentRunner().run(make_run_spec(
         provider,
         initial_messages=[{"role": "user", "content": "search X"}],
@@ -207,7 +143,6 @@ async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
         hook=hook,
     ))
 
@@ -233,7 +168,6 @@ async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
 @pytest.mark.asyncio
 async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_path):
     provider = MagicMock()
-    provider.supports_progress_deltas = True
     call_count = 0
     progress_events: list[dict] = []
     (tmp_path / "big.txt").write_text("old\n", encoding="utf-8")
@@ -251,7 +185,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_stream_with_retry(**kwargs):
+    async def chat_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -264,12 +198,11 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
                         arguments={"path": "big.txt", "content": "line\n" * 24},
                     )
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
+    provider.chat_with_retry = chat_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -279,7 +212,6 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
         workspace=tmp_path,
         hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
     ))
@@ -296,13 +228,11 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
         and event["diff"]["format"] == "unified"
         for event in progress_events
     )
-    provider.chat_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_path):
     provider = MagicMock()
-    provider.supports_progress_deltas = True
     call_count = 0
     progress_events: list[dict] = []
     target = tmp_path / "notes.txt"
@@ -321,7 +251,7 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_stream_with_retry(**kwargs):
+    async def chat_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -338,12 +268,11 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
                         },
                     )
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
+    provider.chat_with_retry = chat_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -353,7 +282,6 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
         workspace=tmp_path,
         hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
     ))
@@ -368,13 +296,11 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
         and event["diff"]["format"] == "unified"
         for event in progress_events
     )
-    provider.chat_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path):
     provider = MagicMock()
-    provider.supports_progress_deltas = True
     call_count = 0
     progress_events: list[dict] = []
 
@@ -391,7 +317,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_stream_with_retry(**kwargs):
+    async def chat_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -404,12 +330,11 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
                         arguments={"path": "aborted.txt"},
                     )
                 ],
-                usage={},
+                usage=None,
             )
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
+    provider.chat_with_retry = chat_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -419,7 +344,6 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
         workspace=tmp_path,
         hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
     ))
@@ -428,13 +352,11 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
     assert progress_events[-1]["path"] == "aborted.txt"
     assert progress_events[-1]["phase"] == "error"
     assert progress_events[-1]["status"] == "error"
-    provider.chat_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
     provider = MagicMock()
-    provider.supports_progress_deltas = True
     progress_events: list[dict] = []
     executing = asyncio.Event()
     target = tmp_path / "cancelled.txt"
@@ -459,7 +381,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_stream_with_retry(**kwargs):
+    async def chat_with_retry(**kwargs):
         return LLMResponse(
             content=None,
             tool_calls=[
@@ -469,11 +391,10 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
                     arguments={"path": "cancelled.txt", "content": "new\n"},
                 )
             ],
-            usage={},
+            usage=None,
         )
 
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
+    provider.chat_with_retry = chat_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -483,7 +404,6 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        progress_callback=progress_cb,
         workspace=tmp_path,
         hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
     )))
@@ -497,4 +417,3 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
     assert progress_events[-1]["path"] == "cancelled.txt"
     assert progress_events[-1]["status"] == "error"
     assert progress_events[-1]["error"] == "Task interrupted before this tool finished."
-    provider.chat_with_retry.assert_not_awaited()

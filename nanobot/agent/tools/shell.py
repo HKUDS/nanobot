@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -12,7 +13,8 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, Protocol, cast
+from urllib.parse import unquote
 
 from loguru import logger
 from pydantic import Field
@@ -42,6 +44,17 @@ from nanobot.security.workspace_access import current_scope_allows_loopback, cur
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
+_PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
+
+
+class _ProcessTreeOwner(Protocol):
+    creation_flags: int
+
+    def assign_and_resume(self, pid: int) -> None: ...
+
+    def release(self) -> None: ...
+
+    def terminate(self) -> None: ...
 
 
 def _reap_pid(pid: int) -> None:
@@ -109,55 +122,37 @@ class _PreparedCommand:
         working_dir=StringSchema("Optional working directory for the command"),
         workdir=StringSchema("Compatibility alias for working_dir"),
         timeout=IntegerSchema(
-            description=(
-                "Timeout in seconds. Increase for long-running commands "
-                "like compilation or installation (default 60, max 600)."
-            ),
+            description="Hard timeout in seconds (default 60, max 600).",
             minimum=1,
             maximum=600,
         ),
         shell=StringSchema(
             (
-                "Override the Windows shell only when needed. Omit to use "
-                "PowerShell by default (pwsh when available, else powershell). "
-                "Pass 'cmd' only for cmd.exe syntax or cmd built-ins."
+                "Shell override; omit for PowerShell, or pass 'cmd' for cmd.exe."
                 if _IS_WINDOWS
-                else "Override the Unix shell only when needed. Omit to use "
-                "bash by default. Pass 'sh' for POSIX sh or 'zsh' for "
-                "zsh-specific syntax."
+                else "Shell override; omit for bash, or pass 'sh' or 'zsh'."
             ),
             nullable=True,
         ),
         login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default false).",
+            description="Run bash/zsh as a login shell.",
             default=False,
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
-            description=(
-                "Optional milliseconds to wait before returning output. "
-                "When set, a still-running command returns a session_id that "
-                "can be polled or written to with write_stdin. Omit this field "
-                "to keep one-shot exec behavior."
-            ),
+            description="Return after this many milliseconds if still running; omit to wait for exit.",
             minimum=0,
             maximum=MAX_YIELD_MS,
             nullable=True,
         ),
         max_output_chars=IntegerSchema(
-            description=(
-                "Maximum output characters to return when yield_time_ms is used "
-                "(default 10000, max 50000)."
-            ),
+            description="Session output limit in characters (default 10000, max 50000).",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
             nullable=True,
         ),
         max_output_tokens=IntegerSchema(
-            description=(
-                "Compatibility alias for max_output_chars. The current runtime "
-                "uses a character budget."
-            ),
+            description="Compatibility alias for max_output_chars.",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
             nullable=True,
@@ -270,26 +265,7 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        platform_note = (
-            "On Windows, use PowerShell syntax by default; pass shell='cmd' "
-            "only for cmd-specific commands. "
-            if _IS_WINDOWS
-            else "On Unix, commands run through bash by default; pass shell='sh' "
-            "or shell='zsh' when needed. "
-        )
-        return (
-            "Execute a shell command and return its output. "
-            "Use this for tests, builds, package commands, git commands, and "
-            "other process execution. Prefer read_file/find_files/grep for "
-            "inspection and apply_patch/write_file/edit_file for file changes "
-            "instead of cat, shell find/grep, echo, or sed. "
-            "Use -y or --yes flags to avoid interactive prompts. "
-            f"{platform_note}"
-            "For long-running or interactive commands, pass yield_time_ms; "
-            "if the command keeps running, exec returns a session_id that can "
-            "be polled or written to with write_stdin. Output is truncated at "
-            "10 000 chars; timeout defaults to 60s."
-        )
+        return "Execute a shell command."
 
     @property
     def exclusive(self) -> bool:
@@ -326,6 +302,7 @@ class ExecTool(Tool):
                 prepared.env,
                 prepared.shell_program,
                 prepared.login,
+                process_tree=True,
             )
 
             try:
@@ -334,10 +311,10 @@ class ExecTool(Tool):
                     timeout=prepared.timeout,
                 )
             except asyncio.TimeoutError:
-                await self._kill_process(process)
+                await self._kill_process_tree(process)
                 return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
             except asyncio.CancelledError:
-                await self._kill_process(process)
+                await self._kill_process_tree(process)
                 raise
 
             # Safety-net reap: asyncio *should* have reaped the child via
@@ -368,13 +345,14 @@ class ExecTool(Tool):
                     + result[-half:]
                 )
 
+            self._release_process_tree(process)
             return result
 
         except Exception as e:
             # Kill and reap the child if it was spawned but an unexpected
             # error prevented communicate() from completing.
             if process is not None:
-                await self._kill_process(process)
+                await self._kill_process_tree(process)
             return ToolResult.error(f"Error executing command: {str(e)}")
 
     async def _execute_session(
@@ -455,14 +433,18 @@ class ExecTool(Tool):
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
 
-        guard_error = self._guard_command(
-            command,
-            cwd,
-            restrict_to_workspace=access.restrict_to_workspace,
-            workspace_root=workspace_root,
-        )
-        if guard_error:
-            return guard_error
+        # Full access is an explicit trust decision. Keep the application-level
+        # command guard aligned with the selected access mode instead of
+        # continuing to block commands after workspace restriction is disabled.
+        if access.restrict_to_workspace:
+            guard_error = self._guard_command(
+                command,
+                cwd,
+                restrict_to_workspace=True,
+                workspace_root=workspace_root,
+            )
+            if guard_error:
+                return guard_error
 
         if self.sandbox:
             if _IS_WINDOWS:
@@ -537,38 +519,58 @@ class ExecTool(Tool):
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
+            windows_job = None
+            process = None
+            creation_flags = 0
+            if process_tree and sys.platform == "win32":
+                windows_job = ExecTool._create_windows_job()
+                creation_flags = windows_job.creation_flags
             # Default to PowerShell so single-line and multi-line commands
             # share the same shell semantics.  cmd.exe is reachable via the
             # explicit shell="cmd" parameter (see _resolve_shell).
             default_program = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
             program = shell_program or default_program
             program_name = PureWindowsPath(program).name.lower()
-            if program_name in ("cmd", "cmd.exe"):
-                cmd_env = {**env, "COMSPEC": program}
-                return await asyncio.create_subprocess_shell(
-                    command,
-                    stdin=stdin,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=cmd_env,
-                )
-            command = ExecTool._normalize_powershell_command(command)
-            command = (
-                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
-                "if ($PSVersionTable.PSVersion.Major -lt 6) { $OutputEncoding = [Console]::OutputEncoding }\n"
-                "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
-                f"{command}\n"
-                "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
-            )
-            return await asyncio.create_subprocess_exec(
-                program, "-NoProfile", "-NonInteractive", "-Command", command,
-                stdin=stdin,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
+            try:
+                if program_name in ("cmd", "cmd.exe"):
+                    cmd_env = {**env, "COMSPEC": program}
+                    process = await asyncio.create_subprocess_shell(
+                        command,
+                        stdin=stdin,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=cwd,
+                        env=cmd_env,
+                        creationflags=creation_flags,
+                    )
+                else:
+                    command = ExecTool._normalize_powershell_command(command)
+                    command = (
+                        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                        "if ($PSVersionTable.PSVersion.Major -lt 6) { $OutputEncoding = [Console]::OutputEncoding }\n"
+                        "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
+                        f"{command}\n"
+                        "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
+                    )
+                    process = await asyncio.create_subprocess_exec(
+                        program, "-NoProfile", "-NonInteractive", "-Command", command,
+                        stdin=stdin,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=cwd,
+                        env=env,
+                        creationflags=creation_flags,
+                    )
+                if windows_job is not None:
+                    windows_job.assign_and_resume(process.pid)
+                    setattr(process, _PROCESS_TREE_OWNER_ATTR, windows_job)
+                return process
+            except BaseException:
+                if windows_job is not None:
+                    windows_job.terminate()
+                if process is not None:
+                    await ExecTool._kill_process(process)
+                raise
         shell_program = shell_program or shutil.which("bash") or "/bin/bash"
         args: list[str] = [shell_program]
         shell_name = Path(shell_program).name.lower()
@@ -687,22 +689,23 @@ class ExecTool(Tool):
     @staticmethod
     async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
         """Kill a session process and descendants, then reap the root process."""
-        if process.returncode is not None:
-            _reap_pid(process.pid)
-            return
+        owner = ExecTool._process_tree_owner(process)
         try:
-            if _IS_WINDOWS:
-                with suppress(OSError, asyncio.TimeoutError):
-                    await asyncio.wait_for(
-                        asyncio.to_thread(
-                            subprocess.run,
-                            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                            check=False,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        ),
-                        timeout=5.0,
-                    )
+            if owner is not None:
+                owner.terminate()
+            elif _IS_WINDOWS:
+                if process.returncode is None:
+                    with suppress(OSError, asyncio.TimeoutError):
+                        await asyncio.wait_for(
+                            asyncio.to_thread(
+                                subprocess.run,
+                                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                check=False,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            ),
+                            timeout=5.0,
+                        )
             else:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -715,7 +718,35 @@ class ExecTool(Tool):
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=5.0)
         finally:
+            if owner is not None:
+                ExecTool._drop_process_tree_owner(process)
             _reap_pid(process.pid)
+
+    @staticmethod
+    def _process_tree_owner(
+        process: asyncio.subprocess.Process,
+    ) -> _ProcessTreeOwner | None:
+        # _spawn is the only writer for this private ownership marker.
+        return cast(_ProcessTreeOwner | None, vars(process).get(_PROCESS_TREE_OWNER_ATTR))
+
+    @staticmethod
+    def _create_windows_job() -> _ProcessTreeOwner:
+        from nanobot.agent.tools._windows_job import WindowsJob
+
+        return WindowsJob.create()
+
+    @staticmethod
+    def _drop_process_tree_owner(process: asyncio.subprocess.Process) -> None:
+        with suppress(AttributeError):
+            delattr(process, _PROCESS_TREE_OWNER_ATTR)
+
+    @staticmethod
+    def _release_process_tree(process: asyncio.subprocess.Process) -> None:
+        owner = ExecTool._process_tree_owner(process)
+        if owner is None:
+            return
+        owner.release()
+        ExecTool._drop_process_tree_owner(process)
 
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
@@ -826,12 +857,27 @@ class ExecTool(Tool):
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
+                    # Python's expanduser() intentionally does not implement
+                    # shell directory-stack forms. ``~+`` is the active cwd,
+                    # while ``~-`` and indexed forms can resolve outside it;
+                    # normalize the former and fail closed on the latter.
+                    if expanded == "~+":
+                        p = cwd_path
+                    elif expanded.startswith("~+/"):
+                        p = (cwd_path / expanded[3:]).resolve()
+                    elif re.match(r"^~(?:-|[+-]\d+)(?:/|$)", expanded):
+                        return ToolResult.error(
+                            "Error: Command blocked by safety guard "
+                            "(path outside working dir)"
+                            + _WORKSPACE_BOUNDARY_NOTE
+                        )
+                    else:
+                        p = Path(expanded).expanduser().resolve()
                     # Match against the un-resolved path first.  On Linux,
                     # /dev/stderr is a symlink to /proc/self/fd/2 and
                     # ``Path.resolve()`` would mask the device-file intent.
                     if self._is_benign_device_path(expanded):
                         continue
-                    p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
 
@@ -914,7 +960,9 @@ class ExecTool(Tool):
                 ):
                     current.append(ch)
                     operator_len = 1
-                elif ch in {";", "|"}:
+                # A newline separates commands just like ";" does, so a payload
+                # smuggled onto its own line must be checked on its own too.
+                elif ch in {";", "|", "\n", "\r"}:
                     operator_len = 1
 
             if operator_len:
@@ -948,9 +996,134 @@ class ExecTool(Tool):
             r"(?<![A-Za-z])(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
             command
         )
-        posix_paths = re.findall(r"(?:^|[\s|>='\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s>='\"])(~[/+][^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~/ or ~+
-        return win_paths + posix_paths + home_paths
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&")
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            tokens = list(lexer)
+        except ValueError:
+            # Keep malformed quoting fail-closed. The shell will normally reject
+            # it too, but a conservative raw scan must not turn it into a bypass.
+            tokens = [command]
+
+        paths = [*win_paths]
+        seen = set(win_paths)
+        for index, token in enumerate(tokens):
+            for path in ExecTool._extract_posix_paths_from_token(token):
+                if path not in seen:
+                    paths.append(path)
+                    seen.add(path)
+            if index > 0 and tokens[index - 1] in {"-c", "-lc", "--command"}:
+                for path in ExecTool._extract_absolute_paths(token):
+                    if path not in seen:
+                        paths.append(path)
+                        seen.add(path)
+        return paths
+
+    @staticmethod
+    def _extract_posix_paths_from_token(token: str) -> list[str]:
+        """Extract local POSIX/home paths from one shell-decoded token.
+
+        ``shlex`` separates real grouping/redirection operators while preserving
+        parentheses and spaces that were quoted or escaped as part of a path.
+        Embedded scripts (for example ``sh -c \"cat /tmp/x\"``) still need a
+        small boundary scan. Colons are not general boundaries: treating them
+        as such misclassifies URLs, ``host:/remote`` and ``C:/Windows``. They
+        are considered only inside a syntactically valid assignment, where
+        shells expand each colon-delimited tilde component.
+        """
+        paths: list[str] = []
+        for match in re.finditer(
+            r"file://(?:[^/\s\"']+)?(/[^\s\"'<>|;&]*)",
+            token,
+            flags=re.IGNORECASE,
+        ):
+            uri_prefix = token[: match.start()]
+            raw_path = match.group(1)
+            if uri_prefix.count("(") > uri_prefix.count(")"):
+                raw_path = raw_path.split(")", 1)[0]
+            if uri_prefix.count("{") > uri_prefix.count("}"):
+                raw_path = raw_path.split(",", 1)[0].split("}", 1)[0]
+            raw_path = raw_path.split("?", 1)[0].split("#", 1)[0]
+            if raw_path:
+                paths.append(unquote(raw_path))
+        boundary_chars = frozenset(" \t\r\n=({,<>|;&\"'")
+        i = 0
+        while i < len(token):
+            is_posix = token[i] == "/"
+            home_match = re.match(
+                r"~(?:[+-](?:\d+)?|[A-Za-z0-9_.@-]+)?(?=/|:|$)",
+                token[i:],
+            )
+            is_home = home_match is not None
+            if not is_posix and not is_home:
+                i += 1
+                continue
+
+            prefix = token[:i]
+            parameter_default = (
+                i >= 2 and token[i - 2] == ":" and token[i - 1] in "-+?="
+            )
+            word_start = max(
+                (prefix.rfind(char) for char in " \t\r\n<>|;&"),
+                default=-1,
+            ) + 1
+            word_prefix = prefix[word_start:]
+            assignment_component = bool(
+                re.fullmatch(
+                    r"(?:[A-Za-z_][A-Za-z0-9_]*|--?[A-Za-z0-9_.-]+)="
+                    r"(?:[^:=\s]*:)*",
+                    word_prefix,
+                )
+            )
+            at_boundary = i == 0 or token[i - 1] in boundary_chars
+            if is_home:
+                # A shell word beginning with ``~`` is a separate shlex token.
+                # Mid-token expansion is valid only after ``=`` or a colon in
+                # an assignment. This avoids PromQL/Loki ``=~`` and ``|~``
+                # match operators while covering PATH-like values.
+                at_boundary = i == 0 or assignment_component
+            if not at_boundary and not parameter_default:
+                i += 1
+                continue
+
+            if re.search(r"[A-Za-z][A-Za-z0-9+.-]*://", word_prefix) or re.match(
+                r"(?:[^/:=\s]+@)?[^/:=\s]+:$",
+                word_prefix,
+            ):
+                # HTTP-style URL path/query fragments and scp-style remote paths
+                # are not local filesystem references. ``file://`` paths were
+                # decoded above. Windows drive paths are already captured by the
+                # platform-specific expression above.
+                i += 1
+                continue
+
+            assignment_value = assignment_component
+            if i == 0 or assignment_value:
+                end = len(token)
+                if assignment_value:
+                    separator = token.find(":", i)
+                    if separator >= 0:
+                        end = separator
+            elif token[i - 1] in {"'", '"'}:
+                quote = token[i - 1]
+                closing = token.find(quote, i)
+                end = len(token) if closing < 0 else closing
+            else:
+                end_chars = set(" \t\r\n\"'<>|;&")
+                if prefix.count("(") > prefix.count(")"):
+                    end_chars.add(")")
+                if prefix.count("{") > prefix.count("}"):
+                    end_chars.update({",", "}"})
+                end = i
+                while end < len(token) and token[end] not in end_chars:
+                    end += 1
+
+            candidate = token[i:end]
+            if candidate:
+                paths.append(candidate)
+            i = max(end, i + 1)
+        return paths
 
     @staticmethod
     def _normalize_bind_roots(paths: list[str] | None) -> list[Path]:
