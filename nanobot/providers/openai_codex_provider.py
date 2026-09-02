@@ -21,6 +21,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     resolve_stream_idle_timeout_s,
 )
+from nanobot.providers.openai_codex_storage import get_openai_codex_storage
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
     build_responses_state,
@@ -115,7 +116,11 @@ class OpenAICodexProvider(LLMProvider):
 
         stage = "oauth_token"
         try:
-            token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
+            token = await asyncio.to_thread(
+                get_codex_token,
+                proxy=self.proxy,
+                storage=get_openai_codex_storage(),
+            )
             headers = _build_headers(cast(str, token.account_id), token.access)
 
             async def _send(
