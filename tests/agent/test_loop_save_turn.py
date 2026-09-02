@@ -224,6 +224,34 @@ def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> N
     assert PENDING_FOLLOWUPS_KEY not in session.metadata
 
 
+def test_persist_user_message_early_excludes_ephemeral_runtime_context(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:ephemeral")
+    blocks = [
+        RuntimeContextBlock(source="goal", content="durable goal guidance"),
+        RuntimeContextBlock(
+            source="voice",
+            content="ephemeral delivery contract",
+            ephemeral=True,
+        ),
+    ]
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="ephemeral",
+            content="hello world",
+        ),
+        session,
+        runtime_context_blocks=blocks,
+    )
+
+    assert persisted is True
+    assert session.messages[-1]["content"] == "hello world\n\ndurable goal guidance"
+    assert "ephemeral delivery contract" not in str(session.messages[-1])
+
+
 def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
@@ -592,6 +620,28 @@ def test_save_turn_persists_runtime_context_and_public_view_hides_it() -> None:
     assert session.messages[0]["content"] == "hello world\n\ninternal goal guidance"
     assert session.messages[0][RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
     assert public_history_message(session.messages[0])["content"] == "hello world"
+
+
+def test_save_turn_does_not_persist_ephemeral_runtime_context() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:ephemeral-runtime-context")
+    blocks = [
+        RuntimeContextBlock(source="goal", content="durable goal guidance"),
+        RuntimeContextBlock(
+            source="voice",
+            content="ephemeral delivery contract",
+            ephemeral=True,
+        ),
+    ]
+
+    model_message = _runtime_message("hello world", blocks)
+    assert "ephemeral delivery contract" in model_message["content"]
+
+    loop._save_turn(session, [model_message], skip=0)
+
+    assert session.messages[0]["content"] == "hello world\n\ndurable goal guidance"
+    assert "ephemeral delivery contract" not in str(session.messages[0])
+    assert session.messages[0][RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
 
 
 def test_build_and_save_preserves_user_text_containing_goal_guidance_tag(tmp_path: Path) -> None:

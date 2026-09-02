@@ -63,6 +63,8 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     RuntimeContextProvider,
     append_runtime_context,
+    persistent_runtime_context_blocks,
+    project_runtime_context_for_persistence,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
 )
@@ -700,7 +702,10 @@ class AgentLoop:
         ]
         content_value = cast(object, msg.content)
         has_text = isinstance(content_value, str) and content_value.strip()
-        if has_text or media_paths or runtime_context_blocks:
+        persisted_runtime_context_blocks = persistent_runtime_context_blocks(
+            runtime_context_blocks or ()
+        )
+        if has_text or media_paths or persisted_runtime_context_blocks:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = content_value if isinstance(content_value, str) else ""
@@ -710,7 +715,7 @@ class AgentLoop:
             extra.update(automation_extra)
             text, runtime_context_meta = append_runtime_context(
                 text,
-                runtime_context_blocks or (),
+                persisted_runtime_context_blocks,
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
@@ -2192,6 +2197,14 @@ class AgentLoop:
                 else None
             )
             role, content = entry.get("role"), entry.get("content")
+            if role == "user" and isinstance(runtime_context_meta, Mapping):
+                projected = project_runtime_context_for_persistence(
+                    content,
+                    runtime_context_meta,
+                )
+                if projected is not None:
+                    content, runtime_context_meta = projected
+                    entry["content"] = content
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
