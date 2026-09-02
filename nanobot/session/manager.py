@@ -1038,7 +1038,7 @@ class JsonlSessionStore:
         rejects the traversal vectors that would let an untrusted id such as
         ``../../etc/passwd`` address a file outside the sessions directory.
         """
-        if not isinstance(key, str) or not key:
+        if not key:
             raise ValueError("session key must be a non-empty string")
         normalized = key.replace("\\", "/")
         if normalized.startswith("/") or _WINDOWS_DRIVE_RE.match(normalized):
