@@ -419,6 +419,8 @@ class AzureOpenAIProvider(LLMProvider):
                 result.provider_compaction_applied = (
                     result.provider_compaction_state is not None
                 )
+                if result.provider_compaction_applied:
+                    result.provider_compaction_scope = "current_request"
             return result
         except Exception as e:
             return self._handle_error(e)

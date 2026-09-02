@@ -325,7 +325,23 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
     assert summarized[-1]["content"] == BACKFILL_CONTENT
 
 
-async def test_native_compaction_summarizes_h_without_current_tool_exchange(monkeypatch):
+@pytest.mark.parametrize(
+    ("scope", "expected_contents", "expected_boundary"),
+    [
+        ("prior_context", ["system", "accepted question", "accepted answer"], 3),
+        (
+            "current_request",
+            ["system", "accepted question", "accepted answer", "inspect the project"],
+            4,
+        ),
+    ],
+)
+async def test_native_compaction_uses_provider_request_boundary(
+    monkeypatch,
+    scope,
+    expected_contents,
+    expected_boundary,
+):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False
     compacted_state = ProviderConversationState(
@@ -341,6 +357,7 @@ async def test_native_compaction_summarizes_h_without_current_tool_exchange(monk
             tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
             provider_compaction_applied=True,
             provider_compaction_state=compacted_state,
+            provider_compaction_scope=scope,
         ),
         LLMResponse(content="done"),
     ])
@@ -377,17 +394,14 @@ async def test_native_compaction_summarizes_h_without_current_tool_exchange(monk
     ))
 
     consolidate.assert_not_awaited()
-    consolidate_native.assert_awaited_once_with(
-        compacted_state,
-        [
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "accepted question"},
-            {"role": "assistant", "content": "accepted answer"},
-        ],
-        None,
-    )
+    consolidate_native.assert_awaited_once()
+    assert consolidate_native.await_args.args[0] == compacted_state
+    assert [
+        message["content"] for message in consolidate_native.await_args.args[1]
+    ] == expected_contents
+    assert consolidate_native.await_args.args[2] is None
     assert result.summary_checkpoint is not None
-    assert result.summary_checkpoint.transcript_boundary == 3
+    assert result.summary_checkpoint.transcript_boundary == expected_boundary
     assert result.provider_compaction_applied is True
     assert any(message.get("content") == "inspect the project" for message in result.messages)
     assert any(message.get("content") == "complete tool result" for message in result.messages)

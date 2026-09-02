@@ -238,6 +238,7 @@ class OpenAICodexProvider(LLMProvider):
             )
             if native_compaction_state is not None:
                 result.provider_compaction_state = native_compaction_state
+                result.provider_compaction_scope = "prior_context"
             return result
         except Exception as e:
             response = _codex_error_response(e)

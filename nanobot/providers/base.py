@@ -31,6 +31,7 @@ RETRY_AFTER_BUFFER = 1
 
 RetryEventCallback = Callable[[str], Awaitable[None]]
 LLMCallObserver = Callable[["LLMCallRecord"], None]
+ProviderCompactionScope = Literal["prior_context", "current_request"]
 
 
 def resolve_stream_idle_timeout_s(
@@ -569,6 +570,13 @@ class LLMResponse:
     # State immediately after native compaction, before the normal response
     # continues. An archive prompt can resume this state without replaying H.
     provider_compaction_state: ProviderConversationState | None = field(
+        default=None,
+        repr=False,
+    )
+    # Which model input the native compaction state replaces. Providers that
+    # compact before attaching the current request delta report
+    # ``prior_context``; in-request compaction reports ``current_request``.
+    provider_compaction_scope: ProviderCompactionScope | None = field(
         default=None,
         repr=False,
     )

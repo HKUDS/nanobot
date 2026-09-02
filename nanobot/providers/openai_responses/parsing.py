@@ -664,6 +664,8 @@ def parse_response_output(
             output_items=output,
         )
         result.provider_compaction_applied = result.provider_compaction_state is not None
+        if result.provider_compaction_applied:
+            result.provider_compaction_scope = "current_request"
     return result
 
 

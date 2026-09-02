@@ -118,6 +118,7 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
         provider_state=compacted_state,
         provider_compaction_applied=True,
         provider_compaction_state=compacted_state,
+        provider_compaction_scope="current_request",
     ))
     loop.consolidator.summarize_provider_compaction = AsyncMock(
         return_value="portable terminal checkpoint",
@@ -133,7 +134,7 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
     accepted_contents = [message.get("content") for message in accepted]
     assert "accepted history" in accepted_contents
     assert "accepted answer" in accepted_contents
-    assert "continue" not in accepted_contents
+    assert "continue" in accepted_contents
     assert "done" not in accepted_contents
     reloaded = loop.sessions.get_or_create("cli:native")
     assert reloaded.provider_state is None
@@ -145,6 +146,5 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
     )
     assert [message["content"] for message in reloaded.get_history()] == [
         SUMMARY_CONTINUATION_TEXT,
-        "continue",
         "done",
     ]

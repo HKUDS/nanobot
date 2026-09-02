@@ -922,6 +922,7 @@ def test_runner_append_keeps_recovery_followups_separate() -> None:
 
 
 def test_model_request_merge_preserves_runtime_markers_with_media() -> None:
+    from nanobot.agent.context_governance import ContextGovernor
     from nanobot.agent.runner import AgentRunner
     from nanobot.runtime_context import (
         RUNTIME_CONTEXT_HISTORY_META,
@@ -959,7 +960,7 @@ def test_model_request_merge_preserves_runtime_markers_with_media() -> None:
     ])
 
     assert len(messages) == 2
-    merged = AgentRunner._merge_adjacent_user_messages_for_model(messages)[0]
+    merged = ContextGovernor._merge_adjacent_user_messages_for_model(messages)[0]
     assert len(messages) == 2
     assert "private first" in str(merged["content"])
     assert "private second" in str(merged["content"])

@@ -816,6 +816,7 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
     assert response.content == "done"
     assert response.provider_compaction_applied is True
     assert response.provider_compaction_state is not None
+    assert response.provider_compaction_scope == "prior_context"
     assert responses_state_items(response.provider_compaction_state) == [{
         "type": "compaction",
         "encrypted_content": "compacted opaque state",

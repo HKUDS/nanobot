@@ -2060,6 +2060,8 @@ class OpenAICompatProvider(LLMProvider):
                         result.provider_compaction_applied = (
                             result.provider_compaction_state is not None
                         )
+                        if result.provider_compaction_applied:
+                            result.provider_compaction_scope = "current_request"
                     return result
                 except Exception as responses_error:
                     if self._spec and self._spec.name == "github_copilot":
