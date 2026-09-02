@@ -136,6 +136,10 @@ def resolve_url_target(
         except ValueError:
             continue
         addrs.append(addr)
+    if not addrs:
+        # Nothing was resolved, so nothing was checked: fail closed instead of
+        # skipping every address check below.
+        return False, f"Cannot resolve hostname: {hostname}", ()
     if allow_loopback and _is_allowed_loopback_target(hostname, addrs):
         return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
     for addr in addrs:
