@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Eye, EyeOff, Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
+import { Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
@@ -475,39 +475,12 @@ function isBootstrapAuthRequired(error: unknown): boolean {
 }
 
 function HostChrome({
-  onToggleSidebar,
-  onSidebarPreviewEnter,
-  onSidebarPreviewLeave,
-  sidebarOpen = true,
   rightAction,
 }: {
-  onToggleSidebar?: () => void;
-  onSidebarPreviewEnter?: () => void;
-  onSidebarPreviewLeave?: () => void;
-  sidebarOpen?: boolean;
   rightAction?: ReactNode;
 }) {
-  const { t } = useTranslation();
-
   return (
     <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 h-11 bg-transparent text-foreground/90">
-      {onToggleSidebar ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("thread.header.toggleSidebar")}
-          data-testid="host-sidebar-toggle"
-          onClick={onToggleSidebar}
-          onFocus={!sidebarOpen ? onSidebarPreviewEnter : undefined}
-          onBlur={!sidebarOpen ? onSidebarPreviewLeave : undefined}
-          onMouseEnter={!sidebarOpen ? onSidebarPreviewEnter : undefined}
-          onMouseLeave={!sidebarOpen ? onSidebarPreviewLeave : undefined}
-          className="host-no-drag pointer-events-auto absolute left-[88px] top-[8px] h-7 w-7 rounded-lg bg-transparent text-muted-foreground/85 shadow-none hover:bg-transparent hover:text-foreground"
-        >
-          <PanelLeft className="h-[15px] w-[15px]" strokeWidth={1.75} />
-        </Button>
-      ) : null}
       {rightAction ? (
         <div className="host-no-drag pointer-events-auto absolute right-3 top-2">
           {rightAction}
@@ -1055,7 +1028,6 @@ function Shell({
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
-  const [hostSidebarPreviewOpen, setHostSidebarPreviewOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
@@ -1112,7 +1084,6 @@ function Shell({
   const activeChatIdRef = useRef<string | null>(null);
   const pendingCreatedSessionKeyRef = useRef<string | null>(null);
   const temporarySessionsRef = useRef<Record<string, ChatSummary>>({});
-  const hostSidebarPreviewCloseTimerRef = useRef<number | null>(null);
   const effectiveRuntimeSurface =
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
   const showHostChrome = effectiveRuntimeSurface === "native";
@@ -1453,74 +1424,13 @@ function Shell({
     });
   }, [client, loading, sessions]);
 
-  const clearHostSidebarPreviewCloseTimer = useCallback(() => {
-    if (hostSidebarPreviewCloseTimerRef.current === null) return;
-    window.clearTimeout(hostSidebarPreviewCloseTimerRef.current);
-    hostSidebarPreviewCloseTimerRef.current = null;
+  const closeHostSidebar = useCallback(() => {
+    setHostSidebarOpen(false);
   }, []);
 
-  const closeHostSidebarPreview = useCallback(() => {
-    clearHostSidebarPreviewCloseTimer();
-    setHostSidebarPreviewOpen(false);
-  }, [clearHostSidebarPreviewCloseTimer]);
-
-  const openHostSidebarPreview = useCallback(() => {
-    if (!showHostChrome || !showMainSidebar || hostSidebarOpen) return;
-    clearHostSidebarPreviewCloseTimer();
-    setHostSidebarPreviewOpen(true);
-  }, [
-    clearHostSidebarPreviewCloseTimer,
-    hostSidebarOpen,
-    showHostChrome,
-    showMainSidebar,
-  ]);
-
-  const scheduleHostSidebarPreviewClose = useCallback(() => {
-    clearHostSidebarPreviewCloseTimer();
-    if (!showHostChrome || !showMainSidebar || hostSidebarOpen) {
-      setHostSidebarPreviewOpen(false);
-      return;
-    }
-    hostSidebarPreviewCloseTimerRef.current = window.setTimeout(() => {
-      setHostSidebarPreviewOpen(false);
-      hostSidebarPreviewCloseTimerRef.current = null;
-    }, 160);
-  }, [
-    clearHostSidebarPreviewCloseTimer,
-    hostSidebarOpen,
-    showHostChrome,
-    showMainSidebar,
-  ]);
-
-  useEffect(() => {
-    return () => clearHostSidebarPreviewCloseTimer();
-  }, [clearHostSidebarPreviewCloseTimer]);
-
-  useEffect(() => {
-    if (!showHostChrome || !showMainSidebar || hostSidebarOpen) {
-      closeHostSidebarPreview();
-    }
-  }, [
-    closeHostSidebarPreview,
-    hostSidebarOpen,
-    showHostChrome,
-    showMainSidebar,
-  ]);
-
-  const closeHostSidebar = useCallback(() => {
-    closeHostSidebarPreview();
-    setHostSidebarOpen(false);
-  }, [closeHostSidebarPreview]);
-
   const openHostSidebar = useCallback(() => {
-    closeHostSidebarPreview();
     setHostSidebarOpen(true);
-  }, [closeHostSidebarPreview]);
-
-  const toggleHostSidebar = useCallback(() => {
-    closeHostSidebarPreview();
-    setHostSidebarOpen((v) => !v);
-  }, [closeHostSidebarPreview]);
+  }, []);
 
   const closeMobileSidebar = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -1531,12 +1441,11 @@ function Shell({
       typeof window !== "undefined" &&
       window.matchMedia("(min-width: 1024px)").matches;
     if (isNativeHost) {
-      closeHostSidebarPreview();
       setHostSidebarOpen((v) => !v);
     } else {
       setMobileSidebarOpen((v) => !v);
     }
-  }, [closeHostSidebarPreview]);
+  }, []);
 
   const applyWorkspaceScope = useCallback(
     (scope: WorkspaceScopePayload) => {
@@ -2574,13 +2483,7 @@ function Shell({
     archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
-  const hostSidebarCollapsed = showHostChrome && !hostSidebarOpen;
-  const showHostSidebarPreview =
-    showMainSidebar && hostSidebarCollapsed && hostSidebarPreviewOpen;
-  const hostSidebarFlowWidth = showHostChrome
-    ? (hostSidebarOpen ? SIDEBAR_WIDTH : 0)
-    : (hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH);
-  const renderHostSidebarFlowContent = !showHostChrome || hostSidebarOpen;
+  const hostSidebarFlowWidth = hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH;
 
   useEffect(() => {
     document.documentElement.classList.toggle("native-host", showHostChrome);
@@ -2599,10 +2502,6 @@ function Shell({
       >
         {showHostChrome ? (
           <HostChrome
-            onToggleSidebar={showMainSidebar ? toggleHostSidebar : undefined}
-            onSidebarPreviewEnter={openHostSidebarPreview}
-            onSidebarPreviewLeave={scheduleHostSidebarPreviewClose}
-            sidebarOpen={hostSidebarOpen}
             rightAction={
               view === "chat" ? undefined : (
                 <Button
@@ -2640,38 +2539,17 @@ function Shell({
                 width: hostSidebarFlowWidth,
               }}
             >
-              {renderHostSidebarFlowContent ? (
-                <div
-                  className={cn(
-                    "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
-                    showHostChrome
-                      ? "host-sidebar-glass"
-                      : "bg-sidebar",
-                  )}
-                >
-                  <Sidebar
-                    {...sidebarProps}
-                    collapsed={!showHostChrome && !hostSidebarOpen}
-                    hostChromeInset={showHostChrome}
-                    onCollapse={closeHostSidebar}
-                    onExpand={openHostSidebar}
-                  />
-                </div>
-              ) : null}
-            </aside>
-          ) : null}
-
-          {showHostSidebarPreview ? (
-            <aside
-              data-testid="host-sidebar-preview"
-              className="absolute inset-y-0 left-0 z-30 hidden overflow-hidden lg:block animate-in fade-in-0 slide-in-from-left-2 duration-150"
-              style={{ width: SIDEBAR_WIDTH }}
-              onMouseEnter={openHostSidebarPreview}
-              onMouseLeave={scheduleHostSidebarPreviewClose}
-            >
-              <div className="h-full w-full overflow-hidden host-sidebar-glass shadow-2xl">
+              <div
+                className={cn(
+                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
+                  showHostChrome
+                    ? "host-sidebar-glass"
+                    : "bg-sidebar",
+                )}
+              >
                 <Sidebar
                   {...sidebarProps}
+                  collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onCollapse={closeHostSidebar}
                   onExpand={openHostSidebar}
@@ -2782,7 +2660,6 @@ function Shell({
                         theme={theme}
                         onToggleTheme={toggle}
                         hideSidebarToggleForHostChrome
-                        hostChromeTitleInset={hostSidebarCollapsed}
                         hideHeader={false}
                         workspaceScope={activeWorkspaceScope}
                         workspaceDefaultScope={workspaces?.default_scope ?? null}
@@ -2820,7 +2697,6 @@ function Shell({
                       onToggleTheme={toggle}
                       hideSidebarToggle={!context.active}
                       hideSidebarToggleForHostChrome={context.active}
-                      hostChromeTitleInset={hostSidebarCollapsed}
                       hideThemeButton={!context.active}
                       hideHeaderTitle
                       inlineHandle={workbenchPaneSessions.length > 1}

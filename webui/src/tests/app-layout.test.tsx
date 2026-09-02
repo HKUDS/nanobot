@@ -454,6 +454,8 @@ describe("App layout", () => {
     const main = container.querySelector("main");
     expect(main).toBeInTheDocument();
     expect(main).not.toHaveAttribute("style");
+    expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
+    expect(screen.getByTestId("sidebar-brand-mark")).not.toHaveClass("mt-5");
 
     const asideClassNames = Array.from(container.querySelectorAll("aside")).map(
       (el) => el.className,
@@ -1609,7 +1611,7 @@ describe("App layout", () => {
     expect(document.title).toBe("自动任务 · nanobot");
   });
 
-  it("fully collapses the native host sidebar and previews it on hover", async () => {
+  it("uses the shared sidebar controls and rail on the native host", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -1632,36 +1634,25 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const flowSidebar = screen.getByTestId("host-sidebar-flow");
-    const toggle = screen.getByTestId("host-sidebar-toggle");
     expect(flowSidebar).toHaveStyle({ width: "272px" });
+    expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
+    expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
+    expect(screen.queryByTestId("host-sidebar-toggle")).not.toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(toggle);
-    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "0px" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "56px" }));
     expect(
-      screen.queryByRole("navigation", { name: "Sidebar navigation" }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.mouseEnter(toggle);
-    const previewSidebar = await screen.findByTestId("host-sidebar-preview");
-    expect(flowSidebar).toHaveStyle({ width: "0px" });
-    expect(previewSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      within(previewSidebar).getByRole("navigation", {
-        name: "Sidebar navigation",
-      }),
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(screen.queryByTestId("host-sidebar-preview")).not.toBeInTheDocument(),
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+        .getByRole("button", { name: "Toggle sidebar" }),
     );
-    expect(flowSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      screen.getByRole("navigation", { name: "Sidebar navigation" }),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "272px" }));
   });
 
   it("switches to the next session when deleting the active chat", async () => {
