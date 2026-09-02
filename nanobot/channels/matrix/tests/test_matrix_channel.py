@@ -2483,7 +2483,7 @@ async def test_send_delta_stream_end_noop_when_buffer_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_on_error_stops_typing(monkeypatch) -> None:
+async def test_send_delta_on_error_restores_buffer_and_raises(monkeypatch) -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     channel.logger = MagicMock()
     client = _FakeAsyncClient("", "", "", None)
@@ -2493,16 +2493,66 @@ async def test_send_delta_on_error_stops_typing(monkeypatch) -> None:
     now = 100.0
     monkeypatch.setattr(channel, "monotonic_time", lambda: now)
 
-    await channel.send_delta("!room:matrix.org", "Hello", {"room_id": "!room:matrix.org"})
+    with pytest.raises(RuntimeError, match="send failed"):
+        await channel.send_delta(
+            "!room:matrix.org",
+            "Hello",
+            {"room_id": "!room:matrix.org"},
+        )
 
-    assert "!room:matrix.org" in channel._stream_bufs
-    assert channel._stream_bufs["!room:matrix.org"].text == "Hello"
+    assert "!room:matrix.org" not in channel._stream_bufs
     assert len(client.room_send_calls) == 1
 
     assert len(client.typing_calls) == 1
     channel.logger.error.assert_called_once_with(
         "Stream send/edit failed for chat_id={}", "!room:matrix.org", exc_info=True
     )
+
+    client.raise_on_send = False
+    await channel.send_delta("!room:matrix.org", "Hello")
+
+    assert channel._stream_bufs["!room:matrix.org"].text == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_send_delta_raises_when_room_send_returns_error(monkeypatch) -> None:
+    class _FakeRoomSendError:
+        def __str__(self) -> str:
+            return "temporary homeserver failure"
+
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    client.room_send_response = _FakeRoomSendError()
+    channel.client = client
+    monkeypatch.setattr(matrix_module, "RoomSendError", _FakeRoomSendError)
+
+    with pytest.raises(RuntimeError, match="temporary homeserver failure"):
+        await channel.send_delta("!room:matrix.org", "Hello")
+
+    assert "!room:matrix.org" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_keeps_buffer_when_send_returns_error(monkeypatch) -> None:
+    class _FakeRoomSendError:
+        def __str__(self) -> str:
+            return "temporary homeserver failure"
+
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    client.room_send_response = _FakeRoomSendError()
+    channel.client = client
+    monkeypatch.setattr(matrix_module, "RoomSendError", _FakeRoomSendError)
+    channel._stream_bufs["!room:matrix.org"] = matrix_module._StreamBuf(
+        text="Final text",
+        event_id="event-1",
+        last_edit=100.0,
+    )
+
+    with pytest.raises(RuntimeError, match="temporary homeserver failure"):
+        await channel.send_delta("!room:matrix.org", "", stream_end=True)
+
+    assert channel._stream_bufs["!room:matrix.org"].text == "Final text"
 
 
 @pytest.mark.asyncio

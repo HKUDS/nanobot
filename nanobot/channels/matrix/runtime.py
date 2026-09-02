@@ -658,7 +658,7 @@ class MatrixChannel(BaseChannel):
             stream_end = False
         if stream_end:
             stream_key = _matrix_stream_key(chat_id, stream_id)
-            buf = self._stream_bufs.pop(stream_key, None)
+            buf = self._stream_bufs.get(stream_key)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -669,14 +669,19 @@ class MatrixChannel(BaseChannel):
                 buf.event_id,
                 thread_relates_to=relates_to,
             )
-            await self._send_room_content(chat_id, content)
+            response = await self._send_room_content(chat_id, content)
+            if isinstance(response, RoomSendError):
+                raise RuntimeError(f"Matrix stream was not delivered: {response}")
+            self._stream_bufs.pop(stream_key, None)
             return
 
         stream_key = _matrix_stream_key(chat_id, stream_id)
         buf = self._stream_bufs.get(stream_key)
+        created_buf = buf is None
         if buf is None:
             buf = _StreamBuf()
             self._stream_bufs[stream_key] = buf
+        previous_text = buf.text
         buf.text += delta
 
         if not buf.text.strip():
@@ -692,13 +697,19 @@ class MatrixChannel(BaseChannel):
                     thread_relates_to=relates_to,
                 )
                 response = await self._send_room_content(chat_id, content)
+                if isinstance(response, RoomSendError):
+                    raise RuntimeError(f"Matrix stream was not delivered: {response}")
                 buf.last_edit = now
                 if not buf.event_id:
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = cast(RoomSendResponse, response).event_id
             except Exception:
+                buf.text = previous_text
+                if created_buf:
+                    self._stream_bufs.pop(stream_key, None)
                 self.logger.error("Stream send/edit failed for chat_id={}", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
+                raise
 
 
     def _register_event_callbacks(self) -> None:
