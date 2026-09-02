@@ -145,7 +145,7 @@
       "presetName": "Nome da predefinição",
       "presetNameHelp": "Usado na interface e nos comandos /model. Os nomes devem ser únicos.",
       "presetNameDuplicate": "Já existe uma predefinição com este nome.",
-      "presetNamePlaceholder": "Escrita rápida",
+      "presetNamePlaceholder": "ex.: Escrita rápida",
       "advancedOptions": "Opções avançadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",
       "maxTokens": "Máx. de tokens de saída",

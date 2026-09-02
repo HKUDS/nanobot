@@ -62,6 +62,26 @@ function modelPresetValue(payload: SettingsPayload): string {
   );
 }
 
+function suggestedPresetName(
+  model: string,
+  presets: SettingsPayload["model_presets"],
+): string {
+  const modelName = model.trim().split("/").filter(Boolean).at(-1) ?? "";
+  const base = (modelName.toLowerCase() === "default" ? "model" : modelName).slice(0, 48);
+  if (!base) return "";
+
+  const existing = new Set(
+    presets.filter((preset) => !preset.is_default).map((preset) => preset.name.toLowerCase()),
+  );
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let index = 2; ; index += 1) {
+    const suffix = ` ${index}`;
+    const candidate = `${base.slice(0, 48 - suffix.length)}${suffix}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   model: "",
   provider: "",
@@ -211,6 +231,7 @@ export function ModelsSettings({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
+  const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
@@ -219,6 +240,9 @@ export function ModelsSettings({
   useEffect(() => {
     if (presetNameError) presetNameInputRef.current?.focus();
   }, [presetNameError]);
+  useEffect(() => {
+    if (!creating) suggestedPresetNameRef.current = null;
+  }, [creating]);
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
@@ -377,8 +401,9 @@ export function ModelsSettings({
             aria-invalid={Boolean(presetNameError)}
             aria-describedby={presetNameError ? "model-preset-name-error" : undefined}
             value={form.modelPreset}
-            placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
+            placeholder={tx("settings.models.presetNamePlaceholder", "e.g. Fast writing")}
             onChange={(event) => {
+              suggestedPresetNameRef.current = null;
               onClearPresetNameError();
               setForm((prev) => ({ ...prev, modelPreset: event.target.value }));
             }}
@@ -405,13 +430,21 @@ export function ModelsSettings({
           value={providerValue}
           emptyLabel={t("settings.byok.noConfiguredProviders")}
           showProviderLogos={showBrandLogos}
-          onChange={(provider) =>
+          onChange={(provider) => {
+            const providerChanged = provider !== form.provider;
+            const clearSuggestedName =
+              creating &&
+              providerChanged &&
+              suggestedPresetNameRef.current !== null &&
+              form.modelPreset === suggestedPresetNameRef.current;
+            if (clearSuggestedName) suggestedPresetNameRef.current = null;
             setForm((prev) => ({
               ...prev,
               provider,
               model: provider === prev.provider ? prev.model : "",
-            }))
-          }
+              modelPreset: clearSuggestedName ? "" : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
       {selectedProviderNeedsSignIn ? (
@@ -445,7 +478,20 @@ export function ModelsSettings({
           provider={form.provider}
           value={form.model}
           showProviderLogos={showBrandLogos}
-          onChange={(model) => setForm((prev) => ({ ...prev, model }))}
+          onChange={(model) => {
+            const canSuggestName =
+              creating &&
+              (!form.modelPreset.trim() || form.modelPreset === suggestedPresetNameRef.current);
+            const suggestion = canSuggestName
+              ? suggestedPresetName(model, settings.model_presets)
+              : "";
+            if (canSuggestName) suggestedPresetNameRef.current = suggestion;
+            setForm((prev) => ({
+              ...prev,
+              model,
+              modelPreset: canSuggestName ? suggestion : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
       <button

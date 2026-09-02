@@ -423,7 +423,7 @@
       "presetName": "Nom du préréglage",
       "presetNameHelp": "Utilisé dans l’interface et avec /model. Les noms doivent être uniques.",
       "presetNameDuplicate": "Un préréglage portant ce nom existe déjà.",
-      "presetNamePlaceholder": "Rédaction rapide",
+      "presetNamePlaceholder": "p. ex. Rédaction rapide",
       "advancedOptions": "Options avancées",
       "advancedSummary": "Contexte {{context}} · Max. {{max}} tokens",
       "maxTokens": "Tokens de sortie max.",

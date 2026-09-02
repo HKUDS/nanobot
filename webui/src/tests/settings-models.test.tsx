@@ -608,7 +608,7 @@ describe("Settings models", () => {
     expect(
       screen.queryByText("Complete the preset before saving."),
     ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Fast writing"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Writer" },
     });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
@@ -1421,11 +1421,13 @@ describe("Settings models", () => {
   });
 
   it("creates presets in the inline editor and can cancel without opening a dialog", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings") return jsonResponse(payload);
         if (url === "/api/settings/cli-apps") {
           return jsonResponse({ apps: [], installed_count: 0 });
         }
@@ -1441,7 +1443,7 @@ describe("Settings models", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
 
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Fast writing")).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("");
     expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByText("Temperature")).toBeInTheDocument();
@@ -1452,7 +1454,28 @@ describe("Settings models", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
 
     fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(await screen.findByPlaceholderText("Fast writing")).toHaveValue("");
+    const nameInput = await screen.findByRole("textbox", { name: "Preset name" });
+    expect(nameInput).toHaveValue("");
+    expect(nameInput).toHaveAttribute("placeholder", "e.g. Fast writing");
+
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    const modelSearch = await screen.findByRole("combobox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
+    fireEvent.keyDown(modelSearch, { key: "Enter" });
+
+    expect(nameInput).toHaveValue("gpt-4o-mini");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    fireEvent.change(nameInput, { target: { value: "Writer" } });
+    await openPopover(screen.getByRole("button", { name: /openai\/gpt-4o-mini/ }));
+    const nextModelSearch = await screen.findByRole("combobox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
+    fireEvent.keyDown(nextModelSearch, { key: "Enter" });
+    expect(nameInput).toHaveValue("Writer");
   });
 
   it("loads provider models and lets users choose one without typing the id manually", async () => {

@@ -423,7 +423,7 @@
       "presetName": "Tên cấu hình đặt trước",
       "presetNameHelp": "Dùng trong giao diện và lệnh /model. Tên phải là duy nhất.",
       "presetNameDuplicate": "Đã có một cấu hình sẵn với tên này.",
-      "presetNamePlaceholder": "Viết nhanh",
+      "presetNamePlaceholder": "ví dụ: Viết nhanh",
       "advancedOptions": "Tùy chọn nâng cao",
       "advancedSummary": "Ngữ cảnh {{context}} · Tối đa {{max}} token",
       "maxTokens": "Token đầu ra tối đa",

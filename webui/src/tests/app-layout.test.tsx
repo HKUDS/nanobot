@@ -2553,7 +2553,7 @@ describe("App layout", () => {
     expect(screen.queryByText("Model call order")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Fast writing"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Fast writing" },
     });
     expect(
