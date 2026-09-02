@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -346,6 +346,17 @@ function renderPresetComposer(
   };
 }
 
+function stubCoarsePointer(): void {
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+    matches: query.includes("pointer: coarse"),
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })));
+}
+
 describe("ThreadComposer", () => {
   it("locks an async send and keeps the draft when it is rejected", async () => {
     let resolveSend!: (accepted: boolean) => void;
@@ -404,6 +415,87 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("hello from mobile", undefined, undefined);
     expect(input).toHaveValue("");
     expect(input).not.toHaveFocus();
+  });
+
+  it("inserts a newline instead of sending on Enter on coarse-pointer devices", () => {
+    stubCoarsePointer();
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "line one" } });
+    const keyEvent = createEvent.keyDown(input, { key: "Enter" });
+    fireEvent(input, keyEvent);
+
+    expect(keyEvent.defaultPrevented).toBe(false);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps sending on Enter on precision-pointer devices", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "desktop message" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("desktop message", undefined, undefined);
+  });
+
+  it("still selects a slash command with Enter on coarse-pointer devices", () => {
+    stubCoarsePointer();
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("/history ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("labels the keyboard action as enter on coarse-pointer devices", () => {
+    stubCoarsePointer();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.getByLabelText("Message input")).toHaveAttribute("enterkeyhint", "enter");
+  });
+
+  it("does not set enterkeyhint on precision-pointer devices", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.getByLabelText("Message input")).not.toHaveAttribute("enterkeyhint");
   });
 
   it("focuses and sends a removable quoted answer excerpt", async () => {
