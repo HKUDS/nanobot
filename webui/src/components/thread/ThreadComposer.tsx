@@ -971,6 +971,9 @@ export function ThreadComposer({
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Wider than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still count as touch for the Enter key behavior below.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -2181,6 +2184,19 @@ export function ThreadComposer({
         return;
       }
     }
+    // Touch keyboards: a plain Enter inserts a newline; sending stays on the
+    // send button. The select-on-Enter menu branches above take precedence.
+    if (
+      e.key === "Enter"
+      && !e.shiftKey
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && !e.nativeEvent.isComposing
+      && hasCoarsePointer
+    ) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
@@ -2533,6 +2549,7 @@ export function ThreadComposer({
             }}
             onPaste={onPaste}
             rows={1}
+            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
