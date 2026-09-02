@@ -10,7 +10,7 @@ import {
 describe("local preferences", () => {
   beforeEach(() => localStorage.clear());
 
-  it("shows third-party brand logos by default while preserving an explicit opt-out", () => {
+  it("enables third-party brand logos by default and migrates the previous default", () => {
     expect(DEFAULT_LOCAL_PREFS.brandLogos).toBe(true);
     expect(readLocalPreferences().brandLogos).toBe(true);
 
@@ -18,6 +18,11 @@ describe("local preferences", () => {
       LOCAL_PREFS_STORAGE_KEY,
       JSON.stringify({ brandLogos: false }),
     );
+    expect(readLocalPreferences().brandLogos).toBe(true);
+  });
+
+  it("preserves a brand logo opt-out after the default-on migration", () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, brandLogos: false });
     expect(readLocalPreferences().brandLogos).toBe(false);
   });
 
