@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -60,6 +61,7 @@ def _default_webui_dist() -> Path | None:
 _SEND_RETRY_DELAYS = (1, 2, 4)
 _RESTART_NOTICE_START_TIMEOUT_S = 30.0
 _RESTART_NOTICE_START_POLL_S = 0.25
+ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE = 1000
 
 _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_progress": "sendProgress",
@@ -137,7 +139,7 @@ class ChannelManager:
         self._channel_tasks: dict[str, asyncio.Task[None]] = {}
         self._dispatch_task: asyncio.Task[None] | None = None
         self._started = False
-        self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
+        self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
 
         self._init_channels()
 
@@ -669,6 +671,16 @@ class ChannelManager:
         normalized = " ".join(content.split())
         return hashlib.sha1(normalized.encode("utf-8")).hexdigest() if normalized else ""
 
+    def _remember_origin_reply_fingerprint(
+        self,
+        key: tuple[str, str, str],
+        fingerprint: str,
+    ) -> None:
+        self._origin_reply_fingerprints[key] = fingerprint
+        self._origin_reply_fingerprints.move_to_end(key)
+        while len(self._origin_reply_fingerprints) > ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE:
+            self._origin_reply_fingerprints.popitem(last=False)
+
     def _should_suppress_outbound(self, msg: OutboundMessage) -> bool:
         metadata = msg.metadata or {}
         if isinstance(outbound_event_from_message(msg), ProgressEvent):
@@ -681,13 +693,14 @@ class ChannelManager:
         if isinstance(origin_message_id, str) and origin_message_id:
             key = (msg.channel, msg.chat_id, origin_message_id)
             if self._origin_reply_fingerprints.get(key) == fingerprint:
+                self._origin_reply_fingerprints.move_to_end(key)
                 return True
-            self._origin_reply_fingerprints[key] = fingerprint
+            self._remember_origin_reply_fingerprint(key, fingerprint)
 
         message_id = metadata.get("message_id")
         if isinstance(message_id, str) and message_id:
             key = (msg.channel, msg.chat_id, message_id)
-            self._origin_reply_fingerprints[key] = fingerprint
+            self._remember_origin_reply_fingerprint(key, fingerprint)
 
         return False
 
