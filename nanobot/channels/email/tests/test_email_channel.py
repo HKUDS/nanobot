@@ -53,30 +53,7 @@ def _make_raw_email(
 def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 
-    class FakeIMAP:
-        def __init__(self) -> None:
-            self.store_calls: list[tuple[bytes, str, str]] = []
-
-        def login(self, _user: str, _pw: str):
-            return "OK", [b"logged in"]
-
-        def select(self, _mailbox: str):
-            return "OK", [b"1"]
-
-        def search(self, *_args):
-            return "OK", [b"1"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
-
-        def store(self, imap_id: bytes, op: str, flags: str):
-            self.store_calls.append((imap_id, op, flags))
-            return "OK", [b""]
-
-        def logout(self):
-            return "BYE", [b""]
-
-    fake = FakeIMAP()
+    fake = _make_fake_imap(raw, uid=b"123")
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(), MessageBus())
@@ -86,38 +63,25 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     assert items[0]["sender"] == "alice@example.com"
     assert items[0]["subject"] == "Invoice"
     assert "Please pay" in items[0]["content"]
-    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
+        ("FETCH", "123", "(BODY.PEEK[HEADER])"),
+        ("FETCH", "123", "(BODY.PEEK[])"),
+    ]
     assert skipped_uids == set()
 
     # Same UID should be deduped in-process.
     items_again, skipped_again = channel._fetch_new_messages()
     assert items_again == []
     assert skipped_again == set()
+    assert len([call for call in fake.uid_calls if call[0] == "FETCH"]) == 2
 
 
 def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 
-    class FakeIMAP:
-        def login(self, _user: str, _pw: str):
-            return "OK", [b"logged in"]
-
-        def select(self, _mailbox: str):
-            return "OK", [b"1"]
-
-        def search(self, *_args):
-            return "OK", [b"1"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
-
-        def store(self, _imap_id: bytes, _op: str, _flags: str):
-            return "OK", [b""]
-
-        def logout(self):
-            return "BYE", [b""]
-
-    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    fake = _make_fake_imap(raw, uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     items, skipped_uids = channel._fetch_new_messages()
@@ -130,26 +94,10 @@ def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> No
 def test_fetch_new_messages_rejected_returns_skipped_uid(monkeypatch) -> None:
     raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
 
-    class FakeIMAP:
-        def login(self, _user: str, _pw: str):
-            return "OK", [b"logged in"]
-
-        def select(self, _mailbox: str):
-            return "OK", [b"1"]
-
-        def search(self, *_args):
-            return "OK", [b"1"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
-
-        def store(self, _imap_id: bytes, _op: str, _flags: str):
-            return "OK", [b""]
-
-        def logout(self):
-            return "BYE", [b""]
-
-    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.imaplib.IMAP4_SSL",
+        lambda _h, _p: _make_fake_imap(raw, uid=b"123"),
+    )
 
     channel_skip = EmailChannel(
         _make_config(from_address="bot@example.com", post_action="delete", post_action_ignore_skipped=True),
@@ -545,30 +493,7 @@ async def test_start_keeps_post_actions_for_successful_emails_when_later_deliver
 def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) -> None:
     raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
 
-    class FakeIMAP:
-        def __init__(self) -> None:
-            self.store_calls: list[tuple[bytes, str, str]] = []
-
-        def login(self, _user: str, _pw: str):
-            return "OK", [b"logged in"]
-
-        def select(self, _mailbox: str):
-            return "OK", [b"1"]
-
-        def search(self, *_args):
-            return "OK", [b"1"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
-
-        def store(self, imap_id: bytes, op: str, flags: str):
-            self.store_calls.append((imap_id, op, flags))
-            return "OK", [b""]
-
-        def logout(self):
-            return "BYE", [b""]
-
-    fake = FakeIMAP()
+    fake = _make_fake_imap(raw, uid=b"123")
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(from_address="bot@example.com"), MessageBus())
@@ -576,7 +501,7 @@ def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) ->
 
     assert items == []
     assert skipped_uids == {"123"}
-    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
 
     # Same UID should still be deduped after being ignored.
     items_again, skipped_again = channel._fetch_new_messages()
@@ -614,37 +539,14 @@ def test_fetch_new_messages_skips_self_sent_across_identity_sources(
     imap_username matches, and must be case-insensitive."""
     raw = _make_raw_email(from_addr=from_header, subject="Loop test")
 
-    class FakeIMAP:
-        def __init__(self) -> None:
-            self.store_calls: list[tuple[bytes, str, str]] = []
-
-        def login(self, _user: str, _pw: str):
-            return "OK", [b"logged in"]
-
-        def select(self, _mailbox: str):
-            return "OK", [b"1"]
-
-        def search(self, *_args):
-            return "OK", [b"1"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
-
-        def store(self, imap_id: bytes, op: str, flags: str):
-            self.store_calls.append((imap_id, op, flags))
-            return "OK", [b""]
-
-        def logout(self):
-            return "BYE", [b""]
-
-    fake = FakeIMAP()
+    fake = _make_fake_imap(raw, uid=b"123")
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(**config_override), MessageBus())
     items, _ = channel._fetch_new_messages()
 
     assert items == []
-    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
 
 
 def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeypatch) -> None:
@@ -662,15 +564,16 @@ def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeyp
         def select(self, _mailbox: str):
             return "OK", [b"1"]
 
-        def search(self, *_args):
-            self.search_calls += 1
-            if fail_once["pending"]:
-                fail_once["pending"] = False
-                raise imaplib.IMAP4.abort("socket error")
-            return "OK", [b"1"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+        def uid(self, command: str, *args):
+            if command == "SEARCH":
+                self.search_calls += 1
+                if fail_once["pending"]:
+                    fail_once["pending"] = False
+                    raise imaplib.IMAP4.abort("socket error")
+                return "OK", [b"123"]
+            if command == "FETCH":
+                return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+            return "OK", [b""]
 
         def store(self, imap_id: bytes, op: str, flags: str):
             self.store_calls.append((imap_id, op, flags))
@@ -700,10 +603,7 @@ def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeyp
 def test_fetch_new_messages_keeps_messages_collected_before_stale_retry(monkeypatch) -> None:
     raw_first = _make_raw_email(subject="First", body="First body")
     raw_second = _make_raw_email(subject="Second", body="Second body")
-    mailbox_state = {
-        b"1": {"uid": b"123", "raw": raw_first, "seen": False},
-        b"2": {"uid": b"124", "raw": raw_second, "seen": False},
-    }
+    mailbox_state = {"123": raw_first, "124": raw_second}
     fail_once = {"pending": True}
 
     class FlakyIMAP:
@@ -713,20 +613,18 @@ def test_fetch_new_messages_keeps_messages_collected_before_stale_retry(monkeypa
         def select(self, _mailbox: str):
             return "OK", [b"2"]
 
-        def search(self, *_args):
-            unseen_ids = [imap_id for imap_id, item in mailbox_state.items() if not item["seen"]]
-            return "OK", [b" ".join(unseen_ids)]
-
-        def fetch(self, imap_id: bytes, _parts: str):
-            if imap_id == b"2" and fail_once["pending"]:
-                fail_once["pending"] = False
-                raise imaplib.IMAP4.abort("socket error")
-            item = mailbox_state[imap_id]
-            header = b"%s (UID %s BODY[] {200})" % (imap_id, item["uid"])
-            return "OK", [(header, item["raw"]), b")"]
-
-        def store(self, imap_id: bytes, _op: str, _flags: str):
-            mailbox_state[imap_id]["seen"] = True
+        def uid(self, command: str, *args):
+            if command == "SEARCH":
+                keys = " ".join(sorted(mailbox_state.keys(), key=int))
+                return "OK", [keys.encode()]
+            if command == "FETCH":
+                uid = args[0]
+                if uid == "124" and fail_once["pending"]:
+                    fail_once["pending"] = False
+                    raise imaplib.IMAP4.abort("socket error")
+                raw = mailbox_state[uid]
+                header = f"{uid} (UID {uid} BODY[] {{200}})".encode()
+                return "OK", [(header, raw), b")"]
             return "OK", [b""]
 
         def logout(self):
@@ -1044,12 +942,13 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
         def select(self, _mailbox: str):
             return "OK", [b"1"]
 
-        def search(self, *_args):
-            self.search_args = _args
-            return "OK", [b"5"]
-
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"5 (UID 999 BODY[] {200})", raw), b")"]
+        def uid(self, command: str, *args):
+            if command == "SEARCH":
+                self.search_args = args
+                return "OK", [b"999"]
+            if command == "FETCH":
+                return "OK", [(b"5 (UID 999 BODY[] {200})", raw), b")"]
+            return "OK", [b""]
 
         def store(self, imap_id: bytes, op: str, flags: str):
             self.store_calls.append((imap_id, op, flags))
@@ -1070,7 +969,7 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
 
     assert len(items) == 1
     assert items[0]["subject"] == "Status"
-    # search(None, "SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
+    # uid("SEARCH", None, "SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.search_args is not None
     assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.store_calls == []
@@ -1080,11 +979,12 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
 # Security: Anti-spoofing tests for Authentication-Results verification
 # ---------------------------------------------------------------------------
 
-def _make_fake_imap(raw: bytes):
+def _make_fake_imap(raw: bytes, uid: bytes = b"500"):
     """Return a FakeIMAP class pre-loaded with the given raw email."""
     class FakeIMAP:
         def __init__(self) -> None:
             self.store_calls: list[tuple[bytes, str, str]] = []
+            self.uid_calls: list[tuple] = []
 
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
@@ -1092,11 +992,16 @@ def _make_fake_imap(raw: bytes):
         def select(self, _mailbox: str):
             return "OK", [b"1"]
 
-        def search(self, *_args):
-            return "OK", [b"1"]
+        def capability(self):
+            return "OK", [b"IMAP4rev1"]
 
-        def fetch(self, _imap_id: bytes, _parts: str):
-            return "OK", [(b"1 (UID 500 BODY[] {200})", raw), b")"]
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "SEARCH":
+                return "OK", [uid]
+            if command == "FETCH":
+                return "OK", [(b"1 (UID " + uid + b" BODY[] {200})", raw), b")"]
+            return "OK", [b""]
 
         def store(self, imap_id: bytes, op: str, flags: str):
             self.store_calls.append((imap_id, op, flags))
@@ -1292,7 +1197,10 @@ def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monke
 
     assert channel._fetch_new_messages() == ([], {"500"})
     assert called["attachments"] is False
-    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+    assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
+        ("FETCH", "500", "(BODY.PEEK[HEADER])")
+    ]
+    assert ("STORE", "500", "+FLAGS", "(\\Seen)") in fake.uid_calls
 
 
 def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:

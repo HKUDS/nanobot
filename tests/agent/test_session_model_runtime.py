@@ -18,7 +18,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 
 class RecordingProvider(LLMProvider):
     def __init__(self, name: str) -> None:
-        super().__init__()
+        super().__init__(provider_name=name)
         self.name = name
         self.generation = GenerationSettings(max_tokens=256, temperature=0.1)
         self.calls: list[str | None] = []
@@ -114,7 +114,7 @@ async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_p
         provider=base,
         workspace=tmp_path,
         model="base-model",
-        context_window_tokens=8_000,
+        context_window_tokens=16_000,
     )
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     session_key = "sdk:removed-preset"
@@ -196,7 +196,7 @@ async def test_sdk_custom_model_preset_metadata_does_not_select_runtime(
         provider=base,
         workspace=tmp_path,
         model="base-model",
-        context_window_tokens=8_000,
+        context_window_tokens=16_000,
     )
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     bot = Nanobot(loop)

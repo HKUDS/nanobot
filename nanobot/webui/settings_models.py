@@ -28,6 +28,10 @@ from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config, FallbackCandidate, ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import get_image_gen_provider
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
+from nanobot.providers.oauth_model_catalog import (
+    get_oauth_model_catalog,
+    invalidate_oauth_model_catalog,
+)
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -77,6 +81,7 @@ class ModelSettingsPayload(TypedDict):
     model_presets: list[dict[str, Any]]
     model_call_order: list[str]
     model_call_order_editable: bool
+    model_configuration_migratable: bool
     providers: list[dict[str, Any]]
 
 
@@ -660,6 +665,30 @@ def provider_models_payload(
             "models": rows,
             "model_count": len(rows),
         }
+    if catalog_kind == "hybrid":
+        proxy = _resolve_env_placeholders(provider_config.proxy)
+        catalog = get_oauth_model_catalog(spec.name, proxy=proxy)
+        rows = [
+            {
+                "id": model.id,
+                "label": model.label or None,
+                "description": model.description or None,
+                "owned_by": model.owned_by or spec.label,
+                "context_window": model.context_window,
+                "reasoning_efforts": list(model.reasoning_efforts),
+                "supports_backend_search": model.supports_backend_search,
+            }
+            for model in catalog.models
+        ]
+        return {
+            **base_payload,
+            "status": "available",
+            "source": catalog.source,
+            "models": rows,
+            "model_count": len(rows),
+            "message": catalog.message,
+            "fetched_at": catalog.fetched_at,
+        }
 
     api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
     if spec.name == "openai" and not api_base:
@@ -896,6 +925,48 @@ def _model_call_order_state(config: Config) -> tuple[list[str], bool]:
     return order, True
 
 
+def _legacy_model_configuration_migratable(
+    config: Config,
+    oauth_status: OAuthStatusReader,
+) -> bool:
+    """Return whether the implicit default represents usable legacy configuration.
+
+    A pristine config still carries schema defaults for backwards compatibility.
+    Those defaults are not user configuration and must not be materialized as a
+    preset. Inline fallbacks, or a default whose matching provider is configured,
+    are evidence that there is real legacy state to preserve.
+    """
+    _, editable = _model_call_order_state(config)
+    if editable:
+        return False
+
+    defaults = config.agents.defaults
+    if defaults.fallback_models:
+        return True
+
+    provider_name = defaults.provider
+    if provider_name == "auto":
+        model_prefix = defaults.model.split("/", 1)[0] if "/" in defaults.model else ""
+        if model_prefix and resolve_settings_provider(config, model_prefix) is not None:
+            provider_name = model_prefix
+        else:
+            provider_name = (
+                config.get_provider_name(
+                    defaults.model,
+                    preset=config.resolve_default_preset(),
+                )
+                or ""
+            )
+    if not provider_name or provider_name == "auto":
+        return False
+
+    resolved_provider = resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        return False
+    spec, _, provider_config = resolved_provider
+    return provider_configured_for_settings(spec, provider_config, oauth_status)
+
+
 def _validate_configured_provider(
     config: Config,
     provider: str,
@@ -1044,6 +1115,10 @@ def model_settings_payload(
         "model_presets": model_presets,
         "model_call_order": model_call_order,
         "model_call_order_editable": model_call_order_editable,
+        "model_configuration_migratable": _legacy_model_configuration_migratable(
+            config,
+            oauth_status,
+        ),
         "providers": providers,
     }
 
@@ -1124,6 +1199,10 @@ def create_model_configuration(
         raise WebUISettingsError("configuration already exists", status=409)
     _validate_configured_provider(config, provider, oauth_status)
 
+    activate_as_primary = not config.model_presets and not _legacy_model_configuration_migratable(
+        config, oauth_status
+    )
+
     base = config.resolve_preset()
     max_tokens = _parse_positive_int(
         query_first_alias(query, "max_tokens", "maxTokens"),
@@ -1151,6 +1230,9 @@ def create_model_configuration(
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
     )
+    if activate_as_primary:
+        config.agents.defaults.model_preset = name
+        config.agents.defaults.fallback_models = []
     return name
 
 
@@ -1229,7 +1311,12 @@ def update_model_configuration(
     return changed
 
 
-def update_model_call_order(config: Config, query: QueryParams) -> bool:
+def update_model_call_order(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
     raw_order = query_first_alias(query, "order", "presetNames")
     if raw_order is None:
         raise WebUISettingsError("model call order is required")
@@ -1248,15 +1335,16 @@ def update_model_call_order(config: Config, query: QueryParams) -> bool:
         raise WebUISettingsError("model call order must contain at least one preset")
 
     normalized_order = [cast(str, name).strip() for name in cast(list[object], order)]
+    unknown = [name for name in normalized_order if name not in config.model_presets]
+    if unknown:
+        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
+
     _, editable = _model_call_order_state(config)
-    if not editable:
+    if not editable and _legacy_model_configuration_migratable(config, oauth_status):
         raise WebUISettingsError(
             "convert the existing model configuration to presets first",
             status=409,
         )
-    unknown = [name for name in normalized_order if name not in config.model_presets]
-    if unknown:
-        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
 
     defaults = config.agents.defaults
     fallback_models: list[FallbackCandidate] = list(normalized_order[1:])
@@ -1270,8 +1358,18 @@ def update_model_call_order(config: Config, query: QueryParams) -> bool:
     return changed
 
 
-def migrate_model_configurations(config: Config) -> bool:
+def migrate_model_configurations(
+    config: Config,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
     """Materialize legacy primary/inline model settings as named presets."""
+    _, editable = _model_call_order_state(config)
+    if editable:
+        return False
+    if not _legacy_model_configuration_migratable(config, oauth_status):
+        raise WebUISettingsError("there is no legacy model configuration to convert", status=409)
+
     defaults = config.agents.defaults
     primary = config.resolve_preset()
     created: list[str] = []
@@ -1505,6 +1603,7 @@ def login_oauth_provider(
             token = login_github_copilot(print_fn=lambda _message: None)
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
+        invalidate_oauth_model_catalog(spec.name)
         return settings_payload(config_path=config_path)
 
     if spec.name == "xai_grok":
@@ -1590,6 +1689,7 @@ def complete_oauth_provider(
     oauth_flows.remove(spec.name, flow_id, flow, cancel=False)
     if not token.access:
         raise WebUISettingsError("OAuth login failed", status=401)
+    invalidate_oauth_model_catalog(spec.name)
     return settings_payload(config_path=config_path)
 
 
@@ -1625,6 +1725,7 @@ def logout_oauth_provider(
 
         oauth_flows.clear(spec.name)
         logout_xai_oauth()
+        invalidate_oauth_model_catalog(spec.name)
         return settings_payload(config_path=config_path)
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
@@ -1632,6 +1733,7 @@ def logout_oauth_provider(
     for path in (token_path, token_path.with_suffix(".lock")):
         with suppress(FileNotFoundError):
             path.unlink()
+    invalidate_oauth_model_catalog(spec.name)
     return settings_payload(config_path=config_path)
 
 

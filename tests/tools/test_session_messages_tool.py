@@ -184,6 +184,66 @@ async def test_rate_limit_is_per_source_session_and_uses_a_rolling_minute(
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_releases_expired_source_state_and_keeps_recent_sources(
+    tmp_path: Path,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    _persist(
+        sessions,
+        "websocket:a",
+        "websocket:b",
+        "websocket:c",
+        "websocket:target",
+    )
+    now = 0.0
+    tool = SendSessionMessageTool(
+        sessions=sessions,
+        bus=MessageBus(),
+        max_messages_per_minute=2,
+        clock=lambda: now,
+    )
+    target = _handle(sessions, "websocket:target").name
+
+    for source in ("websocket:a", "websocket:b"):
+        await tool.enqueue(
+            source_session_key=source,
+            target_handle=target,
+            content="initial",
+            expect_reply=False,
+        )
+    now = 30.0
+    await tool.enqueue(
+        source_session_key="websocket:a",
+        target_handle=target,
+        content="recent",
+        expect_reply=False,
+    )
+
+    now = 61.0
+    await tool.enqueue(
+        source_session_key="websocket:c",
+        target_handle=target,
+        content="trigger cleanup",
+        expect_reply=False,
+    )
+
+    assert set(tool._sent_at) == {"websocket:a", "websocket:c"}
+    await tool.enqueue(
+        source_session_key="websocket:a",
+        target_handle=target,
+        content="within rolling window",
+        expect_reply=False,
+    )
+    with pytest.raises(SessionMessageError, match="rate limit"):
+        await tool.enqueue(
+            source_session_key="websocket:a",
+            target_handle=target,
+            content="over limit",
+            expect_reply=False,
+        )
+
+
+@pytest.mark.asyncio
 async def test_reply_timeout_injects_a_user_input_back_into_the_source(
     tmp_path: Path,
 ) -> None:

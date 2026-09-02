@@ -30,6 +30,7 @@ from nanobot.nanobot import (
     StreamEvent,
     StreamEventType,
 )
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
@@ -601,7 +602,7 @@ async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
     result = await bot.run("hi")
     assert result.tools_used == []
     assert result.messages == []
-    assert result.usage == {}
+    assert result.usage is None
     assert result.stop_reason is None
     assert result.error is None
 
@@ -622,7 +623,7 @@ async def test_run_populates_observability_fields(tmp_path):
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            usage=LLMUsage.reported(input_tokens=10, output_tokens=2),
             stop_reason="completed",
             error=None,
             tool_events=[{"tool": "read_file", "status": "ok"}],
@@ -641,7 +642,7 @@ async def test_run_populates_observability_fields(tmp_path):
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=2)
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.metadata == {"latency_ms": 42}
@@ -658,7 +659,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
         content="done",
         tool_calls=[],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
     ))
     bot = Nanobot(AgentLoop(
         bus=MessageBus(),
@@ -670,8 +671,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     result = await bot.run("hi", ephemeral=True)
 
     assert result.content == "done"
-    assert result.usage["total_tokens"] == 3
-    assert result.usage["provider_tokens"] == 3
+    assert result.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
 
 
 @pytest.mark.asyncio
@@ -1053,7 +1053,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"total_tokens": 9},
+            usage=LLMUsage.reported(input_tokens=9, output_tokens=0),
             stop_reason="completed",
         )
         for hook in hooks:
@@ -1073,7 +1073,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"total_tokens": 9}
+    assert result.usage == LLMUsage.reported(input_tokens=9, output_tokens=0)
     assert result.stop_reason == "completed"
     assert result.metadata == {"latency_ms": 5}
 
@@ -1397,13 +1397,13 @@ async def test_sdk_capture_prefers_run_level_snapshot():
     await hook.after_run(AgentRunHookContext(
         messages=final_messages,
         tools_used=["read_file"],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
         stop_reason="completed",
     ))
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
-    assert hook.usage == {"total_tokens": 3}
+    assert hook.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
     assert hook.stop_reason == "completed"
 
 
@@ -1412,7 +1412,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock()
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
 
     snapshot = await bot.sessions.ingest(
         "sdk:history",
@@ -1442,7 +1441,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[0]["source"] == "longmemeval"
     assert snapshot.messages[1]["source"] == "longmemeval"
     bot._loop.process_direct.assert_not_called()
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_not_called()
 
     reloaded = bot.sessions.get("sdk:history")
     assert reloaded is not None
@@ -1635,12 +1633,13 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     runtime = bot._loop.llm_runtime()
     bot._loop.runtime_for_session = MagicMock(return_value=runtime)  # type: ignore[method-assign]
 
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    compact_session = AsyncMock()
+    bot._loop.consolidator.compact_idle_session = compact_session
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
-    assert (
-        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"]
-        is runtime
+    compact_session.assert_awaited_once_with(
+        "sdk:history",
+        runtime=runtime,
     )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path

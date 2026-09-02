@@ -3722,6 +3722,27 @@ async def test_notify_restart_done_waits_until_channel_starts():
 
 
 @pytest.mark.asyncio
+async def test_websocket_restart_notice_does_not_overwrite_recovery_state():
+    """WebSocket attach/recovery events already own reconnect state."""
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    channel = _StartableChannel(fake_config, mgr.bus)
+    channel._running = True
+    mgr.channels = {"websocket": channel}
+    mgr._send_with_retry = AsyncMock()
+
+    notice = RestartNotice(channel="websocket", chat_id="chat", started_at_raw="100.0")
+    await mgr._send_restart_notice_when_started(notice)
+
+    mgr._send_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_restart_notice_retries_until_running_channel_accepts_delivery():
     """A running flag must not make an early transport failure final."""
 

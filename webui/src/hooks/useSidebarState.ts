@@ -5,7 +5,7 @@ import { normalizeWorkbenchState } from "@/components/workbench/workbench-model"
 import { fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
-export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
+const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   schema_version: 1,
   pinned_keys: [],
   archived_keys: [],
@@ -74,7 +74,7 @@ function boolMap(value: unknown): Record<string, boolean> {
   return out;
 }
 
-export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
+function normalizeSidebarState(raw: unknown): SidebarStatePayload {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ...DEFAULT_SIDEBAR_STATE, view: { ...DEFAULT_SIDEBAR_STATE.view } };
   }

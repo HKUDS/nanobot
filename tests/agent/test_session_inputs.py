@@ -18,7 +18,7 @@ def _loop(tmp_path: Path) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="Reviewed", tool_calls=[], usage={})
+        return_value=LLMResponse(content="Reviewed", tool_calls=[], usage=None)
     )
     return AgentLoop(
         bus=MessageBus(),

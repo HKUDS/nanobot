@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
+from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -210,8 +212,8 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
-    """SpawnTool should return an error string when the concurrency limit is reached."""
+async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
+    """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.spawn import SpawnTool
     from nanobot.bus.queue import MessageBus
@@ -223,14 +225,23 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_concurrent_subagents=1,
     )
     mgr._announce_result = AsyncMock()
 
-    # Block the first subagent so it stays "running"
-    release = asyncio.Event()
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    release_second = asyncio.Event()
 
     async def fake_run(spec):
-        await release.wait()
+        task = spec.initial_messages[-1]["content"]
+        if task == "first task":
+            first_entered.set()
+            await release_first.wait()
+        else:
+            second_entered.set()
+            await release_second.wait()
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
@@ -249,19 +260,24 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
         session_key="test:c1",
         runtime=_runtime(provider),
     )):
-        # First spawn succeeds
-        result = await tool.execute(task="first task")
-        assert "started" in result
+        first_result = await tool.execute(task="first task")
+        assert "started" in first_result
+        await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
-        # Second spawn should be rejected (default limit is 1)
-        result = await tool.execute(task="second task")
-        assert "Cannot spawn subagent" in result
-        assert "concurrency limit reached" in result
+        second_result = await tool.execute(task="second task")
+        assert "started" in second_result
+        tasks = list(mgr._running_tasks.values())
+        await asyncio.sleep(0)
+        assert not second_entered.is_set()
+        phases = {status.task_description: status.phase for status in mgr._task_statuses.values()}
+        assert phases == {"first task": "initializing", "second task": "queued"}
 
-    # Release the first subagent
-    release.set()
-    # Allow cleanup
-    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+    release_first.set()
+    await asyncio.wait_for(second_entered.wait(), timeout=1.0)
+    release_second.set()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+    assert mgr._running_tasks == {}
 
 
 @pytest.mark.asyncio
@@ -299,7 +315,7 @@ async def test_spawn_tool_waits_for_inline_result():
 
 
 @pytest.mark.asyncio
-async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
+async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import RequestContext, request_context
     from nanobot.agent.tools.spawn import SpawnTool
@@ -311,12 +327,19 @@ async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         max_concurrent_subagents=1,
     )
-    release = asyncio.Event()
-    entered = asyncio.Event()
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    release_second = asyncio.Event()
 
     async def fake_run(spec):
-        entered.set()
-        await release.wait()
+        task = spec.initial_messages[-1]["content"]
+        if task == "first":
+            first_entered.set()
+            await release_first.wait()
+        else:
+            second_entered.set()
+            await release_second.wait()
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
@@ -333,17 +356,98 @@ async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
         runtime=_runtime(MagicMock()),
     )):
         first = asyncio.create_task(tool.execute(task="first", wait=True))
-        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
-        second = await tool.execute(task="second", wait=True)
+        second = asyncio.create_task(tool.execute(task="second", wait=True))
+        await asyncio.sleep(0)
 
-        assert "concurrency limit reached" in second
-        assert manager.get_running_count() == 1
-        release.set()
+        assert not second.done()
+        assert not second_entered.is_set()
+        assert manager.get_running_count() == 2
+        release_first.set()
         assert await first == "done"
+        await asyncio.wait_for(second_entered.wait(), timeout=1.0)
+        release_second.set()
+        assert await second == "done"
 
     assert manager.get_running_count() == 0
     assert manager._session_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
+    """Adjacent blocking consultations should share one concurrent tool batch."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.execution import execute_tool_calls
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import ToolCallRequest
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_concurrent_subagents=2,
+    )
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+    entered: list[str] = []
+
+    async def fake_run(spec):
+        entered.append(spec.initial_messages[-1]["content"])
+        if len(entered) == 2:
+            both_entered.set()
+        await release.wait()
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content=spec.initial_messages[-1]["content"],
+            error=None,
+            tool_events=[],
+        )
+
+    manager.runner.run = AsyncMock(side_effect=fake_run)
+    tools = ToolRegistry()
+    tools.register(SpawnTool(manager))
+    runtime = _runtime(MagicMock())
+    calls = [
+        ToolCallRequest(
+            id="spawn-1",
+            name="spawn",
+            arguments={"task": "first", "wait": True},
+        ),
+        ToolCallRequest(
+            id="spawn-2",
+            name="spawn",
+            arguments={"task": "second", "wait": True},
+        ),
+    ]
+
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=runtime,
+    )):
+        execution = asyncio.create_task(execute_tool_calls(
+            tools,
+            calls,
+            concurrent=True,
+            external_lookup_counts={},
+            workspace_violation_counts={},
+            hook=AgentHook(),
+            context=AgentHookContext(iteration=0, messages=[], session_key="test:c1"),
+        ))
+        await asyncio.wait_for(both_entered.wait(), timeout=1.0)
+        release.set()
+        results, events = await execution
+
+    assert set(entered) == {"first", "second"}
+    assert results == ["first", "second"]
+    assert [event["status"] for event in events] == ["ok", "ok"]
+    assert manager._running_tasks == {}
 
 
 @pytest.mark.asyncio
@@ -390,6 +494,7 @@ def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
 
+    assert AgentDefaults().max_concurrent_subagents == 4
     assert mgr.max_concurrent_subagents == AgentDefaults().max_concurrent_subagents
 
 
@@ -456,7 +561,7 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
             error=None,
             tool_events=[],
             messages=[],
-            usage={},
+            usage=None,
             had_injections=False,
             tools_used=[],
         )
@@ -464,103 +569,12 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     loop.runner.run = AsyncMock(side_effect=fake_run)
     loop.max_iterations = 55
 
-    await loop._run_agent_loop([], runtime=loop.llm_runtime())
-
-    loop.runner.run.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_drain_pending_blocks_while_subagents_running(tmp_path):
-    """_drain_pending should block when no messages are available but sub-agents are still running."""
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.events import InboundMessage
-    from nanobot.bus.queue import MessageBus
-    from nanobot.session.manager import Session
-
-    bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
-
-    pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
-    session = Session(key="test:drain-block")
-    injection_callback = None
-
-    # Capture the injection_callback that _run_agent_loop creates
-    async def fake_runner_run(spec):
-        nonlocal injection_callback
-        injection_callback = spec.injection_callback
-
-        # Simulate: first call to injection_callback should block because
-        # sub-agents are running and no messages are in the queue yet.
-        # We'll resolve this from a concurrent task.
-        return SimpleNamespace(
-            stop_reason="done",
-            final_content="done",
-            error=None,
-            tool_events=[],
-            messages=[],
-            usage={},
-            had_injections=False,
-            tools_used=[],
-            provider_state=None,
-        )
-
-    loop.runner.run = AsyncMock(side_effect=fake_runner_run)
-
-    # Register a running sub-agent in the SubagentManager for this session
-    async def _hang_forever():
-        await asyncio.Event().wait()
-
-    hang_task = asyncio.create_task(_hang_forever())
-    loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-drain-1")
-    loop.subagents._running_tasks["sub-drain-1"] = hang_task
-
-    # Run _run_agent_loop — this defines the _drain_pending closure
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
-        session=session,
-        channel="test",
-        chat_id="c1",
-        pending_queue=pending_queue,
     )
 
-    assert injection_callback is not None
-
-    # Now test the callback directly
-    # With sub-agents running and an empty queue, it should block
-    drain_task = asyncio.create_task(injection_callback())
-
-    # Let the task enter the blocking queue wait.
-    await asyncio.sleep(0)
-
-    # Should still be running (blocked on pending_queue.get())
-    assert not drain_task.done(), "drain should block while sub-agents are running"
-
-    # Now put a message in the queue (simulating sub-agent completion)
-    await pending_queue.put(InboundMessage(
-        sender_id="subagent",
-        channel="test",
-        chat_id="c1",
-        content="Sub-agent result",
-        media=None,
-        metadata={},
-    ))
-
-    # Should unblock and return results
-    results = await asyncio.wait_for(drain_task, timeout=2.0)
-    assert len(results) >= 1
-    assert results[0]["role"] == "user"
-    assert "Sub-agent result" in str(results[0]["content"])
-
-    # Cleanup
-    hang_task.cancel()
-    try:
-        await hang_task
-    except asyncio.CancelledError:
-        pass
+    loop.runner.run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -577,17 +591,19 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     pending_queue: asyncio.Queue = asyncio.Queue()
     injection_callback = None
+    terminal_injection_callback = None
 
     async def fake_runner_run(spec):
-        nonlocal injection_callback
+        nonlocal injection_callback, terminal_injection_callback
         injection_callback = spec.injection_callback
+        terminal_injection_callback = spec.terminal_injection_callback
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
             error=None,
             tool_events=[],
             messages=[],
-            usage={},
+            usage=None,
             had_injections=False,
             tools_used=[],
             provider_state=None,
@@ -595,25 +611,26 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
-        runtime=loop.llm_runtime(),
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
+        runtime=runtime,
         session=None,
-        channel="test",
-        chat_id="c1",
+        request_context=RequestContext(channel="test", chat_id="c1", runtime=runtime),
         pending_queue=pending_queue,
     )
 
     assert injection_callback is not None
+    assert terminal_injection_callback is not None
 
-    # With no sub-agents and empty queue, should return immediately
-    results = await asyncio.wait_for(injection_callback(), timeout=1.0)
-    assert results == []
+    # With no sub-agents and an empty queue, both paths return immediately.
+    assert await asyncio.wait_for(injection_callback(), timeout=1.0) == []
+    assert await asyncio.wait_for(terminal_injection_callback(), timeout=1.0) == []
 
 
 @pytest.mark.asyncio
-async def test_drain_pending_timeout(tmp_path):
-    """_drain_pending should return empty after timeout when sub-agents hang."""
+async def test_terminal_drain_timeout(tmp_path):
+    """The terminal drain should return empty after its shared timeout expires."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
@@ -626,18 +643,18 @@ async def test_drain_pending_timeout(tmp_path):
 
     pending_queue: asyncio.Queue = asyncio.Queue()
     session = Session(key="test:drain-timeout")
-    injection_callback = None
+    terminal_injection_callback = None
 
     async def fake_runner_run(spec):
-        nonlocal injection_callback
-        injection_callback = spec.injection_callback
+        nonlocal terminal_injection_callback
+        terminal_injection_callback = spec.terminal_injection_callback
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
             error=None,
             tool_events=[],
             messages=[],
-            usage={},
+            usage=None,
             had_injections=False,
             tools_used=[],
             provider_state=None,
@@ -653,16 +670,21 @@ async def test_drain_pending_timeout(tmp_path):
     loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-timeout-1")
     loop.subagents._running_tasks["sub-timeout-1"] = hang_task
 
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
-        runtime=loop.llm_runtime(),
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
+        runtime=runtime,
         session=session,
-        channel="test",
-        chat_id="c1",
+        request_context=RequestContext(
+            channel="test",
+            chat_id="c1",
+            session_key=session.key,
+            runtime=runtime,
+        ),
         pending_queue=pending_queue,
     )
 
-    assert injection_callback is not None
+    assert terminal_injection_callback is not None
 
     # Patch the timeout path without leaking the queue.get() coroutine.
     async def _timeout(awaitable, timeout):
@@ -670,7 +692,7 @@ async def test_drain_pending_timeout(tmp_path):
         raise asyncio.TimeoutError
 
     with patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_timeout):
-        results = await injection_callback()
+        results = await terminal_injection_callback()
         assert results == []
 
     # Cleanup
@@ -679,3 +701,81 @@ async def test_drain_pending_timeout(tmp_path):
         await hang_task
     except asyncio.CancelledError:
         pass
+
+
+@pytest.mark.asyncio
+async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
+    """Repeated terminal rendezvous calls share one 300-second deadline."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.manager import Session
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=MagicMock(),
+        workspace=tmp_path,
+        model="test-model",
+    )
+    pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
+    session = Session(key="test:shared-deadline")
+    terminal_injection_callback = None
+
+    async def fake_runner_run(spec):
+        nonlocal terminal_injection_callback
+        terminal_injection_callback = spec.terminal_injection_callback
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+            messages=[],
+            usage=None,
+            had_injections=False,
+            tools_used=[],
+            provider_state=None,
+        )
+
+    loop.runner.run = AsyncMock(side_effect=fake_runner_run)
+
+    async def _hang_forever():
+        await asyncio.Event().wait()
+
+    hang_task = asyncio.create_task(_hang_forever())
+    loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-deadline-1")
+    loop.subagents._running_tasks["sub-deadline-1"] = hang_task
+
+    await loop._run_agent_loop(
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
+        runtime=loop.llm_runtime(),
+        session=session,
+        pending_queue=pending_queue,
+    )
+    assert terminal_injection_callback is not None
+
+    timeouts: list[float] = []
+    clock = MagicMock(side_effect=[10.0, 110.0])
+
+    async def _deliver(awaitable, timeout):
+        awaitable.close()
+        timeouts.append(timeout)
+        return InboundMessage(
+            sender_id="subagent",
+            channel="test",
+            chat_id="c1",
+            content="result",
+        )
+
+    fake_loop = SimpleNamespace(time=clock)
+    with (
+        patch("nanobot.agent.loop.asyncio.get_running_loop", return_value=fake_loop),
+        patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_deliver),
+    ):
+        assert await terminal_injection_callback()
+        assert await terminal_injection_callback()
+
+    assert timeouts == [300.0, 200.0]
+
+    hang_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await hang_task

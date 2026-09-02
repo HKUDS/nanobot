@@ -103,19 +103,19 @@ Use `nanobot gateway logs`, `restart`, and `stop` to manage that background gate
 If you do not want the browser or need to isolate a WebUI problem, send one message directly:
 
 ```bash
-nanobot agent -m "Hello!"
+nanobot -m "Hello!"
 ```
 
 Then start an interactive terminal chat with:
 
 ```bash
-nanobot agent
+nanobot
 ```
 
 In interactive mode, `Enter` sends and `Shift+Enter` inserts a newline (`Ctrl+J` is the
-universal fallback). While a turn is running,
-`Enter` steers it, `Tab` queues a follow-up, and `Option+Up` on macOS (`Alt+Up` on
-Windows/Linux) edits the latest queued message. Exit
+universal fallback). While nanobot is working, `Enter` sends immediately, `Tab` waits until the
+current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) edits the
+latest waiting message. Exit
 with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
 ## Choose One Next Step
@@ -173,7 +173,7 @@ nanobot webui
 ```
 
 The source path follows current `main` and can be newer than the published package. The editable
-install keeps Python pointed at the checkout; `nanobot agent` runs `tui/` with Bun, and
+install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and
 `nanobot webui` automatically rebuilds `webui/` when its bundled assets are stale. All normal
 commands remain the same as a stable install. For development details, follow
 [`../CONTRIBUTING.md`](../CONTRIBUTING.md).

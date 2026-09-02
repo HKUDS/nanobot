@@ -113,7 +113,7 @@ interface PendingWebUIRequest extends PendingRequest<unknown> {
   serializedFrame: string;
 }
 
-export class WebUIMutationError extends Error {
+class WebUIMutationError extends Error {
   status: number;
 
   constructor(status: number, message: string) {

@@ -145,7 +145,7 @@
       "presetName": "预设名称",
       "presetNameHelp": "用于界面和 /model 命令；名称不能重复。",
       "presetNameDuplicate": "已存在同名预设。",
-      "presetNamePlaceholder": "快速写作",
+      "presetNamePlaceholder": "例如：快速写作",
       "advancedOptions": "高级选项",
       "advancedSummary": "上下文 {{context}} · 最大输出 {{max}} tokens",
       "maxTokens": "最大输出 tokens",
@@ -198,6 +198,7 @@
       "fileEditDisplay": "文件编辑显示",
       "codeWrap": "代码换行",
       "brandLogos": "品牌 Logo",
+      "browserNotifications": "任务通知",
       "maxResults": "最大结果数",
       "timeout": "超时",
       "jinaReader": "Jina 阅读器",
@@ -243,6 +244,7 @@
       "fileEditDisplay": "选择文件编辑活动默认显示行数还是差异。",
       "codeWrap": "让长代码行在小屏幕上也易读。",
       "brandLogos": "在设置中显示第三方提供商和 CLI 图标。",
+      "browserNotifications": "仅在页面位于后台时通知，默认关闭。",
       "maxResults": "每次 web_search 调用返回的结果数。",
       "timeout": "搜索提供商请求超时前等待的秒数。",
       "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
@@ -481,7 +483,7 @@
       "save": "保存",
       "saving": "正在保存",
       "saveOrder": "保存顺序",
-      "savePreset": "保存预设",
+      "savePreset": "保存",
       "edit": "编辑",
       "delete": "删除",
       "deleting": "正在删除...",
@@ -1013,7 +1015,8 @@
     "activity": {
       "running": "智能体正在运行",
       "complete": "智能体已完成",
-      "updated": "有新内容"
+      "updated": "有新内容",
+      "recovery": "此对话需要你的处理"
     },
     "pin": "置顶",
     "unpin": "取消置顶",
@@ -1191,6 +1194,13 @@
       "removeQuotedContext": "移除引用内容",
       "modelNotConfigured": "模型未配置",
       "configureModel": "配置模型",
+      "chooseAI": "选择你的 AI",
+      "switchModel": "切换本次对话所用模型",
+      "manageModels": "管理模型预设",
+      "context": {
+        "tooltip": "上下文 · {{tokens}}{{capacity}}",
+        "meterDescription": "{{context}}。已使用 {{percent}}%。"
+      },
       "queued": {
         "label": "排队中的引导消息",
         "guide": "引导",
@@ -1424,7 +1434,24 @@
     "fileEditShowMoreLines": "显示剩余 {{count}} 行",
     "fileEditShowFewerLines": "收起部分行",
     "fileEditOpenFile": "打开文件",
-    "fileEditDiffTruncated": "差异内容已截断。打开文件可查看完整更改。"
+    "fileEditDiffTruncated": "差异内容已截断。打开文件可查看完整更改。",
+    "usage": {
+      "context": "当前上下文：{{tokens}}{{capacity}}",
+      "requests": "本轮 {{count}} 次模型调用",
+      "estimated": "包含估算用量"
+    }
+  },
+  "recovery": {
+    "actionFailed": "恢复操作失败，请重试。",
+    "interrupted": "任务已中断",
+    "completed": "任务已完成",
+    "failed": "任务恢复失败",
+    "failedHelp": "无法安全恢复已保存的任务，继续前请先检查。",
+    "resuming": "正在恢复中断的任务…",
+    "review": "继续前请检查任务。工具不会被自动重放。",
+    "safeResume": "正在从已保存的对话上下文继续。",
+    "dismiss": "忽略",
+    "continue": "继续"
   },
   "lightbox": {
     "title": "图片预览",

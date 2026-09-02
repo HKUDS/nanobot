@@ -83,6 +83,7 @@ def _make_handler(
     channel_feature_action: Any | None = None,
     channel_runtime_status: Any | None = None,
     mcp_reload: Any | None = None,
+    recovery_action: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -103,6 +104,7 @@ def _make_handler(
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         mcp_reload=mcp_reload,
+        recovery_action=recovery_action,
     )
 
 
@@ -121,6 +123,7 @@ def _ch(
     channel_feature_action: Any | None = None,
     channel_runtime_status: Any | None = None,
     mcp_reload: Any | None = None,
+    recovery_action: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -145,6 +148,7 @@ def _ch(
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         mcp_reload=mcp_reload,
+        recovery_action=recovery_action,
     )
     return InProcessHttpChannel(cfg, bus, gateway=gateway)
 
@@ -1244,39 +1248,6 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     assert "Missing pairing code" in missing_code.text
 
 
-def test_api_service_settings_read_api_key_from_webui_payload(bus: MagicMock) -> None:
-    channel = _ch(bus)
-    request = _FakeReq(path="/api/settings/api-service/start")
-    setattr(
-        request,
-        "_nanobot_webui_mutation_payload",
-        {"host": "0.0.0.0", "port": 8900, "timeout": 120, "api_key": "secret-token"},
-    )
-
-    query = channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
-
-    assert query == {
-        "host": ["0.0.0.0"],
-        "port": ["8900"],
-        "timeout": ["120"],
-        "api_key": ["secret-token"],
-    }
-
-
-def test_api_service_settings_reject_non_string_api_key(bus: MagicMock) -> None:
-    from nanobot.webui.settings_api import WebUISettingsError
-
-    channel = _ch(bus)
-    request = _FakeReq(path="/api/settings/api-service/start")
-    setattr(
-        request,
-        "_nanobot_webui_mutation_payload",
-        {"host": "127.0.0.1", "api_key": 123},
-    )
-
-    with pytest.raises(WebUISettingsError, match="API key must be a string"):
-        channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
-
 @pytest.mark.asyncio
 async def test_nanobot_feature_remote_install_requires_opt_in(
     bus: MagicMock,
@@ -2363,6 +2334,48 @@ async def test_session_delete_removes_transcript_without_canonical_file(
 
 
 @pytest.mark.asyncio
+async def test_session_delete_removes_unpersisted_new_chat(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = SessionManager(tmp_path / "sessions")
+    project = tmp_path / "project"
+    project.mkdir()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        connection,
+        "webui-client",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    attached = next(
+        payload
+        for payload in (
+            json.loads(call.args[0]) for call in connection.send.await_args_list
+        )
+        if payload.get("event") == "attached"
+    )
+    key = f"websocket:{attached['chat_id']}"
+
+    assert sm.list_sessions() == []
+    assert channel.gateway.workspaces.scope_for_session_key(key).project_path == project.resolve()
+
+    response = await _webui_mutate(channel, "session.delete", {"key": key})
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert channel.gateway.workspaces.scope_for_session_key(key).project_path == tmp_path.resolve()
+
+
+@pytest.mark.asyncio
 async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
     bus: MagicMock, tmp_path: Path
 ) -> None:
@@ -3272,6 +3285,28 @@ async def _webui_mutate(
         headers=list(response.headers.raw_items()),
         content=response.body,
         request=request,
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovery_mutation_uses_authenticated_websocket_action(bus: MagicMock) -> None:
+    recovery_action = AsyncMock(return_value={
+        "status": "resuming",
+        "recovery_id": "recovery-1",
+    })
+    channel = _ch(bus, recovery_action=recovery_action)
+
+    response = await _webui_mutate(
+        channel,
+        "recovery.continue",
+        {"chat_id": "chat-1", "recovery_id": "recovery-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "resuming"
+    recovery_action.assert_awaited_once_with(
+        "continue",
+        {"chat_id": "chat-1", "recovery_id": "recovery-1"},
     )
 
 

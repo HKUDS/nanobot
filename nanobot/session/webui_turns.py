@@ -37,12 +37,14 @@ from nanobot.bus.runtime_events import (
     TurnRuntimeAdmitted,
     UserInputAccepted,
 )
-from nanobot.providers.base import LLMProvider
+from nanobot.llm_usage.context import llm_usage_source
+from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.recovery import RecoveryCoordinator
 from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import (
     SessionMessageEnvelope,
@@ -54,6 +56,7 @@ from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+from nanobot.webui.session_identity import is_webui_session_key
 from nanobot.webui.transcript import append_session_message_input
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -166,30 +169,76 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     return user_text, assistant_text
 
 
+def _latest_title_inputs(session: Session) -> tuple[str, str]:
+    """Latest user/assistant texts, for turns executed on a shared session."""
+    user_text = ""
+    assistant_text = ""
+    for message in reversed(session.messages):
+        if message.get("_command") is True:
+            continue
+        if is_hidden_history_message(message):
+            continue
+        message = public_history_message(message)
+        role = message.get("role")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        content = strip_think(content)
+        if not content:
+            continue
+        if role == "user" and not user_text:
+            user_text = content.strip()
+        elif role == "assistant" and not assistant_text:
+            assistant_text = content.strip()
+        if user_text and assistant_text:
+            break
+    return user_text, assistant_text
+
+
 async def maybe_generate_webui_title(
     *,
     sessions: SessionManager,
     session_key: str,
     provider: LLMProvider,
     model: str,
+    target_session_key: str | None = None,
 ) -> bool:
-    """Generate and persist a short title for WebUI-owned sessions only."""
-    session = sessions.get_or_create(session_key)
-    if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+    """Generate and persist a short title for WebUI-owned sessions.
+
+    ``session_key`` owns the conversation content. Under unified-session
+    routing this is the shared session while WebUI renders per-chat sessions,
+    so pass ``target_session_key`` to project the title onto that per-chat
+    session instead of storing it on the shared one.
+    """
+    routed_session = sessions.get_or_create(session_key)
+    target_is_routed = target_session_key is None or target_session_key == session_key
+    if target_is_routed or target_session_key is None:
+        target_session = routed_session
+    else:
+        target_session = sessions.get_or_create(target_session_key)
+    if (
+        routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+        and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+    ):
         return False
-    if session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
+    if target_session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
         return False
-    current_title = session.metadata.get(WEBUI_TITLE_METADATA_KEY)
+    current_title = target_session.metadata.get(WEBUI_TITLE_METADATA_KEY)
     if isinstance(current_title, str) and current_title.strip():
         cleaned_current_title = clean_generated_title(current_title)
         if cleaned_current_title:
             if cleaned_current_title != current_title:
-                session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                sessions.save(session)
+                target_session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
+                sessions.save(target_session)
             return False
-        session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
+        target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
-    user_text, assistant_text = _title_inputs(session)
+    if target_is_routed:
+        user_text, assistant_text = _title_inputs(routed_session)
+    else:
+        # Shared-session content mixes every channel; generation runs right
+        # after this turn, so its exchange is the latest pair.
+        user_text, assistant_text = _latest_title_inputs(routed_session)
     if not user_text:
         return False
 
@@ -207,24 +256,25 @@ async def maybe_generate_webui_title(
         prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
-        response = await provider.chat_with_retry(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            tools=None,
-            model=model,
-            max_tokens=TITLE_GENERATION_MAX_TOKENS,
-            temperature=0.2,
-            reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-            retry_mode="standard",
-        )
+        with llm_usage_source("system"):
+            response = await provider.chat_with_retry(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You write short, neutral chat titles. "
+                            "Return only the title text."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                tools=None,
+                model=model,
+                max_tokens=TITLE_GENERATION_MAX_TOKENS,
+                temperature=0.2,
+                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                retry_mode="standard",
+            )
     except Exception:
         logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
         return False
@@ -237,14 +287,15 @@ async def maybe_generate_webui_title(
             response.finish_reason,
         )
         return False
-    session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    sessions.save(session)
+    target_session.metadata[WEBUI_TITLE_METADATA_KEY] = title
+    sessions.save(target_session)
     return True
 
 
 async def maybe_generate_webui_title_after_turn(
     *,
     channel: str,
+    chat_id: str,
     metadata: dict[str, Any],
     sessions: SessionManager,
     session_key: str,
@@ -253,11 +304,15 @@ async def maybe_generate_webui_title_after_turn(
 ) -> bool:
     if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
+    origin_session_key = f"{channel}:{chat_id}"
     return await maybe_generate_webui_title(
         sessions=sessions,
         session_key=session_key,
         provider=provider,
         model=model,
+        target_session_key=(
+            origin_session_key if origin_session_key != session_key else None
+        ),
     )
 
 
@@ -495,6 +550,7 @@ def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserve
                         if context.runtime is not None
                         else None
                     ),
+                    fallback=True,
                 ),
                 metadata=context.metadata,
             )
@@ -510,6 +566,7 @@ class WebuiTurnCoordinator:
     bus: MessageBus
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
+    recovery: RecoveryCoordinator | None = None
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
@@ -572,7 +629,7 @@ class WebuiTurnCoordinator:
             event.context.channel != "system"
             or envelope is None
             or envelope["target_session_key"] != session_key
-            or not session_key.startswith("websocket:")
+            or not is_webui_session_key(session_key)
         ):
             return
         persisted = self.sessions.read_session_metadata(session_key)
@@ -653,6 +710,8 @@ class WebuiTurnCoordinator:
                 event.runtime.context_window_tokens if event.runtime is not None else None
             ),
         )
+        if self.recovery is not None:
+            await self.recovery.turn_completed(event.context.session_key)
         self._schedule_title_update_from_event(event)
 
     async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:
@@ -684,22 +743,13 @@ class WebuiTurnCoordinator:
             )
         )
 
-    async def publish_run_status(
-        self,
-        msg: InboundMessage,
-        status: str,
-        *,
-        started_at: float | None = None,
-    ) -> None:
-        await publish_turn_run_status(self.bus, msg, status, started_at=started_at)
-
     async def handle_turn_end(
         self,
         msg: InboundMessage,
         *,
         session_key: str,
         latency_ms: int | None,
-        usage: dict[str, int] | None = None,
+        usage: LLMUsage | None = None,
         context_window_tokens: int | None = None,
     ) -> None:
         if msg.channel != "websocket":
@@ -713,7 +763,7 @@ class WebuiTurnCoordinator:
                 event=TurnEndEvent(
                     latency_ms=latency_ms,
                     goal_state=goal_state_ws_blob(session.metadata),
-                    usage=usage or None,
+                    usage=usage,
                     context_window_tokens=context_window_tokens,
                 ),
                 metadata=msg.metadata,
@@ -733,6 +783,7 @@ class WebuiTurnCoordinator:
         ) -> None:
             generated = await maybe_generate_webui_title_after_turn(
                 channel=event.context.channel,
+                chat_id=event.context.chat_id,
                 metadata=event.context.metadata,
                 sessions=self.sessions,
                 session_key=event.context.session_key,

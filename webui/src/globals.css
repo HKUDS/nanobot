@@ -165,11 +165,19 @@
     pointer-events: none;
     background-color: rgb(236 141 49);
     opacity: 0;
-    transition: opacity 220ms ease-out;
+    transition: opacity 180ms ease-out;
+  }
+
+  .composer-model-badge[data-fallback="true"] {
+    border-color: rgb(236 141 49 / 0.38);
   }
 
   .composer-model-badge[data-fallback="true"]::before {
-    opacity: 1;
+    opacity: 0.1;
+  }
+
+  .dark .composer-model-badge[data-fallback="true"]::before {
+    opacity: 0.15;
   }
 
   .composer-model-badge > * {
@@ -369,6 +377,7 @@
    * bottom without a remount or a transform clone.
    */
   .thread-layout {
+    --thread-composer-fade-height: 2.25rem;
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -382,6 +391,33 @@
     .thread-layout[data-layout="hero"] {
       grid-template-rows: minmax(min-content, 1fr) auto 1fr;
     }
+  }
+
+  /**
+   * Keep the transcript and composer visually continuous. The scrollport owns
+   * the fade because overflow clips its contents before an adjacent overlay
+   * can soften the edge. The matching in-flow gap keeps the last line fully
+   * visible once the user reaches the bottom.
+   */
+  .thread-message-viewport {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+  }
+  .thread-message-end-gap {
+    height: var(--thread-composer-fade-height);
+  }
+  .thread-composer-dock {
+    background: hsl(var(--background));
   }
 
   @keyframes composer-status-strip-enter {
@@ -674,7 +710,7 @@
 /*
  * Composer controls compress against their actual container, not the viewport.
  * Permission state has priority over the model label; both retain their full
- * accessible names and title text when their visible labels are shortened.
+ * accessible names and tooltip text when their visible labels are shortened.
  */
 .thread-composer-surface {
   container-name: thread-composer;
@@ -695,9 +731,93 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
-.thread-composer-model-badge:not([data-switching="true"]):active
-  > .composer-model-pill {
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
   transform: scale(0.98);
+}
+
+.composer-model-pill-setup {
+  border-color: hsl(var(--border) / 0.72);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.62),
+    0 1px 2px hsl(var(--foreground) / 0.035);
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dark .composer-model-pill-setup {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.thread-composer-model-badge:hover > .composer-model-pill-setup {
+  border-color: hsl(var(--border));
+  background-color: hsl(var(--accent) / 0.7);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.72),
+    0 2px 5px hsl(var(--foreground) / 0.06);
+}
+
+.dark .thread-composer-model-badge:hover > .composer-model-pill-setup {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 2px 5px rgb(0 0 0 / 0.16);
+}
+
+@keyframes composer-model-pill-setup-attention {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  22% {
+    transform: translateX(-3px);
+  }
+
+  46% {
+    transform: translateX(3px);
+  }
+
+  68% {
+    transform: translateX(-2px);
+  }
+
+  86% {
+    transform: translateX(1px);
+  }
+}
+
+.composer-model-pill-setup-attention {
+  animation: composer-model-pill-setup-attention 280ms cubic-bezier(0.22, 0.8, 0.32, 1);
+}
+
+@keyframes composer-model-pill-viewport-enter {
+  from {
+    transform: scale(0.9074);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.composer-model-pill-viewport {
+  transform-origin: right center;
+  animation: composer-model-pill-viewport-enter 210ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+}
+
+.composer-model-pill-dock {
+  transform-origin: right center;
+  transition-property: none;
+  will-change: transform;
+}
+
+.composer-model-pill-track[data-settling="true"],
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes preset-name-shake {
@@ -715,38 +835,17 @@
   }
 }
 
-@keyframes composer-model-pill-viewport-enter {
-  from {
-    transform: scale(0.9074);
-  }
-
-  to {
-    transform: scale(1);
-  }
-}
-
-.composer-model-pill-viewport {
-  transform-origin: right center;
-  animation: composer-model-pill-viewport-enter 210ms
-    cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
-}
-
-.composer-model-pill-dock {
-  transform-origin: right center;
-  transition-property: none;
-  will-change: transform;
-}
-
-.composer-model-pill-track[data-settling="true"],
-.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .thread-composer-model-badge:active > .composer-model-pill {
+  .thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
     transform: none !important;
+  }
+
+  .composer-model-pill-setup {
+    transition: none;
+  }
+
+  .composer-model-pill-setup-attention {
+    animation: none;
   }
 
   .composer-model-pill-track[data-settling="true"],

@@ -3,14 +3,22 @@ import {
   MarkdownRenderable,
   RGBA,
   ScrollBoxRenderable,
+  StyledText,
   SyntaxStyle,
   TextAttributes,
   TextRenderable,
   type CliRenderer,
+  type TextChunk,
   type TreeSitterClient,
 } from "@opentui/core"
 
-import type { FileEditEvent, HistoryMessage, ToolProgressEvent } from "./protocol"
+import type {
+  FileEditEvent,
+  HistoryMessage,
+  MediaAttachment,
+  ToolProgressEvent,
+} from "./protocol"
+import { renderLatexAsUnicode } from "./latex"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
@@ -44,12 +52,66 @@ interface Activity {
   events: Map<string, ToolProgressEvent>
 }
 
-const ACTIVITY_PREVIEW_LINES = 6
+interface ActivityPreviewItem {
+  text: string
+  steps: number
+  group?: string
+}
+
+const ACTIVITY_PREVIEW_LINES = 4
 // OpenTUI renders at 30 FPS. Re-parsing the entire Markdown buffer for every
 // provider token turns long answers into quadratic work without producing any
 // additional visible frames. Paint the first token immediately, then coalesce
 // subsequent deltas to the renderer cadence.
 const STREAM_FLUSH_MS = 32
+
+export interface UserMessageMedia {
+  kind?: MediaAttachment["kind"]
+  name?: string
+}
+
+interface UserMessageProjection {
+  imageLabels: string[]
+  attachmentNames: string[]
+}
+
+function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProjection {
+  const imageNames: Array<string | undefined> = []
+  const attachmentNames: string[] = []
+  for (const item of media) {
+    // Outbound TUI media has no explicit kind because this path currently only
+    // sends clipboard images. Gateway and history media carry the kind.
+    if (item.kind === undefined || item.kind === "image") imageNames.push(item.name)
+    else if (item.name) attachmentNames.push(item.name)
+  }
+
+  const used = new Set<number>()
+  let next = 1
+  const imageLabels = imageNames.map((name) => {
+    const match = name?.match(/^clipboard-image-(\d+)\.[^.]+$/iu)
+    const preferred = match ? Number(match[1]) : 0
+    let index = Number.isSafeInteger(preferred) && preferred > 0 && !used.has(preferred)
+      ? preferred
+      : next
+    while (used.has(index)) index += 1
+    used.add(index)
+    while (used.has(next)) next += 1
+    return `[Image #${index}]`
+  })
+  return { imageLabels, attachmentNames }
+}
+
+export function userMessageText(
+  content: string,
+  media: readonly UserMessageMedia[] = [],
+  displayContent?: string,
+): string {
+  const { imageLabels, attachmentNames } = projectUserMessage(media)
+  return [
+    displayContent ?? [content, imageLabels.join(" ")].filter(Boolean).join(" "),
+    attachmentNames.length ? `Attachments: ${attachmentNames.join(", ")}` : "",
+  ].filter(Boolean).join("\n")
+}
 
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
@@ -64,6 +126,12 @@ export class Transcript {
   private readonly activities = new Set<Activity>()
   private readonly frames = new Set<BoxRenderable>()
   private readonly userRows = new Set<BoxRenderable>()
+  private readonly userMessages = new Set<{
+    renderable: TextRenderable
+    content: string
+    media: UserMessageMedia[]
+    displayContent?: string
+  }>()
   private readonly userTurnIds = new Set<string>()
   private wrote = false
   private nextId = 0
@@ -77,13 +145,13 @@ export class Transcript {
     private theme: TranscriptTheme,
     private readonly treeSitterClient: TreeSitterClient,
     private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
-    private readonly showHeader = true,
+    private readonly workspace = "",
   ) {
     this.root = new ScrollBoxRenderable(renderer, {
       id: "nanobot-tui-transcript",
       width: "100%",
       minHeight: 0,
-      flexGrow: 1,
+      flexGrow: 0,
       scrollX: false,
       scrollY: true,
       stickyScroll: true,
@@ -91,6 +159,7 @@ export class Transcript {
       viewportCulling: true,
       contentOptions: {
         flexDirection: "column",
+        minHeight: 0,
         paddingTop: 1,
         paddingBottom: 1,
         paddingLeft: 1,
@@ -107,6 +176,13 @@ export class Transcript {
     const previousSyntax = this.theme.syntax
     this.theme = theme
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
+    for (const message of this.userMessages) {
+      message.renderable.content = this.userMessageContent(
+        message.content,
+        message.media,
+        message.displayContent,
+      )
+    }
     for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
     for (const frame of this.frames) frame.borderColor = theme.border
     for (const row of this.userRows) {
@@ -121,7 +197,6 @@ export class Transcript {
   }
 
   header(options: TranscriptHeader): void {
-    if (!this.showHeader) return
     const row = new BoxRenderable(this.renderer, {
       id: this.id("header-row"),
       width: "100%",
@@ -136,7 +211,7 @@ export class Transcript {
     const title = this.createText(`>_  nanobot  v${options.version}`, "text", true)
     const context = this.createText([
       "",
-      `${options.model}  ·  ${options.access}`,
+      `${options.model}     ${options.access}`,
       options.workspace,
     ].join("\n"), "muted")
     row.add(title)
@@ -162,6 +237,7 @@ export class Transcript {
     this.activities.clear()
     this.frames.clear()
     this.userRows.clear()
+    this.userMessages.clear()
     this.userTurnIds.clear()
     this.wrote = false
     this.nextId = 0
@@ -173,7 +249,9 @@ export class Transcript {
 
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
-      if (message.role === "user") this.user(message.content, message.turnId)
+      if (message.role === "user") {
+        this.user(message.content, message.turnId, message.media)
+      }
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
@@ -185,11 +263,11 @@ export class Transcript {
     if (messages.length === 0) return
     const previousTop = this.root.scrollTop
     const previousHeight = this.root.scrollHeight
-    let index = this.showHeader ? 1 : 0
+    let index = 1 // Keep the launch header first.
     for (const message of messages) {
       if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue
-        this.writeRole("›", message.content, "user", index++)
+        this.writeUser(message.content, message.media, index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeMarkdown(message.content, false, index++)
@@ -215,11 +293,16 @@ export class Transcript {
     return this.root.scrollTop <= 0
   }
 
-  user(content: string, turnId?: string): boolean {
+  user(
+    content: string,
+    turnId?: string,
+    media: readonly UserMessageMedia[] = [],
+    displayContent?: string,
+  ): boolean {
     if (turnId && this.userTurnIds.has(turnId)) return false
     this.noteOutput()
     this.finishActivity()
-    this.writeRole("›", content, "user")
+    this.writeUser(content, media, undefined, displayContent)
     if (turnId) this.userTurnIds.add(turnId)
     return true
   }
@@ -248,7 +331,7 @@ export class Transcript {
     }
     if (!this.live.content && !this.pendingStream) {
       this.live.content = delta
-      this.live.markdown.content = delta
+      this.live.markdown.content = renderLatexAsUnicode(delta)
       return
     }
     this.pendingStream += delta
@@ -262,7 +345,7 @@ export class Transcript {
       const content = fallback || this.live.content
       // Finalize the retained Markdown node in place. This preserves scroll
       // anchors and avoids the one-frame jump caused by replacing the row.
-      this.live.markdown.content = content
+      this.live.markdown.content = renderLatexAsUnicode(content)
       this.live.markdown.streaming = false
       this.live = null
     } else if (fallback.trim()) {
@@ -275,7 +358,7 @@ export class Transcript {
     this.clearStreamTimer()
     this.pendingStream = ""
     this.live.content = content
-    this.live.markdown.content = content
+    this.live.markdown.content = renderLatexAsUnicode(content)
   }
 
   progress(content: string, events: ToolProgressEvent[] = []): string {
@@ -327,6 +410,7 @@ export class Transcript {
     this.activity = null
     this.frames.clear()
     this.userRows.clear()
+    this.userMessages.clear()
     this.theme.syntax.destroy()
   }
 
@@ -335,7 +419,7 @@ export class Transcript {
     if (!this.live || !this.pendingStream) return
     this.live.content += this.pendingStream
     this.pendingStream = ""
-    this.live.markdown.content = this.live.content
+    this.live.markdown.content = renderLatexAsUnicode(this.live.content)
   }
 
   private clearStreamTimer(): void {
@@ -424,7 +508,7 @@ export class Transcript {
       const key = event.call_id ? `tool:${event.call_id}` : ""
       const merged = key ? mergeToolEvent(activity.events.get(key), event) : event
       if (key) activity.events.set(key, merged)
-      return { key, line: renderToolEvent(merged) }
+      return { key, line: renderToolEvent(merged, { workspace: this.workspace }) }
     })
     const lines = events.length > 0
       ? projected.map(({ line }) => line).filter(Boolean)
@@ -448,13 +532,18 @@ export class Transcript {
       activity.text.content = activity.lines.join("\n")
       return
     }
-    const visible = activity.lines.slice(-(ACTIVITY_PREVIEW_LINES - 1))
-    const hidden = activity.lines.length - visible.length
-    activity.text.content = [`  … ${hidden} earlier steps · Ctrl+O expand`, ...visible].join("\n")
+    const visible = activityPreview(activity.lines).slice(-(ACTIVITY_PREVIEW_LINES - 1))
+    const visibleSteps = visible.reduce((total, item) => total + item.steps, 0)
+    const hidden = activity.lines.length - visibleSteps
+    const disclosure = hidden > 0 ? `${hidden} earlier steps` : `${activity.lines.length} steps`
+    activity.text.content = [
+      `  … ${disclosure} · Ctrl+O expand`,
+      ...visible.map((item) => item.text),
+    ].join("\n")
   }
 
   private createText(
-    content: string,
+    content: string | StyledText,
     tone: "text" | "muted" | "error" | "user",
     bold = false,
     id = "text",
@@ -473,10 +562,10 @@ export class Transcript {
 
   private writeRole(
     marker: string,
-    content: string,
+    content: string | StyledText,
     tone: "muted" | "error" | "user",
     index?: number,
-  ): void {
+  ): TextRenderable {
     const row = this.createRow(tone === "user" ? "user" : "notice", "row")
     if (tone === "user") {
       row.backgroundColor = this.theme.userBackground
@@ -495,12 +584,82 @@ export class Transcript {
     row.add(text)
     this.root.add(row, index)
     this.wrote = true
+    return text
+  }
+
+  private writeUser(
+    content: string,
+    media: readonly UserMessageMedia[] = [],
+    index?: number,
+    displayContent?: string,
+  ): void {
+    const retainedMedia = [...media]
+    const renderable = this.writeRole(
+      "›",
+      this.userMessageContent(content, retainedMedia, displayContent),
+      "user",
+      index,
+    )
+    this.userMessages.add({ renderable, content, media: retainedMedia, displayContent })
+  }
+
+  private userMessageContent(
+    content: string,
+    media: readonly UserMessageMedia[],
+    displayContent?: string,
+  ): StyledText {
+    const { imageLabels, attachmentNames } = projectUserMessage(media)
+    const chunks: TextChunk[] = []
+    const append = (text: string) => {
+      if (text) chunks.push({ __isChunk: true, text })
+    }
+    const nextLine = () => {
+      if (chunks.length) append("\n")
+    }
+
+    if (displayContent !== undefined) {
+      const ranges = imageLabels
+        .map((label) => ({ label, start: displayContent.indexOf(label) }))
+        .filter(({ start }) => start >= 0)
+        .sort((left, right) => left.start - right.start)
+      let cursor = 0
+      for (const { label, start } of ranges) {
+        append(displayContent.slice(cursor, start))
+        chunks.push({
+          __isChunk: true,
+          text: label,
+          fg: RGBA.fromHex(this.theme.user),
+          attributes: TextAttributes.BOLD,
+        })
+        cursor = start + label.length
+      }
+      append(displayContent.slice(cursor))
+    } else {
+      append(content)
+    }
+    if (displayContent === undefined && imageLabels.length) {
+      if (chunks.length) append(" ")
+      for (const [index, label] of imageLabels.entries()) {
+        if (index > 0) append(" ")
+        chunks.push({
+          __isChunk: true,
+          text: label,
+          fg: RGBA.fromHex(this.theme.user),
+          attributes: TextAttributes.BOLD,
+        })
+      }
+    }
+    if (attachmentNames.length) {
+      nextLine()
+      append(`Attachments: ${attachmentNames.join(", ")}`)
+    }
+    return new StyledText(chunks)
   }
 
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
-      content,
+      content: renderLatexAsUnicode(content),
       width: "auto",
       minWidth: 0,
       flexGrow: 1,
@@ -540,6 +699,22 @@ export class Transcript {
 function cleanProgress(value: string): string {
   const text = value.trim().replace(/^\*\*(.*?)\*\*$/u, "$1").replace(/\s+/gu, " ")
   return text ? `  · ${text}` : ""
+}
+
+function activityPreview(lines: readonly string[]): ActivityPreviewItem[] {
+  const preview: ActivityPreviewItem[] = []
+  for (const line of lines) {
+    const match = line.match(/^  ([›✓]) (Read|Edited|Editing)  /u)
+    const group = match ? `${match[1]}:${match[2]}` : undefined
+    const previous = preview.at(-1)
+    if (match && group && previous?.group === group) {
+      previous.steps += 1
+      previous.text = `  ${match[1]} ${match[2]} ${previous.steps} files`
+      continue
+    }
+    preview.push({ text: line, steps: 1, ...(group ? { group } : {}) })
+  }
+  return preview
 }
 
 function formatDiffStat(edit: FileEditEvent): string {

@@ -251,16 +251,16 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
         offset=IntegerSchema(
-            description="Line number to start reading from (1-indexed, default 1)",
+            description="1-based text or extracted-document line (default 1)",
             minimum=1,
         ),
         limit=IntegerSchema(
-            description="Maximum number of lines to read (default 2000)",
+            description="Maximum lines to return (default 2000)",
             minimum=1,
         ),
-        pages=StringSchema("Page range for PDF files, e.g. '1-5' (default: all, max 20 pages)"),
+        pages=StringSchema("PDF page number or range, e.g. '7' or '1-5' (max 20 pages)"),
         force=BooleanSchema(
-            description="Bypass same-file read deduplication and return content again.",
+            description="Return an unchanged range again",
             default=False,
         ),
         required=["path"],
@@ -282,18 +282,8 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read a file (text, image, or document). "
-            "Text output format: LINE_NUM|CONTENT. "
-            "Images return visual content for analysis. "
-            "Supports PDF, DOCX, XLSX, PPTX documents. "
-            "Uploaded non-image attachments are referenced by path; read them "
-            "with this tool only when their contents are needed. "
-            "Use find_files/list_dir first when the path is uncertain. "
-            "Read the relevant range before editing so replacements or patches "
-            "are based on current content. "
-            "Use offset and limit for large text files. "
-            "Use force=true to re-read content even if unchanged. "
-            "Reads exceeding ~128K chars are truncated."
+            "Read text, images, PDFs, and Office documents by path. "
+            "Text is line-numbered; use offset/limit or pages for targeted ranges."
         )
 
     @property
@@ -342,7 +332,7 @@ class ReadFileTool(_FsTool):
 
             # Office document support
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-                return self._read_office_doc(fp)
+                return self._read_office_doc(fp, offset, limit)
 
             raw = fp.read_bytes()
             if not raw:
@@ -464,8 +454,8 @@ class ReadFileTool(_FsTool):
                 max_pages=self._MAX_PDF_PAGES,
                 max_chars=self._MAX_CHARS,
             )
-        except PdfPageRangeError:
-            return ToolResult.error(f"Error: Invalid page range '{pages}'. Use format like '1-5'.")
+        except PdfPageRangeError as e:
+            return ToolResult.error(f"Error: Invalid page range '{pages}': {e!s}.")
         except PdfSafetyError as e:
             return ToolResult.error(f"Error reading PDF: {e}")
         except Exception as e:
@@ -484,24 +474,85 @@ class ReadFileTool(_FsTool):
             )
         return result
 
-    def _read_office_doc(self, fp: Path) -> str:
-        from nanobot.utils.document import extract_text
+    def _read_office_doc(
+        self,
+        fp: Path,
+        offset: int,
+        limit: int | None,
+    ) -> str:
+        from nanobot.utils.document import open_document_line_source
 
-        result = extract_text(fp)
+        offset = max(1, offset)
+        requested_limit = limit or self._DEFAULT_LIMIT
+        source_iterator = None
+        try:
+            source = open_document_line_source(fp)
+            if source is None:
+                return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
+            source_iterator = source.lines
+            numbered: list[str] = []
+            output_chars = 0
+            total_seen = 0
+            end = offset - 1
+            has_more = False
+            line_was_clipped = False
 
-        if result is None:
-            return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
+            for line in source_iterator:
+                total_seen = line.extracted_line
+                if line.extracted_line < offset:
+                    continue
+                if len(numbered) >= requested_limit:
+                    has_more = True
+                    break
 
-        if result.startswith("[error:"):
-            return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {result}")
+                rendered = f"{line.extracted_line}| {line.text}"
+                extra = 1 if numbered else 0
+                if output_chars + extra + len(rendered) > self._MAX_CHARS:
+                    if numbered:
+                        has_more = True
+                        break
+                    prefix = f"{line.extracted_line}| "
+                    available = max(0, self._MAX_CHARS - len(prefix) - 3)
+                    rendered = f"{prefix}{line.text[:available]}..."
+                    line_was_clipped = True
+                    has_more = True
+                numbered.append(rendered)
+                output_chars += extra + len(rendered)
+                end = line.extracted_line
+                if line_was_clipped:
+                    break
 
-        if not result:
-            return f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
+            if not numbered:
+                if total_seen == 0:
+                    return (
+                        f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
+                    )
+                return ToolResult.error(
+                    f"Error: offset {offset} is beyond end of extracted document "
+                    f"({total_seen} lines)"
+                )
 
-        if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(Document text truncated at ~128K chars)"
-
-        return result
+            output = "\n".join(numbered)
+            if has_more:
+                if line_was_clipped:
+                    output += (
+                        "\n\n(Document text truncated at ~128K chars; line clipped. "
+                        f"Use offset={end + 1} to continue.)"
+                    )
+                else:
+                    output += (
+                        f"\n\n(Showing extracted lines {offset}-{end}. "
+                        f"Use offset={end + 1} to continue.)"
+                    )
+            else:
+                output += f"\n\n(End of document — {total_seen} extracted lines total)"
+            return output
+        except Exception as e:
+            return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {e!s}")
+        finally:
+            close = getattr(source_iterator, "close", None)
+            if close is not None:
+                close()
 
 
 # ---------------------------------------------------------------------------
@@ -810,8 +861,10 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to edit"),
-        old_text=StringSchema("The text to find and replace"),
-        new_text=StringSchema("The text to replace with"),
+        old_text=StringSchema("The text to find and replace; copy it from read_file."),
+        new_text=StringSchema(
+            "The replacement text; must differ from old_text for an existing file."
+        ),
         replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
         occurrence=IntegerSchema(
             description="Optional 1-based occurrence to replace when old_text appears multiple times.",
@@ -848,15 +901,9 @@ class EditFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Perform a small, exact replacement in one file by replacing "
-            "old_text with new_text. When replacing text in an existing file, "
-            "old_text and new_text must be different. Use this for narrow text substitutions "
-            "with old_text copied from read_file. For multi-file, structural, "
-            "or generated code edits, prefer apply_patch. If old_text matches "
-            "multiple times, provide more context or set occurrence, line_hint, "
-            "replace_all, and expected_replacements. When editing from numbered "
-            "read_file output, set line_hint to the exact target line. "
-            "Shows closest-match diagnostics on failure."
+            "Perform a small, exact replacement in one file. "
+            "Prefer apply_patch for multi-file, structural, or generated edits. "
+            "occurrence, line_hint, and replace_all=true are mutually exclusive."
         )
 
     @staticmethod

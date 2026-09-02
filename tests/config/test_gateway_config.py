@@ -13,3 +13,12 @@ def test_gateway_restart_mode_accepts_camel_alias():
 def test_gateway_restart_mode_rejects_unknown_value():
     with pytest.raises(ValueError):
         GatewayConfig(restart_mode="service")
+
+
+def test_heartbeat_ignores_removed_retention_limit():
+    config = Config.model_validate(
+        {"gateway": {"heartbeat": {"keepRecentMessages": 8}}}
+    )
+
+    heartbeat = config.model_dump(by_alias=True)["gateway"]["heartbeat"]
+    assert "keepRecentMessages" not in heartbeat

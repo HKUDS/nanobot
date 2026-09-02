@@ -8,6 +8,19 @@ import pytest
 
 from nanobot.agent.tools import file_state
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
+from nanobot.utils.document import (
+    DocumentExtractionError,
+    DocumentLineSource,
+    LocatedDocumentLine,
+)
+
+
+def _document_source(text: str) -> DocumentLineSource:
+    lines = (
+        LocatedDocumentLine(line, line_no, "")
+        for line_no, line in enumerate(text.splitlines(), 1)
+    )
+    return DocumentLineSource(lines)
 
 
 @pytest.fixture(autouse=True)
@@ -220,6 +233,12 @@ class TestReadPdf:
 
         assert "Invalid page range" in result
 
+        out_of_bounds = await tool.execute(path=str(pdf_path), pages="99")
+        assert out_of_bounds == (
+            "Error: Invalid page range '99': document has 1 page; "
+            "use a page number or range within 1-1."
+        )
+
     @pytest.mark.asyncio
     async def test_pdf_file_not_found_error(self, tool, tmp_path):
         result = await tool.execute(path=str(tmp_path / "nope.pdf"))
@@ -345,7 +364,10 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_docx_returns_extracted_text(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="Title\n\nParagraph 1"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source("Title\n\nParagraph 1"),
+        ):
             f = tmp_path / "test.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -355,7 +377,10 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_xlsx_returns_extracted_text(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source("--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30"),
+        ):
             f = tmp_path / "test.xlsx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -363,8 +388,58 @@ class TestReadOfficeDocuments:
         assert "Alice" in result
 
     @pytest.mark.asyncio
+    async def test_office_documents_support_extracted_line_ranges(self, tool, tmp_path):
+        extracted = "--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30\nBob\t25"
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source(extracted),
+        ):
+            f = tmp_path / "test.xlsx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f), offset=3, limit=1)
+
+        assert "3| Alice\t30" in result
+        assert "Name\tAge" not in result
+        assert "Use offset=4 to continue" in result
+
+    @pytest.mark.asyncio
+    async def test_office_range_reaches_beyond_attachment_preview_limit(
+        self,
+        tool,
+        tmp_path,
+        monkeypatch,
+    ):
+        from openpyxl import Workbook
+
+        from nanobot.utils import document as document_utils
+
+        workbook_path = tmp_path / "long.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        for row in range(1, 20):
+            sheet.append([f"ordinary-row-{row}"])
+        sheet.append(["late-content"])
+        workbook.save(workbook_path)
+        workbook.close()
+        monkeypatch.setattr(document_utils, "_MAX_TEXT_LENGTH", 50)
+
+        preview = document_utils.extract_text(workbook_path)
+        assert preview is not None
+        assert "late-content" not in preview
+
+        result = await tool.execute(path=str(workbook_path), offset=21, limit=1)
+
+        assert "21| late-content" in result
+        assert "beyond end" not in result
+
+    @pytest.mark.asyncio
     async def test_pptx_returns_extracted_text(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source(
+                "--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"
+            ),
+        ):
             f = tmp_path / "test.pptx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -373,7 +448,10 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_docx_missing_library(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="[error: python-docx not installed]"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            side_effect=DocumentExtractionError("python-docx not installed"),
+        ):
             f = tmp_path / "test.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -382,7 +460,10 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_docx_corrupt_file(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: bad zip]"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            side_effect=DocumentExtractionError("failed to extract DOCX: bad zip"),
+        ):
             f = tmp_path / "test.docx"
             f.write_bytes(b"not-a-zip")
             result = await tool.execute(path=str(f))
@@ -391,7 +472,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_unsupported_extension(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value=None):
+        with patch("nanobot.utils.document.open_document_line_source", return_value=None):
             f = tmp_path / "test.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -400,7 +481,10 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_empty_document_returns_descriptive_message(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value=""):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source(""),
+        ):
             f = tmp_path / "empty.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -415,7 +499,10 @@ class TestOfficeDocTruncation:
 
     @pytest.mark.asyncio
     async def test_large_document_truncated(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="x" * 200_000):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source("x" * 200_000),
+        ):
             f = tmp_path / "large.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -424,7 +511,10 @@ class TestOfficeDocTruncation:
 
     @pytest.mark.asyncio
     async def test_small_document_not_truncated(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="Hello world"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            return_value=_document_source("Hello world"),
+        ):
             f = tmp_path / "small.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -433,7 +523,12 @@ class TestOfficeDocTruncation:
 
     @pytest.mark.asyncio
     async def test_error_response_not_truncated(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: something went wrong]"):
+        with patch(
+            "nanobot.utils.document.open_document_line_source",
+            side_effect=DocumentExtractionError(
+                "failed to extract DOCX: something went wrong"
+            ),
+        ):
             f = tmp_path / "bad.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))

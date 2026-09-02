@@ -87,11 +87,11 @@ def _make_fake_compact(
         state["count"] += 1
         session = loop.sessions.get_or_create(key)
 
-        tail = list(session.messages[session.last_consolidated:])
+        tail = list(session.messages[session.last_archived:])
         if not tail:
             loop.sessions.save(session)
             return ""
-        archive_end = session.last_consolidated + len(tail)
+        archive_end = session.last_archived + len(tail)
         archive_msgs = tail
 
         last_active = session.updated_at
@@ -108,7 +108,7 @@ def _make_fake_compact(
                 "last_active": last_active.isoformat(),
             }
 
-        session.last_consolidated = archive_end
+        session.last_archived = archive_end
         loop.sessions.save(session)
         return s
 
@@ -227,30 +227,6 @@ class TestAgentLoopTTLParam:
         """AutoCompact default TTL should be 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
-
-    @pytest.mark.asyncio
-    async def test_process_message_reads_history_with_token_budget(self, tmp_path):
-        """_process_message should pass an auto-derived token budget to get_history."""
-        loop = _make_loop(tmp_path)
-        session = loop.sessions.get_or_create("cli:direct")
-        session.get_history = MagicMock(return_value=[])
-        loop.context.build_messages = MagicMock(return_value=[])
-        loop._run_agent_loop = AsyncMock(return_value=("ok", [], [], "stop", False))
-        loop._save_turn = MagicMock()
-
-        msg = InboundMessage(
-            channel="cli",
-            sender_id="u1",
-            chat_id="direct",
-            content="hello",
-        )
-        await loop._process_message(msg)
-        session.get_history.assert_called_once()
-        kwargs = session.get_history.call_args.kwargs
-        assert isinstance(kwargs.get("max_tokens"), int)
-        assert kwargs["max_tokens"] > 0
-        assert set(kwargs) == {"max_tokens", "extend_to_user"}
-
 
 class TestAutoCompact:
     """Test the _archive method."""
@@ -392,12 +368,12 @@ class TestAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_respects_last_consolidated(self, tmp_path):
-        """_archive should only archive un-consolidated messages."""
+    async def test_auto_compact_respects_last_archived(self, tmp_path):
+        """_archive should process only unarchived messages."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 14)
-        session.last_consolidated = 18
+        session.last_archived = 18
         loop.sessions.save(session)
 
         archived_messages = []
@@ -1295,9 +1271,9 @@ class TestSummaryPersistence:
         assert "_last_summary" in reloaded.metadata
 
         # Simulate /new command
-        session.clear()
-        loop.sessions.save(session)
-        loop.sessions.invalidate(session.key)
+        reloaded.clear()
+        loop.sessions.save(reloaded)
+        loop.sessions.invalidate(reloaded.key)
 
         # After /new, metadata should no longer contain _last_summary
         fresh = loop.sessions.get_or_create("cli:test")

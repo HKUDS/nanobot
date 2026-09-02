@@ -204,13 +204,15 @@ export function ModelIdPicker({
   const providerConfigured = settingsProviderConfigured(settings, effectiveProvider);
   const providerRequiresConfiguration =
     !hasStaticModels && hasConcreteProvider && !providerConfigured;
-  const providerHasBuiltinModels = providerRow?.model_catalog === "builtin";
+  const providerHasManagedModels = ["builtin", "hybrid"].includes(
+    providerRow?.model_catalog ?? "",
+  );
   const providerUsesManualModelIds =
     !hasStaticModels &&
     hasConcreteProvider &&
     providerConfigured &&
     providerRow?.auth_type === "oauth" &&
-    !providerHasBuiltinModels;
+    !providerHasManagedModels;
   const canFetchModels =
     !hasStaticModels &&
     hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;

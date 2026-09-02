@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -128,7 +130,7 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
         nonlocal call_count
         call_count += 1
         captured_messages.append([dict(message) for message in messages])
-        return LLMResponse(content=f"answer-{call_count}", tool_calls=[], usage={})
+        return LLMResponse(content=f"answer-{call_count}", tool_calls=[], usage=None)
 
     loop = _make_loop(workspace)
     loop.provider.chat_with_retry = chat_with_retry
@@ -145,16 +147,19 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
         )
     )
 
-    final_content, _, _, _, had_injections = await loop._run_agent_loop(
-        [{"role": "user", "content": "hello"}],
-        runtime=loop.llm_runtime(),
-        channel="cli",
-        chat_id="c",
+    runtime = loop.llm_runtime()
+    result = await loop._run_agent_loop(
+        TranscriptInput(
+            history=[{"role": "user", "content": "hello"}],
+            current_message=None,
+        ),
+        runtime=runtime,
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
     )
 
-    assert final_content == "answer-2"
-    assert had_injections is True
+    assert result.final_content == "answer-2"
+    assert result.had_injections is True
     injected_user_content = [
         message["content"]
         for message in captured_messages[-1]

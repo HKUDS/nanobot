@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -25,10 +25,10 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
             return LLMResponse(
                 content="working",
                 tool_calls=[ToolCallRequest(id="call_big", name="list_dir", arguments={"path": "."})],
-                usage={"prompt_tokens": 5, "completion_tokens": 3},
+                usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
             )
         captured_second_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -138,10 +138,10 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
             return LLMResponse(
                 content="reading",
                 tool_calls=[ToolCallRequest(id="call_rf", name="read_file", arguments={"path": "big.txt"})],
-                usage={"prompt_tokens": 5, "completion_tokens": 3},
+                usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
             )
         captured_second_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
@@ -183,10 +183,10 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
             return LLMResponse(
                 content="working",
                 tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-                usage={"prompt_tokens": 5, "completion_tokens": 3},
+                usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
             )
         captured_second_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()

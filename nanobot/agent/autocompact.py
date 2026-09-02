@@ -48,7 +48,7 @@ class AutoCompact:
 
     def _has_unarchived_messages(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
-        return session.last_consolidated < len(session.messages)
+        return session.last_archived < len(session.messages)
 
     @classmethod
     def _is_internal_session(cls, key: str) -> bool:

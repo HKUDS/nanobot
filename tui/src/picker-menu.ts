@@ -1,22 +1,27 @@
 import {
   BoxRenderable,
   RGBA,
+  StyledText,
   TextAttributes,
   TextRenderable,
   type CliRenderer,
+  type TextChunk,
 } from "@opentui/core"
 
 export interface PickerMenuTheme {
   text: string
   muted: string
   border: string
+  accent?: string
+  warning?: string
   selectedBackground?: string
 }
 
 interface PickerMenuOptions<T> {
   id: string
+  key?: (item: T) => string
   searchText: (item: T) => string
-  render: (item: T) => string
+  render: (item: T, selected: boolean) => string | TextChunk[]
   emptyText?: string
   maxWidth?: number
   onSelect?: (item: T) => void
@@ -68,9 +73,21 @@ export class PickerMenu<T> {
     this.update(query, limit)
   }
 
+  replace(items: T[]): void {
+    if (!this.visible) return
+    this.items = items
+    this.update(this.query, this.limit)
+  }
+
+  redraw(): void {
+    if (this.visible) this.render()
+  }
+
   update(query: string, limit = this.limit): void {
     if (!this.visible) return
     const changed = query !== this.query
+    const previous = this.matches[this.selected]
+    const previousKey = previous === undefined ? null : this.options.key?.(previous)
     this.query = query
     this.limit = Math.max(1, limit)
     const words = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)
@@ -80,7 +97,18 @@ export class PickerMenu<T> {
         return words.every((word) => haystack.includes(word))
       })
       .slice(0, this.limit)
-    this.selected = changed ? 0 : Math.min(this.selected, Math.max(0, this.matches.length - 1))
+    if (changed) {
+      this.selected = 0
+    } else {
+      const preserved = previous === undefined
+        ? -1
+        : previousKey === null || previousKey === undefined
+          ? this.matches.indexOf(previous)
+          : this.matches.findIndex((item) => this.options.key?.(item) === previousKey)
+      this.selected = preserved >= 0
+        ? preserved
+        : Math.min(this.selected, Math.max(0, this.matches.length - 1))
+    }
     this.render()
   }
 
@@ -125,9 +153,16 @@ export class PickerMenu<T> {
     }
     for (const [index, item] of this.matches.entries()) {
       const selected = index === this.selected
+      const rendered = this.options.render(item, selected)
+      const content = typeof rendered === "string"
+        ? `${selected ? "›" : " "} ${rendered}`
+        : new StyledText([
+            chunk(`${selected ? "›" : " "} `, selected ? this.theme.text : this.theme.muted),
+            ...rendered,
+          ])
       this.root.add(new TextRenderable(this.renderer, {
         id: `${this.options.id}-${index}`,
-        content: `${selected ? "›" : " "} ${this.options.render(item)}`,
+        content,
         width: "100%",
         height: 1,
         wrapMode: "none",
@@ -137,7 +172,7 @@ export class PickerMenu<T> {
           ? { backgroundColor: RGBA.fromHex(this.theme.selectedBackground) }
           : {}),
         attributes: selected ? TextAttributes.BOLD : 0,
-        onMouseOver: () => {
+        onMouseMove: () => {
           if (this.selected === index) return
           this.selected = index
           this.render()
@@ -159,5 +194,13 @@ export class PickerMenu<T> {
       this.root.remove(child)
       child.destroyRecursively()
     }
+  }
+}
+
+function chunk(text: string, color: string): TextChunk {
+  return {
+    __isChunk: true,
+    text,
+    fg: RGBA.fromHex(color),
   }
 }

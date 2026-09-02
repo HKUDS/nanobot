@@ -21,6 +21,11 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.pairing import is_approved
+from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
+    httpx_env_proxy_mounts,
+    validate_url_target,
+)
 from nanobot.utils.helpers import safe_filename, split_message
 
 
@@ -64,7 +69,6 @@ class SlackConfig(Base):
     webhook_path: str = "/slack/events"
     bot_token: str = ""
     app_token: str = ""
-    user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
@@ -87,6 +91,13 @@ SLACK_DOWNLOAD_TIMEOUT = 30.0
 # to websockets.connect — see slack_sdk.socket_mode.websockets.SocketModeClient.connect.
 SLACK_SOCKET_CONNECT_TIMEOUT_S = 45.0
 _HTML_DOWNLOAD_PREFIXES = (b"<!doctype html", b"<html")
+
+
+async def _validate_slack_download_request(request: httpx.Request) -> None:
+    """Validate every Slack file request, including redirects, before transport."""
+    ok, error = validate_url_target(str(request.url))
+    if not ok:
+        raise httpx.RequestError(f"unsafe Slack file URL: {error}", request=request)
 
 
 class SlackChannel(BaseChannel):
@@ -562,7 +573,13 @@ class SlackChannel(BaseChannel):
         filename = safe_filename(f"{file_id}_{name}")
         path = Path(get_media_dir("slack")) / filename
         try:
-            async with httpx.AsyncClient(timeout=SLACK_DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=SLACK_DOWNLOAD_TIMEOUT,
+                follow_redirects=True,
+                transport=PinnedDNSAsyncTransport(),
+                mounts=httpx_env_proxy_mounts(),
+                event_hooks={"request": [_validate_slack_download_request]},
+            ) as client:
                 response = await client.get(
                     url,
                     headers={"Authorization": f"Bearer {self.config.bot_token}"},

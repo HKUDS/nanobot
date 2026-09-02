@@ -527,18 +527,22 @@ function MarketplaceSkillRow({
         <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[12px] text-muted-foreground">
           {skill.source}
           {skill.version ? <span>· v{skill.version}</span> : null}
-          <span>·</span>
-          {skill.metric === "installs_24h"
-            ? t("settings.skills.marketplaceInstalls24h", {
-                count: skill.installs,
-                formattedCount: skill.installs.toLocaleString(),
-                defaultValue: "{{formattedCount}} installs / 24h",
-              })
-            : t("settings.skills.marketplaceInstalls", {
-                count: skill.installs,
-                formattedCount: skill.installs.toLocaleString(),
-                defaultValue: "{{formattedCount}} installs",
-              })}
+          {skill.provider === "skills_sh" ? (
+            <>
+              <span>·</span>
+              {skill.metric === "installs_24h"
+                ? t("settings.skills.marketplaceInstalls24h", {
+                    count: skill.installs,
+                    formattedCount: skill.installs.toLocaleString(),
+                    defaultValue: "{{formattedCount}} installs / 24h",
+                  })
+                : t("settings.skills.marketplaceInstalls", {
+                    count: skill.installs,
+                    formattedCount: skill.installs.toLocaleString(),
+                    defaultValue: "{{formattedCount}} installs",
+                  })}
+            </>
+          ) : null}
         </div>
       </div>
       {skill.provider === "skills_sh" ? <TrendSparkline values={trend} /> : null}

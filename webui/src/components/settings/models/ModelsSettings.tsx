@@ -62,6 +62,26 @@ function modelPresetValue(payload: SettingsPayload): string {
   );
 }
 
+function suggestedPresetName(
+  model: string,
+  presets: SettingsPayload["model_presets"],
+): string {
+  const modelName = model.trim().split("/").filter(Boolean).at(-1) ?? "";
+  const base = (modelName.toLowerCase() === "default" ? "model" : modelName).slice(0, 48);
+  if (!base) return "";
+
+  const existing = new Set(
+    presets.filter((preset) => !preset.is_default).map((preset) => preset.name.toLowerCase()),
+  );
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let index = 2; ; index += 1) {
+    const suffix = ` ${index}`;
+    const candidate = `${base.slice(0, 48 - suffix.length)}${suffix}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   model: "",
   provider: "",
@@ -211,6 +231,7 @@ export function ModelsSettings({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
+  const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
@@ -219,6 +240,9 @@ export function ModelsSettings({
   useEffect(() => {
     if (presetNameError) presetNameInputRef.current?.focus();
   }, [presetNameError]);
+  useEffect(() => {
+    if (!creating) suggestedPresetNameRef.current = null;
+  }, [creating]);
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
@@ -348,7 +372,10 @@ export function ModelsSettings({
     <div
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-floating border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl"
+      className={cn(
+        "mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-floating border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl",
+        creating && "mt-3",
+      )}
     >
       {creating ? (
         <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
@@ -377,8 +404,9 @@ export function ModelsSettings({
             aria-invalid={Boolean(presetNameError)}
             aria-describedby={presetNameError ? "model-preset-name-error" : undefined}
             value={form.modelPreset}
-            placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
+            placeholder={tx("settings.models.presetNamePlaceholder", "e.g. Fast writing")}
             onChange={(event) => {
+              suggestedPresetNameRef.current = null;
               onClearPresetNameError();
               setForm((prev) => ({ ...prev, modelPreset: event.target.value }));
             }}
@@ -405,13 +433,21 @@ export function ModelsSettings({
           value={providerValue}
           emptyLabel={t("settings.byok.noConfiguredProviders")}
           showProviderLogos={showBrandLogos}
-          onChange={(provider) =>
+          onChange={(provider) => {
+            const providerChanged = provider !== form.provider;
+            const clearSuggestedName =
+              creating &&
+              providerChanged &&
+              suggestedPresetNameRef.current !== null &&
+              form.modelPreset === suggestedPresetNameRef.current;
+            if (clearSuggestedName) suggestedPresetNameRef.current = null;
             setForm((prev) => ({
               ...prev,
               provider,
               model: provider === prev.provider ? prev.model : "",
-            }))
-          }
+              modelPreset: clearSuggestedName ? "" : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
       {selectedProviderNeedsSignIn ? (
@@ -445,7 +481,20 @@ export function ModelsSettings({
           provider={form.provider}
           value={form.model}
           showProviderLogos={showBrandLogos}
-          onChange={(model) => setForm((prev) => ({ ...prev, model }))}
+          onChange={(model) => {
+            const canSuggestName =
+              creating &&
+              (!form.modelPreset.trim() || form.modelPreset === suggestedPresetNameRef.current);
+            const suggestion = canSuggestName
+              ? suggestedPresetName(model, settings.model_presets)
+              : "";
+            if (canSuggestName) suggestedPresetNameRef.current = suggestion;
+            setForm((prev) => ({
+              ...prev,
+              model,
+              modelPreset: canSuggestName ? suggestion : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
       <button
@@ -546,7 +595,7 @@ export function ModelsSettings({
           >
             {saving || creatingSaving
               ? tx("settings.actions.saving", "Saving...")
-              : tx("settings.actions.savePreset", "Save preset")}
+              : tx("settings.actions.savePreset", "Save")}
           </Button>
         </div>
       </div>
@@ -560,7 +609,8 @@ export function ModelsSettings({
           {tx("settings.models.presets", "Model presets")}
         </SettingsSectionTitle>
         <SettingsGroup>
-          {!settings.model_call_order_editable ? (
+          {!settings.model_call_order_editable &&
+          settings.model_configuration_migratable !== false ? (
             <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex min-w-0 items-start gap-3">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
@@ -799,34 +849,31 @@ export function ModelsSettings({
                   );
                 })}
               </div>
-              <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                {!creating ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="rounded-full"
-                    disabled={callOrderBusy}
-                    onClick={() => {
-                      setEditorRowKey(null);
-                      setEditorOpen(true);
-                      onBeginCreate();
-                    }}
-                  >
+              {!creating ? (
+                <button
+                  type="button"
+                  className="flex min-h-[58px] w-full items-center justify-between gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
+                  disabled={callOrderBusy}
+                  onClick={() => {
+                    setEditorRowKey(null);
+                    setEditorOpen(true);
+                    onBeginCreate();
+                  }}
+                >
+                  <span className="inline-flex items-center text-[13px] font-medium">
                     <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                     {tx("settings.models.newPreset", "New model preset")}
-                  </Button>
-                ) : (
-                  <span />
-                )}
-                {orderSaving ? (
-                  <SettingsStatusMessage>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                      {tx("settings.actions.saving", "Saving...")}
-                    </span>
-                  </SettingsStatusMessage>
-                ) : null}
-              </div>
+                  </span>
+                  {orderSaving ? (
+                    <SettingsStatusMessage>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                        {tx("settings.actions.saving", "Saving...")}
+                      </span>
+                    </SettingsStatusMessage>
+                  ) : null}
+                </button>
+              ) : null}
               {creating && editorOpen ? renderPresetEditor() : null}
             </>
           )}

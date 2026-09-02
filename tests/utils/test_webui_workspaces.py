@@ -234,6 +234,30 @@ def test_scope_for_session_key_reads_metadata_without_full_history(
     assert scope.access_mode == "full"
 
 
+def test_new_chat_scope_is_persisted_only_after_first_message(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    project = tmp_path / "project"
+    default.mkdir()
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    controller = WebUIWorkspaceController(
+        session_manager=sessions,
+        default_workspace=default,
+        default_restrict_to_workspace=True,
+    )
+    scope = default_workspace_scope(project, restrict_to_workspace=False)
+
+    controller.stage_scope("draft-chat", scope)
+
+    assert sessions.list_sessions() == []
+    assert controller.scope_for_session_key("websocket:draft-chat") == scope
+
+    controller.persist_scope("draft-chat", scope)
+
+    assert [item["key"] for item in sessions.list_sessions()] == ["websocket:draft-chat"]
+
+
 def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"

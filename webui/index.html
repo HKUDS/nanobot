@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=auto"
     />
     <meta name="color-scheme" content="light dark" />
     <meta
@@ -12,8 +12,12 @@
       content="nanobot web UI — chat with your nanobot workspace."
       data-i18n-meta="description"
     />
-    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#161618" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      data-theme-color-light="#ffffff"
+      data-theme-color-dark="#303030"
+    />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -49,7 +53,7 @@
       }
 
       html.dark body {
-        background: #1a1a1a;
+        background: #303030;
         color: #fafafa;
       }
 
@@ -96,13 +100,23 @@
     <script>
       (function () {
         try {
-          var stored = localStorage.getItem("nanobot-webui.theme");
+          var stored = null;
+          try {
+            stored = localStorage.getItem("nanobot-webui.theme");
+          } catch {}
           var dark =
             stored === "dark" ||
-            (!stored &&
+            (stored !== "light" &&
               window.matchMedia &&
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
+          var themeColor = document.querySelector('meta[name="theme-color"]');
+          if (themeColor) {
+            var color = themeColor.getAttribute(
+              dark ? "data-theme-color-dark" : "data-theme-color-light"
+            );
+            if (color) themeColor.setAttribute("content", color);
+          }
         } catch {}
       })();
     </script>

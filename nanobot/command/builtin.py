@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
+from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -265,8 +266,9 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             session,
             runtime=runtime,
         )
+    last_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
     if ctx_est <= 0:
-        ctx_est = loop._last_usage.get("prompt_tokens", 0)  # pyright: ignore[reportPrivateUsage]
+        ctx_est = last_usage.input_tokens if last_usage is not None else 0
 
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
@@ -288,7 +290,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
             version=__version__, model=runtime.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,  # pyright: ignore[reportPrivateUsage]
+            start_time=loop._start_time, last_usage=last_usage,  # pyright: ignore[reportPrivateUsage]
             context_window_tokens=runtime.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
@@ -309,7 +311,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
-    if session.last_consolidated < len(snapshot):
+    if session.last_archived < len(snapshot):
         runtime = ctx.runtime or loop.runtime_for_session(session)
         archive_snapshot = replace(
             session,
@@ -423,14 +425,16 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import DreamRunProgress, MemoryStore
+        from nanobot.agent.memory import MemoryStore
+
+        async def _silent(*_args: Any, **_kwargs: Any) -> None:
+            pass
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
         prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
-        progress = DreamRunProgress()
         content = ""
         resp = None
         diff_body = ""
@@ -452,17 +456,14 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
-                on_progress=progress,
+                on_progress=_silent,
                 runtime=dream_runtime,
             )
             elapsed = time.monotonic() - t0
-            # The real file delta grounds the audit record; clean completion
+            # The real file delta grounds the audit record; normal completion
             # decides whether this history batch has finished processing.
             diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(
-                resp,
-                had_tool_errors=progress.had_tool_errors,
-            )
+            completed = MemoryStore.dream_run_completed(resp)
             if completed:
                 store.set_last_dream_cursor(last_cursor)
                 if diff_body:
@@ -470,21 +471,15 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 else:
                     content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
+                reason = MemoryStore.dream_incompletion_reason(resp)
                 content = (
-                    f"Dream did not complete after {elapsed:.1f}s; "
+                    f"Dream did not complete after {elapsed:.1f}s ({reason}); "
                     "memory cursor was not advanced."
                 )
         except Exception as e:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
-            from nanobot.webui.token_usage import record_response_token_usage
-
-            record_response_token_usage(
-                resp,
-                source="dream",
-                timezone_name=getattr(loop.context, "timezone", None),
-            )
             if store.git.is_initialized():
                 commit_msg = build_dream_commit_message("dream: manual run", diff_body)
                 sha = store.git.auto_commit(commit_msg)

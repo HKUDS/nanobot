@@ -1,4 +1,21 @@
-export type ConnectionStatus = "connecting" | "connected" | "closed" | "error"
+export type ConnectionStatus =
+  | "starting"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "unavailable"
+  | "closed"
+  | "error"
+
+export interface ConnectionStatusInfo {
+  endpoint: string
+  attempt: number
+  elapsedMs: number
+  retryInMs?: number
+  health?: GatewayHealthStatus
+}
+
+export type GatewayHealthStatus = "ready" | "degraded" | "unreachable"
 
 export interface ToolProgressEvent {
   version?: number
@@ -29,7 +46,7 @@ export interface FileEditEvent {
   diff?: FileDiff
 }
 
-export interface FileDiff {
+interface FileDiff {
   format: "unified" | string
   context?: number
   truncated?: boolean
@@ -39,6 +56,11 @@ export interface FileDiff {
 export interface MediaAttachment {
   kind: "image" | "video" | "file"
   url: string
+  name?: string
+}
+
+export interface OutboundMedia {
+  data_url: string
   name?: string
 }
 
@@ -54,6 +76,16 @@ export interface RuntimeControls {
   canUseFullAccess: boolean
 }
 
+export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed"
+
+export interface RecoveryState {
+  status: RecoveryStatus
+  recovery_id: string
+  reason?: string
+  attempts?: number
+  can_continue?: boolean
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -61,6 +93,7 @@ export type InboundEvent =
       chat_id: string
       model_preset?: string | null
       usage?: TokenUsage
+      recovery_state?: RecoveryState
     }
   | {
       event: "message_accepted"
@@ -118,6 +151,7 @@ export type InboundEvent =
       turn_id?: string
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
+  | ({ event: "recovery_state"; chat_id: string } & RecoveryState)
   | {
       event: "session_updated"
       chat_id: string
@@ -140,11 +174,19 @@ type OutboundEvent =
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | {
+      type: "webui_request"
+      request_id: string
+      action: string
+      payload: Record<string, unknown>
+    }
+  | {
       type: "message"
       chat_id: string
       content: string
       turn_id: string
       webui: true
+      workspace_scope?: WorkspaceScopePayload
+      media?: OutboundMedia[]
       cli_apps?: Array<{ name: string }>
       mcp_presets?: Array<{ name: string }>
       session_mentions?: SessionMention[]
@@ -153,13 +195,16 @@ type OutboundEvent =
 export interface ClientOptions {
   url?: string
   resolveConnection?: () => Promise<GatewayConnection>
+  checkHealth?: () => Promise<GatewayHealthStatus>
   onConnection?: (connection: GatewayConnection) => void
-  connectionRetryLabel?: string
+  targetEndpoint?: string
+  startupFailureDelayMs?: number
   startupRetryMaxDelayMs?: number
   chatId?: string
+  initialWorkspaceScope?: WorkspaceScopePayload
   reconnectDelayMs?: number
   onEvent: (event: InboundEvent) => void
-  onStatus: (status: ConnectionStatus, detail?: string) => void
+  onStatus: (status: ConnectionStatus, detail?: string, info?: ConnectionStatusInfo) => void
 }
 
 export interface GatewayApiConnection {
@@ -186,6 +231,7 @@ export interface HistoryMessage {
   role: "user" | "assistant" | "activity"
   content: string
   turnId?: string
+  media?: MediaAttachment[]
   toolEvents?: ToolProgressEvent[]
   fileEdits?: FileEditEvent[]
   forkIndex?: number
@@ -202,7 +248,10 @@ export interface TokenUsage {
   prompt_tokens?: number
   completion_tokens?: number
   cached_tokens?: number
+  cache_write_tokens?: number
   total_tokens?: number
+  context_tokens?: number
+  request_count?: number
   provider_tokens?: number
   estimated_tokens?: number
   cost_usd?: number
@@ -224,7 +273,7 @@ export interface SessionContextSnapshot {
   lastUsage: TokenUsage | null
 }
 
-export interface SessionMention {
+interface SessionMention {
   name: string
   session_key: string
   title?: string
@@ -239,7 +288,14 @@ export interface MentionCandidate {
   session?: SessionMention
 }
 
+export interface SkillCandidate {
+  name: string
+  description: string
+  source: string
+}
+
 export interface MessageOptions {
+  media?: OutboundMedia[]
   cliApps?: Array<{ name: string }>
   mcpPresets?: Array<{ name: string }>
   sessionMentions?: SessionMention[]
@@ -270,10 +326,13 @@ export interface SessionSummary {
   updatedAt: string | null
   runStartedAt: number | null
   modelPreset: string | null
+  recoveryState?: RecoveryState | null
   workspaceScope?: WorkspaceScopePayload | null
   pinned: boolean
   archived: boolean
 }
+
+const SKILL_REFERENCE_NAME = /^[A-Za-z0-9_-]+$/u
 
 const SLASH_COMMAND_LIFECYCLES = new Set([
   "side_channel",
@@ -296,6 +355,7 @@ const CHAT_EVENTS = new Set([
   "turn_end",
   "goal_status",
   "goal_state",
+  "recovery_state",
   "session_updated",
   "turn_model_updated",
   "error",
@@ -350,7 +410,10 @@ function isTokenUsage(value: unknown): value is TokenUsage {
     "prompt_tokens",
     "completion_tokens",
     "cached_tokens",
+    "cache_write_tokens",
     "total_tokens",
+    "context_tokens",
+    "request_count",
     "provider_tokens",
     "estimated_tokens",
     "cost_usd",
@@ -374,6 +437,34 @@ function isWorkspaceScope(value: unknown): value is WorkspaceScopePayload {
     && (value.access_mode === "restricted" || value.access_mode === "full")
     && optional(value.project_name, "string")
     && optional(value.restrict_to_workspace, "boolean")
+}
+
+function isRecoveryState(value: unknown): value is RecoveryState {
+  return isRecord(value)
+    && ["resuming", "awaiting_user", "recovered", "failed"].includes(String(value.status))
+    && typeof value.recovery_id === "string"
+    && optional(value.reason, "string")
+    && optional(value.attempts, "number")
+    && optional(value.can_continue, "boolean")
+}
+
+interface WebUIResponseEvent {
+  event: "webui_response"
+  request_id: string
+  ok: boolean
+  result?: unknown
+  error?: { status: number; message: string }
+}
+
+function decodeWebUIResponse(value: unknown): WebUIResponseEvent | null | undefined {
+  if (!isRecord(value) || value.event !== "webui_response") return undefined
+  if (typeof value.request_id !== "string" || typeof value.ok !== "boolean") return null
+  if (value.ok) return value as unknown as WebUIResponseEvent
+  return isRecord(value.error)
+    && typeof value.error.status === "number"
+    && typeof value.error.message === "string"
+    ? value as unknown as WebUIResponseEvent
+    : null
 }
 
 function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
@@ -406,7 +497,8 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
     && ((record.model_preset !== undefined
       && record.model_preset !== null
       && typeof record.model_preset !== "string")
-      || (record.usage !== undefined && !isTokenUsage(record.usage)))
+      || (record.usage !== undefined && !isTokenUsage(record.usage))
+      || (record.recovery_state !== undefined && !isRecoveryState(record.recovery_state)))
   ) return null
   if (
     ["user_message", "message", "delta", "reasoning_delta"].includes(name)
@@ -451,6 +543,7 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && !isRecord(record.goal_state)) return null
+  if (name === "recovery_state" && !isRecoveryState(record)) return null
   if (
     name === "session_updated"
     && (!optional(record.scope, "string")
@@ -538,18 +631,20 @@ export async function fetchHistory(
       (role !== "user" && role !== "assistant")
       || message.kind === "reasoning"
       || typeof content !== "string"
-      || !content.trim()
     ) {
       continue
     }
+    const media = Array.isArray(message.media) ? message.media.filter(isMediaAttachment) : []
     if (role === "user") {
+      if (!content.trim() && !media.length) continue
       userIndex += 1
       messages.push({
         role: "user",
         content,
+        ...(media.length ? { media } : {}),
         ...(typeof message.turnId === "string" ? { turnId: message.turnId } : {}),
       })
-    } else {
+    } else if (content.trim()) {
       messages.push({ role: "assistant", content, forkIndex: userIndex })
     }
   }
@@ -621,6 +716,31 @@ export async function fetchSlashCommands(
       argHint: typeof value.arg_hint === "string" ? value.arg_hint : "",
       lifecycle: value.lifecycle as SlashCommandLifecycle,
       acceptsArgs: value.accepts_args === true,
+    }]
+  })
+}
+
+export async function fetchAvailableSkills(
+  apiUrl: string,
+  apiToken: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<SkillCandidate[]> {
+  if (!apiUrl || !apiToken) return []
+  const response = await fetchApi(apiUrl, apiToken, "/api/webui/skills", reauthenticate)
+  if (!response.ok) throw new Error(`skill request failed: HTTP ${response.status}`)
+  const payload = await response.json() as { skills?: unknown[] }
+  return (payload.skills || []).flatMap((value) => {
+    if (
+      !isRecord(value)
+      || typeof value.name !== "string"
+      || !SKILL_REFERENCE_NAME.test(value.name)
+      || value.enabled !== true
+      || value.available !== true
+    ) return []
+    return [{
+      name: value.name,
+      description: typeof value.description === "string" ? value.description : value.name,
+      source: typeof value.source === "string" ? value.source : "unknown",
     }]
   })
 }
@@ -699,6 +819,9 @@ export async function fetchSessions(
       modelPreset: typeof value.model_preset === "string" && value.model_preset.trim()
         ? value.model_preset.trim()
         : null,
+      ...(isRecoveryState(value.recovery_state)
+        ? { recoveryState: value.recovery_state }
+        : {}),
       ...(isWorkspaceScope(value.workspace_scope) ? { workspaceScope: value.workspace_scope } : {}),
       pinned: pinned.has(value.key),
       archived: archived.has(value.key),
@@ -846,16 +969,117 @@ export async function fetchGatewayConnection(
   }
 }
 
+/** Read gateway readiness without sending bootstrap or API credentials. */
+export async function fetchGatewayHealth(
+  healthUrl: string,
+  timeoutMs = 400,
+): Promise<GatewayHealthStatus> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(healthUrl, { signal: controller.signal })
+    if (response.status !== 200 && response.status !== 503) return "unreachable"
+    const payload: unknown = await response.json()
+    if (!isRecord(payload)) return "unreachable"
+    if (
+      response.status === 503
+      && payload.status === "degraded"
+      && payload.ready === false
+      && payload.process === "alive"
+    ) return "degraded"
+    if (response.status === 200 && payload.status === "ok" && payload.ready !== false) {
+      return "ready"
+    }
+    return "unreachable"
+  } catch {
+    return "unreachable"
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Return only the authority users can act on, never credentials or an authenticated path. */
+export function connectionEndpoint(value: string | undefined): string {
+  if (!value) return "local gateway"
+  try {
+    return new URL(value).host || "local gateway"
+  } catch {
+    return "local gateway"
+  }
+}
+
+/** Reduce arbitrary fetch/WebSocket errors to a small set of credential-safe reasons. */
+export function sanitizeConnectionFailure(error: unknown): string {
+  const signals: string[] = []
+  const seen = new Set<unknown>()
+  const collect = (value: unknown): void => {
+    if (value === null || value === undefined || seen.has(value)) return
+    if (typeof value === "object") seen.add(value)
+    if (typeof value === "string") {
+      signals.push(value)
+      return
+    }
+    if (value instanceof Error) {
+      signals.push(value.name, value.message)
+      collect(value.cause)
+      if (value instanceof AggregateError) {
+        for (const nested of value.errors) collect(nested)
+      }
+      return
+    }
+    if (!isRecord(value)) return
+    if (typeof value.code === "string") signals.push(value.code)
+    collect(value.cause)
+    if (Array.isArray(value.errors)) {
+      for (const nested of value.errors) collect(nested)
+    }
+  }
+  collect(error)
+  const signal = signals.join(" ")
+  if (/ECONNREFUSED|connection refused/iu.test(signal)) return "connection refused"
+  if (/ETIMEDOUT|timed? out|timeout/iu.test(signal)) return "connection timed out"
+  if (/ENOTFOUND|EAI_AGAIN|name not resolved|host not found/iu.test(signal)) {
+    return "host not found"
+  }
+  if (/certificate|TLS|SSL/iu.test(signal)) return "secure connection failed"
+  const bootstrapStatus = signal.match(/gateway bootstrap failed:\s*HTTP\s*(\d{3})/iu)
+  if (bootstrapStatus?.[1]) return `gateway bootstrap failed: HTTP ${bootstrapStatus[1]}`
+  if (/bootstrap response is missing ws_url/iu.test(signal)) {
+    return "gateway bootstrap response is missing ws_url"
+  }
+  if (/bootstrap response (?:has an invalid ws_url|is invalid)/iu.test(signal)) {
+    return "gateway bootstrap response is invalid"
+  }
+  if (/gateway is still starting/iu.test(signal)) return "gateway is still starting"
+  if (/fetch failed|failed to fetch|network error/iu.test(signal)) return "network request failed"
+  return "connection failed"
+}
+
 export class NanobotClient {
   private socket: WebSocket | null = null
   private chatId = ""
+  private workspaceScope?: WorkspaceScopePayload
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private closedByClient = false
   private opening = false
   private connectedOnce = false
+  private connectionAttempt = 0
+  private retryStartedAt = 0
+  private nextRetryAt = 0
+  private lastFailure = ""
+  private healthStatus: GatewayHealthStatus | undefined
+  private failureEscalationTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly endpoint: string
+  private readonly pendingMutations = new Map<string, {
+    resolve: (value: unknown) => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
 
-  constructor(private readonly options: ClientOptions) {}
+  constructor(private readonly options: ClientOptions) {
+    this.endpoint = options.targetEndpoint || connectionEndpoint(options.url)
+  }
 
   get activeChatId(): string {
     return this.chatId
@@ -863,13 +1087,21 @@ export class NanobotClient {
 
   connect(): void {
     this.closedByClient = false
+    this.connectionAttempt = 0
+    this.reconnectAttempt = 0
+    this.retryStartedAt = Date.now()
+    this.nextRetryAt = 0
+    this.lastFailure = ""
+    this.healthStatus = undefined
     void this.open()
   }
 
   private async open(): Promise<void> {
     if (this.socket || this.opening || this.closedByClient) return
     this.opening = true
-    this.options.onStatus("connecting")
+    this.nextRetryAt = 0
+    this.connectionAttempt += 1
+    this.reportConnectionProgress()
     let url = this.options.url
     try {
       if (this.options.resolveConnection) {
@@ -880,46 +1112,69 @@ export class NanobotClient {
       }
     } catch (error) {
       if (!this.closedByClient) {
+        this.lastFailure = sanitizeConnectionFailure(error)
         if (error instanceof GatewayConnectionError && !error.retryable) {
-          this.options.onStatus("error", error.message)
+          this.clearFailureEscalation()
+          this.options.onStatus("error", this.lastFailure, this.connectionInfo())
           return
         }
-        this.options.onStatus(
-          "connecting",
-          this.options.connectionRetryLabel || "gateway unavailable",
-        )
-        this.scheduleReconnect(false)
+        await this.checkHealthAndScheduleReconnect()
       }
       return
     } finally {
       this.opening = false
     }
     if (!url) {
-      this.options.onStatus("error", "gateway URL is not configured")
+      this.options.onStatus("error", "gateway URL is not configured", this.connectionInfo())
       return
     }
-    const socket = new WebSocket(url)
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(url)
+    } catch (error) {
+      this.lastFailure = sanitizeConnectionFailure(error)
+      await this.checkHealthAndScheduleReconnect()
+      return
+    }
+    let opened = false
     this.socket = socket
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return
+      opened = true
       this.connectedOnce = true
+      this.connectionAttempt = 0
       this.reconnectAttempt = 0
-      this.options.onStatus("connected")
+      this.retryStartedAt = 0
+      this.nextRetryAt = 0
+      this.lastFailure = ""
+      this.healthStatus = "ready"
+      this.clearFailureEscalation()
+      this.options.onStatus("connected", undefined, this.connectionInfo())
     })
     socket.addEventListener("message", (message) => {
       if (this.socket === socket) this.handleMessage(String(message.data))
     })
     socket.addEventListener("error", () => {
-      if (this.socket === socket) this.options.onStatus("error", "connection failed")
+      if (this.socket !== socket) return
+      this.lastFailure = "connection failed"
+      this.reportRetryState()
     })
     socket.addEventListener("close", () => {
       if (this.socket !== socket) return
       this.socket = null
+      this.rejectPendingMutations("gateway connection closed")
       if (this.closedByClient) {
         this.options.onStatus("closed")
         return
       }
-      this.scheduleReconnect()
+      if (opened) {
+        this.connectionAttempt = 0
+        this.reconnectAttempt = 0
+        this.retryStartedAt = Date.now()
+      }
+      if (!this.lastFailure) this.lastFailure = "connection closed"
+      this.reportRetryState()
+      void this.checkHealthAndScheduleReconnect()
     })
   }
 
@@ -927,9 +1182,11 @@ export class NanobotClient {
     this.closedByClient = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
+    this.clearFailureEscalation()
     const socket = this.socket
     this.socket = null
     socket?.close()
+    this.rejectPendingMutations("gateway connection closed")
   }
 
   send(content: string, options: MessageOptions = {}): string {
@@ -941,7 +1198,9 @@ export class NanobotClient {
       content,
       turn_id: turnId,
       webui: true,
+      ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
+      ...(options.media?.length ? { media: options.media } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
       ...(options.sessionMentions?.length
@@ -953,10 +1212,12 @@ export class NanobotClient {
 
   attach(chatId: string): void {
     if (!chatId) throw new Error("chat id is required")
+    this.workspaceScope = undefined
     this.write({ type: "attach", chat_id: chatId })
   }
 
   newChat(scope?: WorkspaceScopePayload): void {
+    this.workspaceScope = scope
     this.write({ type: "new_chat", ...(scope ? { workspace_scope: scope } : {}) })
   }
 
@@ -971,7 +1232,65 @@ export class NanobotClient {
 
   setWorkspaceScope(scope: WorkspaceScopePayload): void {
     if (!this.chatId) throw new Error("chat is not ready")
+    this.workspaceScope = scope
     this.write({ type: "set_workspace_scope", chat_id: this.chatId, workspace_scope: scope })
+  }
+
+  updateRecovery(
+    action: "continue" | "dismiss",
+    chatId: string,
+    recoveryId: string,
+  ): Promise<RecoveryState> {
+    return this.requestMutation<unknown>(`recovery.${action}`, {
+      chat_id: chatId,
+      recovery_id: recoveryId,
+    }).then((result) => {
+      if (!isRecoveryState(result)) throw new Error("gateway returned an invalid recovery state")
+      return result
+    })
+  }
+
+  private requestMutation<T>(
+    action: string,
+    payload: Record<string, unknown> = {},
+    timeoutMs = 20_000,
+  ): Promise<T> {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("gateway connection is not open"))
+    }
+    const requestId = crypto.randomUUID()
+    const frame = JSON.stringify({
+      type: "webui_request",
+      request_id: requestId,
+      action,
+      payload,
+    } satisfies OutboundEvent)
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingMutations.delete(requestId)
+        reject(new Error(`gateway request timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
+      this.pendingMutations.set(requestId, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timer,
+      })
+      try {
+        this.socket?.send(frame)
+      } catch {
+        clearTimeout(timer)
+        this.pendingMutations.delete(requestId)
+        reject(new Error("could not send gateway request"))
+      }
+    })
+  }
+
+  private rejectPendingMutations(message: string): void {
+    for (const pending of this.pendingMutations.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error(message))
+    }
+    this.pendingMutations.clear()
   }
 
   private handleMessage(raw: string): void {
@@ -980,6 +1299,20 @@ export class NanobotClient {
       value = JSON.parse(raw) as unknown
     } catch {
       this.options.onStatus("error", "gateway sent invalid JSON")
+      return
+    }
+    const response = decodeWebUIResponse(value)
+    if (response === null) {
+      this.options.onStatus("error", "gateway sent an invalid event")
+      return
+    }
+    if (response) {
+      const pending = this.pendingMutations.get(response.request_id)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      this.pendingMutations.delete(response.request_id)
+      if (response.ok) pending.resolve(response.result)
+      else pending.reject(new Error(response.error?.message || "gateway request failed"))
       return
     }
     const event = decodeInboundEvent(value)
@@ -995,26 +1328,88 @@ export class NanobotClient {
         this.chatId = requestedChatId
         this.write({ type: "attach", chat_id: this.chatId })
       } else {
-        this.write({ type: "new_chat" })
+        this.newChat(this.options.initialWorkspaceScope)
       }
     } else if (event.event === "attached") {
       this.chatId = event.chat_id
+    } else if (event.event === "session_updated" && event.workspace_scope) {
+      this.workspaceScope = event.workspace_scope
     }
     this.options.onEvent(event)
   }
 
-  private scheduleReconnect(announce = true): void {
+  private scheduleReconnect(): void {
     if (this.reconnectTimer || this.closedByClient) return
+    if (!this.retryStartedAt) this.retryStartedAt = Date.now()
     const base = this.options.reconnectDelayMs ?? 500
     const maxDelay = this.connectedOnce
       ? 8_000
       : this.options.startupRetryMaxDelayMs ?? 8_000
     const delay = Math.min(maxDelay, base * 2 ** Math.min(this.reconnectAttempt++, 4))
-    if (announce) this.options.onStatus("connecting", `reconnecting in ${delay}ms`)
+    this.nextRetryAt = Date.now() + delay
+    this.reportRetryState()
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       void this.open()
     }, delay)
+  }
+
+  private async checkHealthAndScheduleReconnect(): Promise<void> {
+    if (this.options.checkHealth) {
+      try {
+        this.healthStatus = await this.options.checkHealth()
+      } catch {
+        this.healthStatus = "unreachable"
+      }
+    }
+    if (!this.closedByClient) this.scheduleReconnect()
+  }
+
+  private connectionInfo(): ConnectionStatusInfo {
+    return {
+      endpoint: this.endpoint,
+      attempt: Math.max(1, this.connectionAttempt),
+      elapsedMs: this.retryStartedAt ? Math.max(0, Date.now() - this.retryStartedAt) : 0,
+      ...(this.nextRetryAt
+        ? { retryInMs: Math.max(0, this.nextRetryAt - Date.now()) }
+        : {}),
+      ...(this.healthStatus ? { health: this.healthStatus } : {}),
+    }
+  }
+
+  private reportConnectionProgress(): void {
+    if (this.connectedOnce) {
+      this.options.onStatus("reconnecting", this.lastFailure || undefined, this.connectionInfo())
+      return
+    }
+    const phase = this.options.resolveConnection ? "starting" : "connecting"
+    this.options.onStatus(phase, undefined, this.connectionInfo())
+  }
+
+  private reportRetryState(): void {
+    const info = this.connectionInfo()
+    if (this.connectedOnce) {
+      this.options.onStatus("reconnecting", this.lastFailure, info)
+      return
+    }
+    const failureDelay = this.options.startupFailureDelayMs ?? 3_000
+    if (info.elapsedMs >= failureDelay) {
+      this.clearFailureEscalation()
+      this.options.onStatus("unavailable", this.lastFailure, info)
+      return
+    }
+    this.reportConnectionProgress()
+    if (this.failureEscalationTimer) return
+    this.failureEscalationTimer = setTimeout(() => {
+      this.failureEscalationTimer = null
+      if (this.closedByClient || this.connectedOnce || !this.lastFailure) return
+      this.options.onStatus("unavailable", this.lastFailure, this.connectionInfo())
+    }, Math.max(0, failureDelay - info.elapsedMs))
+  }
+
+  private clearFailureEscalation(): void {
+    if (this.failureEscalationTimer) clearTimeout(this.failureEscalationTimer)
+    this.failureEscalationTimer = null
   }
 
   private write(event: OutboundEvent): void {

@@ -8,6 +8,7 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ToolCallRequest,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -22,6 +23,7 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
     first_calls = 0
     second_calls = 0
     request_temperatures: list[float] = []
+    request_session_ids: list[str | None] = []
     selected_runtime = LLMRuntime.capture(
         first_provider,
         "captured-model",
@@ -33,6 +35,9 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
         nonlocal first_calls, selected_runtime
         first_calls += 1
         request_temperatures.append(kwargs["temperature"])
+        provider_context = kwargs["provider_context"]
+        assert isinstance(provider_context, ProviderCallContext)
+        request_session_ids.append(provider_context.session_id)
         selected_runtime = LLMRuntime.capture(
             second_provider,
             "future-model",
@@ -63,9 +68,11 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
         runtime=selected_runtime,
         max_iterations=2,
         max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+        session_key="webui:cache-test",
     ))
 
     assert first_calls == 2
     assert second_calls == 0
     assert request_temperatures == [0.2, 0.2]
+    assert request_session_ids == ["webui:cache-test", "webui:cache-test"]
     assert selected_runtime.provider is second_provider

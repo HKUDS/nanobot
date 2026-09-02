@@ -24,6 +24,11 @@ const sessions: SessionSummary[] = [
     updatedAt: "2026-08-12T10:00:00Z",
     runStartedAt: null,
     modelPreset: null,
+    recoveryState: {
+      status: "awaiting_user",
+      recovery_id: "recovery-two",
+      reason: "tool execution interrupted",
+    },
     pinned: false,
     archived: false,
   },
@@ -43,17 +48,21 @@ describe("SessionMenu", () => {
       text: "#FFFFFF",
       muted: "#999999",
       border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
     })
     setup.renderer.root.add(menu.root)
-    menu.open(sessions, "one", 6)
+    menu.open(sessions, "one", 6, "Codex")
     await setup.renderOnce()
 
     expect(setup.captureCharFrame()).toContain("› ● API migration")
+    expect(setup.captureCharFrame()).not.toContain("Move authentication")
+    expect(setup.captureCharFrame()).not.toContain("Codex")
     expect(menu.choose()?.chatId).toBe("one")
 
     menu.update("release stable", 6)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("Release checklist")
+    expect(setup.captureCharFrame()).toContain("⚠ Release checklist")
     expect(menu.choose()?.chatId).toBe("two")
   })
 
@@ -63,12 +72,110 @@ describe("SessionMenu", () => {
     )
   })
 
+  test("animates running sessions and marks completed background sessions unread", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+    const running = {
+      ...sessions[0]!,
+      chatId: "running",
+      title: "Background task",
+      runStartedAt: Date.now(),
+      pinned: false,
+    }
+
+    menu.open([sessions[0]!, running], "one", 6)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Background task/u)
+
+    menu.replace([{ ...sessions[0]! }, { ...running, runStartedAt: null }], "one")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("• Background task")
+
+    menu.markRead("running")
+    menu.replace([{ ...sessions[0]! }, { ...running, runStartedAt: null }], "running")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("● Background task")
+    menu.hide()
+  })
+
+  test("prioritizes actionable sessions without moving keyboard selection on refresh", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+    const running = {
+      ...sessions[0]!,
+      chatId: "running",
+      title: "Background task",
+      runStartedAt: Date.now(),
+      pinned: false,
+    }
+
+    const idle = { ...sessions[1]!, recoveryState: null }
+    menu.open([sessions[0]!, running, idle], "one", 6)
+    expect(menu.choose()?.chatId).toBe("one")
+    expect(menu.move(1)).toBe(true)
+    expect(menu.choose()?.chatId).toBe("running")
+
+    menu.replace([sessions[0]!, running, sessions[1]!], "one")
+    await setup.renderOnce()
+
+    expect(menu.choose()?.chatId).toBe("running")
+    const frame = setup.captureCharFrame()
+    expect(frame.indexOf("Release checklist")).toBeLessThan(frame.indexOf("Background task"))
+    menu.hide()
+  })
+
+  test("keeps keyboard selection when the pointer stays over the previous row", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+    menu.open(sessions, "one", 6)
+    await setup.renderOnce()
+
+    const firstRow = menu.root.getChildren()[0]
+    const secondRow = menu.root.getChildren()[1]
+    if (!firstRow || !secondRow) throw new Error("session rows were not rendered")
+    const firstPosition = { x: firstRow.x + 2, y: firstRow.y }
+    await setup.mockMouse.moveTo(secondRow.x + 2, secondRow.y)
+    await setup.flush()
+    expect(menu.choose()?.chatId).toBe("two")
+
+    await setup.mockMouse.moveTo(firstPosition.x, firstPosition.y)
+    await setup.flush()
+    expect(menu.choose()?.chatId).toBe("one")
+
+    expect(menu.move(1)).toBe(true)
+    await setup.flush()
+    expect(menu.choose()?.chatId).toBe("two")
+  })
+
   test("shows compact workspace names only when they distinguish sessions", async () => {
     setup = await createTestRenderer({ width: 100, height: 18, screenMode: "alternate-screen" })
     const menu = new SessionMenu(setup.renderer, {
       text: "#FFFFFF",
       muted: "#999999",
       border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
     })
     setup.renderer.root.add(menu.root)
     const scoped = sessions.map((session) => ({
@@ -125,5 +232,32 @@ describe("SessionMenu", () => {
     const duplicates = setup.captureCharFrame()
     expect(duplicates).toContain("frontend/nanobot")
     expect(duplicates).toContain("backend/nanobot")
+  })
+
+  test("shows only model overrides and keeps previews searchable", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+      accent: "#FF8A33",
+      warning: "#F5C451",
+    })
+    setup.renderer.root.add(menu.root)
+
+    menu.open(sessions, "one", 6, "Codex")
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).not.toContain("Codex")
+    expect(frame).not.toContain("Prepare the stable release")
+
+    menu.update("prepare stable", 6)
+    await setup.renderOnce()
+    expect(menu.choose()?.chatId).toBe("two")
+
+    menu.replace([{ ...sessions[1]!, modelPreset: "Deep Research" }], "one", "Codex")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Deep Research")
+    menu.hide()
   })
 })

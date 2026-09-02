@@ -34,6 +34,7 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
+    build_responses_compaction_state,
     build_responses_state,
     consume_sdk_stream,
     convert_tools,
@@ -106,8 +107,10 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        *,
+        provider_name: str = "azure_openai",
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self._native_compaction_available = True
 
@@ -408,6 +411,16 @@ class AzureOpenAIProvider(LLMProvider):
                     output_items=capture.output_items,
                     usage=usage,
                 )
+                result.provider_compaction_state = build_responses_compaction_state(
+                    provider=self._responses_state_provider(),
+                    model=str(body["model"]),
+                    output_items=capture.output_items,
+                )
+                result.provider_compaction_applied = (
+                    result.provider_compaction_state is not None
+                )
+                if result.provider_compaction_applied:
+                    result.provider_compaction_scope = "current_request"
             return result
         except Exception as e:
             return self._handle_error(e)

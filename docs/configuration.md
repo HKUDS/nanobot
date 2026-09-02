@@ -188,7 +188,7 @@ These variables are process-level switches. Set them in the same terminal, servi
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NANOBOT_MAX_CONCURRENT_REQUESTS` | `3` | Maximum concurrently running inbound agent requests. Must be an integer; set `0` or a negative value for unlimited. |
+| `NANOBOT_MAX_CONCURRENT_REQUESTS` | Unlimited | Maximum concurrently running inbound agent requests. Set a positive integer to apply a cap; unset, `0`, or a negative value means unlimited. |
 | `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds. Ordinary requests use this value; streaming requests use the greater of 300 seconds or twice this value. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
 | `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Streaming idle timeout, in seconds, used by streaming providers. Invalid or non-positive values are ignored; values above `3600` are clamped. |
 | `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for OpenAI-compatible providers. Invalid or non-positive values are ignored. |
@@ -729,6 +729,11 @@ Then run:
 nanobot agent -m "Hello!"
 ```
 
+The WebUI model selector loads the models available to the signed-in account
+from Codex's online catalog. Context-window and reasoning-effort metadata come
+from that response; if discovery is unavailable, nanobot keeps a small built-in
+fallback instead of emptying the selector.
+
 Codex Fast mode can be enabled from the WebUI provider settings, or with:
 
 ```json
@@ -764,11 +769,14 @@ nanobot provider login xai-grok --set-main
 nanobot agent -m "Hello from Grok."
 ```
 
-The default model is `xai-grok/grok-4.5` with a 500,000-token context window.
-The provider reads xAI's model catalog and includes the server-hosted `x_search`
-tool only when the selected model advertises `supportsBackendSearch`. Models
-without that capability continue normally without hosted X Search. When enabled,
-searches run inside xAI's Responses API and citations arrive as inline links.
+The default model is `xai-grok/grok-4.6` with a 500,000-token context window.
+The provider reads and caches xAI's online model catalog for both WebUI model
+selection and runtime capabilities. Newly available models appear automatically;
+when discovery fails, the last successful catalog or built-in fallback remains
+available. The server-hosted `x_search` tool is included only when the selected
+model advertises support. Models without that capability continue normally
+without hosted X Search. When enabled, searches run inside xAI's Responses API
+and citations arrive as inline links.
 Hosted X Search is on by default to preserve this behavior. It can be turned off in the
 WebUI provider settings or with `providers.xaiGrok.extraBody.tools: []`.
 
@@ -804,6 +812,10 @@ a nanobot update.
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+
+After login, the WebUI loads the account-specific Copilot model catalog online.
+Only models compatible with nanobot's current chat-completions or Responses
+transport are shown.
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash
@@ -2213,7 +2225,7 @@ The notification gate runs on a built-in system prompt. Advanced users can overr
 
 ## Subagent Concurrency
 
-By default, nanobot only allows one spawned subagent at a time. When the limit is reached, the `spawn` tool returns an error so the agent can decide to wait or rearrange its work. This protects local LLM servers from loading multiple KV caches at once. If your provider can handle more parallel work, raise the limit:
+By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
 
 ```json
 {
@@ -2225,22 +2237,11 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 }
 ```
 
-Subagents also stop immediately when one of their tools returns an execution error. That default keeps failures visible to the parent agent. If your subagent workflows use tools that can fail transiently and should be retried or worked around by the model, disable hard-stop behavior:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "failOnToolError": false
-    }
-  }
-}
-```
+The deprecated `agents.defaults.failOnToolError` field is silently ignored when present in older configs.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
-| `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
+| `agents.defaults.maxConcurrentSubagents` | `4` | Maximum number of subagents that may run at the same time. Additional tasks wait for capacity. |
 
 
 ## Auto Compact
@@ -2267,16 +2268,12 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
-3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
-4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
+2. **Background compaction**: Older context is summarized while the most recent messages remain available.
+3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
+4. **Restart-safe resume**: The compacted context remains available after a process restart.
 
 > [!NOTE]
-> Mental model: "summarize older context, keep the freshest live turns, **and overwrite the session file with the compact form.**" It is not a full `session.clear()`, but it is a write — not a soft cursor move.
->
-> Concretely, auto compact rewrites `sessions/<key>.jsonl` in place: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the session file.
->
-> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
+> Auto compact shortens the context sent to the model without deleting the session's structured message history.
 
 ## Timezone
 

@@ -174,7 +174,7 @@ export function ChannelLogo({
   );
 }
 
-export function channelDisplayName(feature: NanobotFeatureInfo): string {
+function channelDisplayName(feature: NanobotFeatureInfo): string {
   return channelUiPresentation(feature.name, feature.webui)?.displayName ?? feature.display_name;
 }
 

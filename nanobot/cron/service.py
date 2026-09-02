@@ -25,6 +25,7 @@ from nanobot.cron.types import (
     CronSchedule,
     CronStore,
 )
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
@@ -115,8 +116,21 @@ def _disable_malformed_legacy_job(job: CronJob) -> None:
     logger.warning("Cron: disabled malformed legacy job '{}' ({}): {}", job.name, job.id, reason)
 
 
+def _persistable_origin_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return a detached JSON-safe routing snapshot for a cron payload."""
+    snapshot: dict[str, Any] = {}
+    for key, value in metadata.items():
+        if key == RUNTIME_CONTEXT_INPUT_META:
+            continue
+        try:
+            snapshot[key] = json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError, RecursionError):
+            continue
+    return snapshot
+
+
 def _normalize_agent_turn_job(job: CronJob) -> bool:
-    """Migrate legacy user cron payloads into session-bound payloads.
+    """Make routing metadata persistable and migrate legacy user cron payloads.
 
     Pre-bound user cron jobs stored their delivery target in ``channel``/``to``.
     Normal user-created legacy jobs always have those fields; if they are
@@ -124,8 +138,12 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     a runtime legacy execution path.
     """
     payload = job.payload
+    origin_metadata = _persistable_origin_metadata(payload.origin_metadata)
+    changed = origin_metadata != payload.origin_metadata
+    payload.origin_metadata = origin_metadata
+
     if payload.kind != "agent_turn" or not _has_legacy_delivery_context(payload):
-        return False
+        return changed
 
     if not payload.channel or not payload.to:
         _disable_malformed_legacy_job(job)
@@ -135,7 +153,7 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     payload.origin_channel = payload.origin_channel or payload.channel
     payload.origin_chat_id = payload.origin_chat_id or payload.to
     if not payload.origin_metadata:
-        payload.origin_metadata = dict(payload.channel_meta or {})
+        payload.origin_metadata = _persistable_origin_metadata(payload.channel_meta or {})
 
     payload.deliver = False
     payload.channel = None
@@ -717,6 +735,18 @@ class CronService:
         self._arm_timer()
         logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
         return job
+
+    def remove_system_job(self, job_id: str) -> bool:
+        """Remove a protected system job during startup reconciliation."""
+        store = self._require_store()
+        before = len(store.jobs)
+        store.jobs = [j for j in store.jobs if j.id != job_id]
+        removed = len(store.jobs) < before
+        if removed:
+            self._save_store()
+            self._arm_timer()
+            logger.info("Cron: removed system job {}", job_id)
+        return removed
 
     def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
         """Remove a job by ID, unless it is a protected system job."""

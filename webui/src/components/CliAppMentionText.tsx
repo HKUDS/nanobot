@@ -137,7 +137,7 @@ export function CapabilityMentionToken({
   return <SessionMentionToken mention={segment.mention} label={segment.text} variant={variant} />;
 }
 
-export function SessionMentionToken({
+function SessionMentionToken({
   mention,
   label,
   variant,
@@ -172,7 +172,7 @@ export function SessionMentionToken({
   );
 }
 
-export function CliAppMentionToken({
+function CliAppMentionToken({
   app,
   label,
   variant,
@@ -229,7 +229,7 @@ export function CliAppMentionToken({
   );
 }
 
-export function McpPresetMentionToken({
+function McpPresetMentionToken({
   preset,
   label,
   variant,

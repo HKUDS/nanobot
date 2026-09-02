@@ -58,7 +58,7 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "relative z-30 flex items-center justify-between gap-3 px-3 py-2",
+        "relative z-30 flex items-center justify-between gap-3 px-3 py-1",
         minimal && "h-11",
         !minimal && hostChromeTitleInset && "lg:pl-[128px]",
       )}

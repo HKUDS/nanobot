@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -133,12 +134,15 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [],
+        TranscriptInput(history=[], current_message=None),
         runtime=runtime,
-        channel="slack",
-        chat_id="C123",
-        metadata=metadata,
-        session_key="slack:C123:111.222",
+        request_context=RequestContext(
+            channel="slack",
+            chat_id="C123",
+            session_key="slack:C123:111.222",
+            runtime=runtime,
+            metadata=metadata,
+        ),
     )
 
     assert cron.contexts[-1] == {
@@ -231,12 +235,15 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
     try:
         with pytest.raises(RuntimeError, match="runner failed"):
             await loop._run_agent_loop(
-                [],
+                TranscriptInput(history=[], current_message=None),
                 runtime=runtime,
-                channel="slack",
-                chat_id="C123",
-                session_key="slack:C123:111.222",
-                original_user_text="  unchanged user text  ",
+                request_context=RequestContext(
+                    channel="slack",
+                    chat_id="C123",
+                    session_key="slack:C123:111.222",
+                    original_user_text="  unchanged user text  ",
+                    runtime=runtime,
+                ),
             )
         assert current_request_context() is outer
     finally:

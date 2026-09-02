@@ -1,10 +1,14 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
+import os
+import subprocess
 import sys
 import time
+import webbrowser
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 import typer
 from pydantic import ValidationError
@@ -40,6 +44,7 @@ __all__ = [
     "_gateway_instance_command",
     "_host_for_local_browser",
     "_load_webui_setup_config",
+    "_launch_browser",
     "_open_webui_browser",
     "_prepare_webui_bundle_for_gateway",
     "_print_foreground_port_conflict",
@@ -58,6 +63,20 @@ __all__ = [
 ]
 
 console = Console()
+
+
+def _launch_browser(url: str) -> bool:
+    """Open *url* and request a foreground browser window."""
+    if sys.platform == "darwin":
+        result = subprocess.run(
+            ["open", url],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    return bool(webbrowser.open(url, new=2, autoraise=True))
 
 
 def _confirm_webui_action(message: str, *, yes: bool) -> None:
@@ -192,10 +211,9 @@ def _prepare_webui_bundle_for_gateway(
         return typer.confirm(message, default=True)
 
     try:
-        # A source checkout is the development product. Every gateway entrypoint
-        # keeps its browser client in lockstep with Python; only Vite mode skips
-        # the production bundle intentionally.
-        if mode != "skip" and inspect_webui_bundle().source_available:
+        # Interactive WebUI commands keep source and bundle in lockstep.
+        # Warn-only gateway startup must not block on a frontend build.
+        if mode not in {"skip", "warn"} and inspect_webui_bundle().source_available:
             mode = "auto"
         ensure_webui_bundle(
             mode=mode,
@@ -420,14 +438,14 @@ def _print_foreground_port_conflict(
 
 def _open_webui_browser(url: str, *, wait: bool = True) -> None:
     """Open the WebUI in the user's default browser, with a copyable fallback."""
-    import webbrowser
-
     if wait:
         _wait_for_webui(url)
     display_url = _webui_display_url(url)
     try:
-        webbrowser.open(url)
-        console.print(f"[green]✓[/green] Opened WebUI: [cyan]{display_url}[/cyan]")
+        if _launch_browser(url):
+            console.print(f"[green]✓[/green] Opened WebUI: [cyan]{display_url}[/cyan]")
+        else:
+            console.print(f"[yellow]Could not open browser; visit {display_url}[/yellow]")
     except Exception as exc:
         console.print(f"[yellow]Could not open browser ({exc}); visit {display_url}[/yellow]")
 
@@ -441,8 +459,75 @@ def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
         console.print("[green]WebUI is attached to the shared gateway.[/green]")
     console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
     console.print(
-        "[dim]Press Ctrl+C to detach; the gateway stops only when the last local client exits.[/dim]"
+        "[dim]Following live gateway logs. Press Ctrl+C to detach; the gateway stops "
+        "only when the last local client exits.[/dim]"
     )
+
+
+_LOG_ANCHOR_BYTES = 64
+
+
+@dataclass
+class _GatewayLogCursor:
+    offset: int = 0
+    identity: tuple[int, int] | None = None
+    anchor: bytes = b""
+    pending: bytes = b""
+
+
+def _log_anchor(handle: BinaryIO, offset: int) -> bytes:
+    size = min(offset, _LOG_ANCHOR_BYTES)
+    handle.seek(offset - size)
+    return handle.read(size)
+
+
+def _start_gateway_log_cursor(log_path: Path) -> _GatewayLogCursor:
+    """Start following at the current end of *log_path*."""
+    try:
+        with log_path.open("rb") as handle:
+            stat = os.fstat(handle.fileno())
+            offset = stat.st_size
+            return _GatewayLogCursor(
+                offset=offset,
+                identity=(stat.st_dev, stat.st_ino),
+                anchor=_log_anchor(handle, offset),
+            )
+    except OSError:
+        return _GatewayLogCursor()
+
+
+def _read_new_gateway_logs(
+    log_path: Path,
+    cursor: _GatewayLogCursor,
+    *,
+    flush: bool = False,
+) -> list[str]:
+    """Read complete gateway log lines appended after *cursor*."""
+    try:
+        with log_path.open("rb") as handle:
+            stat = os.fstat(handle.fileno())
+            identity = (stat.st_dev, stat.st_ino)
+            reset = cursor.identity != identity or stat.st_size < cursor.offset
+            if not reset and cursor.offset:
+                reset = _log_anchor(handle, cursor.offset) != cursor.anchor
+            if reset:
+                cursor.offset = 0
+                cursor.pending = b""
+
+            handle.seek(cursor.offset)
+            chunk = handle.read()
+            cursor.offset = handle.tell()
+            cursor.identity = identity
+            cursor.anchor = _log_anchor(handle, cursor.offset)
+    except OSError:
+        return []
+
+    parts = (cursor.pending + chunk).split(b"\n")
+    cursor.pending = parts.pop()
+    if flush and cursor.pending:
+        parts.append(cursor.pending)
+        cursor.pending = b""
+    return [part.removesuffix(b"\r").decode("utf-8", errors="replace") for part in parts]
 
 
 def _attach_to_background_gateway(
@@ -451,17 +536,27 @@ def _attach_to_background_gateway(
     poll_hook: Callable[[], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Keep a WebUI launcher attached without taking ownership of the gateway."""
+    """Keep the launcher attached and mirror this gateway's new log output."""
+    status = runtime.status()
+    log_path = status.log_path
+    cursor = _start_gateway_log_cursor(log_path)
     _print_webui_foreground_lifecycle(attached=True)
     try:
-        while runtime.status().running:
+        while status.running:
+            for line in _read_new_gateway_logs(log_path, cursor):
+                console.print(line, markup=False, highlight=False)
             if poll_hook is not None:
                 poll_hook()
             sleep(0.5)
+            status = runtime.status()
     except KeyboardInterrupt:
+        for line in _read_new_gateway_logs(log_path, cursor, flush=True):
+            console.print(line, markup=False, highlight=False)
         console.print("\n[yellow]WebUI launcher detached.[/yellow]")
         return
 
+    for line in _read_new_gateway_logs(log_path, cursor, flush=True):
+        console.print(line, markup=False, highlight=False)
     console.print("[yellow]Gateway stopped.[/yellow]")
 
 
