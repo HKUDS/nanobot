@@ -269,7 +269,11 @@ def update_model_call_order(
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
-    if models.update_model_call_order(config, query):
+    if models.update_model_call_order(
+        config,
+        query,
+        oauth_status=_oauth_provider_status,
+    ):
         _save_settings_config(config, config_path)
     return settings_payload(config_path=config_path)
 

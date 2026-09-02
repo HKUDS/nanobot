@@ -592,7 +592,7 @@ def test_update_model_call_order_sets_primary_and_fallbacks(
     assert saved.agents.defaults.fallback_models == ["primary"]
 
 
-def test_update_model_call_order_requires_named_primary(
+def test_update_model_call_order_activates_existing_named_preset(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -602,11 +602,36 @@ def test_update_model_call_order_requires_named_primary(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
+    payload = update_model_call_order({"order": [json.dumps(["backup"])]})
+
+    assert payload["model_call_order"] == ["backup"]
+    assert payload["model_call_order_editable"] is True
+    assert load_config(config_path).agents.defaults.model_preset == "backup"
+
+
+def test_update_model_call_order_preserves_real_legacy_configuration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.agents.defaults.provider = "openai"
+    config.model_presets["backup"] = ModelPresetConfig(
+        model="openai/gpt-4.1-mini",
+        provider="openai",
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
     with pytest.raises(WebUISettingsError) as error:
         update_model_call_order({"order": [json.dumps(["backup"])]})
 
     assert error.value.status == 409
-    assert load_config(config_path).agents.defaults.model_preset is None
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset is None
+    assert saved.agents.defaults.model == "openai/gpt-4o"
 
 
 def test_migrate_model_configurations_preserves_legacy_chain(

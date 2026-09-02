@@ -1312,7 +1312,12 @@ def update_model_configuration(
     return changed
 
 
-def update_model_call_order(config: Config, query: QueryParams) -> bool:
+def update_model_call_order(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
     raw_order = query_first_alias(query, "order", "presetNames")
     if raw_order is None:
         raise WebUISettingsError("model call order is required")
@@ -1331,15 +1336,16 @@ def update_model_call_order(config: Config, query: QueryParams) -> bool:
         raise WebUISettingsError("model call order must contain at least one preset")
 
     normalized_order = [cast(str, name).strip() for name in cast(list[object], order)]
+    unknown = [name for name in normalized_order if name not in config.model_presets]
+    if unknown:
+        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
+
     _, editable = _model_call_order_state(config)
-    if not editable:
+    if not editable and _legacy_model_configuration_migratable(config, oauth_status):
         raise WebUISettingsError(
             "convert the existing model configuration to presets first",
             status=409,
         )
-    unknown = [name for name in normalized_order if name not in config.model_presets]
-    if unknown:
-        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
 
     defaults = config.agents.defaults
     fallback_models: list[FallbackCandidate] = list(normalized_order[1:])
