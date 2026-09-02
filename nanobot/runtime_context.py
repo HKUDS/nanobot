@@ -173,8 +173,11 @@ def append_runtime_context(
 
 def _ephemeral_flags(marker: Mapping[str, Any], count: int) -> list[bool]:
     """Read in-memory block lifecycle flags, defaulting old markers to durable."""
-    raw_flags = marker.get("ephemeral_blocks")
-    if not isinstance(raw_flags, list) or len(raw_flags) != count:
+    raw_flags_value = marker.get("ephemeral_blocks")
+    if not isinstance(raw_flags_value, list):
+        return [False] * count
+    raw_flags = cast(list[object], raw_flags_value)
+    if len(raw_flags) != count:
         return [False] * count
     return [value is True for value in raw_flags]
 

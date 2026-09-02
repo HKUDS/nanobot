@@ -2200,7 +2200,7 @@ class AgentLoop:
             if role == "user" and isinstance(runtime_context_meta, Mapping):
                 projected = project_runtime_context_for_persistence(
                     content,
-                    runtime_context_meta,
+                    cast(Mapping[str, Any], runtime_context_meta),
                 )
                 if projected is not None:
                     content, runtime_context_meta = projected
