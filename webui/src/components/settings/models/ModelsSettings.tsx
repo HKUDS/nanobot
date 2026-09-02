@@ -850,21 +850,20 @@ export function ModelsSettings({
                 })}
               </div>
               {!creating ? (
-                <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="rounded-full"
-                    disabled={callOrderBusy}
-                    onClick={() => {
-                      setEditorRowKey(null);
-                      setEditorOpen(true);
-                      onBeginCreate();
-                    }}
-                  >
+                <button
+                  type="button"
+                  className="flex min-h-[58px] w-full items-center justify-between gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
+                  disabled={callOrderBusy}
+                  onClick={() => {
+                    setEditorRowKey(null);
+                    setEditorOpen(true);
+                    onBeginCreate();
+                  }}
+                >
+                  <span className="inline-flex items-center text-[13px] font-medium">
                     <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                     {tx("settings.models.newPreset", "New model preset")}
-                  </Button>
+                  </span>
                   {orderSaving ? (
                     <SettingsStatusMessage>
                       <span className="inline-flex items-center gap-1.5">
@@ -873,7 +872,7 @@ export function ModelsSettings({
                       </span>
                     </SettingsStatusMessage>
                   ) : null}
-                </div>
+                </button>
               ) : null}
               {creating && editorOpen ? renderPresetEditor() : null}
             </>

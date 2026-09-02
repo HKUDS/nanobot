@@ -1440,7 +1440,9 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
+    const createButton = await screen.findByRole("button", { name: "New model preset" });
+    expect(createButton).toHaveClass("w-full");
+    fireEvent.click(createButton);
 
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
     expect(screen.getByTestId("model-preset-editor")).toHaveClass("mt-3", "mb-3");
