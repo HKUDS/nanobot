@@ -287,6 +287,33 @@ def test_create_model_configuration_accepts_legacy_label_without_changing_call_o
     assert duplicate.value.status == 409
 
 
+def test_first_model_configuration_replaces_unused_schema_default(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {
+            "name": ["openai"],
+            "provider": ["openai"],
+            "model": ["openai/gpt-4.1"],
+        }
+    )
+
+    assert payload["model_call_order"] == ["openai"]
+    assert payload["model_call_order_editable"] is True
+    assert payload["agent"]["model_preset"] == "openai"
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset == "openai"
+    assert saved.agents.defaults.fallback_models == []
+    assert saved.model_presets["openai"].model == "openai/gpt-4.1"
+
+
 def test_create_model_configuration_preserves_canonical_name(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -337,7 +364,7 @@ def test_create_model_configuration_accepts_dynamic_custom_provider(
         }
     )
 
-    assert payload["agent"]["model_preset"] == "default"
+    assert payload["agent"]["model_preset"] == "tenant-model"
     assert payload["created_model_preset"] == "tenant-model"
     saved = load_config(config_path)
     assert saved.model_presets["tenant-model"].provider == DYNAMIC_PROVIDER_NAME
@@ -604,6 +631,7 @@ def test_migrate_model_configurations_preserves_legacy_chain(
     legacy_payload = settings_payload()
     assert legacy_payload["model_call_order"] == []
     assert legacy_payload["model_call_order_editable"] is False
+    assert legacy_payload["model_configuration_migratable"] is True
 
     payload = migrate_model_configurations()
 
@@ -619,6 +647,27 @@ def test_migrate_model_configurations_preserves_legacy_chain(
     repeated = migrate_model_configurations()
     assert repeated["model_call_order"] == ["gpt-4o", "claude-sonnet-4"]
     assert set(load_config(config_path).model_presets) == {"gpt-4o", "claude-sonnet-4"}
+
+
+def test_schema_default_is_not_exposed_or_materialized_as_legacy_configuration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    assert payload["model_configuration_migratable"] is False
+    assert payload["model_call_order_editable"] is False
+    with pytest.raises(WebUISettingsError) as error:
+        migrate_model_configurations()
+
+    assert error.value.status == 409
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset is None
+    assert saved.model_presets == {}
 
 
 def test_model_configuration_advanced_options_round_trip(
@@ -2288,7 +2337,7 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
         }
     )
 
-    assert payload["agent"]["model_preset"] == "default"
+    assert payload["agent"]["model_preset"] == "codex"
     assert payload["created_model_preset"] == "codex"
     saved = load_config(config_path)
     assert saved.model_presets["codex"].provider == "openai_codex"
@@ -2376,7 +2425,7 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
         }
     )
 
-    assert payload["agent"]["model_preset"] == "default"
+    assert payload["agent"]["model_preset"] == "azure-aad"
     assert payload["created_model_preset"] == "azure-aad"
     saved = load_config(config_path)
     assert saved.model_presets["azure-aad"].provider == "azure_openai"

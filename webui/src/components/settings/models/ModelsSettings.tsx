@@ -560,7 +560,8 @@ export function ModelsSettings({
           {tx("settings.models.presets", "Model presets")}
         </SettingsSectionTitle>
         <SettingsGroup>
-          {!settings.model_call_order_editable ? (
+          {!settings.model_call_order_editable &&
+          settings.model_configuration_migratable !== false ? (
             <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex min-w-0 items-start gap-3">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">

@@ -81,6 +81,7 @@ class ModelSettingsPayload(TypedDict):
     model_presets: list[dict[str, Any]]
     model_call_order: list[str]
     model_call_order_editable: bool
+    model_configuration_migratable: bool
     providers: list[dict[str, Any]]
 
 
@@ -925,6 +926,48 @@ def _model_call_order_state(config: Config) -> tuple[list[str], bool]:
     return order, True
 
 
+def _legacy_model_configuration_migratable(
+    config: Config,
+    oauth_status: OAuthStatusReader,
+) -> bool:
+    """Return whether the implicit default represents usable legacy configuration.
+
+    A pristine config still carries schema defaults for backwards compatibility.
+    Those defaults are not user configuration and must not be materialized as a
+    preset. Inline fallbacks, or a default whose matching provider is configured,
+    are evidence that there is real legacy state to preserve.
+    """
+    _, editable = _model_call_order_state(config)
+    if editable:
+        return False
+
+    defaults = config.agents.defaults
+    if defaults.fallback_models:
+        return True
+
+    provider_name = defaults.provider
+    if provider_name == "auto":
+        model_prefix = defaults.model.split("/", 1)[0] if "/" in defaults.model else ""
+        if model_prefix and resolve_settings_provider(config, model_prefix) is not None:
+            provider_name = model_prefix
+        else:
+            provider_name = (
+                config.get_provider_name(
+                    defaults.model,
+                    preset=config.resolve_default_preset(),
+                )
+                or ""
+            )
+    if not provider_name or provider_name == "auto":
+        return False
+
+    resolved_provider = resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        return False
+    spec, _, provider_config = resolved_provider
+    return provider_configured_for_settings(spec, provider_config, oauth_status)
+
+
 def _validate_configured_provider(
     config: Config,
     provider: str,
@@ -1073,6 +1116,10 @@ def model_settings_payload(
         "model_presets": model_presets,
         "model_call_order": model_call_order,
         "model_call_order_editable": model_call_order_editable,
+        "model_configuration_migratable": _legacy_model_configuration_migratable(
+            config,
+            oauth_status,
+        ),
         "providers": providers,
     }
 
@@ -1153,6 +1200,10 @@ def create_model_configuration(
         raise WebUISettingsError("configuration already exists", status=409)
     _validate_configured_provider(config, provider, oauth_status)
 
+    activate_as_primary = not config.model_presets and not _legacy_model_configuration_migratable(
+        config, oauth_status
+    )
+
     base = config.resolve_preset()
     max_tokens = _parse_positive_int(
         query_first_alias(query, "max_tokens", "maxTokens"),
@@ -1180,6 +1231,9 @@ def create_model_configuration(
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
     )
+    if activate_as_primary:
+        config.agents.defaults.model_preset = name
+        config.agents.defaults.fallback_models = []
     return name
 
 
@@ -1299,8 +1353,18 @@ def update_model_call_order(config: Config, query: QueryParams) -> bool:
     return changed
 
 
-def migrate_model_configurations(config: Config) -> bool:
+def migrate_model_configurations(
+    config: Config,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
     """Materialize legacy primary/inline model settings as named presets."""
+    _, editable = _model_call_order_state(config)
+    if editable:
+        return False
+    if not _legacy_model_configuration_migratable(config, oauth_status):
+        raise WebUISettingsError("there is no legacy model configuration to convert", status=409)
+
     defaults = config.agents.defaults
     primary = config.resolve_preset()
     created: list[str] = []

@@ -690,6 +690,7 @@ describe("Settings models", () => {
       model_presets: [defaultPreset],
       model_call_order: [],
       model_call_order_editable: false,
+      model_configuration_migratable: true,
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -723,6 +724,48 @@ describe("Settings models", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
+  });
+
+  it("starts fresh users with an empty preset list instead of legacy conversion", async () => {
+    const base = settingsPayload();
+    const freshPayload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "anthropic/claude-opus-4-5",
+        provider: "auto",
+        resolved_provider: null,
+        has_api_key: false,
+        model_preset: "default",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          name: "default",
+          label: "Default",
+          active: true,
+          is_default: true,
+          model: "anthropic/claude-opus-4-5",
+          provider: "auto",
+          resolved_provider: null,
+        },
+      ],
+      model_call_order: [],
+      model_call_order_editable: false,
+      model_configuration_migratable: false,
+      providers: [],
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({ initialSection: "models", initialSettings: freshPayload });
+
+    expect(
+      await screen.findByRole("button", { name: "New model preset" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Convert to presets" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("claude-opus-4-5")).not.toBeInTheDocument();
   });
 
   it("does not expose the synthetic default configuration as a WebUI preset", async () => {
