@@ -1,10 +1,12 @@
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 import nanobot.session as session_api
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session import Session, SessionManager
-from nanobot.session.manager import SessionStore
+from nanobot.session.manager import JsonlSessionStore, SessionStore
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
@@ -317,3 +319,24 @@ def test_invalid_runtime_checkpoint_is_discarded(tmp_path) -> None:
 
     assert "runtime_checkpoint" not in restored.metadata
     assert not checkpoint_path.exists()
+
+
+def test_session_key_validation_accepts_legitimate_keys(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    for key in ("abc-123_DEF", "slack:C123", "cli:direct", "discord:123456789012345678"):
+        assert manager.get_or_create(key).key == key
+
+
+def test_session_key_validation_rejects_path_traversal(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    for key in ("../../etc/passwd", "/tmp/evil", "..\\..\\etc\\passwd", "channel:../secret"):
+        with pytest.raises(ValueError):
+            manager._get_session_path(key)
+
+
+def test_validate_session_key_matches_issue_cases() -> None:
+    for key in ("abc-123_DEF", "slack:C123"):
+        assert JsonlSessionStore.validate_session_key(key) == key
+    for key in ("../../etc/passwd", "/tmp/evil"):
+        with pytest.raises(ValueError):
+            JsonlSessionStore.validate_session_key(key)

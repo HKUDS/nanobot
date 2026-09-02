@@ -75,6 +75,12 @@ _WORKSPACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _SESSION_MIGRATION_LOCK_TIMEOUT_SECONDS = 30
 _SESSION_FILES_LOCK_FILENAME = ".session-files.lock"
 _COPY_CHUNK_SIZE = 1024 * 1024
+# A "." or ".." used as a path segment, delimited by the start of the key, a
+# "/" or "\" separator, a ":" scheme boundary, or the end of the key. This
+# covers both POSIX traversal ("../x") and URL-form accounts ("channel:../x")
+# without rejecting innocuous chat ids that merely contain ".." in a token.
+_PATH_TRAVERSAL_SEGMENT_RE = re.compile(r"(?:^|[/\\:])\.{1,2}(?:$|[/\\:])")
+_WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:[\\/]")
 
 
 def _json_object(value: object) -> dict[str, Any]:
@@ -1023,16 +1029,38 @@ class JsonlSessionStore:
             return None
         return key
 
+    @classmethod
+    def validate_session_key(cls, key: str) -> str:
+        """Raise if a session key could escape the sessions directory.
+
+        session keys are ``channel:chat_id`` pairs that legitimately contain a
+        large character set, so this does not restrict the alphabet. It only
+        rejects the traversal vectors that would let an untrusted id such as
+        ``../../etc/passwd`` address a file outside the sessions directory.
+        """
+        if not isinstance(key, str) or not key:
+            raise ValueError("session key must be a non-empty string")
+        normalized = key.replace("\\", "/")
+        if normalized.startswith("/") or _WINDOWS_DRIVE_RE.match(normalized):
+            raise ValueError("session key must be a relative identifier")
+        if _PATH_TRAVERSAL_SEGMENT_RE.search(normalized):
+            raise ValueError("session key must not contain path traversal components")
+        return key
+
     def get_session_path(self, key: str) -> Path:
+        self.validate_session_key(key)
         return self.sessions_dir / f"{self.storage_key(key)}.jsonl"
 
     def get_runtime_checkpoint_path(self, key: str) -> Path:
+        self.validate_session_key(key)
         return self.sessions_dir / f"{self.storage_key(key)}{_RUNTIME_CHECKPOINT_SUFFIX}"
 
     def get_legacy_lossy_path(self, key: str) -> Path:
+        self.validate_session_key(key)
         return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
 
     def get_legacy_session_path(self, key: str) -> Path:
+        self.validate_session_key(key)
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def load(self, key: str) -> Session | None:
