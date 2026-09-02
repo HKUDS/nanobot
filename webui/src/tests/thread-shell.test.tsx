@@ -895,11 +895,18 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     onOpenModelSettings.mockClear();
+    const firstSetupPill = badge.querySelector('[data-needs-setup="true"]');
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
-    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    const secondSetupPill = badge.querySelector('[data-needs-setup="true"]');
+    expect(onOpenModelSettings).not.toHaveBeenCalled();
+    expect(secondSetupPill).not.toBe(firstSetupPill);
+    expect(secondSetupPill).toHaveClass("composer-model-pill-setup-attention");
     expect(input).toHaveValue("hello");
     expect(client.sendMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(badge.querySelector('[data-needs-setup="true"]')).not.toBe(secondSetupPill);
   });
 
   it("keeps image generation controls out of the composer", async () => {

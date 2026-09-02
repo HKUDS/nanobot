@@ -90,6 +90,7 @@ interface ModelPresetBadgeProps {
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
+  attentionRequest?: number;
   fallbackModelName?: string | null;
   isHero: boolean;
   onClick?: () => void;
@@ -106,6 +107,7 @@ export function ModelPresetBadge({
   provider,
   providerLabel,
   needsSetup = false,
+  attentionRequest = 0,
   fallbackModelName,
   isHero,
   onClick,
@@ -272,11 +274,13 @@ export function ModelPresetBadge({
 
   const pill = (
     <PresetPill
+      key={needsSetup ? attentionRequest : undefined}
       label={displayLabel}
       modelDetail={displayModelDetail}
       provider={displayProvider}
       providerLabel={fallbackModelName ? null : providerLabel}
       needsSetup={needsSetup}
+      needsAttention={needsSetup && attentionRequest > 0}
       fallbackModelName={fallbackModelName}
       fallbackFromLabel={fallbackModelName ? label : null}
       isHero={isHero}
@@ -493,6 +497,7 @@ function PresetPill({
   provider,
   providerLabel,
   needsSetup = false,
+  needsAttention = false,
   fallbackModelName,
   fallbackFromLabel,
   isHero,
@@ -504,6 +509,7 @@ function PresetPill({
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
+  needsAttention?: boolean;
   fallbackModelName?: string | null;
   fallbackFromLabel?: string | null;
   isHero: boolean;
@@ -542,6 +548,7 @@ function PresetPill({
         "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible:ring-2 group-focus-visible:ring-ring/45",
         isHero ? "gap-1.5 px-2.5 text-[12px]" : "gap-2 px-3 text-[12.5px]",
         needsSetup && "composer-model-pill-setup",
+        needsAttention && "composer-model-pill-setup-attention",
         offset !== undefined && "composer-model-pill-dock",
       )}
       style={scale === undefined ? undefined : {

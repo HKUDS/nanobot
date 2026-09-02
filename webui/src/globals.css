@@ -765,6 +765,33 @@
     0 2px 5px rgb(0 0 0 / 0.16);
 }
 
+@keyframes composer-model-pill-setup-attention {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  22% {
+    transform: translateX(-3px);
+  }
+
+  46% {
+    transform: translateX(3px);
+  }
+
+  68% {
+    transform: translateX(-2px);
+  }
+
+  86% {
+    transform: translateX(1px);
+  }
+}
+
+.composer-model-pill-setup-attention {
+  animation: composer-model-pill-setup-attention 280ms cubic-bezier(0.22, 0.8, 0.32, 1);
+}
+
 @keyframes composer-model-pill-viewport-enter {
   from {
     transform: scale(0.9074);
@@ -815,6 +842,10 @@
 
   .composer-model-pill-setup {
     transition: none;
+  }
+
+  .composer-model-pill-setup-attention {
+    animation: none;
   }
 
   .composer-model-pill-track[data-settling="true"],
