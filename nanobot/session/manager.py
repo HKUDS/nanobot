@@ -15,7 +15,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Collection, Generator, Protocol, TypedDict, cast
+from typing import Any, Callable, Collection, Generator, Literal, Protocol, TypedDict, cast
 from weakref import WeakValueDictionary
 
 from filelock import FileLock
@@ -334,11 +334,19 @@ class Session:
         max_tokens: int = 0,
         extend_to_user: bool = False,
         include_runtime_context: bool = True,
+        replay_reasoning: Literal["recent", "all", "none"] = "all",
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
         A positive ``max_messages`` applies an explicit caller-owned count
         limit. The normal model path relies on ``max_tokens`` instead.
+
+        ``replay_reasoning`` bounds how far back ``reasoning_content`` and
+        ``thinking_blocks`` are replayed: ``"all"`` keeps them on every row,
+        ``"recent"`` keeps them only for the turn after the last user row
+        (an unfinished tool loop stays intact), and ``"none"`` drops them
+        everywhere. Stripping happens at replay time only — the persisted
+        session record is never modified.
         """
         replay_start = self.last_archived
         if replay_start:
@@ -443,6 +451,28 @@ class Session:
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
+
+        if replay_reasoning != "all" and out:
+            # Past-turn reasoning is only useful to the provider inside the
+            # current tool loop. Drop it from older rows at replay time so it
+            # no longer competes with the conversation for the replay budget.
+            boundary = len(out)  # "none": no row replays reasoning
+            if replay_reasoning == "recent":
+                boundary = 0  # No user row in the replay: keep reasoning rather than guess a turn boundary.
+                for index in range(len(out) - 1, -1, -1):
+                    if out[index].get("role") == "user":
+                        boundary = index
+                        break
+            out = [
+                message
+                if index >= boundary
+                else {
+                    key: value
+                    for key, value in message.items()
+                    if key not in ("reasoning_content", "thinking_blocks")
+                }
+                for index, message in enumerate(out)
+            ]
 
         if max_tokens > 0 and out:
             kept: list[dict[str, Any]] = []
