@@ -372,7 +372,10 @@ export function ModelsSettings({
     <div
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-floating border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl"
+      className={cn(
+        "mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-floating border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl",
+        creating && "mt-3",
+      )}
     >
       {creating ? (
         <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
@@ -846,8 +849,8 @@ export function ModelsSettings({
                   );
                 })}
               </div>
-              <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                {!creating ? (
+              {!creating ? (
+                <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -862,18 +865,16 @@ export function ModelsSettings({
                     <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                     {tx("settings.models.newPreset", "New model preset")}
                   </Button>
-                ) : (
-                  <span />
-                )}
-                {orderSaving ? (
-                  <SettingsStatusMessage>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                      {tx("settings.actions.saving", "Saving...")}
-                    </span>
-                  </SettingsStatusMessage>
-                ) : null}
-              </div>
+                  {orderSaving ? (
+                    <SettingsStatusMessage>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                        {tx("settings.actions.saving", "Saving...")}
+                      </span>
+                    </SettingsStatusMessage>
+                  ) : null}
+                </div>
+              ) : null}
               {creating && editorOpen ? renderPresetEditor() : null}
             </>
           )}

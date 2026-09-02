@@ -1443,6 +1443,7 @@ describe("Settings models", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
 
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("model-preset-editor")).toHaveClass("mt-3", "mb-3");
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("");
     expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
