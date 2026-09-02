@@ -742,7 +742,12 @@ class TestParseResponseOutput:
         )
 
         assert compacted.provider_compaction_applied is True
+        assert compacted.provider_compaction_state is not None
+        assert responses_state_items(compacted.provider_compaction_state) == [
+            {"type": "compaction", "encrypted_content": "opaque"},
+        ]
         assert replayed.provider_compaction_applied is False
+        assert replayed.provider_compaction_state is None
 
 
 class TestResponsesConversationState:

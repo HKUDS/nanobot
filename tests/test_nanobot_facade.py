@@ -1412,7 +1412,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock()
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
 
     snapshot = await bot.sessions.ingest(
         "sdk:history",
@@ -1442,7 +1441,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[0]["source"] == "longmemeval"
     assert snapshot.messages[1]["source"] == "longmemeval"
     bot._loop.process_direct.assert_not_called()
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_not_called()
 
     reloaded = bot.sessions.get("sdk:history")
     assert reloaded is not None
@@ -1635,12 +1633,13 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     runtime = bot._loop.llm_runtime()
     bot._loop.runtime_for_session = MagicMock(return_value=runtime)  # type: ignore[method-assign]
 
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    compact_session = AsyncMock()
+    bot._loop.consolidator.compact_idle_session = compact_session
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
-    assert (
-        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"]
-        is runtime
+    compact_session.assert_awaited_once_with(
+        "sdk:history",
+        runtime=runtime,
     )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path

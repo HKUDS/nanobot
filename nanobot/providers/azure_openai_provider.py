@@ -34,6 +34,7 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
+    build_responses_compaction_state,
     build_responses_state,
     consume_sdk_stream,
     convert_tools,
@@ -42,7 +43,6 @@ from nanobot.providers.openai_responses import (
     parse_response_output,
     prepare_responses_input,
     resolve_compact_threshold,
-    responses_items_have_compaction,
     responses_state_matches,
 )
 
@@ -411,8 +411,13 @@ class AzureOpenAIProvider(LLMProvider):
                     output_items=capture.output_items,
                     usage=usage,
                 )
+                result.provider_compaction_state = build_responses_compaction_state(
+                    provider=self._responses_state_provider(),
+                    model=str(body["model"]),
+                    output_items=capture.output_items,
+                )
                 result.provider_compaction_applied = (
-                    responses_items_have_compaction(capture.output_items)
+                    result.provider_compaction_state is not None
                 )
             return result
         except Exception as e:

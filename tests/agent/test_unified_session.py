@@ -28,7 +28,7 @@ from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.providers.base import GenerationSettings
 from nanobot.session.keys import UNIFIED_SESSION_KEY
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import SessionManager
 from nanobot.utils.llm_runtime import LLMRuntime
 
 # ---------------------------------------------------------------------------
@@ -332,116 +332,6 @@ class TestCmdNewUnifiedSession:
         sessions.invalidate("discord:999")
         assert sessions.get_or_create("unified:default").messages == []
         assert len(sessions.get_or_create("discord:999").messages) == 1
-
-
-# ---------------------------------------------------------------------------
-# TestConsolidationUnaffectedByUnifiedSession — consolidation is key-agnostic
-# ---------------------------------------------------------------------------
-
-class TestConsolidationUnaffectedByUnifiedSession:
-    """maybe_consolidate_by_tokens() behaviour is identical regardless of session key."""
-
-    @pytest.mark.asyncio
-    async def test_consolidation_skips_empty_session_for_unified_key(self):
-        """Empty unified:default session → consolidation exits immediately, archive not called."""
-        from nanobot.agent.memory import Consolidator, MemoryStore
-
-        store = MagicMock(spec=MemoryStore)
-        mock_provider = MagicMock()
-        mock_provider.chat_with_retry = AsyncMock(return_value=MagicMock(content="summary"))
-        runtime = _runtime(mock_provider)
-        # Use spec= so MagicMock doesn't auto-generate AsyncMock for non-async methods,
-        # which would leave unawaited coroutines and trigger RuntimeWarning.
-        sessions = MagicMock(spec=SessionManager)
-
-        consolidator = Consolidator(
-            store=store,
-            sessions=sessions,
-            build_messages=MagicMock(return_value=[]),
-            get_tool_definitions=MagicMock(return_value=[]),
-        )
-        consolidator.archive_session = AsyncMock()
-
-        session = Session(key="unified:default")
-        session.messages = []
-        sessions.get_or_create.return_value = session
-
-        await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
-
-        consolidator.archive_session.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_consolidation_behaviour_identical_for_any_key(self):
-        """Archive call count is the same for 'telegram:123' and 'unified:default'
-        under identical token conditions."""
-        from nanobot.agent.memory import Consolidator, MemoryStore
-
-        archive_calls: dict[str, int] = {}
-
-        for key in ("telegram:123", "unified:default"):
-            store = MagicMock(spec=MemoryStore)
-            mock_provider = MagicMock()
-            mock_provider.chat_with_retry = AsyncMock(return_value=MagicMock(content="summary"))
-            runtime = _runtime(mock_provider)
-            sessions = MagicMock(spec=SessionManager)
-
-            consolidator = Consolidator(
-                store=store,
-                sessions=sessions,
-                build_messages=MagicMock(return_value=[]),
-                get_tool_definitions=MagicMock(return_value=[]),
-            )
-
-            session = Session(key=key)
-            session.messages = []  # empty → exits immediately for both keys
-            sessions.get_or_create.return_value = session
-
-            consolidator.archive_session = AsyncMock()
-            await consolidator.maybe_consolidate_by_tokens(
-                session,
-                runtime=runtime,
-            )
-            archive_calls[key] = consolidator.archive_session.call_count
-
-        assert archive_calls["telegram:123"] == archive_calls["unified:default"] == 0
-
-    @pytest.mark.asyncio
-    async def test_consolidation_triggers_when_over_budget_unified_key(self):
-        """When tokens exceed budget, consolidation attempts to find a boundary —
-        behaviour is identical to any other session key."""
-        from nanobot.agent.memory import Consolidator, MemoryStore
-
-        store = MagicMock(spec=MemoryStore)
-        mock_provider = MagicMock()
-        runtime = _runtime(mock_provider)
-        sessions = MagicMock(spec=SessionManager)
-
-        consolidator = Consolidator(
-            store=store,
-            sessions=sessions,
-            build_messages=MagicMock(return_value=[]),
-            get_tool_definitions=MagicMock(return_value=[]),
-        )
-
-        session = Session(key="unified:default")
-        session.messages = [{"role": "user", "content": "msg"}]
-        sessions.get_or_create.return_value = session
-
-        # Simulate over-budget: estimated > budget
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))
-        # No valid boundary found → returns gracefully without archiving
-        consolidator.pick_consolidation_boundary = MagicMock(return_value=None)
-        consolidator.archive_session = AsyncMock()
-
-        await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
-
-        # estimate was called (consolidation was attempted)
-        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
-            session,
-            runtime=runtime,
-        )
-        # but archive was not called (no valid boundary)
-        consolidator.archive_session.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

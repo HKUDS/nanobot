@@ -69,7 +69,6 @@ async def test_outbound_no_longer_carries_generated_media(
         ),
         image_generation_provider_config=ProviderConfig(api_key="sk-or-test"),
     )
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     result = await loop._process_message(
         InboundMessage(

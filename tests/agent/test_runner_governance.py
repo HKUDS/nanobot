@@ -235,6 +235,43 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
     assert any(message.get("content") == old_answer for message in result.messages)
 
 
+async def test_runner_rejects_oversized_delta_without_summarizable_history(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (600, "test-counter"),
+    )
+    consolidate = AsyncMock(return_value=None)
+
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=None,
+            transcript_input=TranscriptInput(
+                history=[],
+                current_message="current input is the entire oversized delta",
+            ),
+            transcript_builder=_build_transcript,
+            consolidate_history=consolidate,
+            tools=tools,
+            model="test-model",
+            context_window_tokens=2_000,
+            context_block_limit=500,
+            max_tokens=100,
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
+
+    consolidate.assert_awaited_once_with(
+        [{"role": "system", "content": "system"}],
+        None,
+    )
+    provider.chat_with_retry.assert_not_awaited()
+
+
 async def test_runner_governs_history_before_summarizing_it(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False
@@ -291,11 +328,19 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
 async def test_native_compaction_summarizes_h_without_current_tool_exchange(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False
+    compacted_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+    )
     provider.chat_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content=None,
             tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
             provider_compaction_applied=True,
+            provider_compaction_state=compacted_state,
         ),
         LLMResponse(content="done"),
     ])
@@ -307,6 +352,7 @@ async def test_native_compaction_summarizes_h_without_current_tool_exchange(monk
         lambda *_args: (100, "test-counter"),
     )
     consolidate = AsyncMock(return_value="portable checkpoint")
+    consolidate_native = AsyncMock(return_value="portable checkpoint")
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -320,6 +366,7 @@ async def test_native_compaction_summarizes_h_without_current_tool_exchange(monk
         ),
         transcript_builder=_build_transcript,
         consolidate_history=consolidate,
+        consolidate_provider_compaction=consolidate_native,
         tools=tools,
         model="test-model",
         context_window_tokens=2_000,
@@ -329,7 +376,9 @@ async def test_native_compaction_summarizes_h_without_current_tool_exchange(monk
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    consolidate.assert_awaited_once_with(
+    consolidate.assert_not_awaited()
+    consolidate_native.assert_awaited_once_with(
+        compacted_state,
         [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "accepted question"},
@@ -1251,7 +1300,6 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [

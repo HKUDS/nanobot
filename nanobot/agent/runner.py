@@ -77,6 +77,10 @@ HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
     Awaitable[str | None],
 ]
+ProviderCompactionConsolidator = Callable[
+    [ProviderConversationState, list[dict[str, Any]], str | None],
+    Awaitable[str | None],
+]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -123,6 +127,7 @@ class AgentRunSpec:
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
+    consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
     llm_timeout_s: float | None = None
@@ -159,6 +164,10 @@ class _ContextCompactionState:
     accepted_messages: list[dict[str, Any]]
     raw_accepted_boundary: int
     active_summary: str | None
+    transcript_input: TranscriptInput
+    transcript_builder: TranscriptBuilder
+    consolidate_history: HistoryConsolidator
+    consolidate_provider_compaction: ProviderCompactionConsolidator | None
     summary_checkpoint: SessionSummaryCheckpoint | None = None
 
     def request_messages(
@@ -173,11 +182,9 @@ class _ContextCompactionState:
     def delta_after_accepted(
         self,
         request_messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]] | None:
-        boundary = len(self.accepted_messages)
-        if request_messages[:boundary] != self.accepted_messages:
-            return None
-        return deepcopy(request_messages[boundary:])
+    ) -> list[dict[str, Any]]:
+        return deepcopy(request_messages[len(self.accepted_messages):])
+
 
 @dataclass(slots=True)
 class _ModelRequestState:
@@ -471,7 +478,7 @@ class AgentRunner:
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
-        messages = self._initial_transcript(spec)
+        messages, compaction = self._initial_transcript_and_compaction(spec)
         context = AgentRunHookContext(messages=deepcopy(messages))
         llm_usage_source_token = bind_llm_usage_source(
             spec.llm_usage_source or source_from_session_key(spec.session_key)
@@ -479,7 +486,7 @@ class AgentRunner:
 
         try:
             await hook.before_run(context)
-            result = await self._run_core(spec, hook, messages)
+            result = await self._run_core(spec, hook, messages, compaction)
         except asyncio.CancelledError as exc:
             context.messages = deepcopy(messages)
             context.stop_reason = "cancelled"
@@ -524,31 +531,51 @@ class AgentRunner:
                 reset_llm_usage_source(llm_usage_source_token)
 
     @staticmethod
-    def _initial_transcript(spec: AgentRunSpec) -> list[dict[str, Any]]:
-        """Resolve exactly one supported source for the initial model transcript."""
-        if spec.transcript_input is not None:
+    def _initial_transcript_and_compaction(
+        spec: AgentRunSpec,
+    ) -> tuple[list[dict[str, Any]], _ContextCompactionState | None]:
+        """Build the initial transcript and its optional compaction state."""
+        transcript_input = spec.transcript_input
+        if transcript_input is not None:
             if spec.initial_messages is not None:
                 raise ValueError("provide either transcript_input or initial_messages, not both")
-            if spec.transcript_builder is None:
+            transcript_builder = spec.transcript_builder
+            if transcript_builder is None:
                 raise ValueError("transcript_builder is required with transcript_input")
-            return list(spec.transcript_builder(spec.transcript_input))
+            messages = list(transcript_builder(transcript_input))
+            consolidate_history = spec.consolidate_history
+            if consolidate_history is None:
+                return messages, None
+            accepted_history_boundary = 1 + len(transcript_input.history)
+            return messages, _ContextCompactionState(
+                raw_messages=messages,
+                accepted_messages=deepcopy(messages[:accepted_history_boundary]),
+                raw_accepted_boundary=accepted_history_boundary,
+                active_summary=(
+                    transcript_input.session_summary["text"]
+                    if transcript_input.session_summary is not None
+                    else None
+                ),
+                transcript_input=transcript_input,
+                transcript_builder=transcript_builder,
+                consolidate_history=consolidate_history,
+                consolidate_provider_compaction=spec.consolidate_provider_compaction,
+            )
         if spec.initial_messages is None:
             raise ValueError("initial_messages is required without transcript_input")
         if spec.consolidate_history is not None:
             raise ValueError("consolidate_history requires transcript_input")
-        return list(spec.initial_messages)
+        return list(spec.initial_messages), None
 
     @staticmethod
     def _summary_transcript(
-        spec: AgentRunSpec,
+        compaction: _ContextCompactionState,
         summary: str,
     ) -> list[dict[str, Any]]:
         """Rebuild only the stable system prefix around a replacement summary."""
-        if spec.transcript_input is None or spec.transcript_builder is None:
-            raise ValueError("consolidate_history requires transcript_builder")
-        return spec.transcript_builder(
+        return compaction.transcript_builder(
             replace(
-                spec.transcript_input,
+                compaction.transcript_input,
                 history=[],
                 current_message=None,
                 media=None,
@@ -562,17 +589,21 @@ class AgentRunner:
 
     @staticmethod
     async def _summarize_provider_compaction(
-        spec: AgentRunSpec,
         state: _ModelRequestState,
         response: LLMResponse,
     ) -> None:
         """Materialize the H replaced by provider-native compaction."""
         compaction = state.compaction
-        summarize = spec.consolidate_history
-        if not response.provider_compaction_applied or compaction is None or summarize is None:
+        if (
+            not response.provider_compaction_applied
+            or response.provider_compaction_state is None
+            or compaction is None
+            or compaction.consolidate_provider_compaction is None
+        ):
             return
 
-        summary = await summarize(
+        summary = await compaction.consolidate_provider_compaction(
+            response.provider_compaction_state,
             deepcopy(compaction.accepted_messages),
             compaction.active_summary,
         )
@@ -589,6 +620,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         hook: AgentHook,
         messages: list[dict[str, Any]],
+        compaction: _ContextCompactionState | None,
     ) -> AgentRunResult:
         final_content: str | None = None
         tools_used: list[str] = []
@@ -624,19 +656,6 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
         )
-        compaction: _ContextCompactionState | None = None
-        if spec.consolidate_history is not None and spec.transcript_input is not None:
-            accepted_history_boundary = 1 + len(spec.transcript_input.history)
-            compaction = _ContextCompactionState(
-                raw_messages=messages,
-                accepted_messages=deepcopy(messages[:accepted_history_boundary]),
-                raw_accepted_boundary=accepted_history_boundary,
-                active_summary=(
-                    spec.transcript_input.session_summary["text"]
-                    if spec.transcript_input.session_summary is not None
-                    else None
-                ),
-            )
         request_state = _ModelRequestState(
             config=governance_config,
             conversation=conversation_state,
@@ -1065,9 +1084,61 @@ class AgentRunner:
         kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
+    async def _compact_request_history(
+        self,
+        state: _ModelRequestState,
+        compaction: _ContextCompactionState,
+        messages: list[dict[str, Any]],
+        pressure: tuple[int, str],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Replace accepted history H with a checkpoint while preserving delta."""
+        delta_messages = compaction.delta_after_accepted(messages)
+        consolidation_prefix = self._prepare_messages_for_model(
+            state.config,
+            compaction.accepted_messages,
+        )
+        summary = await compaction.consolidate_history(
+            deepcopy(consolidation_prefix),
+            compaction.active_summary,
+        )
+        if not summary:
+            measured, source = pressure
+            raise ContextWindowExceededError(
+                session_key=state.config.session_key,
+                estimated_tokens=measured,
+                input_budget=self.context_governor.input_budget(state.config),
+                source=source,
+            )
+
+        compaction.active_summary = summary
+        prepared = self._prepare_messages_for_model(
+            state.config,
+            [
+                *self._summary_transcript(compaction, summary),
+                {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
+                *delta_messages,
+            ],
+        )
+        # Responses-style state is append-only. Replacing H with a
+        # checkpoint requires a fresh request; a successful response may
+        # establish a new provider-owned state at the rewritten boundary.
+        state.conversation.replace_transcript(compaction.raw_messages)
+        state.usage = None
+        prepared = self.context_governor.ensure_request_fits(
+            state.config,
+            prepared,
+            tool_definitions=tool_definitions,
+        )
+        compaction.summary_checkpoint = SessionSummaryCheckpoint(
+            summary=summary,
+            transcript_boundary=compaction.raw_accepted_boundary,
+        )
+        return prepared
+
     async def _prepare_model_request(
         self,
-        spec: AgentRunSpec,
         state: _ModelRequestState,
         messages: list[dict[str, Any]],
         *,
@@ -1076,30 +1147,28 @@ class AgentRunner:
     ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
         """Prepare, compact or fit, and record the exact provider payload."""
         prepared = self._prepare_messages_for_model(state.config, messages)
-        supplemental_messages = (
-            [prepared[-1]] if transcript is not None and tool_definitions is None else None
-        )
-        model_messages = None if supplemental_messages is not None else prepared
-        request_context_tokens = (
-            state.conversation.estimate_request_context_tokens(
+        model_messages: list[dict[str, Any]] | None = prepared
+        supplemental_messages: list[dict[str, Any]] | None = None
+        request_context_tokens = None
+        if transcript is not None:
+            if tool_definitions is None:
+                model_messages = None
+                supplemental_messages = [prepared[-1]]
+            request_context_tokens = state.conversation.estimate_request_context_tokens(
                 transcript,
                 model_messages=model_messages,
                 supplemental_messages=supplemental_messages,
                 tool_definitions=tool_definitions,
             )
-            if transcript is not None
-            else None
-        )
         usage_matches_messages = (
             state.messages is not None
             and prepared == state.messages
             and tool_definitions == state.tool_definitions
         )
-        fitted = False
+        request_was_fitted = False
         compaction = state.compaction
-        pressure: tuple[int, str] | None = None
         if compaction is None:
-            prepared, fitted = self.context_governor.fit_request(
+            prepared, request_was_fitted = self.context_governor.fit_request(
                 state.config,
                 prepared,
                 state.usage,
@@ -1116,61 +1185,23 @@ class AgentRunner:
                 tool_definitions=tool_definitions,
                 request_context_tokens=request_context_tokens,
             )
-        if compaction is not None and pressure is not None:
-            delta_messages = compaction.delta_after_accepted(messages)
-            consolidate_history = spec.consolidate_history
-            summary = None
-            if delta_messages is not None and consolidate_history is not None:
-                consolidation_prefix = self._prepare_messages_for_model(
-                    state.config,
-                    compaction.accepted_messages,
+            if pressure is not None:
+                prepared = await self._compact_request_history(
+                    state,
+                    compaction,
+                    messages,
+                    pressure,
+                    tool_definitions=tool_definitions,
                 )
-                summary = await consolidate_history(
-                    deepcopy(consolidation_prefix),
-                    compaction.active_summary,
-                )
-            if not summary:
-                measured, source = pressure
-                raise ContextWindowExceededError(
-                    session_key=state.config.session_key,
-                    estimated_tokens=measured,
-                    input_budget=self.context_governor.input_budget(state.config),
-                    source=source,
-                )
-
-            assert delta_messages is not None
-            compaction.active_summary = summary
-            prepared = self._prepare_messages_for_model(
-                state.config,
-                [
-                    *self._summary_transcript(spec, summary),
-                    {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
-                    *delta_messages,
-                ],
-            )
-            # Responses-style state is append-only. Replacing H with a
-            # checkpoint requires a fresh request; a successful response may
-            # establish a new provider-owned state at the rewritten boundary.
-            state.conversation.replace_transcript(compaction.raw_messages)
-            state.usage = None
-            model_messages = prepared
-            supplemental_messages = None
-            prepared = self.context_governor.ensure_request_fits(
-                state.config,
-                prepared,
-                tool_definitions=tool_definitions,
-            )
-            compaction.summary_checkpoint = SessionSummaryCheckpoint(
-                summary=summary,
-                transcript_boundary=compaction.raw_accepted_boundary,
-            )
+                model_messages = prepared
+                supplemental_messages = None
         provider_context = (
             state.conversation.prepare_request(
                 transcript,
                 context_window_tokens=state.config.context_window_tokens,
                 model_messages=model_messages,
                 supplemental_messages=supplemental_messages,
-                resume_state=not fitted,
+                resume_state=not request_was_fitted,
             )
             if transcript is not None
             else state.conversation.independent_request_context(
@@ -1195,7 +1226,6 @@ class AgentRunner:
         timeout_s = self._resolve_llm_timeout_s(spec)
         tool_definitions = spec.tools.get_definitions()
         messages, provider_context = await self._prepare_model_request(
-            spec,
             request_state,
             messages,
             tool_definitions=tool_definitions,
@@ -1355,7 +1385,7 @@ class AgentRunner:
             response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
         if generation_elapsed_s > 0:
             response.generation_ms = max(1, round(generation_elapsed_s * 1000))
-        await self._summarize_provider_compaction(spec, request_state, response)
+        await self._summarize_provider_compaction(request_state, response)
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         # chat_stream_with_retry may recover internally, so only fail unfinished
         # hosted calls after the provider returns its final error response.
@@ -1557,7 +1587,6 @@ class AgentRunner:
         transcript: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         messages, provider_context = await self._prepare_model_request(
-            spec,
             request_state,
             messages,
             tool_definitions=None,
@@ -1585,7 +1614,7 @@ class AgentRunner:
                 finish_reason="error",
                 error_kind="timeout",
             )
-        await self._summarize_provider_compaction(spec, request_state, response)
+        await self._summarize_provider_compaction(request_state, response)
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
 

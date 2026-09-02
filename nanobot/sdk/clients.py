@@ -209,11 +209,11 @@ class RuntimeClient:
         return self._loop.runtime_events.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
-        """Run token consolidation for one session."""
+        """Archive one session through the shared idle-compaction path."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
-        await self._loop.consolidator.maybe_consolidate_by_tokens(
-            session,
+        await self._loop.consolidator.compact_idle_session(
+            session_key,
             runtime=runtime,
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))

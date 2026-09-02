@@ -404,10 +404,9 @@ class TestEphemeralDirect:
         with (
             patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
@@ -492,20 +491,6 @@ class TestEphemeralDirect:
             await loop.process_direct("test", session_key="cli:normal")
 
         assert captured.get("ephemeral") is False
-
-    async def test_ephemeral_skips_consolidator(self, tmp_path, _make_loop):
-        """When ephemeral=True, consolidator.maybe_consolidate_by_tokens is not called."""
-        from unittest.mock import patch
-
-        loop, store = _make_loop
-
-        with patch.object(
-            loop.consolidator, "maybe_consolidate_by_tokens",
-        ) as mock_consolidate:
-            await loop.process_direct(
-                "test", session_key="dream:consolidate-test", ephemeral=True,
-            )
-            mock_consolidate.assert_not_called()
 
     async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
         loop, store = _make_loop
@@ -701,10 +686,9 @@ class TestEphemeralHooks:
         with (
             patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,

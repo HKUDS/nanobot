@@ -22,7 +22,10 @@ from nanobot.providers.openai_codex_provider import (
     _request_codex,
     _should_retry_status,
 )
-from nanobot.providers.openai_responses import build_responses_state
+from nanobot.providers.openai_responses import (
+    build_responses_state,
+    responses_state_items,
+)
 from nanobot.providers.registry import find_by_name
 
 
@@ -812,12 +815,31 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
 
     assert response.content == "done"
     assert response.provider_compaction_applied is True
-    assert len(bodies) == 2
-    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
-    assert bodies[1]["input"][-1] == {
+    assert response.provider_compaction_state is not None
+    assert responses_state_items(response.provider_compaction_state) == [{
         "type": "compaction",
         "encrypted_content": "compacted opaque state",
-    }
+    }]
+    assert len(bodies) == 2
+    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
+    assert not any(
+        item.get("role") == "user"
+        and "new question" in str(item.get("content"))
+        for item in bodies[0]["input"]
+    )
+    assert {
+        "type": "compaction",
+        "encrypted_content": "compacted opaque state",
+    } in bodies[1]["input"]
+    assert bodies[1]["input"].index({
+        "type": "compaction",
+        "encrypted_content": "compacted opaque state",
+    }) < next(
+        index
+        for index, item in enumerate(bodies[1]["input"])
+        if item.get("role") == "user"
+        and "new question" in str(item.get("content"))
+    )
     assert not any(
         item.get("type") == "reasoning"
         for item in bodies[1]["input"]

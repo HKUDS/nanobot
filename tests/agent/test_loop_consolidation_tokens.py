@@ -43,82 +43,6 @@ def _make_loop(
 
 
 @pytest.mark.asyncio
-async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
-    loop.consolidator.archive_session = AsyncMock(return_value=True)  # type: ignore[method-assign]
-    session = loop.sessions.get_or_create("cli:test")
-    session.add_message("user", "hello")
-
-    await loop.consolidator.maybe_consolidate_by_tokens(
-        session,
-        runtime=loop.llm_runtime(),
-    )
-
-    loop.consolidator.archive_session.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_prompt_above_threshold_uses_fixed_recent_tail(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
-    loop.consolidator.archive_session = AsyncMock(return_value=True)  # type: ignore[method-assign]
-
-    session = loop.sessions.get_or_create("cli:test")
-    session.messages = [
-        {"role": role, "content": f"{role[0]}{turn}"}
-        for turn in range(10)
-        for role in ("user", "assistant")
-    ]
-    loop.sessions.save(session)
-
-    await loop.consolidator.maybe_consolidate_by_tokens(
-        session,
-        runtime=loop.llm_runtime(),
-    )
-
-    archive_end = loop.consolidator.archive_session.await_args.kwargs["archive_end"]
-    archived_chunk = session.messages[:archive_end]
-    assert [message["content"] for message in archived_chunk] == [
-        "u0", "a0", "u1", "a1", "u2", "a2", "u3", "a3", "u4", "a4", "u5", "a5",
-    ]
-    assert session.last_archived == 12
-
-
-@pytest.mark.asyncio
-async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
-    loop.consolidator.archive_session = AsyncMock(return_value="User discussed project status.")  # type: ignore[method-assign]
-
-    session = loop.sessions.get_or_create("cli:test")
-    session.messages = [
-        {"role": role, "content": f"{role[0]}{turn}"}
-        for turn in range(5)
-        for role in ("user", "assistant")
-    ]
-    loop.sessions.save(session)
-
-    def mock_estimate(_session, *, runtime):
-        return (500, "test")
-
-    loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
-
-    await loop.consolidator.maybe_consolidate_by_tokens(
-        session,
-        runtime=loop.llm_runtime(),
-    )
-
-    reloaded = loop.sessions.get_or_create("cli:test")
-    meta = reloaded.metadata.get("_last_summary")
-    assert meta is not None
-    assert meta["text"] == "User discussed project status."
-
-    reloaded, pending = loop.auto_compact.prepare_session(reloaded, "cli:test")
-    assert pending is not None
-    assert pending["text"] == "User discussed project status."
-    # _last_summary persists for restart survival.
-    assert "_last_summary" in reloaded.metadata
-
-
-@pytest.mark.asyncio
 async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=2_000)
     loop.context_block_limit = 500
@@ -193,17 +117,19 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
         content="done",
         provider_state=compacted_state,
         provider_compaction_applied=True,
+        provider_compaction_state=compacted_state,
     ))
-    loop.consolidator.summarize_transcript = AsyncMock(
+    loop.consolidator.summarize_provider_compaction = AsyncMock(
         return_value="portable terminal checkpoint",
     )
 
     result = await loop.process_direct("continue", session_key="cli:native")
 
     assert result.content == "done"
-    summarize = loop.consolidator.summarize_transcript
+    summarize = loop.consolidator.summarize_provider_compaction
     summarize.assert_awaited_once()
-    accepted = summarize.await_args.args[0]
+    assert summarize.await_args.args[0] == compacted_state
+    accepted = summarize.await_args.args[1]
     accepted_contents = [message.get("content") for message in accepted]
     assert "accepted history" in accepted_contents
     assert "accepted answer" in accepted_contents

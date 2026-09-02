@@ -12,8 +12,8 @@ from loguru import logger
 
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest, parse_tool_arguments
 from nanobot.providers.openai_responses.state import (
+    build_responses_compaction_state,
     build_responses_state,
-    responses_items_have_compaction,
 )
 
 FINISH_REASON_MAP = {
@@ -658,7 +658,12 @@ def parse_response_output(
             output_items=output,
             usage=usage,
         )
-        result.provider_compaction_applied = responses_items_have_compaction(output)
+        result.provider_compaction_state = build_responses_compaction_state(
+            provider=state_provider,
+            model=state_model,
+            output_items=output,
+        )
+        result.provider_compaction_applied = result.provider_compaction_state is not None
     return result
 
 

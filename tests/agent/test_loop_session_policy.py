@@ -46,7 +46,6 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
 async def test_transient_session_keeps_history_without_persisting_or_durable_tools(tmp_path) -> None:
     loop = _loop(tmp_path, ["first answer", "second answer"])
     loop.context.memory.write_memory("private durable memory")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
     key = "websocket:transient-test"
     loop.sessions.get_or_create_transient(
         key,
@@ -71,7 +70,6 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         "assistant",
     ]
     assert loop.sessions.read_session_file(key) is None
-    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
 
 
 @pytest.mark.asyncio
