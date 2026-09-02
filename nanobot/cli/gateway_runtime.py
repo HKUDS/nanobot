@@ -565,7 +565,7 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
+            from nanobot.agent.memory import MemoryStore, dream_prompt_within_budget
 
             dream_session_key = MemoryStore.dream_session_key
             prune_dream_sessions = MemoryStore.prune_dream_sessions
@@ -574,13 +574,23 @@ def _run_gateway(
             resp = None
             diff_body = ""
             try:
-                result = store.build_dream_prompt()
-                if result is None:
-                    logger.info("Dream: nothing to process")
+                dream_runtime = agent.dream_runtime() or agent.llm_runtime()
+                result = dream_prompt_within_budget(
+                    store,
+                    runtime=dream_runtime,
+                    build_messages=agent.context.build_messages,
+                )
+                if result.batch is None:
+                    if result.over_budget:
+                        logger.warning(
+                            "Dream: prompt exceeds context window even at the "
+                            "minimum history batch; skipping this run"
+                        )
+                    else:
+                        logger.info("Dream: nothing to process")
                     return None
-                prompt, last_cursor = result
+                prompt, last_cursor = result.batch
                 key = dream_session_key()
-                dream_runtime = agent.dream_runtime()
                 await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,

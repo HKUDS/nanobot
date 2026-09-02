@@ -14,6 +14,7 @@ import re
 import threading
 import weakref
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
@@ -58,6 +59,11 @@ class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
+    # Per-file default (not a combined budget) for SOUL.md / USER.md /
+    # memory/MEMORY.md. Mirrors the historical _DREAM_FILE_EMBED_CAP that
+    # existed before PR #5622 unified Dream onto the shared system-prompt
+    # path. Overridable via config.agents.defaults.memory.max_file_chars.
+    _DEFAULT_MEMORY_FILE_MAX_CHARS = 8_000
     # Durable files whose real working-tree delta grounds Dream commit messages.
     # Deliberately excludes memory/.dream_cursor so progress bookkeeping never
     # appears as a durable-memory edit in the audit record.
@@ -68,9 +74,17 @@ class MemoryStore:
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
 
-    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+    def __init__(
+        self,
+        workspace: Path,
+        max_history_entries: int = _DEFAULT_MAX_HISTORY,
+        max_file_chars: int = _DEFAULT_MEMORY_FILE_MAX_CHARS,
+    ):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
+        # Per-file cap (not a combined budget): SOUL.md, USER.md, and
+        # memory/MEMORY.md are each checked against this limit independently.
+        self.max_file_chars = max_file_chars
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "history.jsonl"
@@ -83,6 +97,7 @@ class MemoryStore:
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._dream_prompt_oversize_logged = False
+        self._memory_file_oversize_logged: dict[str, bool] = {}
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
@@ -229,6 +244,7 @@ class MemoryStore:
         return self.read_file(self.memory_file)
 
     def write_memory(self, content: str) -> None:
+        self._warn_if_oversize("memory/MEMORY.md", content)
         self.memory_file.write_text(content, encoding="utf-8")
 
     # -- SOUL.md -------------------------------------------------------------
@@ -237,6 +253,7 @@ class MemoryStore:
         return self.read_file(self.soul_file)
 
     def write_soul(self, content: str) -> None:
+        self._warn_if_oversize("SOUL.md", content)
         self.soul_file.write_text(content, encoding="utf-8")
 
     # -- USER.md -------------------------------------------------------------
@@ -245,7 +262,27 @@ class MemoryStore:
         return self.read_file(self.user_file)
 
     def write_user(self, content: str) -> None:
+        self._warn_if_oversize("USER.md", content)
         self.user_file.write_text(content, encoding="utf-8")
+
+    def _warn_if_oversize(self, label: str, content: str) -> None:
+        """Log once per file when a durable memory file exceeds the per-file cap.
+
+        Warn-only: the write still proceeds. Dream is the sole writer of these
+        files, so rejecting or truncating on write risks stalling Dream or
+        losing content; the cap is enforced instead where these files are
+        injected into the system prompt (see ContextBuilder).
+        """
+        if len(content) <= self.max_file_chars or self._memory_file_oversize_logged.get(label):
+            return
+        self._memory_file_oversize_logged[label] = True
+        logger.warning(
+            "{} exceeds the {}-char per-file guideline ({} chars); consider "
+            "pruning via Dream. Further occurrences for this file suppressed.",
+            label,
+            self.max_file_chars,
+            len(content),
+        )
 
     # -- context injection (used by context.py) ------------------------------
 
@@ -739,6 +776,116 @@ class MemoryStore:
                     logger.warning("Failed to prune dream session {}", path)
 
 
+# Extra headroom for tokenizer estimation drift, reserved out of the input
+# token budget. Shared by dream_prompt_within_budget() and
+# Consolidator._input_token_budget() — both guard an LLM request's input
+# size against the same kind of estimator drift.
+_INPUT_TOKEN_SAFETY_BUFFER = 1024
+
+
+# ---------------------------------------------------------------------------
+# Dream request-size guard
+# ---------------------------------------------------------------------------
+
+_DREAM_MIN_ENTRIES = 1
+
+
+@dataclass(frozen=True, slots=True)
+class DreamPromptResult:
+    """Outcome of :func:`dream_prompt_within_budget`.
+
+    ``batch`` is ``(prompt, last_cursor)`` on success, ``None`` otherwise —
+    kept as one coupled field (not two independent ``| None`` fields) so a
+    successful result can't have one set without the other. When ``batch``
+    is ``None``, ``over_budget`` distinguishes "no unprocessed history"
+    (False) from "history exists but doesn't fit even at the minimum batch"
+    (True), so callers can show the right diagnostic instead of conflating
+    the two.
+    """
+
+    batch: tuple[str, int] | None
+    over_budget: bool = False
+
+
+def dream_prompt_within_budget(
+    store: MemoryStore,
+    *,
+    runtime: LLMRuntime,
+    build_messages: Callable[..., list[dict[str, Any]]],
+    max_entries: int = 20,
+) -> DreamPromptResult:
+    """Build a Dream prompt that fits the runtime's input token budget.
+
+    Mirrors Consolidator._input_token_budget / estimate_session_prompt_tokens
+    for the Dream request path, which (unlike the regular-turn consolidation
+    path) had no equivalent check: build_dream_prompt() was handed straight
+    to process_direct() with no estimate of the assembled request size.  An
+    oversized request doesn't crash — the provider call fails or truncates,
+    dream_run_completed() reports "did not complete", and the cursor never
+    advances — so Dream stalls on the same batch indefinitely with no clear
+    diagnostic pointing at prompt size as the cause.
+
+    Halves max_entries and re-estimates until the assembled request (system
+    prompt + Dream prompt, via the same build_messages/estimate_prompt_tokens_chain
+    path as a real turn) fits the budget, or until even ``_DREAM_MIN_ENTRIES``
+    overflows it.
+
+    Tool definitions come from ``store.build_dream_tools()`` — the same small
+    restricted registry the real Dream turn runs with — not the caller's full
+    tool registry, so the estimate matches the actual request size instead of
+    being inflated by tools Dream's turn never sees.
+    """
+    if runtime.context_window_tokens <= 0:
+        return DreamPromptResult(batch=store.build_dream_prompt(max_entries=max_entries))
+
+    budget = (
+        runtime.context_window_tokens
+        - runtime.generation.max_tokens
+        - _INPUT_TOKEN_SAFETY_BUFFER
+    )
+    if budget <= 0:
+        return DreamPromptResult(batch=None, over_budget=True)
+
+    tools = store.build_dream_tools().get_definitions()
+    entries = max_entries
+    while True:
+        result = store.build_dream_prompt(max_entries=entries)
+        if result is None:
+            return DreamPromptResult(batch=None)
+        prompt, _ = result
+        request_messages = build_messages(
+            history=[],
+            current_message=prompt,
+            is_dream=True,
+        )
+        estimated, source = estimate_prompt_tokens_chain(
+            runtime.provider,
+            runtime.model,
+            request_messages,
+            tools,
+        )
+        if estimated <= budget:
+            return DreamPromptResult(batch=result)
+        if entries <= _DREAM_MIN_ENTRIES:
+            logger.warning(
+                "Dream prompt exceeds input budget even at {} history entries "
+                "({}/{} via {}); skipping this run",
+                entries,
+                estimated,
+                budget,
+                source,
+            )
+            return DreamPromptResult(batch=None, over_budget=True)
+        logger.debug(
+            "Dream prompt exceeds input budget at {} entries ({}/{} via {}); retrying smaller",
+            entries,
+            estimated,
+            budget,
+            source,
+        )
+        entries = max(_DREAM_MIN_ENTRIES, entries // 2)
+
+
 # ---------------------------------------------------------------------------
 # Memory ingestion and legacy context-pressure coordination
 # ---------------------------------------------------------------------------
@@ -950,7 +1097,7 @@ class MemoryArchiver:
 class Consolidator:
     """Legacy context-pressure coordinator backed by a MemoryArchiver."""
 
-    _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
+    _SAFETY_BUFFER = _INPUT_TOKEN_SAFETY_BUFFER
 
     def __init__(
         self,

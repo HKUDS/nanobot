@@ -37,7 +37,7 @@ class _FakeStore:
     def get_last_dream_cursor(self) -> int:
         return self._last_dream_cursor
 
-    def build_dream_prompt(self):
+    def build_dream_prompt(self, *, max_entries: int = 20):
         return self._dream_prompt_result
 
     def build_dream_tools(self):
@@ -115,6 +115,14 @@ def _make_sessions(tmp_path) -> SessionManager:
     )
 
 
+def _fake_runtime():
+    """A runtime with context_window_tokens=0, so dream_prompt_within_budget
+    takes its unguarded passthrough branch — these fixtures test cmd_dream's
+    own control flow, not the budget check (covered separately in
+    tests/agent/test_dream.py::TestDreamPromptWithinBudget)."""
+    return SimpleNamespace(context_window_tokens=0)
+
+
 def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int = 1) -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
     store = _FakeStore(git, last_dream_cursor=last_dream_cursor)
@@ -128,8 +136,10 @@ def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
     bus = _FakeBus()
     loop = SimpleNamespace(
         bus=bus,
-        context=SimpleNamespace(memory=store, timezone="UTC"),
+        context=SimpleNamespace(memory=store, timezone="UTC", build_messages=None),
         sessions=_make_sessions(tmp_path),
+        dream_runtime=lambda: None,
+        llm_runtime=_fake_runtime,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, bus
@@ -175,10 +185,10 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
             metadata={"_stop_reason": "completed"},
         )
 
-    dream_runtime = object()
+    dream_runtime = _fake_runtime()
     loop = SimpleNamespace(
         bus=bus,
-        context=SimpleNamespace(memory=store, timezone="UTC"),
+        context=SimpleNamespace(memory=store, timezone="UTC", build_messages=None),
         sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: dream_runtime,
@@ -230,10 +240,11 @@ def _build_runnable_dream(
     bus = _FakeBus()
     loop = SimpleNamespace(
         bus=bus,
-        context=SimpleNamespace(memory=store, timezone="UTC"),
+        context=SimpleNamespace(memory=store, timezone="UTC", build_messages=None),
         sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
+        llm_runtime=_fake_runtime,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, store
@@ -315,10 +326,11 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
     bus = _FakeBus()
     loop = SimpleNamespace(
         bus=bus,
-        context=SimpleNamespace(memory=store, timezone="UTC"),
+        context=SimpleNamespace(memory=store, timezone="UTC", build_messages=None),
         sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
+        llm_runtime=_fake_runtime,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 

@@ -177,6 +177,161 @@ class TestLoadBootstrapFiles:
 
 
 # ---------------------------------------------------------------------------
+# Per-file display cap (SOUL.md / USER.md / memory/MEMORY.md)
+# ---------------------------------------------------------------------------
+
+
+class TestPerFileDisplayCap:
+    """Regular turns cap oversize SOUL/USER/MEMORY content at section
+    boundaries; Dream turns (is_dream=True) always see the full content."""
+
+    @staticmethod
+    def _sectioned(*bodies: str) -> str:
+        """Build content with N top-level '## ' sections, each ~len(body) chars."""
+        return "\n\n".join(f"## Section {i}\n\n{body}" for i, body in enumerate(bodies))
+
+    def test_content_under_cap_is_unchanged(self, tmp_path):
+        (tmp_path / "SOUL.md").write_text("short", encoding="utf-8")
+        builder = _builder(tmp_path, memory_max_file_chars=1000)
+        result = builder._load_bootstrap_files()
+        assert "short" in result
+        assert "[Note:" not in result
+
+    def test_single_oversized_section_is_hard_truncated_not_kept_whole(self, tmp_path):
+        """A file with exactly one '## ' heading (the common shape before
+        Dream ever splits a file into multiple sections — SOUL.md ships with
+        a single heading) must still be capped, not pass through whole just
+        because there's nothing to drop."""
+        content = "## Core Identity\n\n" + ("fact. " * 10_000)  # ~60000 chars
+        (tmp_path / "SOUL.md").write_text(content, encoding="utf-8")
+        builder = _builder(tmp_path, memory_max_file_chars=8000)
+
+        result = builder._load_bootstrap_files()
+
+        soul_part = result.split("## SOUL.md\n\n", 1)[1]
+        assert len(soul_part) <= 8000
+        assert "[Note: SOUL.md exceeds" in soul_part
+
+    def test_regular_turn_truncates_at_section_boundary(self, tmp_path):
+        content = self._sectioned("a" * 300, "b" * 300, "c" * 300)
+        (tmp_path / "SOUL.md").write_text(content, encoding="utf-8")
+        # Each section is ~316 chars and the note is ~141 chars; 500 fits the
+        # trailing section plus the note, but not all three sections.
+        builder = _builder(tmp_path, memory_max_file_chars=500)
+
+        result = builder._load_bootstrap_files()
+
+        # The kept section is intact (no mid-section cut); earlier sections dropped.
+        assert "c" * 300 in result
+        assert "a" * 300 not in result
+        assert "[Note: SOUL.md exceeds" in result
+        assert 'read_file("SOUL.md")' in result
+
+    def test_capped_output_including_note_never_exceeds_limit(self, tmp_path):
+        """kept sections + the trailing note together must not exceed max_file_chars."""
+        content = self._sectioned(*[chr(97 + i % 26) * 500 for i in range(30)])
+        (tmp_path / "SOUL.md").write_text(content, encoding="utf-8")
+        builder = _builder(tmp_path, memory_max_file_chars=8000)
+
+        result = builder._load_bootstrap_files()
+
+        soul_part = result.split("## SOUL.md\n\n", 1)[1]
+        assert len(soul_part) <= 8000
+
+    def test_note_budget_extreme_case_hard_truncates_the_kept_section(self, tmp_path):
+        """When the note itself nearly fills a tiny limit, the one section
+        that would be kept is hard-truncated by character count so the
+        combined output still never exceeds max_file_chars — never sacrifice
+        the limit to keep a section whole."""
+        content = self._sectioned("a" * 100, "b" * 100, "c" * 100)
+        (tmp_path / "SOUL.md").write_text(content, encoding="utf-8")
+        builder = _builder(tmp_path, memory_max_file_chars=150)
+
+        result = builder._load_bootstrap_files()
+
+        soul_part = result.split("## SOUL.md\n\n", 1)[1]
+        assert len(soul_part) <= 150
+        assert "c" * 100 not in soul_part  # truncated, not kept whole
+        assert "[Note: SOUL.md exceeds" in soul_part
+
+    def test_regular_turn_keeps_trailing_complete_sections(self, tmp_path):
+        content = self._sectioned("a" * 300, "b" * 300, "c" * 300)
+        (tmp_path / "USER.md").write_text(content, encoding="utf-8")
+        # Each section is ~316 chars and the note is ~141 chars; 800 fits the
+        # trailing two sections plus the note, but not all three sections
+        # (total content is 946 chars).
+        builder = _builder(tmp_path, memory_max_file_chars=800)
+
+        result = builder._load_bootstrap_files()
+
+        # Only whole sections are kept — never a partial section.
+        assert "b" * 300 in result
+        assert "c" * 300 in result
+        assert "a" * 300 not in result
+
+    def test_dream_turn_sees_full_content_uncapped(self, tmp_path):
+        content = self._sectioned("a" * 100, "b" * 100, "c" * 100)
+        (tmp_path / "SOUL.md").write_text(content, encoding="utf-8")
+        builder = _builder(tmp_path, memory_max_file_chars=150)
+
+        result = builder._load_bootstrap_files(is_dream=True)
+
+        assert "a" * 100 in result
+        assert "b" * 100 in result
+        assert "c" * 100 in result
+        assert "[Note:" not in result
+
+    def test_dream_turn_memory_md_sees_full_content_uncapped(self, tmp_path):
+        from nanobot.agent.memory import MemoryStore
+
+        content = self._sectioned("a" * 100, "b" * 100, "c" * 100)
+        store = MemoryStore(tmp_path, max_file_chars=150)
+        store.write_memory(content)
+        builder = _builder(tmp_path, memory_max_file_chars=150)
+
+        prompt = builder.build_system_prompt(is_dream=True)
+
+        assert "a" * 100 in prompt
+        assert "b" * 100 in prompt
+        assert "[Note:" not in prompt
+
+    def test_regular_turn_memory_md_is_capped(self, tmp_path):
+        from nanobot.agent.memory import MemoryStore
+
+        content = self._sectioned("a" * 300, "b" * 300, "c" * 300)
+        store = MemoryStore(tmp_path, max_file_chars=500)
+        store.write_memory(content)
+        builder = _builder(tmp_path, memory_max_file_chars=500)
+
+        prompt = builder.build_system_prompt(is_dream=False)
+
+        assert "a" * 300 not in prompt
+        assert "c" * 300 in prompt
+        assert '[Note: memory/MEMORY.md exceeds' in prompt
+
+    def test_capping_logs_dropped_section_count(self, tmp_path, monkeypatch):
+        records: list[str] = []
+        monkeypatch.setattr(
+            "nanobot.agent.context.logger.info",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        content = self._sectioned("a" * 100, "b" * 100, "c" * 100)
+        (tmp_path / "SOUL.md").write_text(content, encoding="utf-8")
+        # Each section is ~116 chars; 150 fits only the trailing section.
+        builder = _builder(tmp_path, memory_max_file_chars=150)
+
+        builder._load_bootstrap_files()
+
+        capped_logs = [r for r in records if "Capped SOUL.md" in r]
+        assert len(capped_logs) == 1
+        assert "2 of 3 section(s) dropped" in capped_logs[0]
+
+    def test_default_cap_matches_historical_value(self, tmp_path):
+        builder = _builder(tmp_path)
+        assert builder.memory.max_file_chars == 8_000
+
+
+# ---------------------------------------------------------------------------
 # _is_template_content (static)
 # ---------------------------------------------------------------------------
 
