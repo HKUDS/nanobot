@@ -17,6 +17,7 @@ import httpx
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.storage import FileTokenStorage
 
+from nanobot.config.paths import get_data_dir
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.oauth_model_catalog import (
     OAuthModelCatalog,
@@ -51,6 +52,7 @@ def get_storage() -> FileTokenStorage:
     return FileTokenStorage(
         token_filename=TOKEN_FILENAME,
         app_name=TOKEN_APP_NAME,
+        data_dir=get_data_dir(),
         import_codex_cli=False,
     )
 
