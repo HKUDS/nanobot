@@ -103,3 +103,6 @@ exp/
 .playwright-mcp/
 bridge/node_modules/
 webui/.verify-*
+
+# Personal research data — not part of the nanobot project, never upstream
+baseline_runs/
