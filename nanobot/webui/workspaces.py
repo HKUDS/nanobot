@@ -357,3 +357,7 @@ class WebUIWorkspaceController:
         self._draft_scopes.move_to_end(session_key)
         while len(self._draft_scopes) > _MAX_DRAFT_SCOPES:
             self._draft_scopes.popitem(last=False)
+
+    def discard_draft_scope(self, session_key: str) -> bool:
+        """Discard the staged scope for a chat that has not persisted yet."""
+        return self._draft_scopes.pop(session_key, None) is not None
