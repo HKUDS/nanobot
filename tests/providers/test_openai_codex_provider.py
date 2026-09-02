@@ -265,6 +265,7 @@ async def test_codex_request_uses_configured_proxy(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
+    headers_seen: list[dict[str, str]] = []
 
     _mock_codex_token(monkeypatch)
 
@@ -280,6 +281,7 @@ async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> N
     ):
         _ = proxy, on_thinking_delta, on_tool_call_delta
         bodies.append(body)
+        headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -294,16 +296,19 @@ async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> N
     )
 
     assert "prompt_cache_key" not in bodies[0]
+    assert "session-id" not in headers_seen[0]
     assert "service_tier" not in bodies[0]
 
 
 @pytest.mark.asyncio
 async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
+    headers_seen: list[dict[str, str]] = []
     _mock_codex_token(monkeypatch)
 
-    async def fake_request(_url, _headers, body, **_kwargs):
+    async def fake_request(_url, headers, body, **_kwargs):
         bodies.append(body)
+        headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -326,15 +331,22 @@ async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> 
 
     assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
     assert bodies[0]["prompt_cache_key"] != bodies[2]["prompt_cache_key"]
+    assert headers_seen[0]["session-id"] != "session-a"
+    assert headers_seen[2]["session-id"] != "session-b"
+    assert headers_seen[0]["session-id"] == bodies[0]["prompt_cache_key"]
+    assert headers_seen[1]["session-id"] == bodies[1]["prompt_cache_key"]
+    assert headers_seen[2]["session-id"] == bodies[2]["prompt_cache_key"]
 
 
 @pytest.mark.asyncio
 async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
+    headers_seen: list[dict[str, str]] = []
     _mock_codex_token(monkeypatch)
 
-    async def fake_request(_url, _headers, body, **_kwargs):
+    async def fake_request(_url, headers, body, **_kwargs):
         bodies.append(body)
+        headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -347,7 +359,10 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
         },
         "providers": {
             "openaiCodex": {
-                "extraBody": {"service_tier": "priority"},
+                "extraBody": {
+                    "service_tier": "priority",
+                    "prompt_cache_key": "explicit-cache-key",
+                },
             },
         },
     })
@@ -357,6 +372,8 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
 
     assert response.content == "ok"
     assert bodies[0]["service_tier"] == "priority"
+    assert bodies[0]["prompt_cache_key"] == "explicit-cache-key"
+    assert headers_seen[0]["session-id"] == "explicit-cache-key"
 
 
 @pytest.mark.asyncio
