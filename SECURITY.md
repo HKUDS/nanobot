@@ -69,7 +69,7 @@ chmod 600 ~/.nanobot/config.json
 
 The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
 
-- ✅ **Enable the bwrap sandbox** (`"tools.exec.sandbox": "bwrap"`) for kernel-level isolation (Linux only)
+- ✅ **Enable the exec sandbox** (`"tools.exec.sandbox": "bwrap"` on Linux, `"seatbelt"` on macOS) for kernel-level isolation
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
@@ -77,16 +77,26 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
-**Exec sandbox (bwrap):**
+**Exec sandbox (bwrap on Linux, seatbelt on macOS):**
 
-On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox. This uses Linux kernel namespaces to restrict what the process can see:
+Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both backends enforce the same policy:
 
 - Workspace directory → **read-write** (agent works normally)
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
-- Config files and API keys (`~/.nanobot/config.json`) → **hidden** (masked by tmpfs)
+- Config files and API keys (`~/.nanobot/config.json`) → **hidden**
+- Everything else, including `~/.ssh` → **denied**
 
-Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
+| Backend | Value | Platform | Requires |
+|---------|-------|----------|----------|
+| [bubblewrap](https://github.com/containers/bubblewrap) | `"bwrap"` | Linux | `bwrap` (`apt install bubblewrap`). Pre-installed in the official Docker image. |
+| Seatbelt | `"seatbelt"` | macOS | `sandbox-exec(1)`, shipped with macOS. |
+
+**Windows has no backend**: nanobot logs a warning and runs the command unsandboxed.
+
+The backends hide the config directory differently. `bwrap` masks the workspace's parent with a tmpfs, so it disappears from directory listings. Seatbelt has no mount namespace, so it denies the parent instead — the directory still appears in listings, but its contents are unreadable.
+
+Neither backend restricts network access.
 
 Enabling the sandbox also automatically activates `restrictToWorkspace` for file tools.
 

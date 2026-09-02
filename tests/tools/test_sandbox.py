@@ -223,6 +223,191 @@ class TestBwrapBackend:
         assert (str(parent), str(parent)) not in bind_try_pairs
 
 
+class TestSeatbeltBackend:
+    """macOS Seatbelt policy generation.
+
+    These parse the generated ``sandbox-exec`` command line, so they run on any
+    platform — the profile is only ever executed on macOS.
+    """
+
+    @staticmethod
+    def _profile(cmd: str) -> str:
+        """Return the SBPL profile from a wrapped command."""
+        tokens = _parse(cmd)
+        return tokens[tokens.index("-p") + 1]
+
+    @staticmethod
+    def _metadata_rule(profile: str) -> str:
+        return next(
+            line
+            for line in profile.splitlines()
+            if line.startswith("(allow file-read-metadata ")
+        )
+
+    def test_basic_structure(self, tmp_path):
+        ws = str(tmp_path / "project")
+        result = wrap_command("seatbelt", "echo hi", ws, ws)
+        tokens = _parse(result)
+
+        assert tokens[0] == "sandbox-exec"
+        assert tokens[1] == "-p"
+        assert tokens[-3] == "sh"
+        assert tokens[-2] == "-c"
+        assert tokens[-1].endswith("echo hi")
+
+    def test_denies_by_default(self, tmp_path):
+        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+
+        assert "(version 1)" in profile
+        assert "(deny default)" in profile
+
+    def test_root_directory_is_readable(self, tmp_path):
+        """sh(1) stats `/` at startup; without this rule the shell aborts.
+
+        `(subpath "/usr")` does not cover the root directory itself, so a
+        profile listing only system subpaths kills every wrapped command
+        before it runs.
+        """
+        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+
+        assert '(allow file-read* (literal "/"))' in profile
+
+    def test_workspace_allowed_read_write(self, tmp_path):
+        ws = (tmp_path / "project").resolve()
+        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+
+        assert f'(allow file-read* file-write* (subpath "{ws}"))' in profile
+
+    def test_config_dir_denied_before_workspace_allow(self, tmp_path):
+        """Last matching rule wins, so the parent deny must come first.
+
+        The parent holds `config.json`; the workspace allow that follows
+        re-exposes only the workspace subtree.
+        """
+        ws = (tmp_path / "project").resolve()
+        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+
+        parent_deny = profile.index(f'(deny file-read* file-write* (subpath "{ws.parent}")')
+        workspace_allow = profile.index(f'(allow file-read* file-write* (subpath "{ws}")')
+        assert parent_deny < workspace_allow
+
+    def test_no_parent_deny_when_workspace_is_the_root(self):
+        """Denying `/` would override the root read rule and break startup."""
+        profile = self._profile(wrap_command("seatbelt", "ls", "/", "/"))
+
+        assert "(deny file-read*" not in profile
+
+    def test_workspace_ancestors_stay_searchable(self, tmp_path):
+        """Masking the config dir must not break resolution into the workspace.
+
+        Seatbelt checks every path component while resolving, so without
+        metadata on the parent the wrapped command dies with ENOTDIR before it
+        runs anything.
+        """
+        ws = (tmp_path / "project").resolve()
+        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+
+        assert f'(literal "{ws.parent}")' in self._metadata_rule(profile)
+
+    def test_config_dir_is_searchable_but_not_listable(self, tmp_path):
+        """Metadata only: `cd workspace` works, `ls ..` and `cat ../config.json` do not."""
+        ws = (tmp_path / "project").resolve()
+        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+
+        assert f'(literal "{ws.parent}")' in self._metadata_rule(profile)
+        assert f'(allow file-read* (subpath "{ws.parent}"))' not in profile
+        assert f'(allow file-read* file-write* (subpath "{ws.parent}"))' not in profile
+
+    def test_scratch_space_covers_the_tmp_symlink_spelling(self, tmp_path):
+        """`/tmp` and `/var` are symlinks; commands spell scratch paths both ways."""
+        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+
+        write_rule = next(
+            line for line in profile.splitlines() if line.startswith("(allow file-write* ")
+        )
+        for expected in ('(subpath "/tmp")', '(subpath "/private/tmp")'):
+            assert expected in write_rule
+
+    def test_media_dir_read_only(self, tmp_path, monkeypatch):
+        fake_media = (tmp_path / "media").resolve()
+        fake_media.mkdir()
+        monkeypatch.setattr(
+            "nanobot.agent.tools.sandbox.get_media_dir",
+            lambda: fake_media,
+        )
+        ws = (tmp_path / "project").resolve()
+        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+
+        assert f'(allow file-read* (subpath "{fake_media}"))' in profile
+        assert f'file-write* (subpath "{fake_media}")' not in profile
+
+    def test_cwd_inside_workspace(self, tmp_path):
+        ws = (tmp_path / "project").resolve()
+        sub = ws / "src" / "lib"
+        result = wrap_command("seatbelt", "pwd", str(ws), str(sub))
+
+        assert _parse(result)[-1] == f"cd {shlex.quote(str(sub))} && pwd"
+
+    def test_cwd_outside_workspace_falls_back(self, tmp_path):
+        ws = (tmp_path / "project").resolve()
+        outside = tmp_path / "other"
+        result = wrap_command("seatbelt", "pwd", str(ws), str(outside))
+
+        assert _parse(result)[-1] == f"cd {shlex.quote(str(ws))} && pwd"
+
+    def test_custom_read_only_binds(self, tmp_path):
+        ws = (tmp_path / "project").resolve()
+        tool_bin = (tmp_path / "home" / ".local" / "bin").resolve(strict=False)
+
+        profile = self._profile(
+            wrap_command(
+                "seatbelt", "uv --version", str(ws), str(ws),
+                sandbox_ro_binds=[str(tool_bin)],
+            )
+        )
+
+        assert f'(allow file-read* (subpath "{tool_bin}"))' in profile
+        assert f'file-write* (subpath "{tool_bin}")' not in profile
+
+    def test_custom_read_write_binds(self, tmp_path):
+        ws = (tmp_path / "project").resolve()
+        cache_dir = (tmp_path / "cache").resolve(strict=False)
+
+        profile = self._profile(
+            wrap_command(
+                "seatbelt", "touch cache/file", str(ws), str(ws),
+                sandbox_rw_binds=[str(cache_dir)],
+            )
+        )
+
+        assert f'(allow file-read* file-write* (subpath "{cache_dir}"))' in profile
+
+    def test_custom_workspace_parent_binds_are_ignored(self, tmp_path):
+        """A bind must not uncover the masked config directory."""
+        ws = tmp_path / "private" / "project"
+        parent = ws.parent.resolve(strict=False)
+
+        profile = self._profile(
+            wrap_command(
+                "seatbelt", "cat ../config.json", str(ws), str(ws),
+                sandbox_ro_binds=[str(parent)],
+                sandbox_rw_binds=[str(parent)],
+            )
+        )
+
+        assert f'(allow file-read* (subpath "{parent}"))' not in profile
+        assert f'(allow file-read* file-write* (subpath "{parent}"))' not in profile
+
+    def test_paths_with_quotes_are_escaped(self, tmp_path):
+        """An unescaped quote would terminate the literal early and silently
+        widen every rule that follows it."""
+        ws = (tmp_path / 'pro"ject').resolve()
+        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+
+        escaped = str(ws).replace('"', '\\"')
+        assert f'(allow file-read* file-write* (subpath "{escaped}"))' in profile
+
+
 class TestUnknownBackend:
     def test_raises_value_error(self, tmp_path):
         ws = str(tmp_path / "project")
