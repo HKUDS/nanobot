@@ -458,6 +458,7 @@ describe("App layout", () => {
     expect(main).not.toHaveAttribute("style");
     expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
     expect(screen.getByTestId("sidebar-brand-mark")).not.toHaveClass("mt-5");
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveClass("mt-1");
 
     const asideClassNames = Array.from(container.querySelectorAll("aside")).map(
       (el) => el.className,
@@ -1642,6 +1643,7 @@ describe("App layout", () => {
     expect(flowSidebar).toHaveStyle({ width: "272px" });
     expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
     expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveClass("mt-1");
     expect(screen.queryByTestId("host-sidebar-toggle")).not.toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),

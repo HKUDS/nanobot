@@ -165,7 +165,7 @@ export function Sidebar(props: SidebarProps) {
             size="icon"
             aria-label={t("sidebar.collapse")}
             onClick={props.onCollapse}
-            className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+            className="host-no-drag mt-1 h-7 w-7 rounded-lg text-muted-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
           >
             <Menu className="h-3.5 w-3.5" />
           </Button>
