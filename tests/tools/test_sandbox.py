@@ -4,7 +4,7 @@ import shlex
 
 import pytest
 
-from nanobot.agent.tools.sandbox import wrap_command
+from nanobot.agent.tools.sandbox import _sbpl_quote, wrap_command
 
 
 def _parse(cmd: str) -> list[str]:
@@ -237,6 +237,11 @@ class TestSeatbeltBackend:
         return tokens[tokens.index("-p") + 1]
 
     @staticmethod
+    def _quote(path: object) -> str:
+        """Render *path* as expected in the generated SBPL profile."""
+        return _sbpl_quote(str(path))
+
+    @staticmethod
     def _metadata_rule(profile: str) -> str:
         return next(
             line
@@ -276,7 +281,7 @@ class TestSeatbeltBackend:
         ws = (tmp_path / "project").resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
-        assert f'(allow file-read* file-write* (subpath "{ws}"))' in profile
+        assert f"(allow file-read* file-write* (subpath {self._quote(ws)}))" in profile
 
     def test_config_dir_denied_before_workspace_allow(self, tmp_path):
         """Last matching rule wins, so the parent deny must come first.
@@ -287,8 +292,8 @@ class TestSeatbeltBackend:
         ws = (tmp_path / "project").resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
-        parent_deny = profile.index(f'(deny file-read* file-write* (subpath "{ws.parent}")')
-        workspace_allow = profile.index(f'(allow file-read* file-write* (subpath "{ws}")')
+        parent_deny = profile.index(f"(deny file-read* file-write* (subpath {self._quote(ws.parent)})")
+        workspace_allow = profile.index(f"(allow file-read* file-write* (subpath {self._quote(ws)})")
         assert parent_deny < workspace_allow
 
     def test_no_parent_deny_when_workspace_is_the_root(self):
@@ -307,16 +312,16 @@ class TestSeatbeltBackend:
         ws = (tmp_path / "project").resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
-        assert f'(literal "{ws.parent}")' in self._metadata_rule(profile)
+        assert f"(literal {self._quote(ws.parent)})" in self._metadata_rule(profile)
 
     def test_config_dir_is_searchable_but_not_listable(self, tmp_path):
         """Metadata only: `cd workspace` works, `ls ..` and `cat ../config.json` do not."""
         ws = (tmp_path / "project").resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
-        assert f'(literal "{ws.parent}")' in self._metadata_rule(profile)
-        assert f'(allow file-read* (subpath "{ws.parent}"))' not in profile
-        assert f'(allow file-read* file-write* (subpath "{ws.parent}"))' not in profile
+        assert f"(literal {self._quote(ws.parent)})" in self._metadata_rule(profile)
+        assert f"(allow file-read* (subpath {self._quote(ws.parent)}))" not in profile
+        assert f"(allow file-read* file-write* (subpath {self._quote(ws.parent)}))" not in profile
 
     def test_scratch_space_covers_the_tmp_symlink_spelling(self, tmp_path):
         """`/tmp` and `/var` are symlinks; commands spell scratch paths both ways."""
@@ -338,8 +343,8 @@ class TestSeatbeltBackend:
         ws = (tmp_path / "project").resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
-        assert f'(allow file-read* (subpath "{fake_media}"))' in profile
-        assert f'file-write* (subpath "{fake_media}")' not in profile
+        assert f"(allow file-read* (subpath {self._quote(fake_media)}))" in profile
+        assert f"file-write* (subpath {self._quote(fake_media)})" not in profile
 
     def test_cwd_inside_workspace(self, tmp_path):
         ws = (tmp_path / "project").resolve()
@@ -366,8 +371,8 @@ class TestSeatbeltBackend:
             )
         )
 
-        assert f'(allow file-read* (subpath "{tool_bin}"))' in profile
-        assert f'file-write* (subpath "{tool_bin}")' not in profile
+        assert f"(allow file-read* (subpath {self._quote(tool_bin)}))" in profile
+        assert f"file-write* (subpath {self._quote(tool_bin)})" not in profile
 
     def test_custom_read_write_binds(self, tmp_path):
         ws = (tmp_path / "project").resolve()
@@ -380,7 +385,7 @@ class TestSeatbeltBackend:
             )
         )
 
-        assert f'(allow file-read* file-write* (subpath "{cache_dir}"))' in profile
+        assert f"(allow file-read* file-write* (subpath {self._quote(cache_dir)}))" in profile
 
     def test_custom_workspace_parent_binds_are_ignored(self, tmp_path):
         """A bind must not uncover the masked config directory."""
@@ -395,8 +400,8 @@ class TestSeatbeltBackend:
             )
         )
 
-        assert f'(allow file-read* (subpath "{parent}"))' not in profile
-        assert f'(allow file-read* file-write* (subpath "{parent}"))' not in profile
+        assert f"(allow file-read* (subpath {self._quote(parent)}))" not in profile
+        assert f"(allow file-read* file-write* (subpath {self._quote(parent)}))" not in profile
 
     def test_paths_with_quotes_are_escaped(self, tmp_path):
         """An unescaped quote would terminate the literal early and silently
@@ -404,8 +409,12 @@ class TestSeatbeltBackend:
         ws = (tmp_path / 'pro"ject').resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
-        escaped = str(ws).replace('"', '\\"')
+        escaped = str(ws).replace("\\", "\\\\").replace('"', '\\"')
         assert f'(allow file-read* file-write* (subpath "{escaped}"))' in profile
+
+    def test_sbpl_quote_escapes_special_characters(self):
+        """Backslashes and double quotes must be escaped with C-style escaping."""
+        assert _sbpl_quote(r'path\with"quotes') == r'"path\\with\"quotes"'
 
 
 class TestUnknownBackend:
