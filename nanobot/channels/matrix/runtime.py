@@ -80,6 +80,7 @@ _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.f
 _SAS_METHOD = "m.sas.v1"
 _SAS_REQUEST_MAX_AGE_MS = 10 * 60 * 1000
 _SAS_REQUEST_MAX_FUTURE_MS = 5 * 60 * 1000
+_SAS_REQUEST_MAX_PENDING = 256
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
 MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
@@ -759,6 +760,16 @@ class MatrixChannel(BaseChannel):
             if request.timestamp_ms >= oldest_allowed
         }
 
+    def _remember_sas_verification_request(
+        self,
+        transaction_id: str,
+        request: _SasVerificationRequest,
+    ) -> None:
+        self._sas_verification_requests[transaction_id] = request
+        while len(self._sas_verification_requests) > _SAS_REQUEST_MAX_PENDING:
+            oldest_transaction_id = next(iter(self._sas_verification_requests))
+            self._sas_verification_requests.pop(oldest_transaction_id)
+
     async def _send_sas_control_message(
         self,
         *,
@@ -849,7 +860,7 @@ class MatrixChannel(BaseChannel):
                 },
             )
             if sent:
-                self._sas_verification_requests[transaction_id] = request
+                self._remember_sas_verification_request(transaction_id, request)
             return
 
         if event_type == "m.key.verification.done":
@@ -882,6 +893,16 @@ class MatrixChannel(BaseChannel):
             return
 
         if isinstance(event, KeyVerificationStart):
+            request = self._sas_verification_requests.get(transaction_id)
+            from_device = str(getattr(event, "from_device", "") or "")
+            if request is not None and (
+                request.sender != sender or request.device_id != from_device
+            ):
+                self.logger.warning(
+                    "Ignoring Matrix SAS start for transaction {} from unexpected device",
+                    transaction_id,
+                )
+                return
             if "emoji" not in (getattr(event, "short_authentication_string", None) or []):
                 self.logger.info(
                     "Ignoring Matrix SAS verification from {} without emoji support",

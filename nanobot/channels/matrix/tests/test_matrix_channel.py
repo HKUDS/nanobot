@@ -241,10 +241,12 @@ class _FakeKeyVerificationStart:
         *,
         sender: str = "@alice:matrix.org",
         transaction_id: str = "tx1",
+        from_device: str = "ALICEDEVICE",
         short_authentication_string: list[str] | None = None,
     ) -> None:
         self.sender = sender
         self.transaction_id = transaction_id
+        self.from_device = from_device
         self.short_authentication_string = short_authentication_string or ["emoji"]
 
 
@@ -474,6 +476,65 @@ async def test_sas_verification_request_sends_ready_to_allowed_device(monkeypatc
         "methods": ["m.sas.v1"],
         "transaction_id": "tx1",
     }
+    assert channel._sas_verification_requests["tx1"].device_id == "ALICEDEVICE"
+
+
+@pytest.mark.asyncio
+async def test_sas_verification_requests_are_bounded(monkeypatch) -> None:
+    monkeypatch.setattr(matrix_module.time, "time", lambda: 1_000.0)
+    channel = MatrixChannel(
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
+        MessageBus(),
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    client.device_id = "BOTDEVICE"
+    channel.client = client
+
+    for index in range(matrix_module._SAS_REQUEST_MAX_PENDING + 1):
+        await channel._handle_key_verification_event(_unknown_verification_event(
+            "m.key.verification.request",
+            transaction_id=f"tx-{index}",
+            from_device="ALICEDEVICE",
+            methods=["m.sas.v1"],
+            timestamp=1_000_000,
+        ))
+
+    assert len(channel._sas_verification_requests) == matrix_module._SAS_REQUEST_MAX_PENDING
+    assert "tx-0" not in channel._sas_verification_requests
+    assert f"tx-{matrix_module._SAS_REQUEST_MAX_PENDING}" in channel._sas_verification_requests
+
+
+@pytest.mark.asyncio
+async def test_sas_verification_start_must_match_requested_device(monkeypatch) -> None:
+    _patch_key_verification_events(monkeypatch)
+    monkeypatch.setattr(matrix_module.time, "time", lambda: 1_000.0)
+    channel = MatrixChannel(
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
+        MessageBus(),
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    client.device_id = "BOTDEVICE"
+    channel.client = client
+
+    await channel._handle_key_verification_event(_unknown_verification_event(
+        "m.key.verification.request",
+        from_device="ALICEDEVICE",
+        methods=["m.sas.v1"],
+        timestamp=1_000_000,
+    ))
+    await channel._handle_key_verification_event(
+        _FakeKeyVerificationStart(from_device="OTHERDEVICE")
+    )
+
+    assert client.accept_key_verification_calls == []
     assert channel._sas_verification_requests["tx1"].device_id == "ALICEDEVICE"
 
 
