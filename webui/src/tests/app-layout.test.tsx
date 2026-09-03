@@ -480,6 +480,9 @@ describe("App layout", () => {
     expect(
       screen.getByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
+    const backButton = screen.getByRole("button", { name: "Back to chat" });
+    expect(backButton.closest("aside")).toHaveClass("pt-4", "lg:pt-4");
+    expect(backButton).not.toHaveClass("-ml-1");
     expect(container.querySelectorAll("main")).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
   });
@@ -1655,6 +1658,28 @@ describe("App layout", () => {
         .getByRole("button", { name: "Toggle sidebar" }),
     );
     await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "272px" }));
+  });
+
+  it("aligns native settings navigation below the titlebar without extra top padding", async () => {
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok",
+      api_token: "api-tok",
+      ws_path: "/",
+      expires_in: 300,
+      runtime_surface: "native",
+    });
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+
+    const backButton = await screen.findByRole("button", { name: "Back to chat" });
+    expect(backButton.closest("aside")).toHaveClass("pt-10", "lg:pt-10");
+    expect(backButton.closest("aside")).not.toHaveClass("pt-[4.25rem]");
+    expect(backButton).toHaveClass("-ml-1");
   });
 
   it("uses native chrome when the host bridge overrides browser gateway metadata", async () => {
