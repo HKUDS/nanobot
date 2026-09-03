@@ -13,12 +13,15 @@ describe("index.html", () => {
     expect(viewport).not.toMatch(/maximum-scale\s*=\s*1(?:\.0)?(?:,|$)/);
   });
 
-  it("lets iOS keep standalone content inside the safe area", () => {
+  it("lets the app handle iOS safe-area insets itself", () => {
     const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
     const viewport = html.match(/<meta\s+name="viewport"\s+content="([^"]+)"/i)?.[1];
 
-    expect(viewport).toContain("viewport-fit=auto");
-    expect(viewport).not.toContain("viewport-fit=cover");
+    // viewport-fit=cover plus env(safe-area-inset-*) padding keeps the header
+    // below the status bar; plain `auto` no longer constrains the layout
+    // viewport on devices whose WebKit reports no safe-area inset, leaving
+    // the header under the translucent status bar.
+    expect(viewport).toContain("viewport-fit=cover");
   });
 
   it("provides light and dark PWA chrome colors", () => {
