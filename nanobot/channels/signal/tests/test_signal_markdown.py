@@ -393,6 +393,14 @@ def test_partition_styles_keeps_offset_in_indented_chunk():
     assert _partition_styles(plain, chunks, ["11:4:BOLD"]) == [[], ["4:4:BOLD"]]
 
 
+def test_partition_styles_keeps_offset_after_crlf_boundary():
+    plain = "header\r\n    code"
+    chunks = split_message(plain, 10)
+
+    assert chunks == ["header", "    code"]
+    assert _partition_styles(plain, chunks, ["12:4:BOLD"]) == [[], ["4:4:BOLD"]]
+
+
 def test_partition_styles_long_message_preserves_chunk_one_styles():
     """A bold span deep in the message must follow the message into chunk 1."""
     # Two ~30-char paragraphs separated by a blank line, then **tail**.
