@@ -32,6 +32,19 @@ class TestGenerateCode:
         codes = {store.generate_code("telegram", str(i)) for i in range(20)}
         assert len(codes) == 20
 
+    def test_reuses_active_code_for_same_sender(self) -> None:
+        first = store.generate_code("telegram", "123")
+
+        assert store.generate_code("telegram", "123") == first
+        assert len(store.list_pending()) == 1
+
+    def test_scopes_reused_codes_to_channel(self) -> None:
+        telegram = store.generate_code("telegram", "123")
+        discord = store.generate_code("discord", "123")
+
+        assert telegram != discord
+        assert len(store.list_pending()) == 2
+
     def test_ttl_expiration(self, monkeypatch) -> None:
         clock = {"now": 1_000.0}
         monkeypatch.setattr(store.time, "time", lambda: clock["now"])
