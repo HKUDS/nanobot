@@ -9,6 +9,7 @@ import {
 } from "@opentui/core"
 import {
   MockTreeSitterClient,
+  TestRecorder,
   createTestRenderer,
   type TestRendererSetup,
 } from "@opentui/core/testing"
@@ -486,6 +487,17 @@ describe("NanobotTui layout", () => {
 
     setup.mockInput.pressArrow("right", { shift: true })
     await waitUntil(() => ui.composer.cursorOffset === 10)
+    await setup.mockInput.typeText("replacement")
+    await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.plainText).toContain("replacement")
+    expect(ui.composer.plainText).not.toContain("Image #1")
+
+    ui.composer.setText("")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    ui.composer.cursorOffset = 10
+    setup.mockInput.pressArrow("left", { shift: true })
+    await waitUntil(() => ui.composer.cursorOffset === 0)
     await setup.mockInput.typeText("replacement")
     await waitUntil(() => ui.draft.imageCount === 0)
     expect(ui.composer.plainText).toContain("replacement")
@@ -2050,6 +2062,44 @@ describe("NanobotTui layout", () => {
         transcript: { root: HiddenScrollBox }
       }).transcript.root.horizontalScrollBar.visible).toBeFalse()
     }
+  })
+
+  test("keeps streamed fenced code visible while completing the response", async () => {
+    setup = await createRenderer({ width: 100, height: 30, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const response = [
+      "Commit types:",
+      "",
+      "```text",
+      "feat:",
+      "fix:",
+      "perf:",
+      "docs:",
+      "test:",
+      "refactor:",
+      "chore:",
+      "```",
+      "",
+      "Include the reason in the body.",
+    ].join("\n")
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: response })
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("feat:")
+
+    const recorder = new TestRecorder(setup.renderer)
+    recorder.rec()
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    await setup.flush()
+    recorder.stop()
+
+    expect(recorder.recordedFrames.length).toBeGreaterThan(0)
+    expect(recorder.recordedFrames.every(({ frame }) => frame.includes("feat:"))).toBeTrue()
+    expect(recorder.recordedFrames.every(({ frame }) => (
+      frame.includes("Include the reason in the body.")
+    ))).toBeTrue()
   })
 
   test("renders assistant LaTeX as Unicode text without changing code", async () => {
