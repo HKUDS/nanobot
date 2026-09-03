@@ -51,6 +51,7 @@ TELEGRAM_HTML_MAX_LEN = 4096
 # so multibyte text must not be split at an encoded-byte boundary.
 TELEGRAM_RICH_MAX_LEN = 32768
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+TELEGRAM_RICH_DRAFT_MIN_INTERVAL = 0.75  # 40 draft updates per 30 seconds per chat
 
 # python-telegram-bot exposes a six-parameter Application generic. Nanobot
 # doesn't customize its context/data/job-queue types, so keep that SDK boundary
@@ -391,6 +392,7 @@ class _StreamBuf:
     """Per-chat streaming accumulator for progressive message editing."""
     text: str = ""
     message_id: int | None = None
+    draft_id: int | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
 
@@ -852,24 +854,6 @@ class TelegramChannel(BaseChannel):
     def _rich_message_payload(content: str) -> dict[str, str]:
         return {"markdown": content}
 
-    @staticmethod
-    def _rich_result_message_id(result: Any) -> int | None:
-        """Extract a message id from PTB's raw ``do_api_request`` result."""
-        value: Any = None
-        if isinstance(result, dict):
-            value = cast(dict[str, Any], result).get("message_id")
-            if value is None:
-                nested = cast(dict[str, Any], result).get("result")
-                if isinstance(nested, dict):
-                    value = cast(dict[str, Any], nested).get("message_id")
-        else:
-            value = getattr(result, "message_id", None)
-        if isinstance(value, bool) or value is None:
-            return None
-        with suppress(TypeError, ValueError):
-            return int(value)
-        return None
-
     def _mark_rich_unavailable(self, exc: Exception, operation: str) -> bool:
         if not self._is_rich_capability_error(exc):
             return False
@@ -933,15 +917,51 @@ class TelegramChannel(BaseChannel):
             self.logger.debug("sendRichMessage failed: {}", exc)
             return False
 
+    @staticmethod
+    def _new_rich_draft_id() -> int:
+        """Return a non-zero Bot API Integer suitable for one live draft."""
+        return time.time_ns() % 2_147_483_647 or 1
+
+    async def _try_send_rich_draft(
+        self,
+        chat_id: int,
+        draft_id: int,
+        content: str,
+        thread_kwargs: dict[str, int],
+    ) -> bool:
+        """Create or update the ephemeral rich preview for a private chat."""
+        app = self._require_app()
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "draft_id": draft_id,
+            "rich_message": self._rich_message_payload(content),
+            **thread_kwargs,
+        }
+        try:
+            await self._call_with_retry(
+                app.bot.do_api_request,
+                "sendRichMessageDraft",
+                api_kwargs=payload,
+            )
+            return True
+        except BadRequest as exc:
+            if not self._mark_rich_unavailable(exc, "sendRichMessageDraft"):
+                self.logger.debug("Rich draft rejected: {}", exc)
+            return False
+        except Exception as exc:
+            if self._mark_rich_unavailable(exc, "sendRichMessageDraft"):
+                return False
+            raise
+
     async def _try_send_stream_rich(
         self,
         chat_id: int,
         content: str,
         thread_kwargs: dict[str, int],
-    ) -> int | None:
-        """Send a persistent rich stream message and return its message id.
+    ) -> bool:
+        """Persist one completed rich stream chunk.
 
-        ``None`` means Telegram rejected rich formatting before delivery and the
+        ``False`` means Telegram rejected rich formatting before delivery and the
         caller may use the legacy path. Transport failures propagate because an
         ambiguous resend could duplicate a message that Telegram already stored.
         """
@@ -952,7 +972,7 @@ class TelegramChannel(BaseChannel):
             **thread_kwargs,
         }
         try:
-            result = await self._call_with_retry(
+            await self._call_with_retry(
                 app.bot.do_api_request,
                 "sendRichMessage",
                 api_kwargs=payload,
@@ -960,16 +980,34 @@ class TelegramChannel(BaseChannel):
         except BadRequest as exc:
             if not self._mark_rich_unavailable(exc, "sendRichMessage"):
                 self.logger.debug("Stream rich send rejected: {}", exc)
-            return None
+            return False
         except Exception as exc:
             if self._mark_rich_unavailable(exc, "sendRichMessage"):
-                return None
+                return False
             raise
+        return True
 
-        message_id = self._rich_result_message_id(result)
-        if message_id is None:
-            raise RuntimeError("sendRichMessage returned no message_id")
-        return message_id
+    async def _start_legacy_stream(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict[str, int],
+    ) -> None:
+        """Replace a rejected rich draft with an editable plain-text tail."""
+        app = self._require_app()
+        chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
+        for markdown, _ in chunks[:-1]:
+            await self._send_text(chat_id, markdown, thread_kwargs=thread_kwargs)
+        tail = chunks[-1][0]
+        sent = await self._call_with_retry(
+            app.bot.send_message,
+            chat_id=chat_id,
+            text=_strip_md_block(tail),
+            **thread_kwargs,
+        )
+        buf.text = tail
+        buf.message_id = sent.message_id
+        buf.draft_id = None
 
     async def _try_edit_stream_rich(
         self,
@@ -1226,7 +1264,7 @@ class TelegramChannel(BaseChannel):
         resuming: bool = False,
         merge_next: bool = False,
     ) -> None:
-        """Stream one persistent message, using rich edits when configured."""
+        """Stream a rich draft in private chats, then persist the final message."""
         app = await self._wait_for_app()
         if app is None:
             return
@@ -1239,7 +1277,7 @@ class TelegramChannel(BaseChannel):
             stream_end = False
         if stream_end:
             buf = self._stream_bufs.get(chat_id)
-            if not buf or not buf.message_id or not buf.text:
+            if not buf or not buf.text or (buf.message_id is None and buf.draft_id is None):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
@@ -1252,11 +1290,31 @@ class TelegramChannel(BaseChannel):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
 
-            # A streamed message can be converted to rich content in place.
-            # This avoids the duplicate/flicker caused by send + delete.
+            if buf.draft_id is not None:
+                rich_chunks = _split_telegram_markdown(raw_text, TELEGRAM_RICH_MAX_LEN)
+                for index, rich_chunk in enumerate(rich_chunks):
+                    if await self._try_send_stream_rich(
+                        int_chat_id, rich_chunk, thread_kwargs,
+                    ):
+                        continue
+                    for remaining in rich_chunks[index:]:
+                        for legacy_chunk in _split_telegram_markdown(
+                            remaining, TELEGRAM_MAX_MESSAGE_LEN,
+                        ):
+                            await self._send_text(
+                                int_chat_id,
+                                legacy_chunk,
+                                thread_kwargs=thread_kwargs,
+                            )
+                    break
+                self._stream_bufs.pop(chat_id, None)
+                return
+
+            # Group chats and streams that rejected drafts use an editable
+            # persistent preview, which can still be upgraded on finalization.
             if self._rich_streaming_enabled() and len(raw_text) <= TELEGRAM_RICH_MAX_LEN:
                 if await self._try_edit_stream_rich(
-                    int_chat_id, buf.message_id, raw_text,
+                    int_chat_id, cast(int, buf.message_id), raw_text,
                 ):
                     self._stream_bufs.pop(chat_id, None)
                     return
@@ -1330,30 +1388,37 @@ class TelegramChannel(BaseChannel):
         stream_thread_kwargs: dict[str, int] = {}
         if message_thread_id := meta.get("message_thread_id"):
             stream_thread_kwargs["message_thread_id"] = message_thread_id
-        if buf.message_id is None:
+        rich_draft_allowed = (
+            self._rich_streaming_enabled() and meta.get("is_group") is False
+        )
+        if buf.message_id is None and buf.draft_id is None:
             try:
-                if self._rich_streaming_enabled() and len(buf.text) <= TELEGRAM_RICH_MAX_LEN:
-                    buf.message_id = await self._try_send_stream_rich(
-                        int_chat_id, buf.text, stream_thread_kwargs,
+                if rich_draft_allowed and len(buf.text) <= TELEGRAM_RICH_MAX_LEN:
+                    buf.draft_id = self._new_rich_draft_id()
+                    if not await self._try_send_rich_draft(
+                        int_chat_id,
+                        buf.draft_id,
+                        buf.text,
+                        stream_thread_kwargs,
+                    ):
+                        buf.draft_id = None
+                if buf.draft_id is None:
+                    await self._start_legacy_stream(
+                        int_chat_id, buf, stream_thread_kwargs,
                     )
-                if buf.message_id is None:
-                    preview = _strip_md_block(buf.text)
-                    sent = await self._call_with_retry(
-                        app.bot.send_message,
-                        chat_id=int_chat_id, text=preview,
-                        **stream_thread_kwargs,
-                    )
-                    buf.message_id = sent.message_id
                 buf.last_edit = now
             except Exception as e:
                 self.logger.warning("Stream initial send failed: {}", e)
                 raise
-        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
-            overflow_limit = (
-                TELEGRAM_RICH_MAX_LEN
-                if self._rich_streaming_enabled()
-                else TELEGRAM_MAX_MESSAGE_LEN
+        else:
+            edit_interval = (
+                max(self.config.stream_edit_interval, TELEGRAM_RICH_DRAFT_MIN_INTERVAL)
+                if buf.draft_id is not None
+                else self.config.stream_edit_interval
             )
+            if (now - buf.last_edit) < edit_interval:
+                return
+            overflow_limit = TELEGRAM_RICH_MAX_LEN if buf.draft_id is not None else TELEGRAM_MAX_MESSAGE_LEN
             if len(buf.text) > overflow_limit:
                 await self._flush_stream_overflow(
                     int_chat_id, buf, stream_thread_kwargs,
@@ -1361,12 +1426,20 @@ class TelegramChannel(BaseChannel):
                 buf.last_edit = now
                 return
             try:
-                if self._rich_streaming_enabled():
-                    if await self._try_edit_stream_rich(
-                        int_chat_id, buf.message_id, buf.text,
+                if buf.draft_id is not None:
+                    if await self._try_send_rich_draft(
+                        int_chat_id,
+                        buf.draft_id,
+                        buf.text,
+                        stream_thread_kwargs,
                     ):
                         buf.last_edit = now
                         return
+                    await self._start_legacy_stream(
+                        int_chat_id, buf, stream_thread_kwargs,
+                    )
+                    buf.last_edit = now
+                    return
                 preview = _strip_md_block(buf.text)
                 await self._call_with_retry(
                     app.bot.edit_message_text,
@@ -1387,42 +1460,32 @@ class TelegramChannel(BaseChannel):
         buf: "_StreamBuf",
         thread_kwargs: dict[str, int],
     ) -> None:
-        """Commit full rich chunks and continue streaming into a rich tail.
+        """Persist full chunks and continue streaming into a new draft tail.
 
         Rich chunks use the 32,768-character limit and preserve raw Markdown.
         If Telegram rejects rich formatting, the same buffer is flushed through
         the established HTML/plain path without losing stream state.
         """
-        if self._rich_streaming_enabled():
+        if buf.draft_id is not None and self._rich_streaming_enabled():
             chunks = _split_telegram_markdown(buf.text, TELEGRAM_RICH_MAX_LEN)
             if len(chunks) <= 1:
                 return
 
-            first_markdown = chunks[0]
-            if await self._try_edit_stream_rich(
-                chat_id,
-                cast(int, buf.message_id),
-                first_markdown,
-            ):
-                for markdown in chunks[1:-1]:
-                    message_id = await self._try_send_stream_rich(
-                        chat_id, markdown, thread_kwargs,
-                    )
-                    if message_id is None:
-                        raise RuntimeError(
-                            "Rich messages became unavailable while flushing stream overflow"
-                        )
-                markdown_tail = chunks[-1]
-                tail_message_id = await self._try_send_stream_rich(
-                    chat_id, markdown_tail, thread_kwargs,
-                )
-                if tail_message_id is None:
-                    raise RuntimeError(
-                        "Rich messages became unavailable while opening overflow tail"
-                    )
-                buf.message_id = tail_message_id
-                buf.text = markdown_tail
+            for index, markdown in enumerate(chunks[:-1]):
+                if await self._try_send_stream_rich(chat_id, markdown, thread_kwargs):
+                    continue
+                buf.text = "\n".join(chunks[index:])
+                await self._start_legacy_stream(chat_id, buf, thread_kwargs)
                 return
+
+            buf.text = chunks[-1]
+            buf.draft_id = self._new_rich_draft_id()
+            if await self._try_send_rich_draft(
+                chat_id, buf.draft_id, buf.text, thread_kwargs,
+            ):
+                return
+            await self._start_legacy_stream(chat_id, buf, thread_kwargs)
+            return
 
         await self._flush_stream_overflow_legacy(chat_id, buf, thread_kwargs)
 
