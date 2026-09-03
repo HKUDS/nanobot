@@ -2045,6 +2045,26 @@ def test_xai_grok_logout_removes_token_through_shared_lock(
     assert not token_path.exists()
 
 
+def test_openai_codex_logout_uses_nanobot_data_dir(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    oauth_flows: WebUIOAuthFlowRegistry,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    token_path = tmp_path / "auth" / "codex.json"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("{}", encoding="utf-8")
+
+    logout_oauth_provider(
+        {"provider": ["openai-codex"]},
+        oauth_flows=oauth_flows,
+    )
+
+    assert not token_path.exists()
+
+
 def test_provider_models_payload_fetches_openai_compatible_models(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

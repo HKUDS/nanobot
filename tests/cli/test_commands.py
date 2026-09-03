@@ -573,6 +573,7 @@ def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkey
     token_path.write_text("{}", encoding="utf-8")
     lock_path.write_text("", encoding="utf-8")
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
 
     result = runner.invoke(app, ["provider", "logout", "openai-codex"])
 
@@ -585,6 +586,7 @@ def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkey
 def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
     token_path = tmp_path / "auth" / "codex.json"
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
 
     result = runner.invoke(app, ["provider", "logout", "openai-codex"])
 
@@ -834,12 +836,13 @@ def test_provider_login_model_implies_set_main_provider(tmp_path):
     assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
 
 
-def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
+def test_provider_login_openai_codex_passes_configured_proxy(tmp_path, monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
         lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
     )
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
 
     import oauth_cli_kit
 
@@ -850,7 +853,7 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
 
     captured: dict[str, str | None] = {}
 
-    def fake_login(*, print_fn, prompt_fn, proxy=None):
+    def fake_login(*, print_fn, prompt_fn, proxy=None, storage=None):
         captured["proxy"] = proxy
         return SimpleNamespace(access="access-token", account_id="acct-test")
 
@@ -887,12 +890,13 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
 
     monkeypatch.setattr(loader, "set_config_path", fake_set_config_path)
     monkeypatch.setattr(loader, "load_config", fake_load_config)
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
 
     import oauth_cli_kit
 
     captured: dict[str, str | None] = {}
 
-    def fake_get_token(*, proxy=None):
+    def fake_get_token(*, proxy=None, storage=None):
         captured["proxy"] = proxy
         return SimpleNamespace(access="access-token", account_id="acct-test")
 
@@ -908,7 +912,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
     assert captured["proxy"] == proxy
 
 
-def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
+def test_provider_login_openai_codex_resolves_proxy_env_ref(tmp_path, monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setenv("CODEX_PROXY_FOR_TEST", proxy)
     monkeypatch.setattr(
@@ -917,12 +921,13 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
             {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
         ),
     )
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
 
     import oauth_cli_kit
 
     captured: dict[str, str | None] = {}
 
-    def fake_get_token(*, proxy=None):
+    def fake_get_token(*, proxy=None, storage=None):
         captured["proxy"] = proxy
         return SimpleNamespace(access="access-token", account_id="acct-test")
 
@@ -932,6 +937,55 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["proxy"] == proxy
+
+
+def test_provider_login_openai_codex_stores_token_under_nanobot_data_dir(tmp_path, monkeypatch):
+    """Codex OAuth storage must resolve under nanobot's managed data dir (#5444).
+
+    Regression test: previously ``get_token``/``login_oauth_interactive`` were
+    called without a ``storage=`` override, so oauth-cli-kit fell back to its own
+    unmanaged ``platformdirs`` default (``~/.local/share/oauth-cli-kit``) — a path
+    Docker never creates, chowns, or persists, unlike the bind-mounted ``.nanobot``
+    data dir that every other nanobot OAuth provider already uses.
+    """
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config.model_validate({}),
+    )
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
+
+    import oauth_cli_kit
+
+    captured: dict[str, object] = {}
+
+    def fake_get_token(*, proxy=None, storage=None):
+        raise RuntimeError("no cached token")
+
+    def fake_login(*, print_fn, prompt_fn, proxy=None, storage=None):
+        captured["storage"] = storage
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+    monkeypatch.setattr(oauth_cli_kit, "login_oauth_interactive", fake_login)
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex"])
+
+    assert result.exit_code == 0
+    storage = captured["storage"]
+    assert storage is not None
+    assert storage.get_token_path() == tmp_path / "auth" / "codex.json"
+
+
+def test_provider_logout_openai_codex_uses_nanobot_data_dir(tmp_path, monkeypatch):
+    """Logout must clear the token at the same managed location login writes to (#5444)."""
+    monkeypatch.setattr(provider_commands, "get_data_dir", lambda: tmp_path)
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
+    # Nothing under the unmanaged oauth-cli-kit default was created or touched.
+    assert not (tmp_path / "oauth-cli-kit").exists()
 
 
 def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeypatch):

@@ -299,8 +299,7 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
 
     if spec.name == "openai_codex":
         try:
-            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-            from oauth_cli_kit.storage import FileTokenStorage
+            from nanobot.providers.openai_codex_storage import get_openai_codex_storage
         except Exception:
             return {
                 "configured": False,
@@ -310,7 +309,7 @@ def oauth_provider_status(spec: Any) -> dict[str, Any]:
             }
         token = None
         with suppress(Exception):
-            token = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).load()
+            token = get_openai_codex_storage().load()
         expires_at = getattr(token, "expires", None) if token else None
         now_ms = int(time.time() * 1000)
         return {
@@ -1710,14 +1709,11 @@ def logout_oauth_provider(
 
     if spec.name == "openai_codex":
         try:
-            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-            from oauth_cli_kit.storage import FileTokenStorage
+            from nanobot.providers.openai_codex_storage import get_openai_codex_storage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
         oauth_flows.clear(spec.name)
-        token_path = FileTokenStorage(
-            token_filename=OPENAI_CODEX_PROVIDER.token_filename
-        ).get_token_path()
+        token_path = get_openai_codex_storage().get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage

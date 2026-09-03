@@ -18,6 +18,8 @@ from oauth_cli_kit import login_oauth_interactive
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
 
+from nanobot.providers.openai_codex_storage import get_openai_codex_storage
+
 _AUTHORIZATION_URL_TIMEOUT_S = 5.0
 _CALLBACK = urlsplit(OPENAI_CODEX_PROVIDER.redirect_uri)
 _CALLBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -137,6 +139,7 @@ class OpenAICodexOAuthLoginFlow:
                 provider=OPENAI_CODEX_PROVIDER,
                 proxy=self._proxy,
                 open_browser=self._open_browser,
+                storage=get_openai_codex_storage(),
             )
         except Exception as exc:
             with suppress(Exception):

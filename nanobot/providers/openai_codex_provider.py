@@ -14,8 +14,6 @@ from typing import Any, cast
 import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
-from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot import __version__
 from nanobot.providers.base import (
@@ -29,6 +27,7 @@ from nanobot.providers.oauth_model_catalog import (
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
 )
+from nanobot.providers.openai_codex_storage import get_openai_codex_storage
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
     build_responses_compaction_state,
@@ -141,7 +140,11 @@ class OpenAICodexProvider(LLMProvider):
         native_compaction_applied = False
         native_compaction_state: ProviderConversationState | None = None
         try:
-            token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
+            token = await asyncio.to_thread(
+                get_codex_token,
+                proxy=self.proxy,
+                storage=get_openai_codex_storage(),
+            )
             headers = _build_headers(cast(str, token.account_id), token.access)
 
             async def _send(
@@ -625,7 +628,7 @@ def _should_retry_status(
 def get_openai_codex_model_catalog(
     proxy: str | None = None,
 ) -> OAuthModelCatalogSnapshot:
-    storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    storage = get_openai_codex_storage()
     token = storage.load()
     account_id = getattr(token, "account_id", None)
     account_key = _catalog_account_key(account_id)
@@ -638,7 +641,7 @@ def invalidate_openai_codex_model_catalog() -> None:
 
 
 def _fetch_openai_codex_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    token = get_codex_token(proxy=proxy)
+    token = get_codex_token(proxy=proxy, storage=get_openai_codex_storage())
     account_id = getattr(token, "account_id", None)
     if not isinstance(account_id, str) or not account_id:
         raise RuntimeError("OpenAI Codex OAuth token has no account ID")

@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 
 from nanobot import __logo__
+from nanobot.config.paths import get_data_dir
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
 if TYPE_CHECKING:
@@ -39,8 +40,14 @@ class _OAuthToken(Protocol):
     account_id: str | None
 
 
+class _TokenStorage(Protocol):
+    def get_token_path(self) -> Path: ...
+
+
 class _GetOAuthToken(Protocol):
-    def __call__(self, *, proxy: str | None = None) -> _OAuthToken | None: ...
+    def __call__(
+        self, *, proxy: str | None = None, storage: _TokenStorage | None = None
+    ) -> _OAuthToken | None: ...
 
 
 class _LoginOAuthInteractive(Protocol):
@@ -50,6 +57,7 @@ class _LoginOAuthInteractive(Protocol):
         print_fn: Callable[[str], None],
         prompt_fn: Callable[[str], str],
         proxy: str | None = None,
+        storage: _TokenStorage | None = None,
     ) -> _OAuthToken | None: ...
 
 
@@ -57,12 +65,10 @@ class _OAuthProviderConfig(Protocol):
     token_filename: str
 
 
-class _TokenStorage(Protocol):
-    def get_token_path(self) -> Path: ...
-
-
 class _FileTokenStorageFactory(Protocol):
-    def __call__(self, *, token_filename: str) -> _TokenStorage: ...
+    def __call__(
+        self, *, token_filename: str, data_dir: Path | None = None
+    ) -> _TokenStorage: ...
 
 
 def _required_module_attribute(module_name: str, attribute: str) -> object:
@@ -222,6 +228,10 @@ def _login_openai_codex() -> None:
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
         get_token, login_oauth_interactive = _load_openai_oauth_client()
+        provider_config, storage_factory = _load_openai_oauth_storage()
+        storage = storage_factory(
+            token_filename=provider_config.token_filename, data_dir=get_data_dir()
+        )
         proxy = None
         try:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
@@ -230,13 +240,14 @@ def _login_openai_codex() -> None:
             raise typer.Exit(1) from e
         token = None
         with suppress(Exception):
-            token = get_token(proxy=proxy)
+            token = get_token(proxy=proxy, storage=storage)
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
                 print_fn=lambda s: console.print(s),
                 prompt_fn=lambda s: typer.prompt(s),
                 proxy=proxy,
+                storage=storage,
             )
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")
@@ -257,7 +268,9 @@ def _logout_openai_codex() -> None:
         console.print(f"[red]{OAUTH_CLI_KIT_MISSING_MESSAGE}[/red]")
         raise typer.Exit(1)
 
-    storage = storage_factory(token_filename=provider_config.token_filename)
+    storage = storage_factory(
+        token_filename=provider_config.token_filename, data_dir=get_data_dir()
+    )
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["openai_codex"])
 
 

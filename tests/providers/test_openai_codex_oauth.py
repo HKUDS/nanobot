@@ -8,6 +8,7 @@ import pytest
 from oauth_cli_kit.models import OAuthToken
 
 import nanobot.providers.openai_codex_oauth as codex_oauth
+import nanobot.providers.openai_codex_storage as codex_storage
 from nanobot.providers.openai_codex_oauth import (
     OpenAICodexOAuthError,
     OpenAICodexOAuthInputError,
@@ -42,11 +43,13 @@ def _fake_interactive_login(
         provider,
         proxy,
         open_browser,
+        storage,
     ) -> OAuthToken:
         captured.update(
             provider=provider,
             proxy=proxy,
             open_browser=open_browser,
+            storage=storage,
         )
         print_fn("Open this URL:")
         print_fn(_authorization_url())
@@ -81,6 +84,15 @@ def test_authorization_url_comes_from_oauth_cli_kit() -> None:
         flow.cancel()
 
 
+def test_storage_uses_nanobot_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(codex_storage, "get_data_dir", lambda: tmp_path)
+
+    assert (
+        codex_storage.get_openai_codex_storage().get_token_path()
+        == tmp_path / "auth" / "codex.json"
+    )
+
+
 def test_local_flow_delegates_browser_and_callback_to_public_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -98,6 +110,8 @@ def test_local_flow_delegates_browser_and_callback_to_public_oauth_cli_kit(
         flow.cancel()
 
     assert token.account_id == "acct-test"
+    storage = captured.pop("storage")
+    assert storage is not None
     assert captured == {
         "provider": codex_oauth.OPENAI_CODEX_PROVIDER,
         "proxy": None,
@@ -135,6 +149,8 @@ def test_remote_flow_delegates_pasted_callback_to_public_oauth_cli_kit(
 
     assert token is not None
     assert token.account_id == "acct-test"
+    storage = captured.pop("storage")
+    assert storage is not None
     assert captured == {
         "provider": codex_oauth.OPENAI_CODEX_PROVIDER,
         "proxy": "http://127.0.0.1:7890",

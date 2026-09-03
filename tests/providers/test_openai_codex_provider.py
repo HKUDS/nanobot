@@ -399,12 +399,15 @@ async def test_codex_mid_stream_server_error_is_treated_as_transient(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_codex_provider_passes_proxy_to_oauth_and_response_request(monkeypatch) -> None:
+async def test_codex_provider_passes_proxy_and_storage_to_oauth_and_response_request(
+    monkeypatch,
+) -> None:
     proxy = "http://127.0.0.1:23458"
     seen: dict[str, object] = {}
 
-    def fake_token(*, proxy=None):
+    def fake_token(*, proxy=None, storage=None):
         seen["token_proxy"] = proxy
+        seen["token_storage"] = storage
         return SimpleNamespace(account_id="acct", access="token")
 
     async def fake_request(
@@ -429,6 +432,7 @@ async def test_codex_provider_passes_proxy_to_oauth_and_response_request(monkeyp
 
     assert response.content == "ok"
     assert seen["token_proxy"] == proxy
+    assert seen["token_storage"] is not None
     assert seen["request_proxy"] == proxy
 
 
