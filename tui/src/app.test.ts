@@ -2102,6 +2102,42 @@ describe("NanobotTui layout", () => {
     ))).toBeTrue()
   })
 
+  test("renders fenced plain text from light-theme history", async () => {
+    setup = await createRenderer({ width: 100, height: 30, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, theme: "light" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const response = [
+      "Commit types:",
+      "",
+      "```text",
+      "feat:",
+      "fix:",
+      "perf:",
+      "docs:",
+      "test:",
+      "refactor:",
+      "chore:",
+      "```",
+      "",
+      "Include the reason in the body.",
+    ].join("\n")
+    const transcript = (app as unknown as { transcript: Transcript }).transcript
+
+    transcript.history([{ role: "assistant", content: response }])
+    await setup.flush()
+
+    const code = setup.captureSpans().lines
+      .flatMap((line) => line.spans)
+      .find((span) => span.text.includes("feat:"))
+
+    expect(setup.captureCharFrame()).toContain("feat:")
+    expect(code?.fg.toInts().slice(0, 3)).toEqual([24, 24, 27])
+  })
+
   test("renders assistant LaTeX as Unicode text without changing code", async () => {
     setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
@@ -2152,7 +2188,7 @@ describe("NanobotTui layout", () => {
         syntaxStyle: { getStyle(name: string): { fg?: { toInts(): number[] } } | undefined } | null
       }
       transcript: {
-        markdown: Set<{ syntaxStyle: object }>
+        markdown: Set<{ fg?: { toInts(): number[] }; syntaxStyle: object }>
         frames: Set<{ borderColor: { toInts(): number[] } }>
         userRows: Set<{ backgroundColor: { intent: string; toInts(): number[] } }>
         userMessages: Set<{ renderable: TextRenderable }>
@@ -2186,6 +2222,7 @@ describe("NanobotTui layout", () => {
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect(sessionFrame?.borderColor.toInts().slice(0, 3)).toEqual([212, 212, 216])
     expect(userRow?.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
+    expect(markdown?.fg?.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
     expect(internals.composer.syntaxStyle).not.toBe(darkComposerSyntax)
     expect(internals.composer.syntaxStyle?.getStyle("image.placeholder")?.fg?.toInts().slice(0, 3))

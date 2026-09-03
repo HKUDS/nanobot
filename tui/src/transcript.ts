@@ -183,7 +183,10 @@ export class Transcript {
         message.displayContent,
       )
     }
-    for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
+    for (const renderable of this.markdown) {
+      renderable.fg = theme.text
+      renderable.syntaxStyle = theme.syntax
+    }
     for (const frame of this.frames) frame.borderColor = theme.border
     for (const row of this.userRows) {
       row.backgroundColor = theme.userBackground
@@ -664,6 +667,7 @@ export class Transcript {
       minWidth: 0,
       flexGrow: 1,
       flexShrink: 1,
+      fg: this.theme.text,
       syntaxStyle: this.theme.syntax,
       streaming,
       internalBlockMode: "top-level",
