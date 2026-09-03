@@ -44,7 +44,7 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.providers.base import LLMUsage
+from nanobot.providers.base import LLMRequestUsage, LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
@@ -3303,6 +3303,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         output_tokens=20,
         cache_read_tokens=40,
     ).with_timing(generation_ms=500, ttft_ms=125)
+    call_id = "a" * 32
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3311,6 +3312,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         event=TurnEndEvent(
             latency_ms=1500,
             usage=usage,
+            request_usages=(LLMRequestUsage(usage, call_id),),
             context_window_tokens=128_000,
         ),
     ))
@@ -3333,6 +3335,22 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
                 "ttft_ms": 125,
                 "timed_requests": 1,
             },
+            "request_usages": [
+                {
+                    "call_id": call_id,
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "total_tokens": 100,
+                    "context_tokens": 80,
+                    "cached_tokens": 40,
+                    "request_count": 1,
+                    "estimated_tokens": 0,
+                    "generation_ms": 500,
+                    "measured_completion_tokens": 20,
+                    "ttft_ms": 125,
+                    "timed_requests": 1,
+                }
+            ],
             "context_window_tokens": 128_000,
         },
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},

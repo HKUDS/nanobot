@@ -19,7 +19,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventPublisher
-from nanobot.providers.base import LLMUsage
+from nanobot.providers.base import LLMRequestUsage, LLMUsage
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -204,8 +204,16 @@ class TurnDelivery:
     def record_latency(self, latency_ms: int | None) -> None:
         self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms)
 
-    def record_usage(self, usage: LLMUsage | None) -> None:
-        self.runtime_event_publisher.record_turn_usage(self.session_key, usage)
+    def record_usage(
+        self,
+        usage: LLMUsage | None,
+        request_usages: list[LLMRequestUsage] | None = None,
+    ) -> None:
+        self.runtime_event_publisher.record_turn_usage(
+            self.session_key,
+            usage,
+            request_usages,
+        )
 
     def background_response(
         self,

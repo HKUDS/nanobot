@@ -1185,8 +1185,19 @@
       "switchModel": "この会話で使うモデルを切り替える",
       "manageModels": "モデルを管理",
       "context": {
-        "tooltip": "コンテキスト · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}。{{percent}}% 使用中"
+        "tooltip": "コンテキスト {{percent}}%",
+        "detailsLabel": "コンテキストと再利用の詳細を開く",
+        "panelTitle": "コンテキストと再利用",
+        "contextTitle": "コンテキスト",
+        "cacheTitle": "再利用",
+        "reused": "再利用",
+        "notReused": "未再利用",
+        "input": "入力 {{tokens}}",
+        "reusedDetail": "{{tokens}} を再利用（{{percent}}%）",
+        "output": "出力 {{tokens}}",
+        "duration": "生成 {{duration}}",
+        "cacheUnavailable": "再利用の詳細は利用できません",
+        "empty": "最初の応答後に使用量が表示されます。"
       },
       "queued": {
         "label": "保留中のガイド",

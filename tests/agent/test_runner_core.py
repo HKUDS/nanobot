@@ -15,6 +15,7 @@ from nanobot.agent.context_governance import ContextWindowExceededError
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import (
     LLMProvider,
+    LLMRequestUsage,
     LLMResponse,
     LLMUsage,
     ProviderCallContext,
@@ -629,11 +630,23 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
                         arguments={"path": "."},
                     )
                 ],
+                usage=LLMUsage.reported(input_tokens=1, output_tokens=1),
             )
         return LLMResponse(
             content="Read the directory twice. More investigation remains.",
             tool_calls=[],
             usage=LLMUsage.reported(input_tokens=10, output_tokens=7),
+            call_id="2" * 32,
+            call_usages=[
+                LLMRequestUsage(
+                    LLMUsage.reported(input_tokens=6, output_tokens=1),
+                    "1" * 32,
+                ),
+                LLMRequestUsage(
+                    LLMUsage.reported(input_tokens=10, output_tokens=7),
+                    "2" * 32,
+                ),
+            ],
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -660,6 +673,13 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     assert calls[-1]["tools"] is None
     assert "tool-call budget" in calls[-1]["messages"][-1]["content"]
     assert tools.execute.await_count == 2
+    assert result.usage is not None
+    assert result.usage.input_tokens == 18
+    assert result.usage.output_tokens == 10
+    assert [item.call_id for item in result.request_usages[-2:]] == [
+        "1" * 32,
+        "2" * 32,
+    ]
 
 
 @pytest.mark.asyncio
@@ -890,6 +910,17 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
             content="final answer",
             tool_calls=[],
             usage=LLMUsage.reported(input_tokens=3, output_tokens=7),
+            call_id="2" * 32,
+            call_usages=[
+                LLMRequestUsage(
+                    LLMUsage.reported(input_tokens=2, output_tokens=1),
+                    "1" * 32,
+                ),
+                LLMRequestUsage(
+                    LLMUsage.reported(input_tokens=3, output_tokens=7),
+                    "2" * 32,
+                ),
+            ],
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -912,8 +943,12 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     assert calls[1]["tools"] is not None
     assert calls[2]["tools"] is None
     assert result.usage is not None
-    assert result.usage.input_tokens == 13
-    assert result.usage.output_tokens == 9
+    assert result.usage.input_tokens == 15
+    assert result.usage.output_tokens == 10
+    assert [item.call_id for item in result.request_usages[-2:]] == [
+        "1" * 32,
+        "2" * 32,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1230,11 +1265,13 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
                 content="thinking",
                 tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
                 usage=LLMUsage.reported(input_tokens=100, output_tokens=10, cache_read_tokens=80),
+                call_id="1" * 32,
             )
         return LLMResponse(
             content="done",
             tool_calls=[],
             usage=LLMUsage.reported(input_tokens=200, output_tokens=20, cache_read_tokens=150),
+            call_id="2" * 32,
         )
 
     provider.chat_with_retry = chat_with_retry
@@ -1258,6 +1295,130 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
     assert result.usage.cache_read_tokens == 230  # 80 + 150
     assert result.usage.context_tokens == 200
     assert result.usage.request_count == 2
+    assert [
+        (item.usage.input_tokens, item.usage.cache_read_tokens)
+        for item in result.request_usages
+    ] == [
+        (100, 80),
+        (200, 150),
+    ]
+    assert [item.call_id for item in result.request_usages] == ["1" * 32, "2" * 32]
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_usage_bearing_physical_retries():
+    """A billed failed attempt and its retry remain separately correlatable."""
+    from nanobot.agent.runner import AgentRunner
+
+    class UsageRetryProvider(LLMProvider):
+        _CHAT_RETRY_DELAYS = (0,)
+
+        def __init__(self) -> None:
+            super().__init__(provider_name="retry-test")
+            self.responses = iter([
+                LLMResponse(
+                    content="temporary failure",
+                    finish_reason="error",
+                    error_kind="timeout",
+                    usage=LLMUsage.reported(
+                        input_tokens=90,
+                        output_tokens=1,
+                        cache_read_tokens=60,
+                    ),
+                ),
+                LLMResponse(
+                    content="done",
+                    usage=LLMUsage.reported(
+                        input_tokens=100,
+                        output_tokens=4,
+                        cache_read_tokens=80,
+                    ),
+                ),
+            ])
+
+        async def chat(self, **_kwargs: object) -> LLMResponse:
+            return next(self.responses)
+
+        def get_default_model(self) -> str:
+            return "test-model"
+
+    provider = UsageRetryProvider()
+    records = []
+    provider.set_llm_call_observer(records.append)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 190
+    assert result.usage.output_tokens == 5
+    assert result.usage.cache_read_tokens == 140
+    assert [item.call_id for item in result.request_usages] == [
+        record.call_id for record in records
+    ]
+    assert [item.usage.input_tokens for item in result.request_usages] == [90, 100]
+
+
+@pytest.mark.asyncio
+async def test_runner_adds_estimated_success_after_usage_bearing_retry(monkeypatch):
+    """An unreported final retry is retained alongside an earlier billed error."""
+    from nanobot.agent.runner import AgentRunner
+
+    class UsageRetryProvider(LLMProvider):
+        _CHAT_RETRY_DELAYS = (0,)
+
+        def __init__(self) -> None:
+            super().__init__(provider_name="retry-test")
+            self.responses = iter([
+                LLMResponse(
+                    content="temporary failure",
+                    finish_reason="error",
+                    error_kind="timeout",
+                    usage=LLMUsage.reported(input_tokens=90, output_tokens=1),
+                ),
+                LLMResponse(content="done"),
+            ])
+
+        async def chat(self, **_kwargs: object) -> LLMResponse:
+            return next(self.responses)
+
+        def get_default_model(self) -> str:
+            return "test-model"
+
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_prompt_tokens_chain",
+        lambda provider, model, messages, definitions: (100, "test"),
+    )
+    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda message: 4)
+    provider = UsageRetryProvider()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 190
+    assert result.usage.output_tokens == 5
+    assert len(result.request_usages) == 2
+    assert result.request_usages[0].usage.source == "reported"
+    assert result.request_usages[1].usage.source == "estimated"
+    assert all(item.call_id is not None for item in result.request_usages)
+    assert result.request_usages[0].call_id != result.request_usages[1].call_id
 
 
 @pytest.mark.asyncio

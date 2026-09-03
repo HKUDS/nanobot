@@ -1186,8 +1186,19 @@
       "switchModel": "Cambiar el modelo de este chat",
       "manageModels": "Gestionar modelos",
       "context": {
-        "tooltip": "Contexto · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. {{percent}} % usado."
+        "tooltip": "Contexto {{percent}}%",
+        "detailsLabel": "Abrir contexto y detalles de reutilización",
+        "panelTitle": "Contexto y reutilización",
+        "contextTitle": "Contexto",
+        "cacheTitle": "Reutilización",
+        "reused": "Reutilizado",
+        "notReused": "Sin reutilizar",
+        "input": "{{tokens}} de entrada",
+        "reusedDetail": "{{tokens}} reutilizados ({{percent}} %)",
+        "output": "{{tokens}} de salida",
+        "duration": "Generación {{duration}}",
+        "cacheUnavailable": "Detalles de reutilización no disponibles",
+        "empty": "El uso aparecerá después de la primera respuesta."
       },
       "queued": {
         "label": "Guía en cola",

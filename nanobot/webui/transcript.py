@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.providers.base import is_llm_call_id
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -72,6 +73,33 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
 MAX_SESSION_MENTIONS = 8
 _SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
 _SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
+
+
+def _sanitize_turn_usage(value: object) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    data = cast(dict[object, object], value)
+    return {
+        key: item
+        for key, item in data.items()
+        if isinstance(key, str)
+        and isinstance(item, int)
+        and not isinstance(item, bool)
+        and item >= 0
+    }
+
+
+def _sanitize_request_usage(value: object) -> dict[str, int | str] | None:
+    numeric = _sanitize_turn_usage(value)
+    if numeric is None:
+        return None
+    result: dict[str, int | str] = {}
+    result.update(numeric)
+    data = cast(dict[object, object], value)
+    call_id = data.get("call_id")
+    if is_llm_call_id(call_id):
+        result["call_id"] = cast(str, call_id)
+    return result
 
 
 def rewrite_local_markdown_images(
@@ -1916,6 +1944,7 @@ def replay_transcript_to_ui_messages(
         *,
         latency_ms: int | None = None,
         usage: dict[str, int] | None = None,
+        request_usages: list[dict[str, int | str]] | None = None,
         context_window_tokens: int | None = None,
     ) -> None:
         for i in range(len(messages) - 1, -1, -1):
@@ -1925,6 +1954,8 @@ def replay_transcript_to_ui_messages(
                     completion["latencyMs"] = latency_ms
                 if usage:
                     completion["usage"] = usage
+                if request_usages:
+                    completion["requestUsages"] = request_usages
                 if context_window_tokens is not None:
                     completion["contextWindowTokens"] = context_window_tokens
                 messages[i] = {
@@ -2428,19 +2459,23 @@ def replay_transcript_to_ui_messages(
                     messages[i] = {**m, "isStreaming": False}
             lat = rec.get("latency_ms")
             usage = rec.get("usage")
-            sanitized_usage = (
-                {
-                    key: value
-                    for key, value in cast(dict[object, object], usage).items()
-                    if isinstance(key, str) and type(value) is int and value >= 0
-                }
-                if isinstance(usage, dict)
+            sanitized_usage = _sanitize_turn_usage(usage)
+            raw_request_usages = rec.get("request_usages")
+            sanitized_request_usages = (
+                [
+                    sanitized
+                    for item in cast(list[object], raw_request_usages)
+                    if (sanitized := _sanitize_request_usage(item))
+                    is not None
+                ]
+                if isinstance(raw_request_usages, list)
                 else None
             )
             context_window = rec.get("context_window_tokens")
             stamp_completion(
                 latency_ms=int(lat) if isinstance(lat, (int, float)) and lat >= 0 else None,
                 usage=sanitized_usage,
+                request_usages=sanitized_request_usages,
                 context_window_tokens=(
                     int(context_window)
                     if isinstance(context_window, (int, float)) and context_window >= 0

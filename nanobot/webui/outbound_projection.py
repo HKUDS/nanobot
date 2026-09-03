@@ -31,7 +31,7 @@ from nanobot.webui.session_projection import WebUISessionProjection
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
 
-    from nanobot.providers.base import LLMUsage
+    from nanobot.providers.base import LLMRequestUsage, LLMUsage
 
 
 class WebUIOutboundTransport(Protocol):
@@ -85,6 +85,7 @@ class WebUIOutboundTransport(Protocol):
         *,
         goal_state: dict[str, Any] | None = None,
         usage: LLMUsage | None = None,
+        request_usages: tuple[LLMRequestUsage, ...] = (),
         context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
@@ -225,6 +226,7 @@ class WebUIOutboundProjector:
                 latency_ms=event.latency_ms,
                 goal_state=event.goal_state,
                 usage=event.usage,
+                request_usages=event.request_usages,
                 context_window_tokens=event.context_window_tokens,
                 metadata=msg.metadata,
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,

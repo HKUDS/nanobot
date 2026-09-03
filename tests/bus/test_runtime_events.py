@@ -12,7 +12,7 @@ from nanobot.bus.runtime_events import (
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
 )
-from nanobot.providers.base import LLMUsage
+from nanobot.providers.base import LLMRequestUsage, LLMUsage
 
 
 @pytest.mark.asyncio
@@ -100,7 +100,12 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     bus.subscribe(seen.append)
     publisher.record_turn_runtime("cli:direct", "runtime")
     publisher.record_turn_latency("cli:direct", 123)
-    publisher.record_turn_usage("cli:direct", LLMUsage.reported(input_tokens=40, output_tokens=2))
+    first_request = LLMUsage.reported(input_tokens=40, output_tokens=2)
+    second_request = LLMUsage.reported(input_tokens=60, output_tokens=3)
+    first_item = LLMRequestUsage(first_request)
+    second_item = LLMRequestUsage(second_request)
+    publisher.record_turn_usage("cli:direct", first_request, [first_item])
+    publisher.record_turn_usage("cli:direct", second_request, [second_item])
 
     await publisher.turn_completed(
         channel="cli",
@@ -121,7 +126,8 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.context.metadata == {"source": "test"}
     assert first.latency_ms == 123
     assert first.runtime == "runtime"
-    assert first.usage == LLMUsage.reported(input_tokens=40, output_tokens=2)
+    assert first.usage == first_request + second_request
+    assert first.request_usages == (first_item, second_item)
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None

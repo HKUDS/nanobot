@@ -1199,8 +1199,19 @@
       "switchModel": "Switch model for this chat",
       "manageModels": "Manage models",
       "context": {
-        "tooltip": "Context · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. {{percent}}% used."
+        "tooltip": "Context {{percent}}%",
+        "detailsLabel": "Open context and reuse details",
+        "panelTitle": "Context and reuse",
+        "contextTitle": "Context",
+        "cacheTitle": "Reuse",
+        "reused": "Reused",
+        "notReused": "Not reused",
+        "input": "{{tokens}} input",
+        "reusedDetail": "{{tokens}} reused ({{percent}}%)",
+        "output": "{{tokens}} output",
+        "duration": "{{duration}} generation",
+        "cacheUnavailable": "Reuse details unavailable",
+        "empty": "Usage appears after the first response."
       },
       "queued": {
         "label": "Queued guidance",

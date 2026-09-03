@@ -1185,8 +1185,19 @@
       "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
       "manageModels": "Quản lý mô hình",
       "context": {
-        "tooltip": "Ngữ cảnh · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. Đã dùng {{percent}}%."
+        "tooltip": "Ngữ cảnh {{percent}}%",
+        "detailsLabel": "Mở ngữ cảnh và chi tiết tái sử dụng",
+        "panelTitle": "Ngữ cảnh và tái sử dụng",
+        "contextTitle": "Ngữ cảnh",
+        "cacheTitle": "Tái sử dụng",
+        "reused": "Tái sử dụng",
+        "notReused": "Không tái sử dụng",
+        "input": "Đầu vào {{tokens}}",
+        "reusedDetail": "Tái sử dụng {{tokens}} ({{percent}}%)",
+        "output": "Đầu ra {{tokens}}",
+        "duration": "Tạo nội dung {{duration}}",
+        "cacheUnavailable": "Không có chi tiết tái sử dụng",
+        "empty": "Mức sử dụng xuất hiện sau phản hồi đầu tiên."
       },
       "queued": {
         "label": "Hướng dẫn đang chờ",

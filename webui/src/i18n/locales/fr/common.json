@@ -1185,8 +1185,19 @@
       "switchModel": "Changer le modèle de cette conversation",
       "manageModels": "Gérer les modèles",
       "context": {
-        "tooltip": "Contexte · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. {{percent}} % utilisé."
+        "tooltip": "Contexte {{percent}} %",
+        "detailsLabel": "Ouvrir le contexte et les détails de réutilisation",
+        "panelTitle": "Contexte et réutilisation",
+        "contextTitle": "Contexte",
+        "cacheTitle": "Réutilisation",
+        "reused": "Réutilisé",
+        "notReused": "Non réutilisé",
+        "input": "{{tokens}} en entrée",
+        "reusedDetail": "{{tokens}} réutilisés ({{percent}} %)",
+        "output": "{{tokens}} en sortie",
+        "duration": "Génération {{duration}}",
+        "cacheUnavailable": "Détail de réutilisation indisponible",
+        "empty": "L’utilisation apparaîtra après la première réponse."
       },
       "queued": {
         "label": "Guidage en attente",

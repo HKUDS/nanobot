@@ -1185,8 +1185,19 @@
       "switchModel": "이 대화에서 사용할 모델 전환",
       "manageModels": "모델 관리",
       "context": {
-        "tooltip": "컨텍스트 · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. {{percent}}% 사용 중."
+        "tooltip": "컨텍스트 {{percent}}%",
+        "detailsLabel": "컨텍스트 및 재사용 세부 정보 열기",
+        "panelTitle": "컨텍스트 및 재사용",
+        "contextTitle": "컨텍스트",
+        "cacheTitle": "재사용",
+        "reused": "재사용",
+        "notReused": "재사용되지 않음",
+        "input": "입력 {{tokens}}",
+        "reusedDetail": "{{tokens}} 재사용 ({{percent}}%)",
+        "output": "출력 {{tokens}}",
+        "duration": "생성 {{duration}}",
+        "cacheUnavailable": "재사용 세부 정보를 사용할 수 없음",
+        "empty": "첫 응답 후 사용량이 표시됩니다."
       },
       "queued": {
         "label": "대기 중인 안내",

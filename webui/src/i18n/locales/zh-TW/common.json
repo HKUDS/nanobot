@@ -1185,8 +1185,19 @@
       "switchModel": "切換此對話使用的模型",
       "manageModels": "管理模型預設",
       "context": {
-        "tooltip": "上下文 · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}。已使用 {{percent}}%。"
+        "tooltip": "上下文 {{percent}}%",
+        "detailsLabel": "開啟上下文與重用詳情",
+        "panelTitle": "上下文與重用",
+        "contextTitle": "上下文",
+        "cacheTitle": "重用",
+        "reused": "重用",
+        "notReused": "未重用",
+        "input": "輸入 {{tokens}}",
+        "reusedDetail": "重用 {{tokens}}（{{percent}}%）",
+        "output": "輸出 {{tokens}}",
+        "duration": "生成 {{duration}}",
+        "cacheUnavailable": "未提供重用明細",
+        "empty": "首次回覆後會顯示用量。"
       },
       "queued": {
         "label": "佇列中的引導訊息",

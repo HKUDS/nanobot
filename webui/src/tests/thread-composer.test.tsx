@@ -551,14 +551,126 @@ describe("ThreadComposer", () => {
     expect(context).not.toHaveTextContent("Context 74.9K / 1M");
     expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
     expect(context).toHaveAccessibleName(
-      "Context · 74.9K / 1M. 7% used.",
+      "Context 7%. Open context and reuse details",
     );
 
     fireEvent.focus(context);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("Context · 74.9K / 1M");
+    expect(tooltip).toHaveTextContent("Context 7%");
     expect(tooltip.parentElement).toHaveClass("rounded-full", "px-2.5", "py-1");
     expect(tooltip.parentElement).not.toHaveTextContent("Available");
+  });
+
+  it("opens a chart with one bar for each model request", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        modelLabel="gpt-5.6-sol"
+        modelPreset="gpt-5-6-sol"
+        modelProvider="openai_codex"
+        contextUsage={{
+          contextTokens: 14_700,
+          contextWindowTokens: 200_000,
+        }}
+        recentRequestUsage={[
+          {
+            id: "turn-1",
+            timestamp: Date.UTC(2026, 8, 3, 7, 20),
+            inputTokens: 18_000,
+            outputTokens: 280,
+            cachedTokens: 12_000,
+            generationMs: 12_000,
+          },
+          {
+            id: "turn-2",
+            timestamp: Date.UTC(2026, 8, 3, 8, 22),
+            inputTokens: 29_400,
+            outputTokens: 416,
+            cachedTokens: 26_180,
+            generationMs: 40_000,
+          },
+        ]}
+        placeholder="Ask anything..."
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+
+    expect(screen.getByText("Context")).toBeInTheDocument();
+    expect(screen.getAllByTestId("cache-usage-bar")).toHaveLength(2);
+    const [smallerBar, largerBar] = screen.getAllByTestId("cache-usage-bar");
+    expect(
+      Number.parseFloat(smallerBar.style.height) / Number.parseFloat(largerBar.style.height),
+    ).toBeCloseTo(18_000 / 29_400, 5);
+    expect(screen.getByText("Reused").firstElementChild).toHaveClass(
+      "kv-cache-reused",
+    );
+    expect(screen.getByText("Not reused").firstElementChild).toHaveClass(
+      "kv-cache-not-reused",
+    );
+    expect(screen.getByRole("img", {
+      name: /29,400 input.*26,180 reused \(89%\).*416 output.*40s generation/i,
+    })).toBeInTheDocument();
+  });
+
+  it("uses each visible bar as its request detail trigger", async () => {
+    const user = userEvent.setup();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
+        recentRequestUsage={[
+          {
+            id: "turn-1",
+            timestamp: Date.UTC(2026, 8, 3, 7, 20),
+            inputTokens: 18_000,
+            outputTokens: 280,
+            cachedTokens: 12_000,
+          },
+          {
+            id: "turn-2",
+            timestamp: Date.UTC(2026, 8, 3, 8, 22),
+            inputTokens: 29_400,
+            outputTokens: 416,
+            cachedTokens: 26_180,
+          },
+        ]}
+        placeholder="Ask anything..."
+      />,
+    );
+
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const firstBar = screen.getByRole("img", { name: /18,000 input/i });
+    const secondBar = screen.getByRole("img", { name: /29,400 input/i });
+    expect(firstBar).toHaveAttribute("data-testid", "cache-usage-bar");
+    expect(secondBar).toHaveAttribute("data-testid", "cache-usage-bar");
+
+    await user.hover(firstBar);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("18,000 input");
+    await user.click(firstBar);
+    await user.unhover(firstBar);
+    await user.hover(secondBar);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("29,400 input");
+  });
+
+  it("does not imply cache reuse when the provider omits cache metrics", () => {
+    render(
+      <ThreadComposer
+        onSend={() => {}}
+        contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
+        recentRequestUsage={[{
+          id: "turn-without-cache-metrics",
+          timestamp: new Date(2026, 8, 3, 16, 22).getTime(),
+          inputTokens: 29_400,
+          outputTokens: 416,
+        }]}
+        placeholder="Ask anything..."
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+
+    expect(screen.getByText("Reuse details unavailable")).toBeInTheDocument();
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {

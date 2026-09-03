@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -31,6 +33,7 @@ def _call(
     error_kind: str | None = None,
 ) -> LLMCallRecord:
     return LLMCallRecord(
+        call_id=uuid4().hex,
         started_at_ms=_timestamp(started_at),
         duration_ms=250,
         provider=provider,
@@ -55,6 +58,7 @@ def test_store_keeps_only_content_free_call_metadata(tmp_path: Path) -> None:
     )
 
     row = store.recent_calls(limit=1)[0]
+    assert row["call_id"]
     assert row["provider"] == "openai"
     assert row["model"] == "gpt-5"
     assert row["total_tokens"] == 120
@@ -73,6 +77,83 @@ def test_store_keeps_only_content_free_call_metadata(tmp_path: Path) -> None:
         mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
     assert version == SCHEMA_VERSION
     assert str(mode).lower() == "wal"
+
+
+def test_store_migrates_existing_rows_and_indexes_new_call_ids(tmp_path: Path) -> None:
+    path = tmp_path / "llm_usage.sqlite3"
+    store = LLMUsageStore(path)
+    store.record(_call(
+        "2026-06-03T00:00:00+00:00",
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=1),
+    ))
+    store.close()
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP INDEX llm_calls_call_id_idx")
+        connection.execute("ALTER TABLE llm_calls DROP COLUMN call_id")
+        connection.execute("PRAGMA user_version = 1")
+
+    migrated = LLMUsageStore(path)
+    assert migrated.count() == 1
+    assert migrated.recent_calls(limit=1)[0]["call_id"] is None
+    with sqlite3.connect(path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(llm_calls)").fetchall()
+        }
+        indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(llm_calls)").fetchall()
+        }
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+    assert "call_id" in columns
+    assert "llm_calls_call_id_idx" in indexes
+    assert version == SCHEMA_VERSION
+
+
+def test_store_tolerates_concurrent_call_id_migration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "llm_usage.sqlite3"
+    seed = LLMUsageStore(path)
+    assert seed.count() == 0
+    seed.close()
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP INDEX llm_calls_call_id_idx")
+        connection.execute("ALTER TABLE llm_calls DROP COLUMN call_id")
+        connection.execute("PRAGMA user_version = 1")
+
+    original = LLMUsageStore._ensure_call_id_schema
+    ready = threading.Barrier(2)
+
+    def synchronized_migration(connection: sqlite3.Connection) -> None:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(llm_calls)").fetchall()
+        }
+        if "call_id" not in columns:
+            ready.wait(timeout=2)
+        original(connection)
+
+    monkeypatch.setattr(
+        LLMUsageStore,
+        "_ensure_call_id_schema",
+        staticmethod(synchronized_migration),
+    )
+    failures: list[Exception] = []
+
+    def open_store() -> None:
+        try:
+            LLMUsageStore(path).count()
+        except Exception as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    threads = [threading.Thread(target=open_store) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+
+    assert not failures
+    assert all(not thread.is_alive() for thread in threads)
 
 
 def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: Path) -> None:
@@ -165,7 +246,7 @@ def test_recent_calls_is_bounded(tmp_path: Path) -> None:
         "2026-06-03T00:00:00+00:00",
         usage=LLMUsage.reported(input_tokens=1, output_tokens=1),
     )
-    store.record_many(call for _ in range(1_005))
+    store.record_many(replace(call, call_id=uuid4().hex) for _ in range(1_005))
 
     assert len(store.recent_calls(limit=10_000)) == 1_000
 
@@ -193,7 +274,7 @@ def test_usage_payload_cache_is_isolated_and_invalidated_on_write(tmp_path: Path
         "2026-06-03T00:00:00+00:00",
         usage=LLMUsage.reported(input_tokens=10, output_tokens=2),
     )
-    store.record(first_call)
+    store.record(replace(first_call, call_id=uuid4().hex))
     kwargs = {"now": datetime(2026, 6, 3, 12, tzinfo=timezone.utc)}
 
     first = store.usage_payload(**kwargs)
@@ -252,7 +333,7 @@ def test_usage_query_does_not_hold_writer_lock(
         return original_daily_rows(**kwargs)
 
     def record_call() -> None:
-        store.record(call)
+        store.record(replace(call, call_id=uuid4().hex))
         record_finished.set()
 
     monkeypatch.setattr(store, "_daily_rows", slow_daily_rows)

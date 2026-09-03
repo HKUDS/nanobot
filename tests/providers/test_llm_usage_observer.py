@@ -99,6 +99,9 @@ async def test_observer_receives_every_retry_attempt() -> None:
     assert all(event.provider == "test-provider" for event in events)
     assert all(event.model == "selected-model" for event in events)
     assert all(event.source == "api" for event in events)
+    assert len({event.call_id for event in events}) == 2
+    assert response.call_id == events[1].call_id
+    assert [item.call_id for item in response.call_usages] == [events[1].call_id]
     assert events[1].usage is not None
     assert events[1].usage.cache_read_tokens == 60
 
@@ -116,6 +119,7 @@ async def test_observer_estimates_missing_success_usage_without_storing_content(
     assert response.usage is not None
     assert response.usage.source == "estimated"
     assert events[0].usage == response.usage
+    assert response.call_id == events[0].call_id
     assert "content" not in LLMCallRecord.__dataclass_fields__
 
 
@@ -197,6 +201,7 @@ async def test_fallback_provider_propagates_observer_to_every_leaf() -> None:
                     content="primary unavailable",
                     finish_reason="error",
                     error_kind="timeout",
+                    usage=LLMUsage.reported(input_tokens=8, output_tokens=1),
                 )
             ]
         )
@@ -232,3 +237,7 @@ async def test_fallback_provider_propagates_observer_to_every_leaf() -> None:
         ("primary-model", "error"),
         ("fallback-model", "stop"),
     ]
+    assert [item.call_id for item in response.call_usages] == [
+        event.call_id for event in events
+    ]
+    assert [item.usage.input_tokens for item in response.call_usages] == [8, 12]

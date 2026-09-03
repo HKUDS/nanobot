@@ -9,10 +9,11 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import {
-  ThreadComposer,
-  type ComposerContextUsage,
-} from "@/components/thread/ThreadComposer";
+import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import type {
+  ComposerContextUsage,
+  ComposerRequestUsage,
+} from "@/components/thread/ComposerUsagePopover";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -41,6 +42,7 @@ import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
+  RequestUsage,
   SettingsPayload,
   SlashCommand,
   SkillSummary,
@@ -109,6 +111,74 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
     };
   }
   return null;
+}
+
+function recentComposerRequestUsage(messages: UIMessage[]): ComposerRequestUsage[] {
+  const recent: ComposerRequestUsage[] = [];
+  const seenTurns = new Set<string>();
+  for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
+    const message = messages[index];
+    const turnKey = message.turnId || message.id;
+    if (
+      message.role !== "assistant"
+      || message.kind === "trace"
+      || message.isStreaming
+      || seenTurns.has(turnKey)
+    ) {
+      continue;
+    }
+
+    seenTurns.add(turnKey);
+    const requests: RequestUsage[] = message.requestUsages?.length
+      ? message.requestUsages
+      : message.usage?.request_count === 1 && message.usage
+        ? [message.usage]
+        : [];
+    for (let requestIndex = requests.length - 1; requestIndex >= 0; requestIndex -= 1) {
+      const request = requests[requestIndex];
+      const inputTokens = request.prompt_tokens;
+      if (
+        recent.length >= 8
+        || typeof inputTokens !== "number"
+        || !Number.isFinite(inputTokens)
+        || inputTokens <= 0
+      ) {
+        continue;
+      }
+      const outputTokens = request.completion_tokens;
+      const cachedTokens = request.cached_tokens;
+      const estimatedTokens = request.estimated_tokens;
+      const generationMs = request.generation_ms;
+      recent.push({
+        id: request.call_id || `${turnKey}:${requestIndex}`,
+        timestamp: message.completedAt ?? message.createdAt,
+        inputTokens,
+        ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
+          ? { outputTokens }
+          : {}),
+        ...(typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
+          ? { cachedTokens }
+          : {}),
+        ...(typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens)
+          ? { estimatedTokens }
+          : {}),
+        ...(typeof generationMs === "number" && Number.isFinite(generationMs)
+          ? { generationMs }
+          : {}),
+      });
+    }
+  }
+  return recent.reverse();
+}
+
+function hasUnavailableRequestUsage(messages: UIMessage[]): boolean {
+  return messages.some((message) => (
+    message.role === "assistant"
+    && message.kind !== "trace"
+    && !message.isStreaming
+    && (message.usage?.request_count ?? 0) > 1
+    && !message.requestUsages?.length
+  ));
 }
 
 function snapshotPreservesMessage(
@@ -839,6 +909,14 @@ export function ThreadShell({
     () => latestComposerContextUsage(displayMessages),
     [displayMessages],
   );
+  const composerRequestUsage = useMemo(
+    () => recentComposerRequestUsage(displayMessages),
+    [displayMessages],
+  );
+  const composerRequestUsageUnavailable = useMemo(
+    () => composerRequestUsage.length === 0 && hasUnavailableRequestUsage(displayMessages),
+    [composerRequestUsage.length, displayMessages],
+  );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Decision states freeze the interrupted turn and hand the next action to
   // the recovery notice. ``resuming`` remains active; ``recovered`` is only
@@ -1520,6 +1598,8 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
+          recentRequestUsage={composerRequestUsage}
+          requestUsageUnavailable={composerRequestUsageUnavailable}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1569,6 +1649,8 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
+          recentRequestUsage={composerRequestUsage}
+          requestUsageUnavailable={composerRequestUsageUnavailable}
           variant="hero"
           slashCommands={availableSlashCommands}
           cliApps={cliApps}

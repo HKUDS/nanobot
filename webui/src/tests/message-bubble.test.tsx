@@ -1013,49 +1013,4 @@ describe("MessageBubble", () => {
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
 
-  it("keeps turn usage focused on the completed reply", () => {
-    const message: UIMessage = {
-      id: "a-usage",
-      role: "assistant",
-      content: "done",
-      createdAt: Date.now(),
-      latencyMs: 18_200,
-      contextWindowTokens: 128_000,
-      usage: {
-        prompt_tokens: 12_400,
-        completion_tokens: 823,
-        cached_tokens: 9_672,
-        context_tokens: 8_100,
-        request_count: 3,
-      },
-    };
-
-    render(<MessageBubble message={message} />);
-
-    const usage = screen.getByText("12.4K in · 823 out · 78% cached · 18s");
-    expect(usage).toHaveAttribute("data-turn-usage");
-    expect(usage).not.toHaveAttribute("tabindex");
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-  });
-
-  it("marks estimated usage and omits cache when the provider did not report it", () => {
-    const message: UIMessage = {
-      id: "a-estimated-usage",
-      role: "assistant",
-      content: "done",
-      createdAt: Date.now(),
-      usage: {
-        prompt_tokens: 1_250,
-        completion_tokens: 90,
-        estimated_tokens: 1_340,
-      },
-    };
-
-    render(<MessageBubble message={message} />);
-
-    const usage = screen.getByText("~1.3K in · ~90 out");
-    expect(usage).not.toHaveTextContent("cached");
-    fireEvent.focus(usage);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Includes estimated usage");
-  });
 });
