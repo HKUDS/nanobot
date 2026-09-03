@@ -79,6 +79,7 @@ import {
 } from "@/lib/api";
 import {
   createRuntimeHost,
+  isNativeRuntime,
   toRuntimeSurface,
 } from "@/lib/runtime";
 import { projectNameFromPath, scopeWithAccessMode } from "@/lib/workspace";
@@ -778,6 +779,14 @@ function formatPairingExpiry(seconds: number | null | undefined): string {
   return `${Math.ceil(seconds / 60)} min`;
 }
 
+function resolveRuntimeSurface(
+  surface: RuntimeSurface | null | undefined,
+  fallback: RuntimeSurface,
+): RuntimeSurface {
+  if (isNativeRuntime(surface)) return "native";
+  return surface ? toRuntimeSurface(surface) : fallback;
+}
+
 export default function App() {
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
@@ -787,9 +796,7 @@ export default function App() {
     async (client: NanobotClient, fallbackSurface: RuntimeSurface) => {
       const boot = await fetchBootstrap("", bootstrapSecretRef.current);
       const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-      const runtimeSurface = boot.runtime_surface
-        ? toRuntimeSurface(boot.runtime_surface)
-        : fallbackSurface;
+      const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, fallbackSurface);
       const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
       const tokenExpiresAt = boot.expires_in
         ? bootstrapTokenExpiresAt(boot.expires_in)
@@ -827,7 +834,7 @@ export default function App() {
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-          const runtimeSurface = toRuntimeSurface(boot.runtime_surface);
+          const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, "browser");
           const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
           const client = new NanobotClient({
             url,
@@ -1086,7 +1093,7 @@ function Shell({
   const temporarySessionsRef = useRef<Record<string, ChatSummary>>({});
   const effectiveRuntimeSurface =
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
-  const showHostChrome = effectiveRuntimeSurface === "native";
+  const showHostChrome = isNativeRuntime(effectiveRuntimeSurface);
   const showMainSidebar = view !== "settings";
   const activeTemporarySession = activeKey ? temporarySessions[activeKey] ?? null : null;
   const temporaryChatId = activeTemporarySession?.chatId ?? null;
