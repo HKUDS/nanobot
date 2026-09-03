@@ -452,6 +452,19 @@ describe("webui i18n", () => {
     expect(resolveInitialLocale()).toBe("zh-CN");
   });
 
+  it("lists languages by their native names without English translations", async () => {
+    const user = userEvent.setup();
+
+    render(<LanguageSwitcher />);
+    await user.click(screen.getByRole("button", { name: "Change language" }));
+
+    for (const { nativeLabel } of supportedLocales) {
+      expect(screen.getByRole("menuitemradio", { name: nativeLabel })).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Chinese (Simplified)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Chinese (Traditional)")).not.toBeInTheDocument();
+  });
+
   it("switches UI copy and document locale through the language switcher", async () => {
     const user = userEvent.setup();
 
