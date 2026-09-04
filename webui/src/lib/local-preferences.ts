@@ -9,6 +9,7 @@ export interface LocalPreferences {
   brandLogos: boolean;
   browserNotifications: boolean;
   fileEditDisplayMode: FileEditDisplayMode;
+  showTurnUsage: boolean;
 }
 
 export const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
@@ -26,6 +27,7 @@ export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   brandLogos: true,
   browserNotifications: false,
   fileEditDisplayMode: "summary",
+  showTurnUsage: false,
 };
 
 export function normalizeFileEditDisplayMode(value: unknown): FileEditDisplayMode {
@@ -46,6 +48,7 @@ export function readLocalPreferences(): LocalPreferences {
         : true,
       browserNotifications: parsed.browserNotifications === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
+      showTurnUsage: parsed.showTurnUsage === true,
     };
   } catch {
     return DEFAULT_LOCAL_PREFS;

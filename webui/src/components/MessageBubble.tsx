@@ -65,6 +65,8 @@ interface MessageBubbleProps {
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
+  /** Show opt-in per-turn token usage for completed assistant messages. */
+  showTurnUsage?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
@@ -189,31 +191,65 @@ function compactDuration(milliseconds: number): string {
   return `${minutes}m ${Math.round(seconds % 60)}s`;
 }
 
-function TurnUsageMeta({
-  usage,
-  latencyMs,
-}: {
-  usage: TurnUsage;
-  latencyMs?: number;
-}) {
+function TurnUsageMeta({ usage }: { usage: TurnUsage }) {
   const { t } = useTranslation();
+  const context = usage.context_tokens;
   const prompt = usage.prompt_tokens;
   const completion = usage.completion_tokens;
   const approximate = (usage.estimated_tokens ?? 0) > 0 ? "~" : "";
+  const formatTokens = (tokens: number) => `${approximate}${formatCompactTokenCount(tokens)}`;
   const parts: string[] = [];
-  if (typeof prompt === "number") parts.push(`${approximate}${formatCompactTokenCount(prompt)} in`);
-  if (typeof completion === "number") parts.push(`${approximate}${formatCompactTokenCount(completion)} out`);
+  const details: string[] = [];
+
+  if (typeof context === "number" && context >= 0) {
+    parts.push(t("message.usage.context", {
+      tokens: formatTokens(context),
+      defaultValue: "{{tokens}} context",
+    }));
+    if (typeof prompt === "number") {
+      details.push(t("message.usage.turnInput", {
+        tokens: formatTokens(prompt),
+        defaultValue: "{{tokens}} turn input",
+      }));
+    }
+  } else if (typeof prompt === "number") {
+    parts.push(t("message.usage.turnInput", {
+      tokens: formatTokens(prompt),
+      defaultValue: "{{tokens}} turn input",
+    }));
+  }
+
+  if (typeof usage.request_count === "number" && usage.request_count > 0) {
+    const requestKey = usage.request_count === 1
+      ? "message.usage.request"
+      : "message.usage.requests";
+    details.push(t(requestKey, {
+      count: usage.request_count,
+      defaultValue: usage.request_count === 1 ? "{{count}} request" : "{{count}} requests",
+    }));
+  }
+
+  if (typeof completion === "number") {
+    const output = t("message.usage.output", {
+      tokens: formatTokens(completion),
+      defaultValue: "{{tokens}} out",
+    });
+    if (parts.length > 0) details.push(output);
+    else parts.push(output);
+  }
+
   if (
     typeof usage.cached_tokens === "number"
     && typeof prompt === "number"
     && prompt > 0
   ) {
-    parts.push(`${Math.round(Math.min(1, usage.cached_tokens / prompt) * 100)}% cached`);
+    details.push(t("message.usage.cached", {
+      percent: Math.round(Math.min(1, usage.cached_tokens / prompt) * 100),
+      defaultValue: "{{percent}}% cached",
+    }));
   }
-  if (typeof latencyMs === "number" && latencyMs >= 0) parts.push(compactDuration(latencyMs));
-  if (parts.length === 0) return null;
 
-  const details: string[] = [];
+  if (parts.length === 0) return null;
   if (approximate) {
     details.push(t("message.usage.estimated", { defaultValue: "Includes estimated usage" }));
   }
@@ -243,6 +279,17 @@ function TurnUsageMeta({
         {details.join(" · ")}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function TurnLatencyMeta({ latencyMs }: { latencyMs: number }) {
+  return (
+    <span
+      data-turn-latency
+      className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+    >
+      {compactDuration(latencyMs)}
+    </span>
   );
 }
 
@@ -394,6 +441,7 @@ export function MessageBubble({
   isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
+  showTurnUsage = false,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
@@ -549,9 +597,21 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
-  const showUsage = message.role === "assistant" && !!message.usage && !message.isStreaming;
+  const showUsage = (
+    showTurnUsage
+    && message.role === "assistant"
+    && !!message.usage
+    && !message.isStreaming
+  );
+  const showLatency = (
+    message.role === "assistant"
+    && !!message.usage
+    && !message.isStreaming
+    && typeof message.latencyMs === "number"
+    && message.latencyMs >= 0
+  );
   const showAssistantFooterRow =
-    showCopyButton || showForkButton || showAssistantTimestamp || showUsage;
+    showCopyButton || showForkButton || showAssistantTimestamp || showUsage || showLatency;
   const showAssistantFooterSlot =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
@@ -617,12 +677,8 @@ export function MessageBubble({
                 <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
               </Tooltip>
             ) : null}
-            {showUsage ? (
-              <TurnUsageMeta
-                usage={message.usage!}
-                latencyMs={message.latencyMs}
-              />
-            ) : null}
+            {showUsage ? <TurnUsageMeta usage={message.usage!} /> : null}
+            {showLatency ? <TurnLatencyMeta latencyMs={message.latencyMs!} /> : null}
             {showAssistantTimestamp ? (
               <MessageTimestamp
                 {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}

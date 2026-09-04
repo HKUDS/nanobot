@@ -1,8 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { useShowTurnUsage } from "@/hooks/useShowTurnUsage";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
+import {
+  DEFAULT_LOCAL_PREFS,
+  LOCAL_PREFS_STORAGE_KEY,
+  writeLocalPreferences,
+} from "@/lib/local-preferences";
 import type {
   CliAppInfo,
   McpPresetInfo,
@@ -67,6 +73,11 @@ const MCP_PRESETS: McpPresetInfo[] = [
   },
 ];
 
+function PreferenceAwareMessageBubble({ message }: { message: UIMessage }) {
+  const showTurnUsage = useShowTurnUsage();
+  return <MessageBubble message={message} showTurnUsage={showTurnUsage} />;
+}
+
 const SLASH_COMMANDS: SlashCommand[] = [
   {
     command: "/model",
@@ -95,6 +106,10 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
+  afterEach(() => {
+    localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY);
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",
@@ -1013,32 +1028,95 @@ describe("MessageBubble", () => {
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
 
-  it("keeps turn usage focused on the completed reply", () => {
+  it("hides turn usage by default and leaves latency visible when the preference changes", async () => {
     const message: UIMessage = {
-      id: "a-usage",
+      id: "turn-usage-preference",
       role: "assistant",
       content: "done",
       createdAt: Date.now(),
       latencyMs: 18_200,
-      contextWindowTokens: 128_000,
       usage: {
         prompt_tokens: 12_400,
         completion_tokens: 823,
-        cached_tokens: 9_672,
         context_tokens: 8_100,
-        request_count: 3,
+        request_count: 1,
       },
     };
 
-    render(<MessageBubble message={message} />);
+    const { container } = render(<PreferenceAwareMessageBubble message={message} />);
 
-    const usage = screen.getByText("12.4K in · 823 out · 78% cached · 18s");
-    expect(usage).toHaveAttribute("data-turn-usage");
-    expect(usage).not.toHaveAttribute("tabindex");
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-turn-usage]")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-turn-latency]")).toHaveTextContent("18s");
+
+    act(() => {
+      writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, showTurnUsage: true });
+    });
+    expect(await screen.findByText("8.1K context")).toHaveAttribute("data-turn-usage");
+
+    act(() => {
+      writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, showTurnUsage: false });
+    });
+    await waitFor(() => {
+      expect(container.querySelector("[data-turn-usage]")).not.toBeInTheDocument();
+    });
+    expect(container.querySelector("[data-turn-latency]")).toHaveTextContent("18s");
   });
 
-  it("marks estimated usage and omits cache when the provider did not report it", () => {
+  it("shows consecutive contexts while keeping each turn's aggregate cost in details", async () => {
+    const turns: UIMessage[] = [
+      {
+        id: "turn-a",
+        role: "assistant",
+        content: "first reply",
+        createdAt: Date.now(),
+        usage: {
+          prompt_tokens: 111_000,
+          completion_tokens: 333,
+          cached_tokens: 55_500,
+          context_tokens: 56_000,
+          request_count: 2,
+        },
+      },
+      {
+        id: "turn-b",
+        role: "assistant",
+        content: "second reply",
+        createdAt: Date.now(),
+        usage: {
+          prompt_tokens: 57_000,
+          completion_tokens: 192,
+          cached_tokens: 55_290,
+          context_tokens: 57_000,
+          request_count: 1,
+        },
+      },
+    ];
+
+    render(<>{turns.map((message) => (
+      <MessageBubble key={message.id} message={message} showTurnUsage />
+    ))}</>);
+
+    const turnAUsage = screen.getByText("56K context");
+    const turnBUsage = screen.getByText("57K context");
+    expect(turnAUsage).toHaveAttribute("data-turn-usage");
+    expect(turnBUsage).toHaveAttribute("data-turn-usage");
+    expect(screen.queryByText(/111K turn input/)).not.toBeInTheDocument();
+
+    fireEvent.focus(turnAUsage);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "111K turn input · 2 requests · 333 out · 50% cached",
+    );
+
+    fireEvent.blur(turnAUsage);
+    await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+
+    fireEvent.focus(turnBUsage);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "57K turn input · 1 request · 192 out · 97% cached",
+    );
+  });
+
+  it("falls back to clearly labeled estimated turn input when context is unavailable", () => {
     const message: UIMessage = {
       id: "a-estimated-usage",
       role: "assistant",
@@ -1047,15 +1125,19 @@ describe("MessageBubble", () => {
       usage: {
         prompt_tokens: 1_250,
         completion_tokens: 90,
+        request_count: 1,
         estimated_tokens: 1_340,
       },
     };
 
-    render(<MessageBubble message={message} />);
+    render(<MessageBubble message={message} showTurnUsage />);
 
-    const usage = screen.getByText("~1.3K in · ~90 out");
-    expect(usage).not.toHaveTextContent("cached");
+    const usage = screen.getByText("~1.3K turn input");
+    expect(usage).not.toHaveTextContent("context");
     fireEvent.focus(usage);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Includes estimated usage");
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "1 request · ~90 out · Includes estimated usage",
+    );
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("cached");
   });
 });

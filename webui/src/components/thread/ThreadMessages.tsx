@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
+import { useShowTurnUsage } from "@/hooks/useShowTurnUsage";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
@@ -63,6 +64,7 @@ export function ThreadMessages({
   onQuoteSelection,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
+  const showTurnUsage = useShowTurnUsage();
   const messageListRef = useRef<HTMLDivElement>(null);
   const units = useMemo(
     () => buildDisplayUnits(messages),
@@ -155,6 +157,7 @@ export function ThreadMessages({
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
             forkBoundaryLabel={t("thread.forkedFromHistory")}
             temporary={temporary}
+            showTurnUsage={showTurnUsage}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
@@ -237,6 +240,7 @@ interface ThreadDisplayUnitProps {
   showForkBoundary: boolean;
   forkBoundaryLabel: string;
   temporary: boolean;
+  showTurnUsage: boolean;
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
   slashCommands: SlashCommand[];
@@ -256,6 +260,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   showForkBoundary,
   forkBoundaryLabel,
   temporary,
+  showTurnUsage,
   cliApps,
   mcpPresets,
   slashCommands,
@@ -295,6 +300,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             message={unit.message}
             isTurnStreaming={isTurnStreaming}
             temporary={temporary}
+            showTurnUsage={showTurnUsage}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
@@ -323,6 +329,7 @@ function threadDisplayUnitPropsEqual(
     && previous.showForkBoundary === next.showForkBoundary
     && previous.forkBoundaryLabel === next.forkBoundaryLabel
     && previous.temporary === next.temporary
+    && previous.showTurnUsage === next.showTurnUsage
     && previous.cliApps === next.cliApps
     && previous.mcpPresets === next.mcpPresets
     && previous.slashCommands === next.slashCommands
