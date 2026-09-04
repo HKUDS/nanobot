@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.autocompact import AutoCompact
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session, SessionManager, SessionPolicy
 
 
 def _runtime(_session: Session | None = None):
@@ -722,3 +722,41 @@ class TestPrepareSession:
         assert summary is not None
         assert summary["text"] == "Hot summary."
         # After hot path pops, cold path would kick in on next call
+
+    def test_non_persistent_session_is_never_reloaded(self):
+        """Non-persistent sessions are isolated: never swap in stored state."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        ac.sessions = mock_sm
+        ac._archiving.add("sdk:iso")
+        transient = Session(key="sdk:iso", policy=SessionPolicy(persist=False))
+        transient.updated_at = datetime.now() - timedelta(minutes=20)
+
+        result_session, summary = ac.prepare_session(transient, "sdk:iso")
+
+        mock_sm.get_or_create.assert_not_called()
+        assert result_session is transient
+        assert summary is None
+        # The stale archival marker must not leak into later persistent turns.
+        assert "sdk:iso" not in ac._archiving
+
+    def test_non_persistent_session_peeks_without_consuming_summaries(self):
+        """Isolated turns may see a pending summary but must not consume it."""
+        ac = _make_autocompact()
+        transient = Session(key="sdk:iso", policy=SessionPolicy(persist=False))
+        ac._summaries["sdk:iso"] = {
+            "text": "Pending summary.",
+            "last_active": datetime(2026, 5, 13, 14, 0, 0).isoformat(),
+        }
+
+        _, summary = ac.prepare_session(transient, "sdk:iso")
+
+        assert summary is not None
+        assert summary["text"] == "Pending summary."
+        # A later ordinary turn must still receive this one-shot summary.
+        assert "sdk:iso" in ac._summaries
+
+        persistent = _make_session(key="sdk:iso")
+        _, consumed = ac.prepare_session(persistent, "sdk:iso")
+        assert consumed is not None
+        assert "sdk:iso" not in ac._summaries
