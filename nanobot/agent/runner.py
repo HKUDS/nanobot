@@ -408,7 +408,7 @@ class AgentRunner:
         )
         model_visible_tools = select_model_visible_tools(
             spec.tools.get_definitions(),
-            spec.initial_messages,
+            messages,
             spec.mcp_schema_budget_bytes,
         )
         governance_config = ContextGovernanceConfig(
