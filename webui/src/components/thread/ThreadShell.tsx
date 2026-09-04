@@ -336,6 +336,7 @@ interface ThreadShellProps {
   onCreateChat?: (
     workspaceScope?: WorkspaceScopePayload | null,
     initialMessage?: string,
+    modelPreset?: string | null,
   ) => Promise<string | null>;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
@@ -1348,7 +1349,7 @@ export function ThreadShell({
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope, content);
+      const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       if (!newId) {
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);

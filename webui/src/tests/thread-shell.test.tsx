@@ -1162,7 +1162,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
-    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real");
+    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
@@ -1203,8 +1203,13 @@ describe("ThreadShell", () => {
       "chat-new",
       "/model fast",
     ));
+    expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast");
 
-    rerender(view(session("chat-new")));
+    await act(async () => {
+      rerender(view(session("chat-new", "fast")));
+    });
+    expect(screen.getByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     await act(async () => {

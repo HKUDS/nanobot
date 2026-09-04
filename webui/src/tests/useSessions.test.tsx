@@ -390,6 +390,23 @@ describe("useSessions", () => {
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
+  it("stores an optimistic model preset when creating a chat", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-fast");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.createChat(null, "fast");
+    });
+
+    expect(result.current.sessions[0]?.modelPreset).toBe("fast");
+  });
+
   it("passes through WebUI transcript user media as images and media", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,

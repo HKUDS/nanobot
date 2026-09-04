@@ -127,7 +127,10 @@ export function useSessions(): {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
+  createChat: (
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
   deleteChat: (
     key: string,
@@ -204,7 +207,10 @@ export function useSessions(): {
     };
   }, [client, refresh]);
 
-  const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
+  const createChat = useCallback(async (
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ): Promise<string> => {
     const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
@@ -219,6 +225,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
+        modelPreset: modelPreset ?? null,
         workspaceScope: workspaceScope ?? null,
       },
       ...prev.filter((s) => s.key !== key),

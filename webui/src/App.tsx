@@ -1477,10 +1477,14 @@ function Shell({
     [activeChatId, activeChatRunning, activeKey, client, temporaryChatActive],
   );
 
-  const onCreateChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null) => {
+  const onCreateChat = useCallback(async (
+    workspaceScope?: WorkspaceScopePayload | null,
+    _initialMessage?: string,
+    modelPreset?: string | null,
+  ) => {
     try {
       const scope = workspaceScope ?? activeWorkspaceScope;
-      const chatId = await createChat(scope);
+      const chatId = await createChat(scope, modelPreset);
       const key = `websocket:${chatId}`;
       pendingCreatedSessionKeyRef.current = key;
       navigate({
@@ -1509,6 +1513,7 @@ function Shell({
     async (
       workspaceScope?: WorkspaceScopePayload | null,
       initialMessage?: string,
+      modelPreset?: string | null,
     ) => {
       try {
         const chatId = await client.newTemporaryChat();
@@ -1519,6 +1524,7 @@ function Shell({
         const nextSession: ChatSummary = {
           ...session,
           preview: initialMessage ?? "",
+          modelPreset: modelPreset ?? null,
           ...(restrictedScope ? { workspaceScope: restrictedScope } : {}),
         };
         setTemporarySessions((current) => ({
