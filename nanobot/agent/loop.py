@@ -37,6 +37,7 @@ from nanobot.agent.runner import (
     AgentRunSpec,
 )
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.time_context import current_time_provider
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
@@ -408,6 +409,11 @@ class AgentLoop:
         self._unified_session = unified_session
         self._running = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
+        # Restore model-level time awareness that the #4891 provider refactor
+        # dropped from ContextBuilder's defaults (issue #5645): with a
+        # timezone configured, every user turn carries a Current Time block.
+        if timezone:
+            self.register_runtime_context_provider(current_time_provider(timezone))
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
