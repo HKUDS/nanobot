@@ -27,6 +27,7 @@ export { formatContextWindow, formatModelContextWindow } from "@/lib/model-conte
 
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
+  "aimlapi",
   "atomic_chat",
   "byteplus",
   "byteplus_coding_plan",

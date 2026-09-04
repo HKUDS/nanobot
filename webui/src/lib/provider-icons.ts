@@ -6,6 +6,7 @@ export const PROVIDER_ICONS: Record<string, LucideIcon> = {
   orcarouter: Sparkles,
   skywork: Sparkles,
   aihubmix: Triangle,
+  aimlapi: Sparkles,
   anthropic: Brain,
   openai: Bot,
   deepseek: Waves,
