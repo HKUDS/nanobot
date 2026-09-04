@@ -1194,7 +1194,9 @@
         "input": "Token đầu vào",
         "cacheHitRate": "Tỷ lệ hit KV cache",
         "output": "Token đầu ra",
-        "duration": "Thời gian tạo"
+        "duration": "Thời gian tạo",
+        "speed": "Tốc độ tạo",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "Hướng dẫn đang chờ",

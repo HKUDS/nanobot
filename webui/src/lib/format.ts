@@ -196,3 +196,38 @@ export function formatTurnLatency(ms: number, locale?: string): string {
   }).format(remSec);
   return `${minStr}\u00a0${secStr}`;
 }
+
+/**
+ * Localized generation speed in tokens per second.
+ *
+ * Returns null when the inputs cannot yield a meaningful rate, so callers can
+ * omit the metric rather than render a misleading zero or Infinity.
+ */
+export function formatTokensPerSecond(
+  tokens: number,
+  ms: number,
+  locale?: string,
+): string | null {
+  if (
+    !Number.isFinite(tokens)
+    || !Number.isFinite(ms)
+    || tokens <= 0
+    || ms <= 0
+  ) {
+    return null;
+  }
+  const perSecond = tokens / (ms / 1000);
+  if (!Number.isFinite(perSecond) || perSecond <= 0) {
+    return null;
+  }
+  const loc = activeLocale(locale);
+  const digits = perSecond < 10 ? 1 : 0;
+  const value = new Intl.NumberFormat(loc, {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: 0,
+  }).format(perSecond);
+  return i18n.t("thread.composer.context.speedValue", {
+    defaultValue: "{{value}} tok/s",
+    value,
+  });
+}

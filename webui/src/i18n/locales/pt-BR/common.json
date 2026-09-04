@@ -1208,7 +1208,9 @@
         "input": "Tokens de entrada",
         "cacheHitRate": "Taxa de acertos do cache KV",
         "output": "Tokens de saída",
-        "duration": "Tempo de geração"
+        "duration": "Tempo de geração",
+        "speed": "Velocidade de geração",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "Guia em fila",

@@ -4,6 +4,7 @@ import { setAppLanguage } from "@/i18n";
 import {
   fmtDateTime,
   formatMessageEndTime,
+  formatTokensPerSecond,
   formatTurnLatency,
   relativeTime,
 } from "@/lib/format";
@@ -111,5 +112,20 @@ describe("localized format helpers", () => {
     const minutePlus = formatTurnLatency(90_000, "en");
     expect(minutePlus).toContain("m");
     expect(minutePlus).toContain("s");
+  });
+
+  it("formats generation speed as tokens per second", async () => {
+    await setAppLanguage("en");
+    // 240 tokens over 2000ms == 120 tok/s.
+    expect(formatTokensPerSecond(240, 2000, "en")).toBe("120 tok/s");
+    // Slow rates keep one decimal for readability.
+    expect(formatTokensPerSecond(3, 2000, "en")).toBe("1.5 tok/s");
+  });
+
+  it("omits generation speed when inputs cannot yield a rate", () => {
+    expect(formatTokensPerSecond(0, 2000, "en")).toBeNull();
+    expect(formatTokensPerSecond(100, 0, "en")).toBeNull();
+    expect(formatTokensPerSecond(Number.NaN, 2000, "en")).toBeNull();
+    expect(formatTokensPerSecond(100, -5, "en")).toBeNull();
   });
 });

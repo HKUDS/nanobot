@@ -1194,7 +1194,9 @@
         "input": "입력 토큰",
         "cacheHitRate": "KV 캐시 적중률",
         "output": "출력 토큰",
-        "duration": "생성 시간"
+        "duration": "생성 시간",
+        "speed": "생성 속도",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "대기 중인 안내",

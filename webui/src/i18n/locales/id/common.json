@@ -1194,7 +1194,9 @@
         "input": "Token masukan",
         "cacheHitRate": "Rasio hit KV cache",
         "output": "Token keluaran",
-        "duration": "Waktu pembuatan"
+        "duration": "Waktu pembuatan",
+        "speed": "Kecepatan pembuatan",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "Panduan antrean",

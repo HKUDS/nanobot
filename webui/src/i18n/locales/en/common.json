@@ -1208,7 +1208,9 @@
         "input": "Input tokens",
         "cacheHitRate": "KV cache hit rate",
         "output": "Output tokens",
-        "duration": "Generation time"
+        "duration": "Generation time",
+        "speed": "Generation speed",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "Queued guidance",

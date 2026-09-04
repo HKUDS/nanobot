@@ -145,6 +145,7 @@ function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
       const cachedTokens = round.cached_tokens;
       const estimatedTokens = round.estimated_tokens;
       const generationMs = round.generation_ms;
+      const measuredCompletionTokens = round.measured_completion_tokens;
       recent.push({
         id: `${turnKey}:${roundIndex}`,
         timestamp: message.completedAt ?? message.createdAt,
@@ -160,6 +161,10 @@ function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
           : {}),
         ...(typeof generationMs === "number" && Number.isFinite(generationMs)
           ? { generationMs }
+          : {}),
+        ...(typeof measuredCompletionTokens === "number"
+          && Number.isFinite(measuredCompletionTokens)
+          ? { measuredCompletionTokens }
           : {}),
       });
     }

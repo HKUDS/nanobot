@@ -12,7 +12,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatCompactTokenCount, formatTurnLatency } from "@/lib/format";
+import {
+  formatCompactTokenCount,
+  formatTokensPerSecond,
+  formatTurnLatency,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export interface ComposerContextUsage {
@@ -28,6 +32,9 @@ export interface ComposerRoundUsage {
   cachedTokens?: number;
   estimatedTokens?: number;
   generationMs?: number;
+  /** Output tokens measured during the timed generation window, paired with
+   * generationMs for an accurate tokens-per-second rate. */
+  measuredCompletionTokens?: number;
 }
 
 interface NormalizedRoundUsage extends ComposerRoundUsage {
@@ -306,6 +313,25 @@ export function ComposerUsagePopover({
                               value: formatTurnLatency(round.generationMs, i18n.language),
                             }
                           : null,
+                        (() => {
+                          const speed =
+                            typeof round.generationMs === "number"
+                              ? formatTokensPerSecond(
+                                  round.measuredCompletionTokens ?? round.outputTokens,
+                                  round.generationMs,
+                                  i18n.language,
+                                )
+                              : null;
+                          return speed
+                            ? {
+                                key: "speed",
+                                label: t("thread.composer.context.speed", {
+                                  defaultValue: "Generation speed",
+                                }),
+                                value: speed,
+                              }
+                            : null;
+                        })(),
                       ].filter((row): row is NonNullable<typeof row> => !!row);
                       const detailNote = (round.estimatedTokens ?? 0) > 0
                         ? t("message.usage.estimated", {

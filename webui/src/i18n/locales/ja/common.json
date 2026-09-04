@@ -1194,7 +1194,9 @@
         "input": "入力トークン",
         "cacheHitRate": "KV キャッシュヒット率",
         "output": "出力トークン",
-        "duration": "生成時間"
+        "duration": "生成時間",
+        "speed": "生成速度",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "保留中のガイド",

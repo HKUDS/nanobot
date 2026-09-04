@@ -1194,7 +1194,9 @@
         "input": "輸入 Token",
         "cacheHitRate": "KV Cache 命中率",
         "output": "輸出 Token",
-        "duration": "生成耗時"
+        "duration": "生成耗時",
+        "speed": "生成速度",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "佇列中的引導訊息",

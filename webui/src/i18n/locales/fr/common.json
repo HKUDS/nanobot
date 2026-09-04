@@ -1194,7 +1194,9 @@
         "input": "Jetons d’entrée",
         "cacheHitRate": "Taux de succès du cache KV",
         "output": "Jetons de sortie",
-        "duration": "Temps de génération"
+        "duration": "Temps de génération",
+        "speed": "Vitesse de génération",
+        "speedValue": "{{value}} tok/s"
       },
       "queued": {
         "label": "Guidage en attente",
