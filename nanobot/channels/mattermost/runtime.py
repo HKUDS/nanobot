@@ -89,6 +89,7 @@ class MattermostChannel(BaseChannel):
 
     name = "mattermost"
     display_name = "Mattermost"
+    _THREAD_CONTEXT_CACHE_LIMIT = 10_000
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -454,6 +455,8 @@ class MattermostChannel(BaseChannel):
         key = f"{channel_id}:{root_id}"
         if key in self._thread_context_attempted:
             return text
+        if len(self._thread_context_attempted) >= self._THREAD_CONTEXT_CACHE_LIMIT:
+            self._thread_context_attempted.clear()
         self._thread_context_attempted.add(key)
 
         try:
