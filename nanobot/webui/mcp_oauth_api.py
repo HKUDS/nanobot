@@ -22,6 +22,7 @@ from nanobot.webui.http_utils import is_loopback_host
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
 _FLOW_TTL_S = 300
 _START_WAIT_S = 20
+_MCP_OAUTH_MAX_FLOWS = 8
 _OAUTH_ERROR_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}$")
 
 
@@ -100,7 +101,10 @@ def prepare_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, bool]:
 class McpOAuthManager:
     """Own short-lived browser flows while the gateway process is running."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_flows: int = _MCP_OAUTH_MAX_FLOWS) -> None:
+        if max_flows < 1:
+            raise ValueError("max_flows must be at least one")
+        self._max_flows = max_flows
         self._flows: dict[str, _McpOAuthFlow] = {}
         self._states: dict[str, str] = {}
 
@@ -116,6 +120,8 @@ class McpOAuthManager:
         self._prune()
         redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
         await self._cancel_name(name)
+        while len(self._flows) >= self._max_flows:
+            await self._discard_flow(next(iter(self._flows.values())))
 
         loop = asyncio.get_running_loop()
         now = time.monotonic()
@@ -399,6 +405,13 @@ class McpOAuthManager:
             task.cancel()
             with suppress(BaseException):
                 await task
+
+    async def _discard_flow(self, flow: _McpOAuthFlow) -> None:
+        await self._cancel_flow(flow)
+        callback_result = flow.callback_result
+        if callback_result is not None and not callback_result.done():
+            callback_result.cancel()
+        self._flows.pop(flow.flow_id, None)
 
     def _prune(self) -> None:
         now = time.monotonic()

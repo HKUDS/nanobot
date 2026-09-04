@@ -30,6 +30,47 @@ def _config() -> MCPServerConfig:
 
 
 @pytest.mark.asyncio
+async def test_browser_flow_registry_evicts_oldest_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = McpOAuthManager(max_flows=2)
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_oauth_api.validate_url_target",
+        lambda _url: (True, ""),
+    )
+
+    async def connect(servers, _registry, *, oauth_handlers):
+        name = next(iter(servers))
+        handlers = oauth_handlers[name]
+        await handlers.redirect_handler(
+            f"https://accounts.example.com/authorize?state=state-{name}"
+        )
+        await handlers.callback_handler()
+        return {}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+
+    async def reload_mcp() -> dict[str, bool]:
+        return {"ok": True}
+
+    started = [
+        await manager.start(
+            name,
+            _config(),
+            "https://agent.example.com/auth/mcp/callback",
+            reload_mcp=reload_mcp,
+        )
+        for name in ("first", "second", "third")
+    ]
+
+    assert len(manager._flows) == 2
+    with pytest.raises(McpOAuthError, match="Unknown or expired"):
+        await manager.status(started[0]["flow_id"])
+    with pytest.raises(McpOAuthError, match="expired"):
+        manager.submit_callback(state="state-first", code="code", error=None)
+
+
+@pytest.mark.asyncio
 async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
