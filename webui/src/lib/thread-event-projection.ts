@@ -123,7 +123,7 @@ export function stampLastAssistantCompletion(
   prev: UIMessage[],
   completion: Pick<
     UIMessage,
-    "latencyMs" | "completedAt" | "usage" | "requestUsages" | "contextWindowTokens"
+    "latencyMs" | "completedAt" | "usage" | "roundUsages" | "contextWindowTokens"
   >,
   turnId?: string,
 ): UIMessage[] {

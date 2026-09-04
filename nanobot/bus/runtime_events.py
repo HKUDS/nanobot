@@ -74,7 +74,8 @@ class TurnCompleted:
     latency_ms: int | None = None
     runtime: LLMRuntime | None = None
     usage: LLMUsage | None = None
-    request_usages: tuple[LLMUsage, ...] = ()
+    # Logical model rounds in display order; recovery dispatches are aggregated.
+    round_usages: tuple[LLMUsage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -183,7 +184,7 @@ class RuntimeEventPublisher:
         self._turn_latency_ms: dict[str, int] = {}
         self._turn_runtime: dict[str, LLMRuntime] = {}
         self._turn_usage: dict[str, LLMUsage] = {}
-        self._turn_request_usages: dict[str, tuple[LLMUsage, ...]] = {}
+        self._turn_round_usages: dict[str, tuple[LLMUsage, ...]] = {}
 
     @staticmethod
     def _context(
@@ -213,22 +214,22 @@ class RuntimeEventPublisher:
         self,
         session_key: str,
         usage: LLMUsage | None,
-        request_usages: list[LLMUsage] | None = None,
+        round_usages: list[LLMUsage] | None = None,
     ) -> None:
         if usage is not None:
             previous = self._turn_usage.get(session_key)
             self._turn_usage[session_key] = usage if previous is None else previous + usage
-        if request_usages:
-            self._turn_request_usages[session_key] = (
-                *self._turn_request_usages.get(session_key, ()),
-                *request_usages,
+        if round_usages:
+            self._turn_round_usages[session_key] = (
+                *self._turn_round_usages.get(session_key, ()),
+                *round_usages,
             )
 
     def clear_turn(self, session_key: str) -> None:
         self._turn_latency_ms.pop(session_key, None)
         self._turn_runtime.pop(session_key, None)
         self._turn_usage.pop(session_key, None)
-        self._turn_request_usages.pop(session_key, None)
+        self._turn_round_usages.pop(session_key, None)
 
     async def user_input_accepted(
         self,
@@ -345,7 +346,7 @@ class RuntimeEventPublisher:
                 latency_ms=self._turn_latency_ms.pop(session_key, None),
                 runtime=self._turn_runtime.pop(session_key, None),
                 usage=self._turn_usage.pop(session_key, None),
-                request_usages=self._turn_request_usages.pop(session_key, ()),
+                round_usages=self._turn_round_usages.pop(session_key, ()),
             )
         )
 

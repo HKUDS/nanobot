@@ -1187,17 +1187,15 @@
       "manageModels": "Gestionar modelos",
       "context": {
         "tooltip": "Contexto {{percent}}%",
-        "detailsLabel": "Abrir contexto y detalles de reutilización",
-        "panelTitle": "Contexto y reutilización",
+        "detailsLabel": "Abrir uso del contexto",
+        "panelTitle": "Uso del contexto",
         "contextTitle": "Contexto",
-        "cacheTitle": "Reutilización",
-        "reused": "Reutilizado",
-        "notReused": "Sin reutilizar",
+        "recentRounds": "Rondas recientes",
+        "inputTrend": "Tokens de entrada",
         "input": "{{tokens}} de entrada",
         "reusedDetail": "{{tokens}} reutilizados ({{percent}} %)",
         "output": "{{tokens}} de salida",
-        "duration": "Generación {{duration}}",
-        "empty": "El uso aparecerá después de la primera respuesta."
+        "duration": "Generación {{duration}}"
       },
       "queued": {
         "label": "Guía en cola",

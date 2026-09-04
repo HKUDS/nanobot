@@ -125,7 +125,7 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.latency_ms == 123
     assert first.runtime == "runtime"
     assert first.usage == first_request + second_request
-    assert first.request_usages == (first_request, second_request)
+    assert first.round_usages == (first_request, second_request)
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None

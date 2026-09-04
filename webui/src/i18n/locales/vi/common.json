@@ -1186,17 +1186,15 @@
       "manageModels": "Quản lý mô hình",
       "context": {
         "tooltip": "Ngữ cảnh {{percent}}%",
-        "detailsLabel": "Mở ngữ cảnh và chi tiết tái sử dụng",
-        "panelTitle": "Ngữ cảnh và tái sử dụng",
+        "detailsLabel": "Mở mức sử dụng ngữ cảnh",
+        "panelTitle": "Mức sử dụng ngữ cảnh",
         "contextTitle": "Ngữ cảnh",
-        "cacheTitle": "Tái sử dụng",
-        "reused": "Tái sử dụng",
-        "notReused": "Không tái sử dụng",
+        "recentRounds": "Các lượt gần đây",
+        "inputTrend": "Token đầu vào",
         "input": "Đầu vào {{tokens}}",
         "reusedDetail": "Tái sử dụng {{tokens}} ({{percent}}%)",
         "output": "Đầu ra {{tokens}}",
-        "duration": "Tạo nội dung {{duration}}",
-        "empty": "Mức sử dụng xuất hiện sau phản hồi đầu tiên."
+        "duration": "Tạo nội dung {{duration}}"
       },
       "queued": {
         "label": "Hướng dẫn đang chờ",

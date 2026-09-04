@@ -873,7 +873,7 @@ export function useNanobotStream(
             {
               ...(latencyMs !== undefined ? { latencyMs } : {}),
               ...(ev.usage ? { usage: ev.usage } : {}),
-              ...(ev.request_usages?.length ? { requestUsages: ev.request_usages } : {}),
+              ...(ev.round_usages?.length ? { roundUsages: ev.round_usages } : {}),
               ...(typeof ev.context_window_tokens === "number"
                 ? { contextWindowTokens: ev.context_window_tokens }
                 : {}),

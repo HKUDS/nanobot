@@ -1156,7 +1156,7 @@ class WebSocketChannel(BaseChannel):
         *,
         goal_state: dict[str, Any] | None = None,
         usage: LLMUsage | None = None,
-        request_usages: tuple[LLMUsage, ...] = (),
+        round_usages: tuple[LLMUsage, ...] = (),
         context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
@@ -1173,8 +1173,8 @@ class WebSocketChannel(BaseChannel):
             body["goal_state"] = goal_state
         if usage is not None:
             body["usage"] = usage.to_turn_dict()
-        if request_usages:
-            body["request_usages"] = [item.to_turn_dict() for item in request_usages]
+        if round_usages:
+            body["round_usages"] = [item.to_turn_dict() for item in round_usages]
         if context_window_tokens is not None:
             body["context_window_tokens"] = int(context_window_tokens)
         canonical_webui_turn = (metadata or {}).get("webui") is True

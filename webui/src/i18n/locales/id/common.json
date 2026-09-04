@@ -1186,17 +1186,15 @@
       "manageModels": "Kelola model",
       "context": {
         "tooltip": "Konteks {{percent}}%",
-        "detailsLabel": "Buka konteks dan rincian penggunaan ulang",
-        "panelTitle": "Konteks dan penggunaan ulang",
+        "detailsLabel": "Buka penggunaan konteks",
+        "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
-        "cacheTitle": "Penggunaan ulang",
-        "reused": "Digunakan ulang",
-        "notReused": "Tidak digunakan ulang",
+        "recentRounds": "Putaran terbaru",
+        "inputTrend": "Token masukan",
         "input": "Masukan {{tokens}}",
         "reusedDetail": "{{tokens}} digunakan ulang ({{percent}}%)",
         "output": "Keluaran {{tokens}}",
-        "duration": "Pembuatan {{duration}}",
-        "empty": "Penggunaan muncul setelah respons pertama."
+        "duration": "Pembuatan {{duration}}"
       },
       "queued": {
         "label": "Panduan antrean",

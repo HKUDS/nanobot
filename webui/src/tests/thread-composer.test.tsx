@@ -551,7 +551,7 @@ describe("ThreadComposer", () => {
     expect(context).not.toHaveTextContent("Context 74.9K / 1M");
     expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
     expect(context).toHaveAccessibleName(
-      "Context 7%. Open context and reuse details",
+      "Context 7%. Open context usage",
     );
 
     fireEvent.focus(context);
@@ -561,7 +561,7 @@ describe("ThreadComposer", () => {
     expect(tooltip.parentElement).not.toHaveTextContent("Available");
   });
 
-  it("opens a chart with one bar for each model request", () => {
+  it("opens an input-token chart with one bar for each logical round", () => {
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -572,7 +572,7 @@ describe("ThreadComposer", () => {
           contextTokens: 14_700,
           contextWindowTokens: 200_000,
         }}
-        recentRequestUsage={[
+        recentRoundUsage={[
           {
             id: "turn-1",
             timestamp: Date.UTC(2026, 8, 3, 7, 20),
@@ -597,29 +597,30 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByTestId("composer-context-usage"));
 
     expect(screen.getByText("Context")).toBeInTheDocument();
-    expect(screen.getAllByTestId("cache-usage-bar")).toHaveLength(2);
-    const [smallerBar, largerBar] = screen.getAllByTestId("cache-usage-bar");
+    expect(screen.getByText("14.7K / 200K")).toBeInTheDocument();
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+    expect(screen.getByText("Input tokens")).toBeInTheDocument();
+    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(2);
+    const [smallerBar, largerBar] = screen.getAllByTestId("round-usage-bar");
     expect(
       Number.parseFloat(smallerBar.style.height) / Number.parseFloat(largerBar.style.height),
     ).toBeCloseTo(18_000 / 29_400, 5);
-    expect(screen.getByText("Reused").firstElementChild).toHaveClass(
-      "kv-cache-reused",
-    );
-    expect(screen.getByText("Not reused").firstElementChild).toHaveClass(
-      "kv-cache-not-reused",
-    );
+    expect(largerBar.querySelector(".kv-cache-reused")).toBeInTheDocument();
+    expect(largerBar.querySelector(".kv-cache-not-reused")).toBeInTheDocument();
+    expect(screen.queryByText("Reused")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not reused")).not.toBeInTheDocument();
     expect(screen.getByRole("img", {
       name: /29,400 input.*26,180 reused \(89%\).*416 output.*40s generation/i,
     })).toBeInTheDocument();
   });
 
-  it("uses each visible bar as its request detail trigger", async () => {
+  it("uses each visible bar as its round detail trigger", async () => {
     const user = userEvent.setup();
     render(
       <ThreadComposer
         onSend={vi.fn()}
         contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
-        recentRequestUsage={[
+        recentRoundUsage={[
           {
             id: "turn-1",
             timestamp: Date.UTC(2026, 8, 3, 7, 20),
@@ -642,9 +643,8 @@ describe("ThreadComposer", () => {
     await user.click(screen.getByTestId("composer-context-usage"));
     const firstBar = screen.getByRole("img", { name: /18,000 input/i });
     const secondBar = screen.getByRole("img", { name: /29,400 input/i });
-    expect(firstBar).toHaveAttribute("data-testid", "cache-usage-bar");
-    expect(secondBar).toHaveAttribute("data-testid", "cache-usage-bar");
-
+    expect(firstBar).toHaveAttribute("data-testid", "round-usage-bar");
+    expect(secondBar).toHaveAttribute("data-testid", "round-usage-bar");
     await user.hover(firstBar);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("18,000 input");
     await user.click(firstBar);
@@ -658,7 +658,7 @@ describe("ThreadComposer", () => {
       <ThreadComposer
         onSend={() => {}}
         contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
-        recentRequestUsage={[{
+        recentRoundUsage={[{
           id: "turn-without-cache-metrics",
           timestamp: new Date(2026, 8, 3, 16, 22).getTime(),
           inputTokens: 29_400,
@@ -674,6 +674,9 @@ describe("ThreadComposer", () => {
       "aria-valuenow",
       "7",
     );
+    const [bar] = screen.getAllByTestId("round-usage-bar");
+    expect(bar.firstElementChild).toHaveClass("bg-muted-foreground/25");
+    expect(screen.queryByText("Reused")).not.toBeInTheDocument();
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {

@@ -60,7 +60,7 @@ class TurnEndEvent(OutboundEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
     usage: LLMUsage | None = None
-    request_usages: tuple[LLMUsage, ...] = ()
+    round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
 
 

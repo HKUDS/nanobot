@@ -1199,17 +1199,15 @@
       "manageModels": "管理模型预设",
       "context": {
         "tooltip": "上下文 {{percent}}%",
-        "detailsLabel": "打开上下文与复用详情",
-        "panelTitle": "上下文与复用",
+        "detailsLabel": "打开上下文用量",
+        "panelTitle": "上下文用量",
         "contextTitle": "上下文",
-        "cacheTitle": "复用",
-        "reused": "复用",
-        "notReused": "未复用",
+        "recentRounds": "最近轮次",
+        "inputTrend": "输入 Token",
         "input": "输入 {{tokens}}",
         "reusedDetail": "复用 {{tokens}}（{{percent}}%）",
         "output": "输出 {{tokens}}",
-        "duration": "生成 {{duration}}",
-        "empty": "首次回复后会显示用量。"
+        "duration": "生成 {{duration}}"
       },
       "queued": {
         "label": "排队中的引导消息",

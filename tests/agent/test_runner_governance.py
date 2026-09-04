@@ -743,10 +743,11 @@ async def test_runner_fits_each_malformed_retry_with_its_actual_tools(monkeypatc
     assert [len(call["messages"]) for call in calls] == [1, 1, 1]
     assert result.final_content == "recovered"
     assert result.usage is not None
-    assert result.usage.input_tokens == 100
-    assert result.usage.output_tokens == 10
-    assert result.usage.request_count == 1
-    assert result.request_usages == [result.usage]
+    assert result.usage.input_tokens == 300
+    assert result.usage.output_tokens == 30
+    assert result.usage.request_count == 3
+    # Recovery dispatches contribute to the total without becoming extra chart bars.
+    assert result.round_usages == [result.usage]
     assert result.messages == [
         {"role": "user", "content": "use a tool"},
         {"role": "assistant", "content": "recovered"},

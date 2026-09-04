@@ -54,7 +54,7 @@ export interface TurnUsage {
   timed_requests?: number;
 }
 
-export type RequestUsage = TurnUsage;
+export type RoundUsage = TurnUsage;
 
 export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed";
 
@@ -109,8 +109,8 @@ export interface UIMessage {
   completedAt?: number;
   /** Additive model usage for this turn; context_tokens is the final request only. */
   usage?: TurnUsage;
-  /** Individual model requests completed inside this turn, in request order. */
-  requestUsages?: RequestUsage[];
+  /** Logical model rounds in display order; runner-level recovery calls are aggregated. */
+  roundUsages?: RoundUsage[];
   /** Configured context-window capacity for the model used by this turn. */
   contextWindowTokens?: number;
   /** Lightweight provenance for proactive assistant messages. */
@@ -1428,7 +1428,7 @@ export type InboundEvent =
       chat_id: string;
       latency_ms?: number;
       usage?: TurnUsage;
-      request_usages?: RequestUsage[];
+      round_usages?: RoundUsage[];
       context_window_tokens?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;

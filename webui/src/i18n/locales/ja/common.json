@@ -1186,17 +1186,15 @@
       "manageModels": "モデルを管理",
       "context": {
         "tooltip": "コンテキスト {{percent}}%",
-        "detailsLabel": "コンテキストと再利用の詳細を開く",
-        "panelTitle": "コンテキストと再利用",
+        "detailsLabel": "コンテキスト使用量を開く",
+        "panelTitle": "コンテキスト使用量",
         "contextTitle": "コンテキスト",
-        "cacheTitle": "再利用",
-        "reused": "再利用",
-        "notReused": "未再利用",
+        "recentRounds": "最近のラウンド",
+        "inputTrend": "入力トークン",
         "input": "入力 {{tokens}}",
         "reusedDetail": "{{tokens}} を再利用（{{percent}}%）",
         "output": "出力 {{tokens}}",
-        "duration": "生成 {{duration}}",
-        "empty": "最初の応答後に使用量が表示されます。"
+        "duration": "生成 {{duration}}"
       },
       "queued": {
         "label": "保留中のガイド",

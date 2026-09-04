@@ -1930,7 +1930,7 @@ def replay_transcript_to_ui_messages(
         *,
         latency_ms: int | None = None,
         usage: dict[str, int] | None = None,
-        request_usages: list[dict[str, int]] | None = None,
+        round_usages: list[dict[str, int]] | None = None,
         context_window_tokens: int | None = None,
     ) -> None:
         for i in range(len(messages) - 1, -1, -1):
@@ -1940,8 +1940,8 @@ def replay_transcript_to_ui_messages(
                     completion["latencyMs"] = latency_ms
                 if usage:
                     completion["usage"] = usage
-                if request_usages:
-                    completion["requestUsages"] = request_usages
+                if round_usages:
+                    completion["roundUsages"] = round_usages
                 if context_window_tokens is not None:
                     completion["contextWindowTokens"] = context_window_tokens
                 messages[i] = {
@@ -2446,22 +2446,22 @@ def replay_transcript_to_ui_messages(
             lat = rec.get("latency_ms")
             usage = rec.get("usage")
             sanitized_usage = _sanitize_turn_usage(usage)
-            raw_request_usages = rec.get("request_usages")
-            sanitized_request_usages = (
+            raw_round_usages = rec.get("round_usages")
+            sanitized_round_usages = (
                 [
                     sanitized
-                    for item in cast(list[object], raw_request_usages)
+                    for item in cast(list[object], raw_round_usages)
                     if (sanitized := _sanitize_turn_usage(item))
                     is not None
                 ]
-                if isinstance(raw_request_usages, list)
+                if isinstance(raw_round_usages, list)
                 else None
             )
             context_window = rec.get("context_window_tokens")
             stamp_completion(
                 latency_ms=int(lat) if isinstance(lat, (int, float)) and lat >= 0 else None,
                 usage=sanitized_usage,
-                request_usages=sanitized_request_usages,
+                round_usages=sanitized_round_usages,
                 context_window_tokens=(
                     int(context_window)
                     if isinstance(context_window, (int, float)) and context_window >= 0

@@ -2035,7 +2035,7 @@ class AgentLoop:
         ):
             ctx.suppress_response = True
         ctx.usage = result.usage
-        ctx.delivery.record_usage(ctx.usage, result.request_usages)
+        ctx.delivery.record_usage(ctx.usage, result.round_usages)
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)
 

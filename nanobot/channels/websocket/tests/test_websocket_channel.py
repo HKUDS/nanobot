@@ -3311,7 +3311,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         event=TurnEndEvent(
             latency_ms=1500,
             usage=usage,
-            request_usages=(usage,),
+            round_usages=(usage,),
             context_window_tokens=128_000,
         ),
     ))
@@ -3334,7 +3334,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
                 "ttft_ms": 125,
                 "timed_requests": 1,
             },
-            "request_usages": [
+            "round_usages": [
                 {
                     "prompt_tokens": 80,
                     "completion_tokens": 20,

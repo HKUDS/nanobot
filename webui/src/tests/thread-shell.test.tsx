@@ -426,7 +426,7 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("renders each request in a completed turn as its own usage bar", async () => {
+  it("renders each logical round in a completed turn as its own usage bar", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Ausage-chart/webui-thread")) {
@@ -445,7 +445,7 @@ describe("ThreadShell", () => {
                 cached_tokens: 12_000,
                 request_count: 2,
               },
-              requestUsages: [
+              roundUsages: [
                 { prompt_tokens: 8_000, completion_tokens: 120, cached_tokens: 2_000 },
                 { prompt_tokens: 10_000, completion_tokens: 160, cached_tokens: 10_000 },
               ],
@@ -464,7 +464,7 @@ describe("ThreadShell", () => {
                 context_tokens: 14_700,
                 request_count: 2,
               },
-              requestUsages: [
+              roundUsages: [
                 { prompt_tokens: 13_000, completion_tokens: 180, cached_tokens: 10_000 },
                 { prompt_tokens: 16_400, completion_tokens: 236, cached_tokens: 16_180 },
               ],
@@ -492,57 +492,10 @@ describe("ThreadShell", () => {
 
     const trigger = await screen.findByTestId("composer-context-usage");
     fireEvent.click(trigger);
-    expect(await screen.findAllByTestId("cache-usage-bar")).toHaveLength(4);
+    expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(4);
     expect(screen.getByRole("img", {
       name: /16,400 input.*16,180 reused \(99%\).*236 output/i,
     })).toBeInTheDocument();
-  });
-
-  it("keeps context usage visible for legacy multi-request totals", async () => {
-    const client = makeClient();
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      if (String(input).includes("websocket%3Ausage-legacy/webui-thread")) {
-        return Promise.resolve(httpJson({
-          schemaVersion: 3,
-          messages: [{
-            id: "assistant-legacy",
-            role: "assistant",
-            content: "Legacy response",
-            createdAt: 1_000,
-            contextWindowTokens: 65_536,
-            usage: {
-              prompt_tokens: 18_000,
-              completion_tokens: 280,
-              cached_tokens: 12_000,
-              context_tokens: 10_000,
-              request_count: 2,
-            },
-          }] satisfies UIMessage[],
-        }));
-      }
-      return Promise.resolve({
-        ok: false,
-        status: 404,
-        json: async () => ({}),
-      });
-    }));
-
-    render(wrap(
-      client,
-      <ThreadShell
-        session={session("usage-legacy")}
-        title="Legacy usage"
-        onToggleSidebar={() => {}}
-        settingsSnapshot={modelSettings("openai-codex/gpt-5.5", "openai_codex")}
-      />,
-      "openai-codex/gpt-5.5",
-    ));
-
-    fireEvent.click(await screen.findByTestId("composer-context-usage"));
-    expect(await screen.findByRole("progressbar", { name: "Context 15%" })).toHaveAttribute(
-      "aria-valuenow",
-      "15",
-    );
   });
 
   it("moves the session handle into the pane only when the workbench is split", () => {

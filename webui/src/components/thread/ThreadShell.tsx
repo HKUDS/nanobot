@@ -12,7 +12,7 @@ import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type {
   ComposerContextUsage,
-  ComposerRequestUsage,
+  ComposerRoundUsage,
 } from "@/components/thread/ComposerUsagePopover";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
@@ -42,7 +42,7 @@ import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
-  RequestUsage,
+  RoundUsage,
   SettingsPayload,
   SlashCommand,
   SkillSummary,
@@ -113,8 +113,8 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
   return null;
 }
 
-function recentComposerRequestUsage(messages: UIMessage[]): ComposerRequestUsage[] {
-  const recent: ComposerRequestUsage[] = [];
+function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
+  const recent: ComposerRoundUsage[] = [];
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
     const message = messages[index];
@@ -129,14 +129,10 @@ function recentComposerRequestUsage(messages: UIMessage[]): ComposerRequestUsage
     }
 
     seenTurns.add(turnKey);
-    const requests: RequestUsage[] = message.requestUsages?.length
-      ? message.requestUsages
-      : message.usage?.request_count === 1 && message.usage
-        ? [message.usage]
-        : [];
-    for (let requestIndex = requests.length - 1; requestIndex >= 0; requestIndex -= 1) {
-      const request = requests[requestIndex];
-      const inputTokens = request.prompt_tokens;
+    const rounds: RoundUsage[] = message.roundUsages ?? [];
+    for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
+      const round = rounds[roundIndex];
+      const inputTokens = round.prompt_tokens;
       if (
         recent.length >= 8
         || typeof inputTokens !== "number"
@@ -145,12 +141,12 @@ function recentComposerRequestUsage(messages: UIMessage[]): ComposerRequestUsage
       ) {
         continue;
       }
-      const outputTokens = request.completion_tokens;
-      const cachedTokens = request.cached_tokens;
-      const estimatedTokens = request.estimated_tokens;
-      const generationMs = request.generation_ms;
+      const outputTokens = round.completion_tokens;
+      const cachedTokens = round.cached_tokens;
+      const estimatedTokens = round.estimated_tokens;
+      const generationMs = round.generation_ms;
       recent.push({
-        id: `${turnKey}:${requestIndex}`,
+        id: `${turnKey}:${roundIndex}`,
         timestamp: message.completedAt ?? message.createdAt,
         inputTokens,
         ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
@@ -169,16 +165,6 @@ function recentComposerRequestUsage(messages: UIMessage[]): ComposerRequestUsage
     }
   }
   return recent.reverse();
-}
-
-function hasUnavailableRequestUsage(messages: UIMessage[]): boolean {
-  return messages.some((message) => (
-    message.role === "assistant"
-    && message.kind !== "trace"
-    && !message.isStreaming
-    && (message.usage?.request_count ?? 0) > 1
-    && !message.requestUsages?.length
-  ));
 }
 
 function snapshotPreservesMessage(
@@ -909,13 +895,9 @@ export function ThreadShell({
     () => latestComposerContextUsage(displayMessages),
     [displayMessages],
   );
-  const composerRequestUsage = useMemo(
-    () => recentComposerRequestUsage(displayMessages),
+  const composerRoundUsage = useMemo(
+    () => recentComposerRoundUsage(displayMessages),
     [displayMessages],
-  );
-  const composerRequestUsageUnavailable = useMemo(
-    () => composerRequestUsage.length === 0 && hasUnavailableRequestUsage(displayMessages),
-    [composerRequestUsage.length, displayMessages],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Decision states freeze the interrupted turn and hand the next action to
@@ -1598,8 +1580,7 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
-          recentRequestUsage={composerRequestUsage}
-          requestUsageUnavailable={composerRequestUsageUnavailable}
+          recentRoundUsage={composerRoundUsage}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1649,8 +1630,7 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
-          recentRequestUsage={composerRequestUsage}
-          requestUsageUnavailable={composerRequestUsageUnavailable}
+          recentRoundUsage={composerRoundUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
           cliApps={cliApps}

@@ -1200,17 +1200,15 @@
       "manageModels": "Manage models",
       "context": {
         "tooltip": "Context {{percent}}%",
-        "detailsLabel": "Open context and reuse details",
-        "panelTitle": "Context and reuse",
+        "detailsLabel": "Open context usage",
+        "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "cacheTitle": "Reuse",
-        "reused": "Reused",
-        "notReused": "Not reused",
+        "recentRounds": "Recent rounds",
+        "inputTrend": "Input tokens",
         "input": "{{tokens}} input",
         "reusedDetail": "{{tokens}} reused ({{percent}}%)",
         "output": "{{tokens}} output",
-        "duration": "{{duration}} generation",
-        "empty": "Usage appears after the first response."
+        "duration": "{{duration}} generation"
       },
       "queued": {
         "label": "Queued guidance",

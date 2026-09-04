@@ -73,7 +73,7 @@ import {
 import {
   ComposerUsagePopover,
   type ComposerContextUsage,
-  type ComposerRequestUsage,
+  type ComposerRoundUsage,
 } from "@/components/thread/ComposerUsagePopover";
 import {
   ACCEPT_ATTR,
@@ -205,8 +205,7 @@ interface ThreadComposerProps {
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
-  recentRequestUsage?: readonly ComposerRequestUsage[];
-  requestUsageUnavailable?: boolean;
+  recentRoundUsage?: readonly ComposerRoundUsage[];
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
@@ -906,8 +905,7 @@ export function ThreadComposer({
   onModelBadgeClick,
   onManageModels,
   contextUsage = null,
-  recentRequestUsage = [],
-  requestUsageUnavailable = false,
+  recentRoundUsage = [],
   variant = "thread",
   slashCommands = [],
   cliApps = [],
@@ -2465,8 +2463,7 @@ export function ThreadComposer({
             {!voiceRecorder.isRecording ? (
               <ComposerUsagePopover
                 context={contextUsage}
-                requests={recentRequestUsage}
-                requestsUnavailable={requestUsageUnavailable}
+                rounds={recentRoundUsage}
               />
             ) : null}
             {showVoiceButton ? (

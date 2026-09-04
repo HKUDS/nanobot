@@ -20,7 +20,7 @@ export interface ComposerContextUsage {
   contextWindowTokens?: number;
 }
 
-export interface ComposerRequestUsage {
+export interface ComposerRoundUsage {
   id: string;
   timestamp: number;
   inputTokens: number;
@@ -30,7 +30,7 @@ export interface ComposerRequestUsage {
   generationMs?: number;
 }
 
-interface NormalizedRequestUsage extends ComposerRequestUsage {
+interface NormalizedRoundUsage extends ComposerRoundUsage {
   cachedTokens?: number;
   outputTokens: number;
 }
@@ -43,41 +43,39 @@ function compactDuration(milliseconds: number): string {
   return `${minutes}m ${Math.round(seconds % 60)}s`;
 }
 
-function normalizeRequests(
-  requests: readonly ComposerRequestUsage[],
-): NormalizedRequestUsage[] {
-  return requests
-    .filter((request) => Number.isFinite(request.inputTokens) && request.inputTokens > 0)
-    .map((request) => ({
-      ...request,
-      inputTokens: Math.max(0, request.inputTokens),
-      outputTokens: Number.isFinite(request.outputTokens)
-        ? Math.max(0, request.outputTokens ?? 0)
+function normalizeRounds(
+  rounds: readonly ComposerRoundUsage[],
+): NormalizedRoundUsage[] {
+  return rounds
+    .filter((round) => Number.isFinite(round.inputTokens) && round.inputTokens > 0)
+    .map((round) => ({
+      ...round,
+      inputTokens: Math.max(0, round.inputTokens),
+      outputTokens: Number.isFinite(round.outputTokens)
+        ? Math.max(0, round.outputTokens ?? 0)
         : 0,
-      ...(Number.isFinite(request.cachedTokens)
-        ? { cachedTokens: Math.min(request.inputTokens, Math.max(0, request.cachedTokens ?? 0)) }
+      ...(Number.isFinite(round.cachedTokens)
+        ? { cachedTokens: Math.min(round.inputTokens, Math.max(0, round.cachedTokens ?? 0)) }
         : {}),
     }));
 }
 
 export function ComposerUsagePopover({
   context,
-  requests,
-  requestsUnavailable = false,
+  rounds,
 }: {
   context: ComposerContextUsage | null;
-  requests: readonly ComposerRequestUsage[];
-  requestsUnavailable?: boolean;
+  rounds: readonly ComposerRoundUsage[];
 }) {
   const { t, i18n } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
-  const normalizedRequests = useMemo(() => normalizeRequests(requests), [requests]);
+  const normalizedRounds = useMemo(() => normalizeRounds(rounds), [rounds]);
   const hasContext = !!context
     && Number.isFinite(context.contextTokens)
     && context.contextTokens >= 0
     && Number.isFinite(context.contextWindowTokens)
     && (context.contextWindowTokens ?? 0) > 0;
-  if (!hasContext && normalizedRequests.length === 0) {
+  if (!hasContext && normalizedRounds.length === 0) {
     return null;
   }
 
@@ -94,7 +92,7 @@ export function ComposerUsagePopover({
       ? "caution"
       : "normal";
   const detailsLabel = t("thread.composer.context.detailsLabel", {
-    defaultValue: "Open context and reuse details",
+    defaultValue: "Open context usage",
   });
   const contextDescription = contextPercentage === null
     ? detailsLabel
@@ -107,10 +105,7 @@ export function ComposerUsagePopover({
     : `${contextDescription}. ${detailsLabel}`;
   const ringCircumference = 2 * Math.PI * 6;
   const ringLength = ringCircumference * meterPercentage / 100;
-  const maxInputTokens = Math.max(0, ...normalizedRequests.map((request) => request.inputTokens));
-  const hasCacheBreakdown = normalizedRequests.some(
-    (request) => typeof request.cachedTokens === "number",
-  );
+  const maxInputTokens = Math.max(0, ...normalizedRounds.map((round) => round.inputTokens));
   const numberFormatter = new Intl.NumberFormat(i18n.language);
 
   return (
@@ -195,7 +190,7 @@ export function ComposerUsagePopover({
             panelRef.current?.focus();
           }}
           aria-label={t("thread.composer.context.panelTitle", {
-            defaultValue: "Context and reuse",
+            defaultValue: "Context usage",
           })}
           className="w-[min(22rem,calc(100vw-1.5rem))] p-0"
         >
@@ -203,12 +198,19 @@ export function ComposerUsagePopover({
             {contextPercentage !== null ? (
               <>
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[12px] font-medium text-foreground">
-                    {t("thread.composer.context.contextTitle", {
-                      defaultValue: "Context",
-                    })}
-                  </span>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <span className="shrink-0 text-[12px] font-medium text-foreground">
+                      {t("thread.composer.context.contextTitle", {
+                        defaultValue: "Context",
+                      })}
+                    </span>
+                    <span className="truncate text-[11px] tabular-nums text-muted-foreground">
+                      {formatCompactTokenCount(context!.contextTokens)} / {formatCompactTokenCount(
+                        context!.contextWindowTokens!,
+                      )}
+                    </span>
+                  </div>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                     {contextPercentage}%
                   </span>
                 </div>
@@ -233,12 +235,24 @@ export function ComposerUsagePopover({
               </>
             ) : null}
 
-            {normalizedRequests.length > 0 && hasCacheBreakdown ? (
+            {normalizedRounds.length > 0 ? (
               <>
                 <div className={cn(
-                  "grid grid-cols-[2.5rem_1fr] gap-2",
+                  "flex items-baseline justify-between gap-3",
                   contextPercentage === null ? "mt-0" : "mt-5",
                 )}>
+                  <span className="text-[12px] font-medium text-foreground">
+                    {t("thread.composer.context.recentRounds", {
+                      defaultValue: "Recent rounds",
+                    })}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {t("thread.composer.context.inputTrend", {
+                      defaultValue: "Input tokens",
+                    })}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-[2.5rem_1fr] gap-2">
                   <div
                     aria-hidden="true"
                     className="flex h-28 flex-col justify-between text-right text-[10px] tabular-nums text-muted-foreground/70"
@@ -248,27 +262,27 @@ export function ComposerUsagePopover({
                   </div>
                   <div
                     role="group"
-                    aria-label={t("thread.composer.context.cacheTitle", {
-                      defaultValue: "Reuse",
+                    aria-label={t("thread.composer.context.inputTrend", {
+                      defaultValue: "Input tokens",
                     })}
                     className="flex h-28 items-end gap-1.5 border-b border-border/60"
                   >
-                    {normalizedRequests.map((request, index) => {
-                      const cachedKnown = typeof request.cachedTokens === "number";
-                      const cachedTokens = request.cachedTokens ?? 0;
-                      const notReusedTokens = Math.max(0, request.inputTokens - cachedTokens);
+                    {normalizedRounds.map((round, index) => {
+                      const cachedKnown = typeof round.cachedTokens === "number";
+                      const cachedTokens = round.cachedTokens ?? 0;
+                      const notReusedTokens = Math.max(0, round.inputTokens - cachedTokens);
                       const cachedPercentage = cachedKnown
-                        ? Math.round(cachedTokens / request.inputTokens * 100)
+                        ? Math.round(cachedTokens / round.inputTokens * 100)
                         : null;
                       const cachedHeight = cachedKnown
-                        ? cachedTokens / request.inputTokens * 100
+                        ? cachedTokens / round.inputTokens * 100
                         : 0;
-                      const barHeight = request.inputTokens / maxInputTokens * 108;
+                      const barHeight = round.inputTokens / maxInputTokens * 108;
                       const detailParts = [
-                        fmtDateTime(request.timestamp, i18n.language),
+                        fmtDateTime(round.timestamp, i18n.language),
                         t("thread.composer.context.input", {
                           defaultValue: "{{tokens}} input",
-                          tokens: numberFormatter.format(request.inputTokens),
+                          tokens: numberFormatter.format(round.inputTokens),
                         }),
                         cachedKnown
                           ? t("thread.composer.context.reusedDetail", {
@@ -279,15 +293,15 @@ export function ComposerUsagePopover({
                           : null,
                         t("thread.composer.context.output", {
                           defaultValue: "{{tokens}} output",
-                          tokens: numberFormatter.format(request.outputTokens),
+                          tokens: numberFormatter.format(round.outputTokens),
                         }),
-                        typeof request.generationMs === "number"
+                        typeof round.generationMs === "number"
                           ? t("thread.composer.context.duration", {
                               defaultValue: "{{duration}} generation",
-                              duration: compactDuration(request.generationMs),
+                              duration: compactDuration(round.generationMs),
                             })
                           : null,
-                        (request.estimatedTokens ?? 0) > 0
+                        (round.estimatedTokens ?? 0) > 0
                           ? t("message.usage.estimated", {
                               defaultValue: "Includes estimated usage",
                             })
@@ -296,11 +310,11 @@ export function ComposerUsagePopover({
 
                       return (
                         <span
-                          key={request.id}
+                          key={round.id}
                           className={cn(
                             "flex h-full min-w-0 flex-1 items-end justify-center rounded-sm",
                             "opacity-70 transition-opacity hover:opacity-100",
-                            index === normalizedRequests.length - 1 && "opacity-100",
+                            index === normalizedRounds.length - 1 && "opacity-100",
                           )}
                         >
                           <Tooltip>
@@ -309,7 +323,7 @@ export function ComposerUsagePopover({
                                 role="img"
                                 tabIndex={0}
                                 aria-label={detailParts.join(". ")}
-                                data-testid="cache-usage-bar"
+                                data-testid="round-usage-bar"
                                 className={cn(
                                   "flex w-full max-w-7 flex-col overflow-hidden rounded-t-[3px] bg-muted",
                                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -361,28 +375,9 @@ export function ComposerUsagePopover({
                     })}
                   </div>
                 </div>
-                <div className="ml-[3.25rem] mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="kv-cache-reused h-2.5 w-4 rounded-[2px]" aria-hidden="true" />
-                    {t("thread.composer.context.reused", {
-                      defaultValue: "Reused",
-                    })}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="kv-cache-not-reused h-2.5 w-4 rounded-[2px]" aria-hidden="true" />
-                    {t("thread.composer.context.notReused", { defaultValue: "Not reused" })}
-                  </span>
-                </div>
               </>
             ) : null}
 
-            {normalizedRequests.length === 0 && !requestsUnavailable ? (
-              <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-                {t("thread.composer.context.empty", {
-                  defaultValue: "Usage appears after the first response.",
-                })}
-              </p>
-            ) : null}
           </div>
         </PopoverContent>
       </TooltipProvider>

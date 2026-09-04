@@ -207,12 +207,12 @@ class TurnDelivery:
     def record_usage(
         self,
         usage: LLMUsage | None,
-        request_usages: list[LLMUsage] | None = None,
+        round_usages: list[LLMUsage] | None = None,
     ) -> None:
         self.runtime_event_publisher.record_turn_usage(
             self.session_key,
             usage,
-            request_usages,
+            round_usages,
         )
 
     def background_response(
