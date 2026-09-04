@@ -474,6 +474,33 @@ class TestArchiveDelegates:
         assert entry["text"] == "Hello."
 
     @pytest.mark.asyncio
+    async def test_summary_cache_evicts_oldest_session(self):
+        ac = _make_autocompact()
+        mock_sm = MagicMock(spec=SessionManager)
+
+        def load_session(key: str) -> Session:
+            return _make_session(
+                key=key,
+                metadata={
+                    "_last_summary": {
+                        "text": key,
+                        "last_active": "2026-05-13T10:00:00",
+                    },
+                },
+            )
+
+        mock_sm.get_or_create.side_effect = load_session
+        ac.sessions = mock_sm
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
+
+        for index in range(ac._SUMMARY_CACHE_MAX_SIZE + 1):
+            await ac._archive(f"cli:{index}", runtime=_runtime())
+
+        assert len(ac._summaries) == ac._SUMMARY_CACHE_MAX_SIZE
+        assert "cli:0" not in ac._summaries
+        assert f"cli:{ac._SUMMARY_CACHE_MAX_SIZE}" in ac._summaries
+
+    @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
         ac = _make_autocompact()
         mock_sm = MagicMock(spec=SessionManager)
