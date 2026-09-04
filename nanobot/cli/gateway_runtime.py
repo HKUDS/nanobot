@@ -17,6 +17,7 @@ from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.runtime_config import _migrate_cron_store
 from nanobot.cli.webui_support import (
@@ -649,7 +650,15 @@ def _run_gateway(
                     config=config,
                 )
                 if heartbeat_model
-                else agent.llm_runtime()
+                else (
+                    agent.llm_runtime()
+                    if hasattr(agent, "llm_runtime")
+                    else LLMRuntime.capture(
+                        agent.provider,
+                        agent.model,
+                        context_window_tokens=getattr(agent, "context_window_tokens", 0),
+                    )
+                )
             )
             assert heartbeat_runtime is not None
 
