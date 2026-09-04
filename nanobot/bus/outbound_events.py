@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.providers.base import LLMRequestUsage, LLMUsage
+from nanobot.providers.base import LLMUsage
 
 
 class OutboundEvent:
@@ -60,7 +60,7 @@ class TurnEndEvent(OutboundEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
     usage: LLMUsage | None = None
-    request_usages: tuple[LLMRequestUsage, ...] = ()
+    request_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
 
 

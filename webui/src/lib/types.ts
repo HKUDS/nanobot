@@ -54,9 +54,7 @@ export interface TurnUsage {
   timed_requests?: number;
 }
 
-export interface RequestUsage extends TurnUsage {
-  call_id?: string;
-}
+export type RequestUsage = TurnUsage;
 
 export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed";
 

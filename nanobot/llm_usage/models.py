@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from nanobot.llm_usage.context import LLMUsageSource
-from nanobot.providers.base import LLMUsage, is_llm_call_id
+from nanobot.providers.base import LLMUsage
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +16,6 @@ class LLMCallRecord:
     not belong to this contract. Sessions already own that content.
     """
 
-    call_id: str
     started_at_ms: int
     duration_ms: int
     provider: str
@@ -29,8 +28,6 @@ class LLMCallRecord:
     error_kind: str | None = None
 
     def __post_init__(self) -> None:
-        if not is_llm_call_id(self.call_id):
-            raise ValueError("call_id must be a 32-character lowercase hex value")
         if self.started_at_ms < 0 or self.duration_ms < 0:
             raise ValueError("LLM usage timestamps must be non-negative")
         if not self.provider.strip() or not self.model.strip():

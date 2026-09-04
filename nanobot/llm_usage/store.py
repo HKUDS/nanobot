@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nanobot.llm_usage.models import LLMCallRecord
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 1
 MAX_DAYS_RETAINED = 400
 MAX_CALLS_RETAINED = 100_000
 
@@ -170,31 +170,6 @@ class LLMUsageStore:
         self._cached_payload_key: tuple[int, str, str, int, int] | None = None
         self._cached_payload: dict[str, Any] | None = None
 
-    @staticmethod
-    def _ensure_call_id_schema(connection: sqlite3.Connection) -> None:
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(llm_calls)").fetchall()
-        }
-        if "call_id" not in columns:
-            try:
-                connection.execute("ALTER TABLE llm_calls ADD COLUMN call_id TEXT")
-            except sqlite3.OperationalError:
-                # Another process may complete the same additive migration while
-                # this connection waits for the schema lock.
-                columns = {
-                    str(row["name"])
-                    for row in connection.execute("PRAGMA table_info(llm_calls)").fetchall()
-                }
-                if "call_id" not in columns:
-                    raise
-        connection.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS llm_calls_call_id_idx
-                ON llm_calls(call_id) WHERE call_id IS NOT NULL
-            """
-        )
-
     def _connect(self) -> sqlite3.Connection:
         pid = os.getpid()
         if self._connection is not None and self._connection_pid == pid:
@@ -220,7 +195,6 @@ class LLMUsageStore:
             """
             CREATE TABLE IF NOT EXISTS llm_calls (
                 id INTEGER PRIMARY KEY,
-                call_id TEXT,
                 started_at_ms INTEGER NOT NULL,
                 duration_ms INTEGER NOT NULL,
                 provider TEXT NOT NULL,
@@ -248,7 +222,6 @@ class LLMUsageStore:
                 ON llm_calls(provider, model, started_at_ms);
             """
         )
-        self._ensure_call_id_schema(connection)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._connection = connection
         self._connection_pid = pid
@@ -287,7 +260,6 @@ class LLMUsageStore:
         usage = call.usage
         usage_data = usage.to_dict() if usage is not None else {}
         values: tuple[object, ...] = (
-            call.call_id,
             call.started_at_ms,
             call.duration_ms,
             call.provider[:120],
@@ -319,13 +291,13 @@ class LLMUsageStore:
             connection.execute(
                 """
                 INSERT INTO llm_calls (
-                    call_id, started_at_ms, duration_ms, provider, model, source, stream,
+                    started_at_ms, duration_ms, provider, model, source, stream,
                     finish_reason, input_tokens, output_tokens, total_tokens,
                     cache_read_tokens, cache_write_tokens, reported_tokens,
                     estimated_tokens, generation_ms, measured_output_tokens,
                     ttft_ms, timed_requests, error_status_code, error_kind
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 values,

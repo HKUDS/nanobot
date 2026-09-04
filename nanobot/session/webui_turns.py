@@ -38,7 +38,7 @@ from nanobot.bus.runtime_events import (
     UserInputAccepted,
 )
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import LLMProvider, LLMRequestUsage, LLMUsage
+from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
@@ -751,7 +751,7 @@ class WebuiTurnCoordinator:
         session_key: str,
         latency_ms: int | None,
         usage: LLMUsage | None = None,
-        request_usages: tuple[LLMRequestUsage, ...] = (),
+        request_usages: tuple[LLMUsage, ...] = (),
         context_window_tokens: int | None = None,
     ) -> None:
         if msg.channel != "websocket":

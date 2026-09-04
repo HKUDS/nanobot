@@ -1196,7 +1196,6 @@
         "reusedDetail": "重用 {{tokens}}（{{percent}}%）",
         "output": "輸出 {{tokens}}",
         "duration": "生成 {{duration}}",
-        "cacheUnavailable": "未提供重用明細",
         "empty": "首次回覆後會顯示用量。"
       },
       "queued": {

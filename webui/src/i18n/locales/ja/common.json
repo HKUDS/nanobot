@@ -1196,7 +1196,6 @@
         "reusedDetail": "{{tokens}} を再利用（{{percent}}%）",
         "output": "出力 {{tokens}}",
         "duration": "生成 {{duration}}",
-        "cacheUnavailable": "再利用の詳細は利用できません",
         "empty": "最初の応答後に使用量が表示されます。"
       },
       "queued": {

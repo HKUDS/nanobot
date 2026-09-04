@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
-from uuid import uuid4
 
 import json_repair
 from loguru import logger
@@ -33,16 +32,6 @@ RETRY_AFTER_BUFFER = 1
 RetryEventCallback = Callable[[str], Awaitable[None]]
 LLMCallObserver = Callable[["LLMCallRecord"], None]
 ProviderCompactionScope = Literal["prior_context", "current_request"]
-_LLM_CALL_ID_HEX_DIGITS = frozenset("0123456789abcdef")
-
-
-def is_llm_call_id(value: object) -> bool:
-    """Return whether *value* is a canonical locally generated call identity."""
-    return (
-        isinstance(value, str)
-        and len(value) == 32
-        and all(char in _LLM_CALL_ID_HEX_DIGITS for char in value)
-    )
 
 
 def resolve_stream_idle_timeout_s(
@@ -558,25 +547,6 @@ class LLMUsage:
         return usage
 
 
-@dataclass(frozen=True, slots=True)
-class LLMRequestUsage:
-    """Usage for one physical provider call and its persisted record."""
-
-    usage: LLMUsage
-    call_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.call_id is not None and not is_llm_call_id(self.call_id):
-            raise ValueError("call_id must be a 32-character lowercase hex value")
-
-    def to_turn_dict(self) -> dict[str, int | str]:
-        result: dict[str, int | str] = {}
-        result.update(self.usage.to_turn_dict())
-        if self.call_id is not None:
-            result["call_id"] = self.call_id
-        return result
-
-
 @dataclass
 class LLMResponse:
     """Response from an LLM provider."""
@@ -584,13 +554,6 @@ class LLMResponse:
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
     usage: LLMUsage | None = None
-    # Stable identity shared with the content-free SQLite usage row. It is not
-    # a session identifier and is intentionally omitted from provider payloads.
-    call_id: str | None = field(default=None, repr=False)
-    # Usage-bearing physical calls represented by this response. Retry and
-    # fallback wrappers accumulate the leaf responses here so callers do not
-    # lose billed attempts when only the final response is returned.
-    call_usages: list[LLMRequestUsage] = field(default_factory=list, repr=False)
     # Locally measured streaming telemetry. ``generation_ms`` excludes time to
     # first token and provider retry gaps; ``ttft_ms`` measures the first
     # streamed reasoning/content delta from request start. They stay separate
@@ -800,30 +763,16 @@ class LLMProvider(ABC):
         response: LLMResponse,
         kwargs: dict[str, Any],
         *,
-        call_id: str,
         started_at_ms: int,
         started_at_ns: int,
         stream: bool,
     ) -> LLMResponse:
-        response.call_id = call_id
         observer = self._llm_call_observer
-        usage = (
-            self._usage_for_call(response, kwargs)
-            if observer is not None
-            else response.usage
-        )
-        if observer is None and usage is not None:
-            usage = usage.with_timing(
-                generation_ms=response.generation_ms,
-                ttft_ms=response.ttft_ms,
-            )
-        if usage is not None:
-            response.usage = usage
-            response.call_usages = [LLMRequestUsage(usage=usage, call_id=call_id)]
-        else:
-            response.call_usages = []
         if observer is None:
             return response
+        usage = self._usage_for_call(response, kwargs)
+        if usage is not None:
+            response.usage = usage
         model_value = kwargs.get("model")
         model = model_value if isinstance(model_value, str) and model_value else self.get_default_model()
         try:
@@ -831,7 +780,6 @@ class LLMProvider(ABC):
             from nanobot.llm_usage.models import LLMCallRecord
 
             observer(LLMCallRecord(
-                call_id=call_id,
                 started_at_ms=started_at_ms,
                 duration_ms=max(0, (time.monotonic_ns() - started_at_ns) // 1_000_000),
                 provider=self.provider_name,
@@ -1310,7 +1258,6 @@ class LLMProvider(ABC):
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
-        call_id = uuid4().hex
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         try:
@@ -1330,7 +1277,6 @@ class LLMProvider(ABC):
                     error_kind="cancelled",
                 ),
                 kwargs,
-                call_id=call_id,
                 started_at_ms=started_at_ms,
                 started_at_ns=started_at_ns,
                 stream=False,
@@ -1341,7 +1287,6 @@ class LLMProvider(ABC):
         return self._observe_llm_call(
             response,
             kwargs,
-            call_id=call_id,
             started_at_ms=started_at_ms,
             started_at_ns=started_at_ns,
             stream=False,
@@ -1408,7 +1353,6 @@ class LLMProvider(ABC):
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
         """Call chat_stream() and convert unexpected exceptions to error responses."""
-        call_id = uuid4().hex
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         first_output_at_ns: int | None = None
@@ -1475,7 +1419,6 @@ class LLMProvider(ABC):
                     error_kind="cancelled",
                 ),
                 kwargs,
-                call_id=call_id,
                 started_at_ms=started_at_ms,
                 started_at_ns=started_at_ns,
                 stream=True,
@@ -1486,7 +1429,6 @@ class LLMProvider(ABC):
         return self._observe_llm_call(
             _attach_stream_timing(response),
             kwargs,
-            call_id=call_id,
             started_at_ms=started_at_ms,
             started_at_ns=started_at_ns,
             stream=True,
@@ -1738,20 +1680,13 @@ class LLMProvider(ABC):
         delays = list(self._CHAT_RETRY_DELAYS)
         persistent = retry_mode == "persistent"
         last_response: LLMResponse | None = None
-        call_usages: list[LLMRequestUsage] = []
         last_error_key: str | None = None
         identical_error_count = 0
-
-        def _with_call_usages(response: LLMResponse) -> LLMResponse:
-            response.call_usages = list(call_usages)
-            return response
-
         while True:
             attempt += 1
             response = await call(**kw)
-            call_usages.extend(response.call_usages)
             if response.finish_reason != "error":
-                return _with_call_usages(response)
+                return response
             last_response = response
             if should_retry_guard is not None and not should_retry_guard():
                 is_timeout = (response.error_kind or "").lower() == "timeout"
@@ -1776,7 +1711,7 @@ class LLMProvider(ABC):
                     logger.warning(
                         "LLM stream failed after content was emitted; skipping retry"
                     )
-                    return _with_call_usages(response)
+                    return response
             error_key = ((response.content or "").strip().lower() or None)
             if error_key and error_key == last_error_key:
                 identical_error_count += 1
@@ -1813,13 +1748,12 @@ class LLMProvider(ABC):
                     if stripped_context is not None:
                         retry_kw["provider_context"] = stripped_context
                     result = await call(**retry_kw)
-                    call_usages.extend(result.call_usages)
                     # Permanently strip images from the original messages so
                     # subsequent iterations do not repeat the error-retry cycle.
                     if result.finish_reason != "error":
                         self._strip_image_content_inplace(original_messages)
-                    return _with_call_usages(result)
-                return _with_call_usages(response)
+                    return result
+                return response
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
                 logger.warning(
@@ -1831,7 +1765,7 @@ class LLMProvider(ABC):
                     await on_retry_exhausted(
                         f"Persistent retry stopped after {identical_error_count} identical errors."
                     )
-                return _with_call_usages(response)
+                return response
 
             if not persistent and attempt > len(delays):
                 logger.warning(
@@ -1865,7 +1799,7 @@ class LLMProvider(ABC):
                 on_retry_wait=on_retry_wait,
             )
 
-        return _with_call_usages(last_response)
+        return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
 
     @abstractmethod
     def get_default_model(self) -> str:

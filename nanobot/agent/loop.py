@@ -56,12 +56,7 @@ from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.llm_usage.context import source_from_request
-from nanobot.providers.base import (
-    LLMProvider,
-    LLMRequestUsage,
-    LLMUsage,
-    ProviderConversationState,
-)
+from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -185,7 +180,6 @@ class TurnContext:
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
     usage: LLMUsage | None = None
-    request_usages: list[LLMRequestUsage] = field(default_factory=list)
 
     def require_runtime(self) -> LLMRuntime:
         """Return the runtime established by the BUILD stage."""
@@ -2041,8 +2035,7 @@ class AgentLoop:
         ):
             ctx.suppress_response = True
         ctx.usage = result.usage
-        ctx.request_usages = result.request_usages
-        ctx.delivery.record_usage(ctx.usage, ctx.request_usages)
+        ctx.delivery.record_usage(ctx.usage, result.request_usages)
         if ctx.kind is TurnKind.USER:
             await turn_continuation.maybe_continue_turn(ctx)
 

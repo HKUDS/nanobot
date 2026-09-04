@@ -16,7 +16,6 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMCallObserver,
     LLMProvider,
-    LLMRequestUsage,
     LLMResponse,
     ProviderCallContext,
     ProviderConversationState,
@@ -424,22 +423,16 @@ class FallbackProvider(LLMProvider):
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
         primary_response: LLMResponse | None = None
-        call_usages: list[LLMRequestUsage] = []
         primary_error = "unknown error"
         # A primary error eligible for failover did not return a replacement
         # continuation, so the incoming primary state remains reusable.
         preserve_primary_state = True
-
-        def _with_call_usages(response: LLMResponse) -> LLMResponse:
-            response.call_usages = list(call_usages)
-            return response
 
         if self._primary_available():
             primary_was_attempted = True
             response, primary_exception = await self._call_provider(
                 call, self._primary, kwargs
             )
-            call_usages.extend(response.call_usages)
             if primary_exception is not None:
                 logger.warning(
                     "Primary model '{}' raised {} before responding",
@@ -448,7 +441,7 @@ class FallbackProvider(LLMProvider):
             if response.finish_reason != "error":
                 self._primary_failures = 0
                 self._primary_tripped_at = None
-                return _with_call_usages(response)
+                return response
             primary_response = response
             primary_error = (response.content or primary_error)[:120]
 
@@ -469,7 +462,7 @@ class FallbackProvider(LLMProvider):
                     logger.warning(
                         "Primary model error but content already streamed; skipping failover"
                     )
-                    return _with_call_usages(response)
+                    return response
 
             if not self._should_fallback(response):
                 logger.warning(
@@ -477,7 +470,7 @@ class FallbackProvider(LLMProvider):
                     primary_model,
                     (response.content or "")[:120],
                 )
-                return _with_call_usages(response)
+                return response
 
             self._primary_failures += 1
             if self._primary_failures >= _PRIMARY_FAILURE_THRESHOLD:
@@ -563,7 +556,6 @@ class FallbackProvider(LLMProvider):
             fallback_response, fallback_exception = await self._call_provider(
                 call, fallback_provider, fallback_kwargs
             )
-            call_usages.extend(fallback_response.call_usages)
             if fallback_exception is not None:
                 logger.warning(
                     "Fallback '{}' raised {}",
@@ -580,7 +572,7 @@ class FallbackProvider(LLMProvider):
                     "Fallback '{}' succeeded after primary '{}' failed",
                     fallback_model, primary_model,
                 )
-                return _with_call_usages(fallback_response)
+                return fallback_response
 
             last_response = fallback_response
             logger.warning(
@@ -595,10 +587,10 @@ class FallbackProvider(LLMProvider):
         )
         # Return the last error response we saw (primary or last fallback).
         if last_response is not None:
-            return _with_call_usages(replace(
+            return replace(
                 last_response,
                 preserve_provider_state_on_error=preserve_primary_state,
-            ))
+            )
         # Primary was skipped and no fallback returned a response. Keep the result
         # transient until the primary circuit is eligible for another probe.
         retry_after_s = (

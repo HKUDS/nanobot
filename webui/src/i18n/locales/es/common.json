@@ -1197,7 +1197,6 @@
         "reusedDetail": "{{tokens}} reutilizados ({{percent}} %)",
         "output": "{{tokens}} de salida",
         "duration": "Generación {{duration}}",
-        "cacheUnavailable": "Detalles de reutilización no disponibles",
         "empty": "El uso aparecerá después de la primera respuesta."
       },
       "queued": {

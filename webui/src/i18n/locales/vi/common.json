@@ -1196,7 +1196,6 @@
         "reusedDetail": "Tái sử dụng {{tokens}} ({{percent}}%)",
         "output": "Đầu ra {{tokens}}",
         "duration": "Tạo nội dung {{duration}}",
-        "cacheUnavailable": "Không có chi tiết tái sử dụng",
         "empty": "Mức sử dụng xuất hiện sau phản hồi đầu tiên."
       },
       "queued": {

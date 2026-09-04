@@ -498,7 +498,7 @@ describe("ThreadShell", () => {
     })).toBeInTheDocument();
   });
 
-  it("labels legacy multi-request totals whose request details were not recorded", async () => {
+  it("keeps context usage visible for legacy multi-request totals", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Ausage-legacy/webui-thread")) {
@@ -539,7 +539,10 @@ describe("ThreadShell", () => {
     ));
 
     fireEvent.click(await screen.findByTestId("composer-context-usage"));
-    expect(await screen.findByText("Reuse details unavailable")).toBeInTheDocument();
+    expect(await screen.findByRole("progressbar", { name: "Context 15%" })).toHaveAttribute(
+      "aria-valuenow",
+      "15",
+    );
   });
 
   it("moves the session handle into the pane only when the workbench is split", () => {

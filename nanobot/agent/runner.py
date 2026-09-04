@@ -35,7 +35,6 @@ from nanobot.llm_usage.context import (
 )
 from nanobot.providers.base import (
     LLMProvider,
-    LLMRequestUsage,
     LLMResponse,
     LLMUsage,
     ProviderConversationState,
@@ -127,7 +126,7 @@ class AgentRunResult:
     messages: list[dict[str, Any]]
     tools_used: list[str] = field(default_factory=list)
     usage: LLMUsage | None = None
-    request_usages: list[LLMRequestUsage] = field(default_factory=list)
+    request_usages: list[LLMUsage] = field(default_factory=list)
     stop_reason: str = "completed"
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
@@ -394,7 +393,7 @@ class AgentRunner:
         final_content: str | None = None
         tools_used: list[str] = []
         usage: LLMUsage | None = None
-        request_usages: list[LLMRequestUsage] = []
+        request_usages: list[LLMUsage] = []
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
@@ -445,14 +444,12 @@ class AgentRunner:
                 if request_state.compaction is not None
                 else messages
             )
-            request_usage_start = len(request_usages)
             response = await self._request_model(
                 spec,
                 request_messages,
                 hook,
                 context,
                 request_state=request_state,
-                request_usages=request_usages,
                 transcript=messages,
             )
             assert request_state.messages is not None
@@ -473,9 +470,8 @@ class AgentRunner:
                 response.content,
             )
             response.content = cleaned_content
-            raw_usage: LLMUsage | None = None
-            for request_usage in request_usages[request_usage_start:]:
-                raw_usage = self._merge_usage(raw_usage, request_usage.usage)
+            raw_usage = self._record_request_usage(spec, request_state, response)
+            request_usages.append(raw_usage)
             context.usage = raw_usage
             usage = self._merge_usage(usage, raw_usage)
             if reasoning_text and not context.streamed_reasoning:
@@ -621,10 +617,7 @@ class AgentRunner:
                     transcript=messages,
                 )
                 retry_usage = self._record_request_usage(spec, request_state, response)
-                if retry_usage is not None:
-                    retry_request_usages = self._request_usages(response, retry_usage)
-                    request_usages.extend(retry_request_usages)
-                    retry_usage = self._aggregate_request_usages(retry_request_usages)
+                request_usages.append(retry_usage)
                 usage = self._merge_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
                 context.response = response
@@ -874,7 +867,6 @@ class AgentRunner:
         context: AgentHookContext,
         *,
         request_state: ModelRequestState,
-        request_usages: list[LLMRequestUsage],
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
     ) -> LLMResponse:
@@ -1046,9 +1038,6 @@ class AgentRunner:
             current_request_boundary=(len(transcript) if transcript is not None else None),
         )
         request_state.provider_compaction_applied |= response.provider_compaction_applied
-        raw_usage = self._record_request_usage(spec, request_state, response)
-        if raw_usage is not None:
-            request_usages.extend(self._request_usages(response, raw_usage))
         # chat_stream_with_retry may recover internally, so only fail unfinished
         # hosted calls after the provider returns its final error response.
         if response.finish_reason == "error":
@@ -1078,7 +1067,6 @@ class AgentRunner:
             return await self._request_model(
                 spec, retry_messages, hook, context,
                 request_state=request_state,
-                request_usages=request_usages,
                 malformed_retry=True,
                 transcript=None,
             )
@@ -1093,21 +1081,11 @@ class AgentRunner:
             fallback_messages = self._malformed_tool_call_retry_messages(
                 messages, response.content,
             )
-            fallback_response = await self._request_no_tools(
+            return await self._request_no_tools(
                 spec,
                 fallback_messages,
                 request_state=request_state,
             )
-            fallback_usage = self._record_request_usage(
-                spec,
-                request_state,
-                fallback_response,
-            )
-            if fallback_usage is not None:
-                request_usages.extend(
-                    self._request_usages(fallback_response, fallback_usage)
-                )
-            return fallback_response
         return response
 
     @staticmethod
@@ -1205,7 +1183,7 @@ class AgentRunner:
         usage: LLMUsage | None,
         *,
         request_state: ModelRequestState,
-        request_usages: list[LLMRequestUsage],
+        request_usages: list[LLMUsage],
     ) -> tuple[str | None, LLMUsage | None]:
         compaction = request_state.compaction
         request_messages = (
@@ -1229,10 +1207,7 @@ class AgentRunner:
             return None, usage
 
         raw_usage = self._record_request_usage(spec, request_state, response)
-        if raw_usage is not None:
-            final_request_usages = self._request_usages(response, raw_usage)
-            request_usages.extend(final_request_usages)
-            raw_usage = self._aggregate_request_usages(final_request_usages)
+        request_usages.append(raw_usage)
         usage = self._merge_usage(usage, raw_usage)
         if response.finish_reason == "error" or response.has_tool_calls:
             logger.warning(
@@ -1342,7 +1317,7 @@ class AgentRunner:
         response: LLMResponse,
         *,
         tool_definitions: list[dict[str, Any]] | None,
-    ) -> LLMUsage | None:
+    ) -> LLMUsage:
         usage = response.usage
         if response.finish_reason == "error":
             if usage is None or usage.total_tokens == 0:
@@ -1364,7 +1339,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         state: ModelRequestState,
         response: LLMResponse,
-    ) -> LLMUsage | None:
+    ) -> LLMUsage:
         assert state.messages is not None
         state.usage = self._usage_or_estimate(
             spec,
@@ -1373,30 +1348,6 @@ class AgentRunner:
             tool_definitions=state.tool_definitions,
         )
         return state.usage
-
-    @staticmethod
-    def _request_usages(
-        response: LLMResponse,
-        usage: LLMUsage,
-    ) -> list[LLMRequestUsage]:
-        call_usages = list(response.call_usages)
-        if not call_usages:
-            return [LLMRequestUsage(usage=usage, call_id=response.call_id)]
-        if (
-            response.call_id is not None
-            and all(item.call_id != response.call_id for item in call_usages)
-        ):
-            call_usages.append(LLMRequestUsage(usage=usage, call_id=response.call_id))
-        return call_usages
-
-    @staticmethod
-    def _aggregate_request_usages(
-        request_usages: list[LLMRequestUsage],
-    ) -> LLMUsage | None:
-        usage: LLMUsage | None = None
-        for request_usage in request_usages:
-            usage = AgentRunner._merge_usage(usage, request_usage.usage)
-        return usage
 
     def _estimate_response_usage(
         self,

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage
-from nanobot.providers.base import LLMRequestUsage, LLMUsage
+from nanobot.providers.base import LLMUsage
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -74,7 +74,7 @@ class TurnCompleted:
     latency_ms: int | None = None
     runtime: LLMRuntime | None = None
     usage: LLMUsage | None = None
-    request_usages: tuple[LLMRequestUsage, ...] = ()
+    request_usages: tuple[LLMUsage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -183,7 +183,7 @@ class RuntimeEventPublisher:
         self._turn_latency_ms: dict[str, int] = {}
         self._turn_runtime: dict[str, LLMRuntime] = {}
         self._turn_usage: dict[str, LLMUsage] = {}
-        self._turn_request_usages: dict[str, tuple[LLMRequestUsage, ...]] = {}
+        self._turn_request_usages: dict[str, tuple[LLMUsage, ...]] = {}
 
     @staticmethod
     def _context(
@@ -213,7 +213,7 @@ class RuntimeEventPublisher:
         self,
         session_key: str,
         usage: LLMUsage | None,
-        request_usages: list[LLMRequestUsage] | None = None,
+        request_usages: list[LLMUsage] | None = None,
     ) -> None:
         if usage is not None:
             previous = self._turn_usage.get(session_key)

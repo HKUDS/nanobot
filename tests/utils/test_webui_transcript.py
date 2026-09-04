@@ -550,21 +550,18 @@ def test_replay_turn_end_preserves_usage_semantics(tmp_path, monkeypatch) -> Non
             },
             "request_usages": [
                 {
-                    "call_id": "1" * 32,
                     "prompt_tokens": 4_000,
                     "completion_tokens": 200,
                     "cached_tokens": 2_000,
                     "request_count": 1,
                 },
                 {
-                    "call_id": "2" * 32,
                     "prompt_tokens": 4_200,
                     "completion_tokens": 300,
                     "cached_tokens": 3_672,
                     "request_count": 1,
                 },
                 {
-                    "call_id": "3" * 32,
                     "prompt_tokens": 4_200,
                     "completion_tokens": 323,
                     "cached_tokens": 4_000,
@@ -589,11 +586,6 @@ def test_replay_turn_end_preserves_usage_semantics(tmp_path, monkeypatch) -> Non
         4_000,
         4_200,
         4_200,
-    ]
-    assert [item["call_id"] for item in messages[-1]["requestUsages"]] == [
-        "1" * 32,
-        "2" * 32,
-        "3" * 32,
     ]
     assert messages[-1]["contextWindowTokens"] == 128_000
     assert messages[-1]["latencyMs"] == 18_200

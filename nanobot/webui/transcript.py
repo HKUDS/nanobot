@@ -18,7 +18,6 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
-from nanobot.providers.base import is_llm_call_id
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -87,19 +86,6 @@ def _sanitize_turn_usage(value: object) -> dict[str, int] | None:
         and not isinstance(item, bool)
         and item >= 0
     }
-
-
-def _sanitize_request_usage(value: object) -> dict[str, int | str] | None:
-    numeric = _sanitize_turn_usage(value)
-    if numeric is None:
-        return None
-    result: dict[str, int | str] = {}
-    result.update(numeric)
-    data = cast(dict[object, object], value)
-    call_id = data.get("call_id")
-    if is_llm_call_id(call_id):
-        result["call_id"] = cast(str, call_id)
-    return result
 
 
 def rewrite_local_markdown_images(
@@ -1944,7 +1930,7 @@ def replay_transcript_to_ui_messages(
         *,
         latency_ms: int | None = None,
         usage: dict[str, int] | None = None,
-        request_usages: list[dict[str, int | str]] | None = None,
+        request_usages: list[dict[str, int]] | None = None,
         context_window_tokens: int | None = None,
     ) -> None:
         for i in range(len(messages) - 1, -1, -1):
@@ -2465,7 +2451,7 @@ def replay_transcript_to_ui_messages(
                 [
                     sanitized
                     for item in cast(list[object], raw_request_usages)
-                    if (sanitized := _sanitize_request_usage(item))
+                    if (sanitized := _sanitize_turn_usage(item))
                     is not None
                 ]
                 if isinstance(raw_request_usages, list)

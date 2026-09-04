@@ -1196,7 +1196,6 @@
         "reusedDetail": "{{tokens}} 재사용 ({{percent}}%)",
         "output": "출력 {{tokens}}",
         "duration": "생성 {{duration}}",
-        "cacheUnavailable": "재사용 세부 정보를 사용할 수 없음",
         "empty": "첫 응답 후 사용량이 표시됩니다."
       },
       "queued": {

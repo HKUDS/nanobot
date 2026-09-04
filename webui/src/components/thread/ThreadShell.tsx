@@ -150,7 +150,7 @@ function recentComposerRequestUsage(messages: UIMessage[]): ComposerRequestUsage
       const estimatedTokens = request.estimated_tokens;
       const generationMs = request.generation_ms;
       recent.push({
-        id: request.call_id || `${turnKey}:${requestIndex}`,
+        id: `${turnKey}:${requestIndex}`,
         timestamp: message.completedAt ?? message.createdAt,
         inputTokens,
         ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)

@@ -1551,7 +1551,6 @@ def test_settings_payload_includes_token_usage_summary(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     get_llm_usage_store().record(
         LLMCallRecord(
-            call_id="a" * 32,
             started_at_ms=int(time.time() * 1000),
             duration_ms=1,
             provider="openai",
@@ -1584,7 +1583,6 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     get_llm_usage_store().record(
         LLMCallRecord(
-            call_id="b" * 32,
             started_at_ms=int(time.time() * 1000),
             duration_ms=1,
             provider="openai",

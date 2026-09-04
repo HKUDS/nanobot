@@ -653,7 +653,7 @@ describe("ThreadComposer", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("29,400 input");
   });
 
-  it("does not imply cache reuse when the provider omits cache metrics", () => {
+  it("keeps context usage visible when the provider omits cache metrics", () => {
     render(
       <ThreadComposer
         onSend={() => {}}
@@ -670,7 +670,10 @@ describe("ThreadComposer", () => {
 
     fireEvent.click(screen.getByTestId("composer-context-usage"));
 
-    expect(screen.getByText("Reuse details unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context 7%" })).toHaveAttribute(
+      "aria-valuenow",
+      "7",
+    );
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {

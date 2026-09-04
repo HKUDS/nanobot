@@ -276,9 +276,7 @@ export function ComposerUsagePopover({
                               tokens: numberFormatter.format(cachedTokens),
                               percent: cachedPercentage,
                             })
-                          : t("thread.composer.context.cacheUnavailable", {
-                              defaultValue: "Reuse details unavailable",
-                            }),
+                          : null,
                         t("thread.composer.context.output", {
                           defaultValue: "{{tokens}} output",
                           tokens: numberFormatter.format(request.outputTokens),
@@ -376,20 +374,15 @@ export function ComposerUsagePopover({
                   </span>
                 </div>
               </>
-            ) : (
+            ) : null}
+
+            {normalizedRequests.length === 0 && !requestsUnavailable ? (
               <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-                {t(
-                  normalizedRequests.length > 0 || requestsUnavailable
-                    ? "thread.composer.context.cacheUnavailable"
-                    : "thread.composer.context.empty",
-                  {
-                    defaultValue: normalizedRequests.length > 0 || requestsUnavailable
-                      ? "Reuse details unavailable."
-                      : "Usage appears after the first response.",
-                  },
-                )}
+                {t("thread.composer.context.empty", {
+                  defaultValue: "Usage appears after the first response.",
+                })}
               </p>
-            )}
+            ) : null}
           </div>
         </PopoverContent>
       </TooltipProvider>

@@ -53,7 +53,7 @@ from nanobot.webui.websocket_logging import websockets_server_logger
 
 if TYPE_CHECKING:
     from nanobot.bus.outbound_events import ProgressEvent, RecoveryStateEvent
-    from nanobot.providers.base import LLMRequestUsage, LLMUsage
+    from nanobot.providers.base import LLMUsage
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
@@ -1156,7 +1156,7 @@ class WebSocketChannel(BaseChannel):
         *,
         goal_state: dict[str, Any] | None = None,
         usage: LLMUsage | None = None,
-        request_usages: tuple[LLMRequestUsage, ...] = (),
+        request_usages: tuple[LLMUsage, ...] = (),
         context_window_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
