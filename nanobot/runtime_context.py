@@ -26,10 +26,18 @@ class RuntimeContextBlock:
     """Provider-owned context appended verbatim to the current user content.
 
     Callers must bound and delimit content obtained from untrusted sources.
+
+    ``ephemeral`` blocks are appended to the in-flight request only. They are
+    never written to the session row, never replayed on later turns, and never
+    reach the display/strip paths. Use them for session-constant riders (for
+    example a channel delivery contract) that would otherwise be duplicated into
+    history on every turn. The default (``False``) preserves the durable
+    lifecycle: appended, persisted, and replayed on every later turn.
     """
 
     source: str
     content: str
+    ephemeral: bool = False
 
 
 def normalize_webui_quote(value: Any) -> str | None:
@@ -92,8 +100,26 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
         if not source:
             raise ValueError("runtime context block source must not be empty")
         if content:
-            blocks.append(RuntimeContextBlock(source=source, content=content))
+            blocks.append(
+                RuntimeContextBlock(
+                    source=source,
+                    content=content,
+                    ephemeral=block.ephemeral,
+                )
+            )
     return blocks
+
+
+def persistable_runtime_context_blocks(
+    blocks: Sequence[RuntimeContextBlock],
+) -> list[RuntimeContextBlock]:
+    """Return only blocks that belong in durable history.
+
+    Ephemeral blocks are appended to the in-flight request but never written to
+    the session row, so they are dropped here. The result feeds every path that
+    persists a user message and is later replayed via ``get_history``.
+    """
+    return [block for block in blocks if not block.ephemeral]
 
 
 def runtime_context_blocks_from_metadata(

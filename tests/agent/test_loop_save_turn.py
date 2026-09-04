@@ -228,6 +228,71 @@ def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> N
     assert PENDING_FOLLOWUPS_KEY not in session.metadata
 
 
+def test_persist_user_message_excludes_ephemeral_runtime_context(
+    tmp_path: Path,
+) -> None:
+    """Ephemeral blocks must never be written to the replayed session row, while
+    durable blocks keep today's persist-and-replay behavior (issue #5586)."""
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:chat")
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat",
+            content="what's the weather",
+        ),
+        session,
+        runtime_context_blocks=[
+            RuntimeContextBlock(source="goal", content="durable goal context"),
+            RuntimeContextBlock(
+                source="voice_contract",
+                content="replies here are spoken aloud; keep to short plain prose",
+                ephemeral=True,
+            ),
+        ],
+    )
+
+    assert persisted is True
+    message = session.messages[-1]
+    assert "durable goal context" in message["content"]
+    assert "spoken aloud" not in message["content"]
+    # The durable marker must only reference the durable block's source.
+    assert message[RUNTIME_CONTEXT_HISTORY_META]["sources"] == ["goal"]
+    # Display strips the durable block and never sees the ephemeral rider.
+    visible = public_history_message(message)["content"]
+    assert visible == "what's the weather"
+
+
+def test_persist_user_message_skips_row_for_ephemeral_only_context(
+    tmp_path: Path,
+) -> None:
+    """An ephemeral block with no user text leaves no history row behind."""
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:chat")
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat",
+            content="",
+        ),
+        session,
+        runtime_context_blocks=[
+            RuntimeContextBlock(
+                source="voice_contract",
+                content="replies here are spoken aloud",
+                ephemeral=True,
+            ),
+        ],
+    )
+
+    assert persisted is False
+    assert session.messages == []
+
+
 def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
