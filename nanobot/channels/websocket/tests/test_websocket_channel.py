@@ -2815,6 +2815,7 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -2836,6 +2837,7 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None
         "reason": "tool_state_unknown",
         "attempts": 1,
     }]
+    channel._persist_turn_transcript_event.assert_not_called()
 
 
 @pytest.mark.asyncio

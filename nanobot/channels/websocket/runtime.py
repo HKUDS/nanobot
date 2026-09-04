@@ -49,13 +49,13 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
+from nanobot.webui.outbound_wire import WebUIWirePayload, WebUIWirePersistence
 from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
 
 if TYPE_CHECKING:
-    from nanobot.bus.outbound_events import ProgressEvent, RecoveryStateEvent
-    from nanobot.providers.base import LLMUsage
+    from nanobot.bus.outbound_events import ProgressEvent
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
@@ -1376,82 +1376,46 @@ class WebSocketChannel(BaseChannel):
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
-    async def send_turn_end(
+    async def send_payload(
         self,
         chat_id: str,
-        latency_ms: int | None = None,
+        payload: WebUIWirePayload,
         *,
-        goal_state: dict[str, Any] | None = None,
-        usage: LLMUsage | None = None,
-        round_usages: tuple[LLMUsage, ...] = (),
-        context_window_tokens: int | None = None,
+        persistence: WebUIWirePersistence,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
     ) -> None:
-        """Signal that the agent has fully finished processing the current turn."""
+        """Persist as requested, frame, and fan out one encoded WebUI payload."""
         conns = list(self._subs.get(chat_id, ()))
-        body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
-        turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
-        if isinstance(turn_id, str) and turn_id:
-            body["turn_id"] = turn_id
-        if latency_ms is not None:
-            body["latency_ms"] = int(latency_ms)
-        if goal_state is not None:
-            body["goal_state"] = goal_state
-        if usage is not None:
-            body["usage"] = usage.to_turn_dict()
-        if round_usages:
-            body["round_usages"] = [item.to_turn_dict() for item in round_usages]
-        if context_window_tokens is not None:
-            body["context_window_tokens"] = int(context_window_tokens)
-        canonical_webui_turn = (metadata or {}).get("webui") is True
-        prior_persistence_failure = (
-            canonical_webui_turn
-            and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
-        )
-        persisted = self._persist_turn_transcript_event(
-            chat_id,
-            body,
-            metadata=metadata,
-            phase="complete",
-            transcript_overrides=(
-                {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
-                if prior_persistence_failure
-                else None
-            ),
-        )
-        if persisted:
-            # A successful completion either has a complete transcript or now
-            # carries a durable incomplete marker. The HTTP replay path can
-            # recover the latter from session history after a gateway restart.
-            clear_websocket_turn_if_current(chat_id, turn_owner)
-        self._clear_stream_buffers(chat_id)
+        body: dict[str, Any] = dict(payload)
+        if persistence == "turn_complete":
+            canonical_webui_turn = (metadata or {}).get("webui") is True
+            prior_persistence_failure = (
+                canonical_webui_turn
+                and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
+            )
+            persisted = self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="complete",
+                transcript_overrides=(
+                    {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
+                    if prior_persistence_failure
+                    else None
+                ),
+            )
+            if persisted:
+                # A successful completion either has a complete transcript or now
+                # carries a durable incomplete marker. The HTTP replay path can
+                # recover the latter from session history after a gateway restart.
+                clear_websocket_turn_if_current(chat_id, turn_owner)
+            self._clear_stream_buffers(chat_id)
         raw = json.dumps(body, ensure_ascii=False)
         if not conns:
             return
         for connection in conns:
-            await self._safe_send_to(connection, raw, label=" turn_end ")
-
-    async def send_recovery_state(
-        self,
-        chat_id: str,
-        event: RecoveryStateEvent,
-    ) -> None:
-        """Publish one structured recovery transition without chat pollution."""
-        body: dict[str, Any] = {
-            "event": "recovery_state",
-            "chat_id": chat_id,
-            "status": event.status,
-            "recovery_id": event.recovery_id,
-            "attempts": event.attempts,
-        }
-        if event.reason:
-            body["reason"] = event.reason
-        if event.can_continue is not None:
-            body["can_continue"] = event.can_continue
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in list(self._subs.get(chat_id, ())):
-            await self._safe_send_to(connection, raw, label=" recovery_state ")
+            await self._safe_send_to(connection, raw, label=f" {body['event']} ")
 
     async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
         """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""

@@ -25,13 +25,17 @@ from nanobot.webui.metadata import (
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
 )
+from nanobot.webui.outbound_wire import (
+    WebUIWirePayload,
+    WebUIWirePersistence,
+    encode_recovery_state,
+    encode_turn_end,
+)
 from nanobot.webui.session_identity import webui_session_key
 from nanobot.webui.session_projection import WebUISessionProjection
 
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
-
-    from nanobot.providers.base import LLMUsage
 
 
 class WebUIOutboundTransport(Protocol):
@@ -65,7 +69,15 @@ class WebUIOutboundTransport(Protocol):
         provenance: dict[str, Any],
     ) -> None: ...
 
-    async def send_recovery_state(self, chat_id: str, event: RecoveryStateEvent) -> None: ...
+    async def send_payload(
+        self,
+        chat_id: str,
+        payload: WebUIWirePayload,
+        *,
+        persistence: WebUIWirePersistence,
+        metadata: dict[str, Any] | None = None,
+        turn_owner: str | None = None,
+    ) -> None: ...
 
     async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None: ...
 
@@ -76,19 +88,6 @@ class WebUIOutboundTransport(Protocol):
         *,
         started_at: float | None = None,
         turn_id: str | None = None,
-    ) -> None: ...
-
-    async def send_turn_end(
-        self,
-        chat_id: str,
-        latency_ms: int | None = None,
-        *,
-        goal_state: dict[str, Any] | None = None,
-        usage: LLMUsage | None = None,
-        round_usages: tuple[LLMUsage, ...] = (),
-        context_window_tokens: int | None = None,
-        metadata: dict[str, Any] | None = None,
-        turn_owner: str | None = None,
     ) -> None: ...
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None: ...
@@ -182,7 +181,11 @@ class WebUIOutboundProjector:
             return
         if isinstance(event, RecoveryStateEvent):
             if conns:
-                await self._transport.send_recovery_state(msg.chat_id, event)
+                await self._transport.send_payload(
+                    msg.chat_id,
+                    encode_recovery_state(msg.chat_id, event),
+                    persistence="transient",
+                )
             return
         if isinstance(event, GoalStateSyncEvent):
             if conns:
@@ -221,13 +224,10 @@ class WebUIOutboundProjector:
                 else "thread"
             )
             turn_owner = (msg.metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
-            await self._transport.send_turn_end(
+            await self._transport.send_payload(
                 msg.chat_id,
-                latency_ms=event.latency_ms,
-                goal_state=event.goal_state,
-                usage=event.usage,
-                round_usages=event.round_usages,
-                context_window_tokens=event.context_window_tokens,
+                encode_turn_end(msg.chat_id, event, msg.metadata),
+                persistence="turn_complete",
                 metadata=msg.metadata,
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
