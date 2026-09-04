@@ -302,8 +302,15 @@ async def maybe_generate_webui_title_after_turn(
     provider: LLMProvider,
     model: str,
 ) -> bool:
-    if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+    if channel != "websocket":
         return False
+    if metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+        # The frontend WebSocket envelope does not always carry ``webui: true``.
+        # ``mark_webui_session`` records the flag on the session object itself, so
+        # fall back to that authoritative marker before skipping title generation.
+        session = sessions.get_or_create(session_key)
+        if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+            return False
     origin_session_key = f"{channel}:{chat_id}"
     return await maybe_generate_webui_title(
         sessions=sessions,
@@ -775,9 +782,16 @@ class WebuiTurnCoordinator:
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
         title_context = _validated_llm_runtime(event.runtime)
+        if title_context is None:
+            return
+        # ``event.context.metadata`` mirrors the frontend envelope, which does not
+        # always include ``webui: true``. The session object is marked via
+        # ``mark_webui_session`` when the WebUI turn starts, so treat that as an
+        # authoritative fallback; otherwise WebUI titles are silently skipped.
+        session = self.sessions.get_or_create(event.context.session_key)
         if (
-            event.context.metadata.get("webui") is not True
-            or title_context is None
+            event.context.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+            and session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
         ):
             return
 

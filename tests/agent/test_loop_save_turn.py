@@ -494,6 +494,63 @@ async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Pa
     loop.provider.chat_with_retry.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_generate_webui_title_when_envelope_omits_webui_flag(
+    tmp_path: Path,
+) -> None:
+    """A session marked WebUI must still get a title even when the frontend
+    envelope omits ``webui: true`` (regression for issue #5647)."""
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content='"优化 WebUI 侧边栏"', finish_reason="stop")
+    )
+    session = loop.sessions.get_or_create("websocket:chat-no-envelope-flag")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "帮我优化一下 webui 的 sidebar")
+    session.add_message("assistant", "好的，我来优化侧边栏。")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title_after_turn(
+        channel="websocket",
+        chat_id="chat-no-envelope-flag",
+        metadata={},  # frontend envelope did not include ``webui: true``
+        sessions=loop.sessions,
+        session_key="websocket:chat-no-envelope-flag",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is True
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
+
+
+@pytest.mark.asyncio
+async def test_skip_title_for_plain_websocket_when_envelope_omits_webui_flag(
+    tmp_path: Path,
+) -> None:
+    """A plain (non-WebUI) websocket session must not get a title when neither the
+    envelope nor the session object is marked WebUI."""
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:plain-chat")
+    session.add_message("user", "hello there")
+    session.add_message("assistant", "hi")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title_after_turn(
+        channel="websocket",
+        chat_id="plain-chat",
+        metadata={},
+        sessions=loop.sessions,
+        session_key="websocket:plain-chat",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    loop.provider.chat_with_retry.assert_not_awaited()
+
+
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
     loop = _mk_loop()
     session = Session(key="test:runtime-only")
