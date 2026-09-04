@@ -1205,10 +1205,10 @@
         "contextTitle": "Context",
         "recentRounds": "Recent rounds",
         "inputTrend": "Input tokens",
-        "input": "{{tokens}} input",
-        "reusedDetail": "{{tokens}} reused ({{percent}}%)",
-        "output": "{{tokens}} output",
-        "duration": "{{duration}} generation"
+        "input": "Input tokens",
+        "cacheHitRate": "KV cache hit rate",
+        "output": "Output tokens",
+        "duration": "Generation time"
       },
       "queued": {
         "label": "Queued guidance",

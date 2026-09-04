@@ -1191,10 +1191,10 @@
         "contextTitle": "Contexte",
         "recentRounds": "Tours récents",
         "inputTrend": "Jetons d’entrée",
-        "input": "{{tokens}} en entrée",
-        "reusedDetail": "{{tokens}} réutilisés ({{percent}} %)",
-        "output": "{{tokens}} en sortie",
-        "duration": "Génération {{duration}}"
+        "input": "Jetons d’entrée",
+        "cacheHitRate": "Taux de succès du cache KV",
+        "output": "Jetons de sortie",
+        "duration": "Temps de génération"
       },
       "queued": {
         "label": "Guidage en attente",

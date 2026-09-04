@@ -1191,10 +1191,10 @@
         "contextTitle": "Ngữ cảnh",
         "recentRounds": "Các lượt gần đây",
         "inputTrend": "Token đầu vào",
-        "input": "Đầu vào {{tokens}}",
-        "reusedDetail": "Tái sử dụng {{tokens}} ({{percent}}%)",
-        "output": "Đầu ra {{tokens}}",
-        "duration": "Tạo nội dung {{duration}}"
+        "input": "Token đầu vào",
+        "cacheHitRate": "Tỷ lệ hit KV cache",
+        "output": "Token đầu ra",
+        "duration": "Thời gian tạo"
       },
       "queued": {
         "label": "Hướng dẫn đang chờ",

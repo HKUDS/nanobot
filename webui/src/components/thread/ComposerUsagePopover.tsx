@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { Fragment, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -12,7 +12,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { fmtDateTime, formatCompactTokenCount } from "@/lib/format";
+import { formatCompactTokenCount, formatTurnLatency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export interface ComposerContextUsage {
@@ -33,14 +33,6 @@ export interface ComposerRoundUsage {
 interface NormalizedRoundUsage extends ComposerRoundUsage {
   cachedTokens?: number;
   outputTokens: number;
-}
-
-function compactDuration(milliseconds: number): string {
-  const seconds = milliseconds / 1_000;
-  if (seconds < 10) return `${seconds.toFixed(1)}s`;
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${Math.round(seconds % 60)}s`;
 }
 
 function normalizeRounds(
@@ -107,6 +99,16 @@ export function ComposerUsagePopover({
   const ringLength = ringCircumference * meterPercentage / 100;
   const maxInputTokens = Math.max(0, ...normalizedRounds.map((round) => round.inputTokens));
   const numberFormatter = new Intl.NumberFormat(i18n.language);
+  const percentageFormatter = new Intl.NumberFormat(i18n.language, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  });
+  const roundDateFormatter = new Intl.DateTimeFormat(i18n.language, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <Popover>
@@ -252,61 +254,69 @@ export function ComposerUsagePopover({
                     })}
                   </span>
                 </div>
-                <div className="mt-2 grid grid-cols-[2.5rem_1fr] gap-2">
-                  <div
-                    aria-hidden="true"
-                    className="flex h-28 flex-col justify-between text-right text-[10px] tabular-nums text-muted-foreground/70"
-                  >
-                    <span>{formatCompactTokenCount(maxInputTokens)}</span>
-                    <span>0</span>
-                  </div>
-                  <div
-                    role="group"
-                    aria-label={t("thread.composer.context.inputTrend", {
-                      defaultValue: "Input tokens",
-                    })}
-                    className="flex h-28 items-end gap-1.5 border-b border-border/60"
-                  >
+                <div
+                  role="group"
+                  aria-label={t("thread.composer.context.inputTrend", {
+                    defaultValue: "Input tokens",
+                  })}
+                  className="mt-2 flex h-28 items-end gap-1.5 border-b border-border/60"
+                >
                     {normalizedRounds.map((round, index) => {
                       const cachedKnown = typeof round.cachedTokens === "number";
                       const cachedTokens = round.cachedTokens ?? 0;
                       const notReusedTokens = Math.max(0, round.inputTokens - cachedTokens);
-                      const cachedPercentage = cachedKnown
-                        ? Math.round(cachedTokens / round.inputTokens * 100)
+                      const cacheHitRate = cachedKnown
+                        ? percentageFormatter.format(cachedTokens / round.inputTokens)
                         : null;
                       const cachedHeight = cachedKnown
                         ? cachedTokens / round.inputTokens * 100
                         : 0;
                       const barHeight = round.inputTokens / maxInputTokens * 108;
-                      const detailParts = [
-                        fmtDateTime(round.timestamp, i18n.language),
-                        t("thread.composer.context.input", {
-                          defaultValue: "{{tokens}} input",
-                          tokens: numberFormatter.format(round.inputTokens),
-                        }),
+                      const timestampLabel = roundDateFormatter.format(round.timestamp);
+                      const detailRows = [
+                        {
+                          key: "input",
+                          label: t("thread.composer.context.input", {
+                            defaultValue: "Input tokens",
+                          }),
+                          value: numberFormatter.format(round.inputTokens),
+                        },
                         cachedKnown
-                          ? t("thread.composer.context.reusedDetail", {
-                              defaultValue: "{{tokens}} reused ({{percent}}%)",
-                              tokens: numberFormatter.format(cachedTokens),
-                              percent: cachedPercentage,
-                            })
+                          ? {
+                              key: "cache-hit-rate",
+                              label: t("thread.composer.context.cacheHitRate", {
+                                defaultValue: "KV cache hit rate",
+                              }),
+                              value: cacheHitRate!,
+                            }
                           : null,
-                        t("thread.composer.context.output", {
-                          defaultValue: "{{tokens}} output",
-                          tokens: numberFormatter.format(round.outputTokens),
-                        }),
+                        {
+                          key: "output",
+                          label: t("thread.composer.context.output", {
+                            defaultValue: "Output tokens",
+                          }),
+                          value: numberFormatter.format(round.outputTokens),
+                        },
                         typeof round.generationMs === "number"
-                          ? t("thread.composer.context.duration", {
-                              defaultValue: "{{duration}} generation",
-                              duration: compactDuration(round.generationMs),
-                            })
+                          ? {
+                              key: "duration",
+                              label: t("thread.composer.context.duration", {
+                                defaultValue: "Generation time",
+                              }),
+                              value: formatTurnLatency(round.generationMs, i18n.language),
+                            }
                           : null,
-                        (round.estimatedTokens ?? 0) > 0
-                          ? t("message.usage.estimated", {
-                              defaultValue: "Includes estimated usage",
-                            })
-                          : null,
-                      ].filter((part): part is string => !!part);
+                      ].filter((row): row is NonNullable<typeof row> => !!row);
+                      const detailNote = (round.estimatedTokens ?? 0) > 0
+                        ? t("message.usage.estimated", {
+                            defaultValue: "Includes estimated usage",
+                          })
+                        : null;
+                      const detailLabel = [
+                        timestampLabel,
+                        ...detailRows.map((row) => `${row.label} ${row.value}`),
+                        detailNote,
+                      ].filter((part): part is string => !!part).join(". ");
 
                       return (
                         <span
@@ -314,6 +324,10 @@ export function ComposerUsagePopover({
                           className={cn(
                             "flex h-full min-w-0 flex-1 items-end justify-center rounded-sm",
                             "opacity-70 transition-opacity hover:opacity-100",
+                            index === 0 && "justify-start",
+                            normalizedRounds.length > 1
+                              && index === normalizedRounds.length - 1
+                              && "justify-end",
                             index === normalizedRounds.length - 1 && "opacity-100",
                           )}
                         >
@@ -322,7 +336,7 @@ export function ComposerUsagePopover({
                               <span
                                 role="img"
                                 tabIndex={0}
-                                aria-label={detailParts.join(". ")}
+                                aria-label={detailLabel}
                                 data-testid="round-usage-bar"
                                 className={cn(
                                   "flex w-full max-w-7 flex-col overflow-hidden rounded-t-[3px] bg-muted",
@@ -358,22 +372,32 @@ export function ComposerUsagePopover({
                               <span
                                 className="block font-medium text-foreground"
                               >
-                                {detailParts[0]}
+                                {timestampLabel}
                               </span>
-                              {detailParts.slice(1).map((part, detailIndex) => (
+                              <span className="mt-1 grid grid-cols-[max-content_max-content] gap-x-3 gap-y-0.5">
+                                {detailRows.map((row) => (
+                                  <Fragment key={row.key}>
+                                    <span className="text-muted-foreground">
+                                      {row.label}
+                                    </span>
+                                    <span className="text-end tabular-nums text-foreground">
+                                      {row.value}
+                                    </span>
+                                  </Fragment>
+                                ))}
+                              </span>
+                              {detailNote ? (
                                 <span
-                                  key={detailIndex}
-                                  className="mt-0.5 block text-muted-foreground"
+                                  className="mt-1 block text-muted-foreground"
                                 >
-                                  {part}
+                                  {detailNote}
                                 </span>
-                              ))}
+                              ) : null}
                             </TooltipContent>
                           </Tooltip>
                         </span>
                       );
                     })}
-                  </div>
                 </div>
               </>
             ) : null}

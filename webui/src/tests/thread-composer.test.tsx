@@ -610,7 +610,7 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("Reused")).not.toBeInTheDocument();
     expect(screen.queryByText("Not reused")).not.toBeInTheDocument();
     expect(screen.getByRole("img", {
-      name: /29,400 input.*26,180 reused \(89%\).*416 output.*40s generation/i,
+      name: /input tokens 29,400.*KV cache hit rate 89%.*output tokens 416.*generation time 40/i,
     })).toBeInTheDocument();
   });
 
@@ -641,16 +641,20 @@ describe("ThreadComposer", () => {
     );
 
     await user.click(screen.getByTestId("composer-context-usage"));
-    const firstBar = screen.getByRole("img", { name: /18,000 input/i });
-    const secondBar = screen.getByRole("img", { name: /29,400 input/i });
+    const firstBar = screen.getByRole("img", { name: /input tokens 18,000/i });
+    const secondBar = screen.getByRole("img", { name: /input tokens 29,400/i });
     expect(firstBar).toHaveAttribute("data-testid", "round-usage-bar");
     expect(secondBar).toHaveAttribute("data-testid", "round-usage-bar");
     await user.hover(firstBar);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("18,000 input");
+    const firstTooltip = await screen.findByRole("tooltip");
+    expect(within(firstTooltip).getByText("Input tokens")).toBeInTheDocument();
+    expect(within(firstTooltip).getByText("18,000")).toBeInTheDocument();
     await user.click(firstBar);
     await user.unhover(firstBar);
     await user.hover(secondBar);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("29,400 input");
+    const secondTooltip = await screen.findByRole("tooltip");
+    expect(within(secondTooltip).getByText("Input tokens")).toBeInTheDocument();
+    expect(within(secondTooltip).getByText("29,400")).toBeInTheDocument();
   });
 
   it("keeps context usage visible when the provider omits cache metrics", () => {

@@ -1205,10 +1205,10 @@
         "contextTitle": "Contexto",
         "recentRounds": "Rodadas recentes",
         "inputTrend": "Tokens de entrada",
-        "input": "{{tokens}} de entrada",
-        "reusedDetail": "{{tokens}} reutilizados ({{percent}}%)",
-        "output": "{{tokens}} de saída",
-        "duration": "Geração {{duration}}"
+        "input": "Tokens de entrada",
+        "cacheHitRate": "Taxa de acertos do cache KV",
+        "output": "Tokens de saída",
+        "duration": "Tempo de geração"
       },
       "queued": {
         "label": "Guia em fila",

@@ -1191,10 +1191,10 @@
         "contextTitle": "コンテキスト",
         "recentRounds": "最近のラウンド",
         "inputTrend": "入力トークン",
-        "input": "入力 {{tokens}}",
-        "reusedDetail": "{{tokens}} を再利用（{{percent}}%）",
-        "output": "出力 {{tokens}}",
-        "duration": "生成 {{duration}}"
+        "input": "入力トークン",
+        "cacheHitRate": "KV キャッシュヒット率",
+        "output": "出力トークン",
+        "duration": "生成時間"
       },
       "queued": {
         "label": "保留中のガイド",

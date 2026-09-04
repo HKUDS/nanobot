@@ -1191,10 +1191,10 @@
         "contextTitle": "컨텍스트",
         "recentRounds": "최근 라운드",
         "inputTrend": "입력 토큰",
-        "input": "입력 {{tokens}}",
-        "reusedDetail": "{{tokens}} 재사용 ({{percent}}%)",
-        "output": "출력 {{tokens}}",
-        "duration": "생성 {{duration}}"
+        "input": "입력 토큰",
+        "cacheHitRate": "KV 캐시 적중률",
+        "output": "출력 토큰",
+        "duration": "생성 시간"
       },
       "queued": {
         "label": "대기 중인 안내",

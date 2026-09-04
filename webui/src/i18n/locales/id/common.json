@@ -1191,10 +1191,10 @@
         "contextTitle": "Konteks",
         "recentRounds": "Putaran terbaru",
         "inputTrend": "Token masukan",
-        "input": "Masukan {{tokens}}",
-        "reusedDetail": "{{tokens}} digunakan ulang ({{percent}}%)",
-        "output": "Keluaran {{tokens}}",
-        "duration": "Pembuatan {{duration}}"
+        "input": "Token masukan",
+        "cacheHitRate": "Rasio hit KV cache",
+        "output": "Token keluaran",
+        "duration": "Waktu pembuatan"
       },
       "queued": {
         "label": "Panduan antrean",

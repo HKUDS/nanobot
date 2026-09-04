@@ -494,7 +494,7 @@ describe("ThreadShell", () => {
     fireEvent.click(trigger);
     expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(4);
     expect(screen.getByRole("img", {
-      name: /16,400 input.*16,180 reused \(99%\).*236 output/i,
+      name: /input tokens 16,400.*KV cache hit rate 99%.*output tokens 236/i,
     })).toBeInTheDocument();
   });
 
