@@ -17,7 +17,6 @@ from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli.runtime_config import _migrate_cron_store
 from nanobot.cli.webui_support import (
@@ -40,6 +39,7 @@ from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
