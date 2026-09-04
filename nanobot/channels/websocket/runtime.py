@@ -864,6 +864,14 @@ class WebSocketChannel(BaseChannel):
         envelope: dict[str, Any],
     ) -> None:
         """Delegate one typed envelope to the WebUI application router."""
+        await self._dispatch_active_envelope(connection, client_id, envelope)
+
+    async def _dispatch_active_envelope(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
         if not self._register_connection_outbound(connection):
             return
         await self._commands.dispatch(connection, client_id, envelope)
