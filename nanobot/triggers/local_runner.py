@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.automation_turns import AutomationTurnError
+from nanobot.agent.automation_turns import AutomationTurnDiscardedError, AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -78,6 +78,27 @@ async def run_local_trigger_queue(
                     delivery.id,
                     delivery.trigger_id,
                     exc,
+                )
+            except AutomationTurnDiscardedError as exc:
+                error = str(exc) or exc.__class__.__name__
+                store.record_delivery(
+                    delivery.trigger_id,
+                    status="error",
+                    error="discarded: " + error,
+                    run_at_ms=delivery.created_at_ms,
+                )
+                _write_delivery_run_record(
+                    store,
+                    delivery,
+                    status="discarded",
+                    error=error,
+                )
+                store.complete_delivery(delivery)
+                logger.info(
+                    "Trigger: discarded delivery {} for {}: {}",
+                    delivery.id,
+                    delivery.trigger_id,
+                    error,
                 )
             except AutomationTurnError as exc:
                 error = str(exc) or exc.__class__.__name__

@@ -893,6 +893,8 @@ class AgentLoop:
         """Stop active work for *key* and forget its cached session."""
         self._discarding_sessions.add(key)
         try:
+            for _, coordinator in self._automation_turn_coordinators:
+                coordinator.discard_session(key)
             self.sessions.invalidate(key)
             await self._cancel_active_tasks(key)
         finally:
@@ -1293,6 +1295,9 @@ class AgentLoop:
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
+                if effective_key in self._discarding_sessions:
+                    logger.info("Dropping inbound message for discarded session {}", effective_key)
+                    continue
                 if (
                     msg.require_existing_session
                     and self.sessions.get_cached(effective_key) is None
@@ -1503,6 +1508,7 @@ class AgentLoop:
                         queue = self._pending_queues.pop(session_key, None)
                     else:
                         queue = pending
+                    discarding = session_key in self._discarding_sessions
                     if queue is not None:
                         leftover = 0
                         while True:
@@ -1510,7 +1516,8 @@ class AgentLoop:
                                 item = queue.get_nowait()
                             except asyncio.QueueEmpty:
                                 break
-                            await self.bus.publish_inbound(item)
+                            if not discarding:
+                                await self.bus.publish_inbound(item)
                             leftover += 1
                         if leftover:
                             logger.info(
@@ -1519,7 +1526,8 @@ class AgentLoop:
                             )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
-                    await self._publish_next_deferred_automation_turn(session_key)
+                    if not discarding:
+                        await self._publish_next_deferred_automation_turn(session_key)
         finally:
             if (
                 recovery_task_registered
@@ -1529,7 +1537,8 @@ class AgentLoop:
                 recovery_admission.unregister_recovery_task(session_key, current_task)
             if pending is None:
                 await delivery.idle()
-                await self._publish_next_deferred_automation_turn(session_key)
+                if session_key not in self._discarding_sessions:
+                    await self._publish_next_deferred_automation_turn(session_key)
 
     async def aclose(self) -> None:
         """Stop active work, then close resources owned by the agent loop.

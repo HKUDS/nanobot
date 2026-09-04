@@ -13,6 +13,10 @@ class AutomationTurnError(RuntimeError):
     """Raised when an automation turn reaches the agent and finishes with an error."""
 
 
+class AutomationTurnDiscardedError(AutomationTurnError):
+    """Raised when a session discard cancels an automation turn."""
+
+
 async def publish_next_deferred_turn(
     *,
     deferred_queues: dict[str, list[InboundMessage]],
@@ -140,3 +144,25 @@ class AutomationTurnCoordinator:
             if pending_id:
                 pending_ids.add(pending_id)
         return pending_ids
+
+    def discard_session(self, session_key: str) -> int:
+        """Cancel deferred and in-flight automation turns for a discarded session."""
+        dropped = self.deferred_queues.pop(session_key, [])
+        discarded = 0
+        seen: set[str] = set()
+        for msg in [*dropped, *self._pending_messages_by_turn_id.values()]:
+            if msg.session_key != session_key:
+                continue
+            turn_id = self._turn_id(msg)
+            if not turn_id or turn_id in seen:
+                continue
+            seen.add(turn_id)
+            future = self._waiters.get(turn_id)
+            if future is not None and not future.done():
+                future.set_exception(
+                    AutomationTurnDiscardedError(
+                        f"automation turn for discarded session {session_key!r}"
+                    )
+                )
+                discarded += 1
+        return discarded
