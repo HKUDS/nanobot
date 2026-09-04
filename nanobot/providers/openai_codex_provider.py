@@ -92,8 +92,7 @@ class _CodexGenerationTracer:
             output = {
                 "content": result.content,
                 "tool_calls": [
-                    {"name": call.name, "arguments": call.arguments}
-                    for call in result.tool_calls
+                    {"name": call.name, "arguments": call.arguments} for call in result.tool_calls
                 ],
             }
         self._finish(output=output, usage_details=_usage_details(result.usage))
@@ -340,7 +339,7 @@ class OpenAICodexProvider(LLMProvider):
             ):
                 stage = "codex_compaction"
                 history_items = responses_state_items(sanitized_state) or []
-                delta_items = input_items[len(history_items):]
+                delta_items = input_items[len(history_items) :]
                 compact_body = {
                     **body,
                     "input": [*history_items, {"type": "compaction_trigger"}],
@@ -357,7 +356,8 @@ class OpenAICodexProvider(LLMProvider):
                         if compact_result.provider_state is not None
                         else None
                     )
-                    # validate() already raised if this were empty/wrong-typed.
+                    if not compact_items:
+                        raise RuntimeError("Codex compaction returned no compaction item")
                     body["input"] = [
                         *_retained_compaction_messages(history_items),
                         *compact_items,
@@ -562,9 +562,7 @@ def _validate_compaction_result(result: LLMResponse) -> None:
     fine but the caller can't use gets traced as an error, not a success.
     """
     compact_items = (
-        responses_state_items(result.provider_state)
-        if result.provider_state is not None
-        else None
+        responses_state_items(result.provider_state) if result.provider_state is not None else None
     )
     if not compact_items or compact_items[-1].get("type") not in {
         "compaction",
