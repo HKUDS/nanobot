@@ -515,11 +515,12 @@ def _tool_result_json_summary(text: str) -> str | None:
     if isinstance(payload, dict):
         scalars: list[tuple[str, Any]] = []
         containers: list[tuple[str, str]] = []
-        for key, value in payload.items():
+        # JSON objects always have string keys; values remain dynamic here.
+        for key, value in cast(dict[str, Any], payload).items():
             if isinstance(value, dict):
-                containers.append((key, f"<object: {len(value)} fields>"))
+                containers.append((key, f"<object: {len(cast(dict[str, Any], value))} fields>"))
             elif isinstance(value, list):
-                containers.append((key, f"<array: {len(value)} items>"))
+                containers.append((key, f"<array: {len(cast(list[Any], value))} items>"))
             elif isinstance(value, str) and len(value) > _TOOL_RESULT_SUMMARY_SCALAR_CHARS:
                 scalars.append(
                     (
@@ -539,7 +540,7 @@ def _tool_result_json_summary(text: str) -> str | None:
         if omitted:
             summary["<omitted root fields>"] = omitted
     elif isinstance(payload, list):
-        summary = {"<root>": f"array with {len(payload)} items"}
+        summary = {"<root>": f"array with {len(cast(list[Any], payload))} items"}
     else:
         return None
 
