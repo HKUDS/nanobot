@@ -444,6 +444,7 @@ def _run_gateway(
 
     # Use the same runtime identity for foreground and managed gateway processes.
     from nanobot.config.loader import get_config_path
+    from nanobot.gateway.direct_delivery import run_direct_delivery_server
     from nanobot.gateway.runtime import (
         GatewayClientLease,
         GatewayRuntime,
@@ -763,6 +764,15 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
+    direct_delivery_cfg = config.gateway.direct_delivery
+    if direct_delivery_cfg.enabled:
+        console.print(
+            "[green]✓[/green] Direct delivery: "
+            f"http://{direct_delivery_cfg.host}:{direct_delivery_cfg.port}"
+            f"{direct_delivery_cfg.path} → {direct_delivery_cfg.channel}:"
+            f"{direct_delivery_cfg.chat_id}"
+        )
+
     async def _health_server(host: str, health_port: int) -> None:
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
@@ -944,6 +954,14 @@ def _run_gateway(
                 ),
                 asyncio.create_task(_run_agent(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
+                *(
+                    [asyncio.create_task(
+                        run_direct_delivery_server(direct_delivery_cfg, bus),
+                        name="nanobot-direct-delivery",
+                    )]
+                    if direct_delivery_cfg.enabled
+                    else []
+                ),
                 asyncio.create_task(
                     run_local_trigger_queue(
                         store=trigger_store,
