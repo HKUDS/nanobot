@@ -399,6 +399,11 @@ class ToolsConfig(Base):
         default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
     max_session_messages_per_minute: int = Field(default=6, ge=1)
+    mcp_schema_budget_bytes: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("mcpSchemaBudgetBytes", "mcp_schema_budget_bytes"),
+    )  # Opt-in byte budget for model-visible MCP schemas; 0 keeps all schemas visible
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
     webui_allow_local_service_access: bool = Field(
         default=True,

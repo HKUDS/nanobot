@@ -25,6 +25,7 @@ from nanobot.agent.context_governance import (
     TranscriptBuilder,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tool_schema_selection import select_model_visible_tools
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.llm_usage.context import (
@@ -104,6 +105,7 @@ class AgentRunSpec:
     workspace: Path | None = None
     session_key: str | None = None
     context_block_limit: int | None = None
+    mcp_schema_budget_bytes: int = 0
     provider_retry_mode: str = "standard"
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
@@ -180,11 +182,7 @@ class AgentRunner:
             continuation = self._build_continuation_message(spec)
             if continuation is not None:
                 injections = [continuation]
-        if (
-            not injections
-            and wait_at_terminal
-            and injection_cycles < _MAX_INJECTION_CYCLES
-        ):
+        if not injections and wait_at_terminal and injection_cycles < _MAX_INJECTION_CYCLES:
             injections = await self._drain_injections(spec, terminal=True)
             real_injection = bool(injections)
         if not injections:
@@ -203,9 +201,7 @@ class AgentRunner:
                     "pending_tool_calls": [],
                 }
                 if conversation_state is not None:
-                    checkpoint["provider_state"] = conversation_state.checkpoint(
-                        messages
-                    )
+                    checkpoint["provider_state"] = conversation_state.checkpoint(messages)
                 await self._emit_checkpoint(
                     spec,
                     checkpoint,
@@ -214,7 +210,10 @@ class AgentRunner:
         if real_injection:
             logger.info(
                 "Injected {} follow-up message(s) {} ({}/{})",
-                len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
+                len(injections),
+                phase,
+                injection_cycles,
+                _MAX_INJECTION_CYCLES,
             )
         else:
             logger.info("Injected caller-requested continuation {}", phase)
@@ -247,21 +246,14 @@ class AgentRunner:
         nothing to inject. Messages beyond the cap are logged so they
         are not silently lost.
         """
-        callback = (
-            spec.terminal_injection_callback
-            if terminal
-            else spec.injection_callback
-        )
+        callback = spec.terminal_injection_callback if terminal else spec.injection_callback
         if callback is None:
             return []
         try:
             signature = inspect.signature(callback)
-            accepts_limit = (
-                "limit" in signature.parameters
-                or any(
-                    parameter.kind is inspect.Parameter.VAR_KEYWORD
-                    for parameter in signature.parameters.values()
-                )
+            accepts_limit = "limit" in signature.parameters or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
             )
             if accepts_limit:
                 items = await callback(limit=_MAX_INJECTIONS_PER_TURN)
@@ -289,7 +281,9 @@ class AgentRunner:
             dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
             logger.warning(
                 "Injection callback returned {} messages, capping to {} ({} dropped)",
-                len(injected_messages), _MAX_INJECTIONS_PER_TURN, dropped,
+                len(injected_messages),
+                _MAX_INJECTIONS_PER_TURN,
+                dropped,
             )
             injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
@@ -412,6 +406,11 @@ class AgentRunner:
             state=spec.provider_state,
             session_id=spec.session_key,
         )
+        model_visible_tools = select_model_visible_tools(
+            spec.tools.get_definitions(),
+            spec.initial_messages,
+            spec.mcp_schema_budget_bytes,
+        )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -449,6 +448,7 @@ class AgentRunner:
                 context,
                 request_state=request_state,
                 transcript=messages,
+                model_visible_tools=model_visible_tools,
             )
             assert request_state.messages is not None
             messages_for_model = request_state.messages
@@ -500,7 +500,9 @@ class AgentRunner:
                         "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": [
+                            tc.to_openai_tool_call() for tc in response.tool_calls
+                        ],
                     },
                 )
 
@@ -565,7 +567,10 @@ class AgentRunner:
                 length_recovery_parts.clear()
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
-                    spec, messages, None, injection_cycles,
+                    spec,
+                    messages,
+                    None,
+                    injection_cycles,
                     phase="after tool execution",
                 )
                 if _drained:
@@ -581,11 +586,12 @@ class AgentRunner:
                 )
 
             clean = hook.finalize_content(context, response.content)
-            if (
-                response.finish_reason
-                not in {"error", "length", "refusal", "content_filter"}
-                and is_blank_text(clean)
-            ):
+            if response.finish_reason not in {
+                "error",
+                "length",
+                "refusal",
+                "content_filter",
+            } and is_blank_text(clean):
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
                     logger.warning(
@@ -637,14 +643,16 @@ class AgentRunner:
                     if hook.wants_streaming():
                         context.stream_continues_current_message = True
                         await hook.on_stream_end(context, resuming=True)
-                    messages.append(conversation_state.project_response_message(
-                        build_assistant_message(
-                            clean,
-                            reasoning_content=response.reasoning_content,
-                            thinking_blocks=response.thinking_blocks,
-                        ),
-                        response,
-                    ))
+                    messages.append(
+                        conversation_state.project_response_message(
+                            build_assistant_message(
+                                clean,
+                                reasoning_content=response.reasoning_content,
+                                thinking_blocks=response.thinking_blocks,
+                            ),
+                            response,
+                        )
+                    )
                     messages.append(build_length_recovery_message(clean or ""))
                     await hook.after_iteration(context)
                     continue
@@ -682,13 +690,14 @@ class AgentRunner:
             # If injections are found we keep the stream alive (resuming=True)
             # so streaming channels don't prematurely finalize the card.
             should_continue, injection_cycles = await self._try_drain_injections(
-                spec, messages, assistant_message, injection_cycles,
+                spec,
+                messages,
+                assistant_message,
+                injection_cycles,
                 conversation_state=conversation_state,
                 phase="after final response",
                 iteration=iteration,
-                allow_continuation=(
-                    response.finish_reason not in {"refusal", "content_filter"}
-                ),
+                allow_continuation=(response.finish_reason not in {"refusal", "content_filter"}),
                 wait_at_terminal=(
                     assistant_message is not None
                     and response.finish_reason
@@ -719,7 +728,10 @@ class AgentRunner:
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
                 should_continue, injection_cycles = await self._try_drain_injections(
-                    spec, messages, None, injection_cycles,
+                    spec,
+                    messages,
+                    None,
+                    injection_cycles,
                     phase="after LLM error",
                 )
                 if should_continue:
@@ -737,7 +749,10 @@ class AgentRunner:
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
                 should_continue, injection_cycles = await self._try_drain_injections(
-                    spec, messages, None, injection_cycles,
+                    spec,
+                    messages,
+                    None,
+                    injection_cycles,
                     phase="after empty response",
                 )
                 if should_continue:
@@ -788,7 +803,10 @@ class AgentRunner:
             # We include them before the no-tools finalization pass so the
             # final response can account for every known follow-up.
             drained_after_max_iterations, injection_cycles = await self._try_drain_injections(
-                spec, messages, None, injection_cycles,
+                spec,
+                messages,
+                None,
+                injection_cycles,
                 phase="after max_iterations",
             )
             if drained_after_max_iterations:
@@ -806,9 +824,7 @@ class AgentRunner:
                 terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts:
                 terminal_tail = f"\n\n{terminal_content.lstrip()}"
-                final_content = (
-                    "".join(length_recovery_parts).rstrip() + terminal_tail
-                ).strip()
+                final_content = ("".join(length_recovery_parts).rstrip() + terminal_tail).strip()
                 pending_stream_content = terminal_tail
             else:
                 final_content = terminal_content
@@ -861,6 +877,7 @@ class AgentRunner:
         context: AgentHookContext,
         *,
         request_state: ModelRequestState,
+        model_visible_tools: list[dict[str, Any]],
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
     ) -> LLMResponse:
@@ -876,7 +893,7 @@ class AgentRunner:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=tool_definitions,
+            tools=model_visible_tools,
         )
         wants_streaming = hook.wants_streaming()
 
@@ -911,9 +928,7 @@ class AgentRunner:
                 if not native_reasoning_open:
                     return
                 native_reasoning_open = False
-                native_reasoning_close_task = asyncio.create_task(
-                    hook.emit_reasoning_end()
-                )
+                native_reasoning_close_task = asyncio.create_task(hook.emit_reasoning_end())
 
             close_task = native_reasoning_close_task
             cancellation: asyncio.CancelledError | None = None
@@ -962,7 +977,7 @@ class AgentRunner:
                 prev_clean = strip_reasoning_tags(thinking_buf)
                 thinking_buf += delta
                 new_clean = strip_reasoning_tags(thinking_buf)
-                incremental = new_clean[len(prev_clean):]
+                incremental = new_clean[len(prev_clean) :]
                 if incremental:
                     context.streamed_reasoning = True
                     native_reasoning_open = True
@@ -993,14 +1008,13 @@ class AgentRunner:
         # timeout for streaming while preserving NANOBOT_LLM_TIMEOUT_S=0 as an
         # opt-out for all LLM wall-clock timeouts.
         outer_timeout_s = (
-            max(300.0, timeout_s * 2)
-            if wants_streaming and timeout_s is not None
-            else timeout_s
+            max(300.0, timeout_s * 2) if wants_streaming and timeout_s is not None else timeout_s
         )
         request_started_at = time.perf_counter()
         try:
             response = (
-                await coro if outer_timeout_s is None
+                await coro
+                if outer_timeout_s is None
                 else await asyncio.wait_for(coro, timeout=outer_timeout_s)
             )
         except asyncio.CancelledError:
@@ -1036,16 +1050,16 @@ class AgentRunner:
         # hosted calls after the provider returns its final error response.
         if response.finish_reason == "error":
             for event in list(active_hosted_tools.values()):
-                await _provider_tool_event({
-                    **event,
-                    "phase": "error",
-                    "result": None,
-                    "error": response.content
-                    or "Model request failed before the provider-hosted tool completed.",
-                })
-        dropped, all_dropped, original_finish_reason = (
-            self._drop_malformed_tool_calls(response)
-        )
+                await _provider_tool_event(
+                    {
+                        **event,
+                        "phase": "error",
+                        "result": None,
+                        "error": response.content
+                        or "Model request failed before the provider-hosted tool completed.",
+                    }
+                )
+        dropped, all_dropped, original_finish_reason = self._drop_malformed_tool_calls(response)
         if (
             all_dropped
             and original_finish_reason in ("tool_calls", "function_call")
@@ -1056,11 +1070,16 @@ class AgentRunner:
                 dropped,
             )
             retry_messages = self._malformed_tool_call_retry_messages(
-                messages, response.content,
+                messages,
+                response.content,
             )
             return await self._request_model(
-                spec, retry_messages, hook, context,
+                spec,
+                retry_messages,
+                hook,
+                context,
                 request_state=request_state,
+                model_visible_tools=model_visible_tools,
                 malformed_retry=True,
                 transcript=None,
             )
@@ -1073,7 +1092,8 @@ class AgentRunner:
                 "Malformed tool calls persisted after retry; falling back to no-tools request",
             )
             fallback_messages = self._malformed_tool_call_retry_messages(
-                messages, response.content,
+                messages,
+                response.content,
             )
             return await self._request_no_tools(
                 spec,
@@ -1134,10 +1154,7 @@ class AgentRunner:
             "a final answer only if no tool is required."
         )
         if assistant_text:
-            note += (
-                f"\n\nPrevious assistant text before the malformed calls:\n"
-                f"{assistant_text}"
-            )
+            note += f"\n\nPrevious assistant text before the malformed calls:\n{assistant_text}"
         retry_messages.append({"role": "user", "content": note})
         return retry_messages
 
@@ -1180,9 +1197,7 @@ class AgentRunner:
     ) -> tuple[str | None, LLMUsage | None]:
         compaction = request_state.compaction
         request_messages = (
-            compaction.request_messages(messages)
-            if compaction is not None
-            else messages
+            compaction.request_messages(messages) if compaction is not None else messages
         )
         retry_messages = self._budget_exhausted_finalization_messages(request_messages)
         try:
@@ -1249,9 +1264,7 @@ class AgentRunner:
         timeout_s = self._resolve_llm_timeout_s(spec)
         try:
             response = (
-                await coro
-                if timeout_s is None
-                else await asyncio.wait_for(coro, timeout=timeout_s)
+                await coro if timeout_s is None else await asyncio.wait_for(coro, timeout=timeout_s)
             )
         except asyncio.TimeoutError:
             response = LLMResponse(
@@ -1404,6 +1417,10 @@ class AgentRunner:
 
     @staticmethod
     def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:
-        if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+        if (
+            messages
+            and messages[-1].get("role") == "assistant"
+            and not messages[-1].get("tool_calls")
+        ):
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))

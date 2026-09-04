@@ -1177,6 +1177,7 @@ class AgentLoop:
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
                 context_block_limit=self.context_block_limit,
+                mcp_schema_budget_bytes=self.tools_config.mcp_schema_budget_bytes,
                 provider_retry_mode=self.provider_retry_mode,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
