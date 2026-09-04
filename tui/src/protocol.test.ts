@@ -757,6 +757,84 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("validates structured retry and failed turn events", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const events: InboundEvent[] = []
+      const statuses: string[] = []
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        onEvent: (event) => events.push(event),
+        onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        state: "waiting",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+        retry_after_s: 3.5,
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        state: "cleared",
+        attempt: 4,
+        max_attempts: 4,
+        error_kind: "connection",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "turn_end",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Model provider request failed.",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        state: "waiting",
+        attempt: 0,
+        error_kind: "connection",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "turn_end",
+        chat_id: "chat",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_attempts: 0,
+      }) })
+
+      expect(events).toHaveLength(3)
+      expect(events[0]?.event).toBe("retry_status")
+      expect(events[1]?.event).toBe("retry_status")
+      expect(events[2]?.event).toBe("turn_end")
+      expect(statuses).toContain("error:gateway sent an invalid event")
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("reattaches the same generated chat after a transient disconnect", async () => {
     const original = globalThis.WebSocket
     const sockets: FakeSocket[] = []

@@ -9,6 +9,7 @@ from nanobot.bus.runtime_events import (
     SessionTurnPersisted,
     SessionTurnStarted,
     TurnCompleted,
+    TurnRetryStatusChanged,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
 )
@@ -92,6 +93,39 @@ async def test_runtime_event_publisher_builds_context_from_inbound_message() -> 
 
 
 @pytest.mark.asyncio
+async def test_runtime_event_publisher_emits_structured_retry_status() -> None:
+    bus = RuntimeEventBus()
+    seen: list[TurnRetryStatusChanged] = []
+    publisher = RuntimeEventPublisher(bus)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+        metadata={"turn_id": "turn-1"},
+    )
+    bus.subscribe(seen.append, TurnRetryStatusChanged)
+
+    await publisher.retry_status_changed(
+        msg,
+        "websocket:chat-a",
+        state="waiting",
+        attempt=2,
+        max_attempts=4,
+        error_kind="connection",
+        next_retry_at=123.5,
+    )
+
+    assert len(seen) == 1
+    assert seen[0].context.chat_id == "chat-a"
+    assert seen[0].state == "waiting"
+    assert seen[0].attempt == 2
+    assert seen[0].max_attempts == 4
+    assert seen[0].error_kind == "connection"
+    assert seen[0].next_retry_at == 123.5
+
+
+@pytest.mark.asyncio
 async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> None:
     bus = RuntimeEventBus()
     seen: list[object] = []
@@ -110,6 +144,9 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
         chat_id="direct",
         session_key="cli:direct",
         metadata={"source": "test"},
+        outcome="failed",
+        failure_kind="model",
+        failure_error_kind="billing",
     )
     await publisher.turn_completed(
         channel="cli",
@@ -126,6 +163,9 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.runtime == "runtime"
     assert first.usage == first_round + second_round
     assert first.round_usages == (first_round, second_round)
+    assert first.outcome == "failed"
+    assert first.failure_kind == "model"
+    assert first.failure_error_kind == "billing"
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None

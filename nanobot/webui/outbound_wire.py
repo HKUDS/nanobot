@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
-from nanobot.bus.outbound_events import RecoveryStateEvent, TurnEndEvent
+from nanobot.bus.outbound_events import RecoveryStateEvent, RetryStatusEvent, TurnEndEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 
@@ -23,6 +24,15 @@ class RecoveryStateWirePayload(_ChatWirePayload):
     can_continue: NotRequired[bool]
 
 
+class RetryStatusWirePayload(_ChatWirePayload):
+    event: Literal["retry_status"]
+    state: str
+    attempt: int
+    max_attempts: NotRequired[int]
+    error_kind: str
+    retry_after_s: NotRequired[float]
+
+
 class TurnEndWirePayload(_ChatWirePayload):
     event: Literal["turn_end"]
     latency_ms: NotRequired[int]
@@ -30,9 +40,16 @@ class TurnEndWirePayload(_ChatWirePayload):
     usage: NotRequired[dict[str, int]]
     round_usages: NotRequired[list[dict[str, int]]]
     context_window_tokens: NotRequired[int]
+    outcome: NotRequired[str]
+    failure_kind: NotRequired[str]
+    failure_error_kind: NotRequired[str]
+    failure_attempts: NotRequired[int]
+    failure_message: NotRequired[str]
 
 
-WebUIWirePayload: TypeAlias = RecoveryStateWirePayload | TurnEndWirePayload
+WebUIWirePayload: TypeAlias = (
+    RecoveryStateWirePayload | RetryStatusWirePayload | TurnEndWirePayload
+)
 WebUIWirePersistence: TypeAlias = Literal["transient", "turn_complete"]
 
 
@@ -52,6 +69,29 @@ def encode_recovery_state(
         payload["reason"] = event.reason
     if event.can_continue is not None:
         payload["can_continue"] = event.can_continue
+    return payload
+
+
+def encode_retry_status(
+    chat_id: str,
+    event: RetryStatusEvent,
+    metadata: Mapping[str, object] | None = None,
+) -> RetryStatusWirePayload:
+    """Project one transient retry transition onto its stable wire shape."""
+    payload: RetryStatusWirePayload = {
+        "event": "retry_status",
+        "chat_id": chat_id,
+        "state": event.state,
+        "attempt": event.attempt,
+        "error_kind": event.error_kind,
+    }
+    turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
+    if isinstance(turn_id, str) and turn_id:
+        payload["turn_id"] = turn_id
+    if event.max_attempts is not None:
+        payload["max_attempts"] = event.max_attempts
+    if event.next_retry_at is not None:
+        payload["retry_after_s"] = max(0.0, event.next_retry_at - time.time())
     return payload
 
 
@@ -78,4 +118,14 @@ def encode_turn_end(
         payload["round_usages"] = [item.to_turn_dict() for item in event.round_usages]
     if event.context_window_tokens is not None:
         payload["context_window_tokens"] = int(event.context_window_tokens)
+    if event.outcome != "completed":
+        payload["outcome"] = event.outcome
+    if event.failure_kind is not None:
+        payload["failure_kind"] = event.failure_kind
+    if event.failure_error_kind is not None:
+        payload["failure_error_kind"] = event.failure_error_kind
+    if event.failure_attempts is not None:
+        payload["failure_attempts"] = int(event.failure_attempts)
+    if event.failure_message is not None:
+        payload["failure_message"] = event.failure_message
     return payload

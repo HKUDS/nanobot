@@ -12,6 +12,8 @@ from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     ProgressEvent,
     RecoveryStateEvent,
+    RetryStatusEvent,
+    RetryWaitEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -29,6 +31,7 @@ from nanobot.webui.outbound_wire import (
     WebUIWirePayload,
     WebUIWirePersistence,
     encode_recovery_state,
+    encode_retry_status,
     encode_turn_end,
 )
 from nanobot.webui.session_identity import webui_session_key
@@ -135,6 +138,9 @@ class WebUIOutboundProjector:
 
     async def send(self, msg: OutboundMessage) -> None:
         event = outbound_event_from_message(msg)
+        if isinstance(event, RetryWaitEvent):
+            logger.debug("dropping legacy retry_wait event for chat_id={}", msg.chat_id)
+            return
         progress_event = event if isinstance(event, ProgressEvent) else None
         if isinstance(event, RuntimeModelUpdatedEvent):
             await self._transport.send_runtime_model_updated(
@@ -147,6 +153,7 @@ class WebUIOutboundProjector:
         if not conns:
             quiet_events = (
                 ProgressEvent,
+                RetryStatusEvent,
                 UserInputEvent,
                 TurnEndEvent,
                 SessionUpdatedEvent,
@@ -184,6 +191,14 @@ class WebUIOutboundProjector:
                 await self._transport.send_payload(
                     msg.chat_id,
                     encode_recovery_state(msg.chat_id, event),
+                    persistence="transient",
+                )
+            return
+        if isinstance(event, RetryStatusEvent):
+            if conns:
+                await self._transport.send_payload(
+                    msg.chat_id,
+                    encode_retry_status(msg.chat_id, event, msg.metadata),
                     persistence="transient",
                 )
             return

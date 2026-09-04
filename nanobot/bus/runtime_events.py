@@ -67,6 +67,18 @@ class TurnRunStatusChanged:
 
 
 @dataclass(frozen=True)
+class TurnRetryStatusChanged:
+    """Sanitized model retry state changed for the active turn."""
+
+    context: RuntimeEventContext
+    state: str
+    attempt: int
+    max_attempts: int | None
+    error_kind: str
+    next_retry_at: float | None = None
+
+
+@dataclass(frozen=True)
 class TurnCompleted:
     """A turn has delivered its final user-visible response."""
 
@@ -76,6 +88,9 @@ class TurnCompleted:
     usage: LLMUsage | None = None
     # Logical model rounds in display order; recovery dispatches are aggregated.
     round_usages: tuple[LLMUsage, ...] = ()
+    outcome: str = "completed"
+    failure_kind: str | None = None
+    failure_error_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +124,7 @@ RuntimeEvent = (
     | TurnRuntimeAdmitted
     | SessionTurnPersisted
     | TurnRunStatusChanged
+    | TurnRetryStatusChanged
     | TurnCompleted
     | GoalStateChanged
     | RuntimeModelChanged
@@ -119,6 +135,7 @@ RuntimeEventType = (
     | type[TurnRuntimeAdmitted]
     | type[SessionTurnPersisted]
     | type[TurnRunStatusChanged]
+    | type[TurnRetryStatusChanged]
     | type[TurnCompleted]
     | type[GoalStateChanged]
     | type[RuntimeModelChanged]
@@ -308,6 +325,33 @@ class RuntimeEventPublisher:
             )
         )
 
+    async def retry_status_changed(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        *,
+        state: str,
+        attempt: int,
+        max_attempts: int | None,
+        error_kind: str,
+        next_retry_at: float | None,
+    ) -> None:
+        await self.bus.publish(
+            TurnRetryStatusChanged(
+                context=self._context(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    session_key=session_key,
+                    metadata=msg.metadata,
+                ),
+                state=state,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error_kind=error_kind,
+                next_retry_at=next_retry_at,
+            )
+        )
+
     async def session_turn_persisted(
         self,
         msg: InboundMessage,
@@ -337,6 +381,9 @@ class RuntimeEventPublisher:
         chat_id: str,
         session_key: str,
         metadata: dict[str, Any] | None,
+        outcome: str = "completed",
+        failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
     ) -> None:
         await self.bus.publish(
             TurnCompleted(
@@ -350,6 +397,9 @@ class RuntimeEventPublisher:
                 runtime=self._turn_runtime.pop(session_key, None),
                 usage=self._turn_usage.pop(session_key, None),
                 round_usages=self._turn_round_usages.pop(session_key, ()),
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=failure_error_kind,
             )
         )
 
