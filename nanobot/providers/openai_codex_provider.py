@@ -91,8 +91,7 @@ class _CodexGenerationTracer:
             output = {
                 "content": result.content,
                 "tool_calls": [
-                    {"name": call.name, "arguments": call.arguments}
-                    for call in result.tool_calls
+                    {"name": call.name, "arguments": call.arguments} for call in result.tool_calls
                 ],
             }
         self._finish(output=output, usage_details=_usage_details(result.usage))
@@ -543,9 +542,7 @@ def _validate_compaction_result(result: LLMResponse) -> None:
     fine but the caller can't use gets traced as an error, not a success.
     """
     compact_items = (
-        responses_state_items(result.provider_state)
-        if result.provider_state is not None
-        else None
+        responses_state_items(result.provider_state) if result.provider_state is not None else None
     )
     if not compact_items or compact_items[-1].get("type") not in {
         "compaction",
