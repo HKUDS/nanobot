@@ -308,6 +308,44 @@ async def test_recovered_retry_cause_is_not_reused_by_turn_end(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_terminal_error_overrides_stale_waiting_retry_cause(tmp_path) -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus,
+        sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe(runtime_events)
+    context = RuntimeEventContext(
+        channel="websocket",
+        chat_id="chat-retry",
+        session_key="websocket:chat-retry",
+        metadata={"webui": True, "webui_turn_id": "turn-1"},
+    )
+
+    await runtime_events.publish(TurnRetryStatusChanged(
+        context=context,
+        state="waiting",
+        attempt=1,
+        max_attempts=4,
+        error_kind="connection",
+    ))
+    await runtime_events.publish(TurnCompleted(
+        context=context,
+        outcome="failed",
+        failure_kind="model",
+        failure_error_kind="billing",
+    ))
+
+    completed = bus.publish_outbound.await_args.args[0]
+    assert isinstance(completed.event, TurnEndEvent)
+    assert completed.event.failure_error_kind == "billing"
+    assert completed.event.failure_attempts is None
+
+
+@pytest.mark.asyncio
 async def test_session_input_is_projected_by_the_webui_coordinator(
     tmp_path,
     monkeypatch,

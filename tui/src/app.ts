@@ -404,6 +404,7 @@ function connectionStatusText(
 }
 
 function retryFailureLabel(errorKind: string): string {
+  if (errorKind === "billing") return "Model provider quota is unavailable"
   if (errorKind === "connection") return "Could not connect to the model provider"
   if (errorKind === "timeout") return "Model provider request timed out"
   if (errorKind === "rate_limit") return "Model provider rate limit reached"
@@ -413,9 +414,12 @@ function retryFailureLabel(errorKind: string): string {
 
 export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
   const reason = retryFailureLabel(errorKind || "unknown")
+  if (errorKind === "billing") {
+    return `${reason}. Add credit or check billing for the provider account, then try again.`
+  }
   const retryResult = typeof attempts === "number" && Number.isInteger(attempts) && attempts > 0
     ? ` The request still failed on attempt ${attempts}, so retries stopped.`
-    : " Retries stopped."
+    : ""
   return `${reason}.${retryResult} Check the provider configuration or service status, then try again.`
 }
 

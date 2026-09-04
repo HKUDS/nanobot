@@ -1530,13 +1530,15 @@
       "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
     },
     "modelRequestFailed": {
+      "billingTitle": "模型供應商帳戶額度不足",
+      "billingBody": "請為供應商帳戶儲值或檢查帳單狀態後再試。",
       "connectionTitle": "無法連線至模型供應商",
       "timeoutTitle": "模型供應商請求逾時",
       "rateLimitTitle": "模型供應商請求受到限制",
       "serverTitle": "模型供應商服務發生錯誤",
       "unknownTitle": "模型供應商請求失敗",
       "bodyWithAttempt": "模型供應商請求在第 {{attempts}} 次嘗試後仍然失敗，已停止重試。請檢查供應商設定或服務狀態後再試。",
-      "body": "模型供應商請求失敗，已停止重試。請檢查供應商設定或服務狀態後再試。"
+      "body": "請檢查供應商設定或服務狀態後再試。"
     }
   },
   "workspace": {

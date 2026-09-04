@@ -143,6 +143,7 @@ class TurnDelivery:
     _stream_segment: int = field(init=False, default=0)
     _stream_open: bool = field(init=False, default=False)
     _stop_reason: str | None = field(init=False, default=None)
+    _failure_error_kind: str | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.delivery_message = dataclasses.replace(
@@ -219,8 +220,14 @@ class TurnDelivery:
     def record_usage(self, round_usages: list[LLMUsage]) -> None:
         self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages)
 
-    def record_stop_reason(self, stop_reason: str) -> None:
+    def record_stop_reason(
+        self,
+        stop_reason: str,
+        *,
+        failure_error_kind: str | None = None,
+    ) -> None:
         self._stop_reason = stop_reason
+        self._failure_error_kind = failure_error_kind
 
     def background_response(
         self,
@@ -282,6 +289,7 @@ class TurnDelivery:
                 metadata=self.lifecycle_message.metadata,
                 outcome=outcome,
                 failure_kind=failure_kind,
+                failure_error_kind=self._failure_error_kind,
             )
 
     async def fail(self, *, publish_completion: bool) -> None:

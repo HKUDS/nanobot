@@ -134,6 +134,7 @@ class AgentRunResult:
     round_usages: list[LLMUsage] = field(default_factory=list)
     stop_reason: str = "completed"
     error: str | None = None
+    failure_error_kind: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
     # Terminal tail to emit when the preceding final-content prefix was already streamed.
@@ -400,6 +401,7 @@ class AgentRunner:
         usage: LLMUsage | None = None
         round_usages: list[LLMUsage] = []
         error: str | None = None
+        failure_error_kind: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
@@ -734,6 +736,7 @@ class AgentRunner:
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
+                failure_error_kind = LLMProvider.public_error_kind(response)
                 break
             if is_blank_text(clean):
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
@@ -831,6 +834,7 @@ class AgentRunner:
             round_usages=round_usages,
             stop_reason=stop_reason,
             error=error,
+            failure_error_kind=failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,

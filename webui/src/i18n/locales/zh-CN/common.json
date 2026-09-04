@@ -1544,13 +1544,15 @@
       "body": "网关拒绝了这条消息。请检查消息内容或附件后重试。"
     },
     "modelRequestFailed": {
+      "billingTitle": "模型提供商账户额度不足",
+      "billingBody": "请为提供商账户充值或检查账单状态后重试。",
       "connectionTitle": "无法连接模型提供商",
       "timeoutTitle": "模型提供商请求超时",
       "rateLimitTitle": "模型提供商请求受限",
       "serverTitle": "模型提供商服务异常",
       "unknownTitle": "模型提供商请求失败",
       "bodyWithAttempt": "模型提供商请求在第 {{attempts}} 次尝试后仍然失败，已停止重试。请检查提供商配置或服务状态后重试。",
-      "body": "模型提供商请求失败，已停止重试。请检查提供商配置或服务状态后重试。"
+      "body": "请检查提供商配置或服务状态后重试。"
     }
   },
   "workspace": {

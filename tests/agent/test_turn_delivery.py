@@ -60,7 +60,7 @@ async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
         content="hello",
     )
     delivery = TurnDeliveryFactory(bus, runtime_bus).create(msg, msg.session_key)
-    delivery.record_stop_reason("error")
+    delivery.record_stop_reason("error", failure_error_kind="billing")
 
     await delivery.complete(
         OutboundMessage(
@@ -74,6 +74,7 @@ async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
     assert len(seen) == 1
     assert seen[0].outcome == "failed"
     assert seen[0].failure_kind == "model"
+    assert seen[0].failure_error_kind == "billing"
     assert bus.outbound_size == 0
 
 

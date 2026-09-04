@@ -100,6 +100,44 @@ async def test_chat_with_retry_emits_structured_retry_lifecycle(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_clears_waiting_status_on_terminal_non_transient_error(
+    monkeypatch,
+) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(
+            content="network connection failed",
+            finish_reason="error",
+            error_kind="connection",
+        ),
+        LLMResponse(
+            content="401 unauthorized",
+            finish_reason="error",
+            error_status_code=401,
+            error_should_retry=False,
+        ),
+    ])
+    statuses: list[ModelRetryStatus] = []
+
+    async def _fake_sleep(_delay: float) -> None:
+        return None
+
+    async def _status(status: ModelRetryStatus) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_status=_status,
+    )
+
+    assert response.content == "401 unauthorized"
+    assert [status.state for status in statuses] == ["waiting", "cleared"]
+    assert statuses[-1].attempt == 2
+    assert statuses[-1].error_kind == "unknown"
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_does_not_retry_non_transient_error(monkeypatch) -> None:
     provider = ScriptedProvider([
         LLMResponse(content="401 unauthorized", finish_reason="error"),

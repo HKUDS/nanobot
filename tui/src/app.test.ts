@@ -13,7 +13,12 @@ import {
   type TestRendererSetup,
 } from "@opentui/core/testing"
 
-import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
+import {
+  NanobotTui,
+  sessionExitMessage,
+  terminalModelFailureLine,
+  type AppOptions,
+} from "./app"
 import type {
   MessageOptions,
   RecoveryState,
@@ -56,6 +61,17 @@ function occurrences(frame: string, value: string): number {
 test("formats a reusable session ID after exit", () => {
   expect(sessionExitMessage("resume-chat")).toBe(
     "Resume with: nanobot agent --session websocket:resume-chat\n",
+  )
+})
+
+test("formats actionable terminal model failures without inventing retries", () => {
+  expect(terminalModelFailureLine("billing")).toBe(
+    "Model provider quota is unavailable. "
+      + "Add credit or check billing for the provider account, then try again.",
+  )
+  expect(terminalModelFailureLine("unknown")).toBe(
+    "Model provider request failed. "
+      + "Check the provider configuration or service status, then try again.",
   )
 })
 

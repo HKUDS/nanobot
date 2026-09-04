@@ -735,7 +735,13 @@ class WebuiTurnCoordinator:
         if not self._is_websocket_event(event.context):
             return
         retry_status = self._retry_status_by_session.pop(event.context.session_key, None)
-        model_retry_status = retry_status if event.failure_kind == "model" else None
+        model_retry_status = (
+            retry_status
+            if event.failure_kind == "model"
+            and retry_status is not None
+            and retry_status.state == "exhausted"
+            else None
+        )
         msg = self._ctx_msg(event.context)
         await self.handle_turn_end(
             msg,
@@ -749,7 +755,12 @@ class WebuiTurnCoordinator:
             outcome=event.outcome,
             failure_kind=event.failure_kind,
             failure_error_kind=(
-                model_retry_status.error_kind if model_retry_status is not None else None
+                event.failure_error_kind
+                or (
+                    model_retry_status.error_kind
+                    if model_retry_status is not None
+                    else None
+                )
             ),
             failure_attempts=(
                 model_retry_status.attempt if model_retry_status is not None else None
