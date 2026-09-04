@@ -2097,6 +2097,7 @@ describe("NanobotTui layout", () => {
 
     expect(recorder.recordedFrames.length).toBeGreaterThan(0)
     expect(recorder.recordedFrames.every(({ frame }) => frame.includes("feat:"))).toBeTrue()
+    expect(recorder.recordedFrames.every(({ frame }) => /│\s+feat:/u.test(frame))).toBeTrue()
     expect(recorder.recordedFrames.every(({ frame }) => (
       frame.includes("Include the reason in the body.")
     ))).toBeTrue()
@@ -2130,12 +2131,17 @@ describe("NanobotTui layout", () => {
     transcript.history([{ role: "assistant", content: response }])
     await setup.flush()
 
-    const code = setup.captureSpans().lines
-      .flatMap((line) => line.spans)
-      .find((span) => span.text.includes("feat:"))
+    const codeLine = setup.captureSpans().lines.find((line) => (
+      line.spans.some((span) => span.text.includes("feat:"))
+    ))
+    const code = codeLine?.spans.find((span) => span.text.includes("feat:"))
+    const rail = codeLine?.spans.find((span) => span.text.includes("│"))
+    const frame = setup.captureCharFrame()
 
-    expect(setup.captureCharFrame()).toContain("feat:")
+    expect(frame).toContain("feat:")
+    expect(frame).toMatch(/│\s+feat:/u)
     expect(code?.fg.toInts().slice(0, 3)).toEqual([24, 24, 27])
+    expect(rail?.fg.toInts().slice(0, 3)).toEqual([212, 212, 216])
   })
 
   test("renders assistant LaTeX as Unicode text without changing code", async () => {

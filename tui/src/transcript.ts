@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  CodeRenderable,
   MarkdownRenderable,
   RGBA,
   ScrollBoxRenderable,
@@ -64,6 +65,7 @@ const ACTIVITY_PREVIEW_LINES = 4
 // additional visible frames. Paint the first token immediately, then coalesce
 // subsequent deltas to the renderer cadence.
 const STREAM_FLUSH_MS = 32
+const CODE_RAIL_INDENT = 2
 
 export interface UserMessageMedia {
   kind?: MediaAttachment["kind"]
@@ -139,6 +141,7 @@ export class Transcript {
   private navigationTimer: ReturnType<typeof setTimeout> | null = null
   private pendingStream = ""
   private streamTimer: ReturnType<typeof setTimeout> | null = null
+  private codeRailColor: RGBA
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -147,6 +150,7 @@ export class Transcript {
     private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
     private readonly workspace = "",
   ) {
+    this.codeRailColor = RGBA.fromHex(theme.border)
     this.root = new ScrollBoxRenderable(renderer, {
       id: "nanobot-tui-transcript",
       width: "100%",
@@ -175,6 +179,7 @@ export class Transcript {
   setTheme(theme: TranscriptTheme): void {
     const previousSyntax = this.theme.syntax
     this.theme = theme
+    this.codeRailColor = RGBA.fromHex(theme.border)
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const message of this.userMessages) {
       message.renderable.content = this.userMessageContent(
@@ -659,6 +664,23 @@ export class Transcript {
     return new StyledText(chunks)
   }
 
+  private decorateCodeBlock(code: CodeRenderable): CodeRenderable {
+    code.marginLeft = CODE_RAIL_INDENT
+    const render = code.render.bind(code)
+    code.render = (buffer, deltaTime) => {
+      render(buffer, deltaTime)
+      for (let row = 0; row < code.height; row += 1) {
+        buffer.drawText(
+          "│",
+          code.screenX - CODE_RAIL_INDENT,
+          code.screenY + row,
+          this.codeRailColor,
+        )
+      }
+    }
+    return code
+  }
+
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
@@ -671,6 +693,12 @@ export class Transcript {
       syntaxStyle: this.theme.syntax,
       streaming,
       internalBlockMode: "top-level",
+      renderNode: (token, context) => {
+        if (token.type !== "code") return undefined
+        const code = context.defaultRender()
+        if (!(code instanceof CodeRenderable)) return code
+        return this.decorateCodeBlock(code)
+      },
       tableOptions: {
         style: "columns",
         widthMode: "full",
