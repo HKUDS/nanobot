@@ -213,17 +213,20 @@ class RuntimeEventPublisher:
     def record_turn_usage(
         self,
         session_key: str,
-        usage: LLMUsage | None,
-        round_usages: list[LLMUsage] | None = None,
+        round_usages: list[LLMUsage],
     ) -> None:
-        if usage is not None:
-            previous = self._turn_usage.get(session_key)
-            self._turn_usage[session_key] = usage if previous is None else previous + usage
-        if round_usages:
-            self._turn_round_usages[session_key] = (
-                *self._turn_round_usages.get(session_key, ()),
-                *round_usages,
-            )
+        if not round_usages:
+            return
+
+        usage = round_usages[0]
+        for round_usage in round_usages[1:]:
+            usage += round_usage
+        previous = self._turn_usage.get(session_key)
+        self._turn_usage[session_key] = usage if previous is None else previous + usage
+        self._turn_round_usages[session_key] = (
+            *self._turn_round_usages.get(session_key, ()),
+            *round_usages,
+        )
 
     def clear_turn(self, session_key: str) -> None:
         self._turn_latency_ms.pop(session_key, None)

@@ -100,10 +100,10 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     bus.subscribe(seen.append)
     publisher.record_turn_runtime("cli:direct", "runtime")
     publisher.record_turn_latency("cli:direct", 123)
-    first_request = LLMUsage.reported(input_tokens=40, output_tokens=2)
-    second_request = LLMUsage.reported(input_tokens=60, output_tokens=3)
-    publisher.record_turn_usage("cli:direct", first_request, [first_request])
-    publisher.record_turn_usage("cli:direct", second_request, [second_request])
+    first_round = LLMUsage.reported(input_tokens=40, output_tokens=2)
+    second_round = LLMUsage.reported(input_tokens=60, output_tokens=3)
+    publisher.record_turn_usage("cli:direct", [first_round])
+    publisher.record_turn_usage("cli:direct", [second_round])
 
     await publisher.turn_completed(
         channel="cli",
@@ -124,8 +124,8 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.context.metadata == {"source": "test"}
     assert first.latency_ms == 123
     assert first.runtime == "runtime"
-    assert first.usage == first_request + second_request
-    assert first.round_usages == (first_request, second_request)
+    assert first.usage == first_round + second_round
+    assert first.round_usages == (first_round, second_round)
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None
