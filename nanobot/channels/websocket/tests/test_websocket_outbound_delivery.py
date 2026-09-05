@@ -12,8 +12,10 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
+from nanobot.config.schema import Config
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -102,6 +104,39 @@ async def _wait_for_connection_cleanup(
 async def _wait_for_retire_tasks(channel: WebSocketChannel) -> None:
     while channel._outbound_retire_tasks:
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() -> None:
+    channel = _channel()
+    bus = MessageBus()
+    config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
+    manager = ChannelManager(config, bus)
+    manager.channels["websocket"] = channel
+    connections = [_RecordingConnection(block_first_send=i == 0) for i in range(10)]
+    for i, connection in enumerate(connections):
+        channel._attach(cast(Any, connection), f"chat-{i}")
+    dispatcher = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        for text in ("first", "last"):
+            for i in range(10):
+                await bus.publish_outbound(_message(f"chat-{i}", text))
+        await asyncio.wait_for(connections[0].send_started.wait(), 2)
+        for connection in connections[1:]:
+            assert await _next_text(connection) == "first"
+            assert await _next_text(connection) == "last"
+        assert connections[0].sent.empty()
+        connections[0].release_send.set()
+        assert await _next_text(connections[0]) == "first"
+        assert await _next_text(connections[0]) == "last"
+    finally:
+        dispatcher.cancel()
+        await asyncio.gather(dispatcher, return_exceptions=True)
+        for connection in connections:
+            await channel._cleanup_connection(cast(Any, connection))
+    assert not manager._outbound_tasks
+    assert not manager._outbound_tails
+    assert not channel._connection_outbound
 
 
 @pytest.mark.asyncio
