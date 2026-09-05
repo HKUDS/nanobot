@@ -13,7 +13,10 @@ from nanobot.runtime_context import (
     WEBUI_QUOTE_SOURCE,
     RuntimeContextBlock,
     append_runtime_context,
+    normalize_runtime_context_blocks,
     normalize_webui_quote,
+    persistent_runtime_context_blocks,
+    project_runtime_context_for_persistence,
     public_history_message,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
@@ -47,6 +50,66 @@ async def test_resolve_runtime_context_preserves_provider_order() -> None:
         ("first", "one"),
         ("second", "two"),
     ]
+
+
+def test_runtime_context_normalization_preserves_ephemeral_flag() -> None:
+    block = RuntimeContextBlock(
+        source="voice",
+        content="keep replies short",
+        ephemeral=True,
+    )
+
+    normalized = normalize_runtime_context_blocks([block])
+
+    assert normalized == [block]
+    assert persistent_runtime_context_blocks(normalized) == []
+
+
+def test_runtime_context_persistence_projection_keeps_ephemeral_for_model_only() -> None:
+    blocks = [
+        RuntimeContextBlock(source="goal", content="durable guidance"),
+        RuntimeContextBlock(
+            source="voice",
+            content="ephemeral delivery contract",
+            ephemeral=True,
+        ),
+    ]
+
+    model_content, marker = append_runtime_context("hello", blocks)
+    assert "durable guidance" in model_content
+    assert "ephemeral delivery contract" in model_content
+    assert marker is not None
+
+    persisted_content, persisted_marker = project_runtime_context_for_persistence(
+        model_content,
+        marker,
+    )
+
+    assert persisted_content == "hello\n\ndurable guidance"
+    assert persisted_marker == {
+        "version": 1,
+        "sources": ["goal"],
+        "suffix": "durable guidance",
+    }
+
+
+def test_runtime_context_persistence_projection_drops_ephemeral_only_block() -> None:
+    block = RuntimeContextBlock(
+        source="voice",
+        content="ephemeral delivery contract",
+        ephemeral=True,
+    )
+
+    model_content, marker = append_runtime_context("hello", [block])
+    assert marker is not None
+
+    persisted_content, persisted_marker = project_runtime_context_for_persistence(
+        model_content,
+        marker,
+    )
+
+    assert persisted_content == "hello"
+    assert persisted_marker is None
 
 
 def test_webui_quote_is_bounded_and_projected_as_model_only_context() -> None:
