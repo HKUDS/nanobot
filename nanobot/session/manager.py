@@ -9,6 +9,7 @@ import re
 import secrets
 import shutil
 import stat
+import threading
 from collections import OrderedDict
 from contextlib import contextmanager, suppress
 from copy import deepcopy
@@ -286,6 +287,10 @@ class Session:
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
+    # Runtime-only identity: incremented on delete, stamped on load/create.
+    # Prevents stale in-flight turns from persisting after a session is deleted.
+    # Not serialized; compare=False so it does not affect equality or hashing.
+    runtime_generation: int = field(default=0, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -1661,6 +1666,28 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
+        # Process-local generation counter per session key.  Incremented on
+        # delete; stamped onto Session objects on load/create so that stale
+        # in-flight turns cannot persist after a deletion.
+        self._generations: dict[str, int] = {}
+        # Per-key lock serializing generation check + durable write vs. delete.
+        # WeakValueDictionary allows idle locks to be collected when no thread
+        # holds a reference, preventing unbounded growth in long-lived processes.
+        self._key_locks: WeakValueDictionary[str, threading.Lock] = WeakValueDictionary()
+        self._key_locks_guard = threading.Lock()  # protects _key_locks itself
+
+    def _get_key_lock(self, key: str) -> threading.Lock:
+        """Return a per-key threading.Lock, creating one if needed.
+
+        Uses a registry guard to guarantee that concurrent first-access
+        for the same key always returns the same Lock object.
+        """
+        with self._key_locks_guard:
+            lock = self._key_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._key_locks[key] = lock
+            return lock
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1747,16 +1774,7 @@ class SessionManager:
         Returns:
             The session.
         """
-        session = self._cached(key)
-        if session is not None:
-            return session
-
-        session = self._load(key)
-        if session is None:
-            session = Session(key=key)
-
-        self._remember(session)
-        return session
+        return self._acquire_or_create_session(key)
 
     def get_or_create_transient(
         self,
@@ -1783,25 +1801,89 @@ class SessionManager:
         """Attempt to recover a session from a corrupt JSONL file."""
         return self._jsonl_store.repair(key, path=path)
 
+    def _acquire_session(self, key: str) -> Session | None:
+        """Unified identity acquisition: cache -> load -> stamp -> remember.
+
+        The entire sequence runs under the per-key lock so that
+        delete_session cannot interleave between load and stamp.
+        Returns None if no persisted session exists for *key*.
+        """
+        lock = self._get_key_lock(key)
+        with lock:
+            session = self._cached(key)
+            if session is not None:
+                return session
+            session = self._load(key)
+            if session is not None:
+                session.runtime_generation = self._generations.get(key, 0)
+                self._remember(session)
+            return session
+
+    def _acquire_or_create_session(self, key: str) -> Session:
+        """Unified identity acquisition with creation fallback.
+
+        Like _acquire_session but creates a fresh Session when no
+        persisted session exists.  The entire sequence runs under the
+        per-key lock.
+        """
+        lock = self._get_key_lock(key)
+        with lock:
+            session = self._cached(key)
+            if session is not None:
+                return session
+            session = self._load(key)
+            if session is None:
+                session = Session(key=key)
+            session.runtime_generation = self._generations.get(key, 0)
+            self._remember(session)
+            return session
+
     def save(self, session: Session, *, fsync: bool = False) -> None:
         """Persist a session and retain it in the cache."""
         if not session.policy.persist:
             return
 
-        self._store.save(session, fsync=fsync)
-        self._remember(session)
+        # Atomic: hold the per-key lock so delete_session cannot advance the
+        # generation between our check, the durable write, and the cache update.
+        lock = self._get_key_lock(session.key)
+        with lock:
+            current_gen = self._generations.get(session.key, 0)
+            if session.runtime_generation != current_gen:
+                return
+            self._store.save(session, fsync=fsync)
+            self._remember(session)
+
+    def _save_new_session(self, session: Session, *, fsync: bool = False) -> None:
+        """Persist a freshly created session, binding its generation atomically.
+
+        Unlike save(), this is used for sessions that are intentionally new
+        (e.g. fork targets).  The generation is assigned inside the per-key
+        lock so that a concurrent delete cannot make the write stale.
+        """
+        if not session.policy.persist:
+            return
+        lock = self._get_key_lock(session.key)
+        with lock:
+            session.runtime_generation = self._generations.get(session.key, 0)
+            self._store.save(session, fsync=fsync)
+            self._remember(session)
 
     def save_runtime_checkpoint(self, session: Session) -> None:
         """Persist volatile recovery state without rewriting long history."""
         if not session.policy.persist:
             return
-        if self._store is self._jsonl_store:
-            self._jsonl_store.save_runtime_checkpoint(session)
+        lock = self._get_key_lock(session.key)
+        with lock:
+            current_gen = self._generations.get(session.key, 0)
+            if session.runtime_generation != current_gen:
+                return
+            if self._store is self._jsonl_store:
+                self._jsonl_store.save_runtime_checkpoint(session)
+            else:
+                # Third-party stores: inline full save (cannot call self.save
+                # because it would re-acquire the same non-reentrant lock).
+                self._store.save(session)
             self._remember(session)
-            return
-        # Third-party stores keep their existing all-or-nothing semantics until
-        # they opt into a dedicated checkpoint primitive.
-        self.save(session)
 
     def rename_model_preset(self, old_name: str, new_name: str) -> int:
         """Rename a session-scoped model preset across durable and live sessions."""
@@ -1816,7 +1898,7 @@ class SessionManager:
         changed: list[Session] = []
         try:
             for key in sorted(keys):
-                session = cached.get(key) or self._load(key)
+                session = cached.get(key) or self._acquire_session(key)
                 if (
                     session is None
                     or session.metadata.get(SESSION_MODEL_PRESET_METADATA_KEY) != old_name
@@ -1869,10 +1951,15 @@ class SessionManager:
 
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
-        self.invalidate(key)
-        deleted = self._store.delete(key)
-        if self._delete_observer is not None:
-            self._delete_observer(key)
+        lock = self._get_key_lock(key)
+        with lock:
+            self.invalidate(key)
+            # Advance generation so any stale in-flight Session object with the
+            # old generation will be rejected by save().
+            self._generations[key] = self._generations.get(key, 0) + 1
+            deleted = self._store.delete(key)
+            if self._delete_observer is not None:
+                self._delete_observer(key)
         return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
@@ -1895,7 +1982,7 @@ class SessionManager:
         """
         if before_user_index < 0:
             return None
-        source = self._cached(source_key) or self._load(source_key)
+        source = self._acquire_session(source_key)
         if source is None:
             return None
 
@@ -1932,7 +2019,9 @@ class SessionManager:
             metadata=metadata,
             last_consolidated=last_consolidated,
         )
-        self.save(target, fsync=True)
+        # Bind generation atomically inside the target-key lifecycle lock
+        # via _save_new_session so a concurrent delete cannot make this stale.
+        self._save_new_session(target, fsync=True)
         return target
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:

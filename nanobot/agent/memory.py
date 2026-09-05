@@ -731,6 +731,8 @@ class MemoryStore:
         Only current base64url-encoded Dream session keys are considered.
         Non-dream session files are never touched.
         """
+        # Collect keys to prune under the file lock (read-only scan).
+        keys_to_prune: list[tuple[Path, str]] = []
         with sessions.locked_session_files() as sessions_dir:
             dream_files: list[tuple[Path, str]] = []
             for path in sessions_dir.glob("*.jsonl"):
@@ -738,12 +740,15 @@ class MemoryStore:
                 if decoded_key is not None and decoded_key.startswith("dream:"):
                     dream_files.append((path, decoded_key))
             dream_files.sort(key=lambda item: item[0].stat().st_mtime)
+            keys_to_prune = dream_files[: max(0, len(dream_files) - keep)]
 
-            for path, key in dream_files[: max(0, len(dream_files) - keep)]:
-                if sessions.delete_session(key):
-                    logger.debug("Pruned old dream session: {}", path.stem)
-                else:
-                    logger.warning("Failed to prune dream session {}", path)
+        # Delete outside the file lock to avoid ABBA deadlock with per-key
+        # lifecycle lock (lock ordering: per-key lock -> file lock).
+        for path, key in keys_to_prune:
+            if sessions.delete_session(key):
+                logger.debug("Pruned old dream session: {}", path.stem)
+            else:
+                logger.warning("Failed to prune dream session {}", path)
 
 
 # ---------------------------------------------------------------------------
