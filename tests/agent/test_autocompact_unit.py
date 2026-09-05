@@ -269,6 +269,7 @@ class TestCheckExpired:
             "cli:old",
             runtime=admitted,
             max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            on_compaction=None,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -444,6 +445,7 @@ class TestArchiveDelegates:
             "cli:test",
             runtime=runtime,
             max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            on_compaction=None,
         )
 
     @pytest.mark.asyncio
@@ -452,8 +454,10 @@ class TestArchiveDelegates:
         consolidator = MagicMock()
         observed: list[tuple[str, ContextCompactionEvent]] = []
 
-        async def publish(key: str, event: ContextCompactionEvent) -> None:
-            observed.append((key, event))
+        def bind(key: str):
+            async def publish(event: ContextCompactionEvent) -> None:
+                observed.append((key, event))
+            return publish
 
         async def compact(key: str, **kwargs):
             event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
@@ -465,7 +469,7 @@ class TestArchiveDelegates:
             sessions=sessions,
             consolidator=consolidator,
             session_ttl_minutes=15,
-            on_compaction=publish,
+            bind_compaction=bind,
         )
 
         await ac._archive("cli:test", runtime=_runtime())

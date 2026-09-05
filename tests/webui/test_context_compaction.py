@@ -1,9 +1,12 @@
 """WebUI replay behavior for structured context-compaction events."""
 
+import pytest
+
 from nanobot.webui.transcript import replay_transcript_to_ui_messages
 
 
-def test_replay_folds_compaction_lifecycle_into_one_stable_message() -> None:
+@pytest.mark.parametrize("phase", ["succeeded", "cancelled"])
+def test_replay_folds_compaction_lifecycle_into_one_stable_message(phase) -> None:
     messages = replay_transcript_to_ui_messages([
         {
             "event": "context_compaction",
@@ -14,8 +17,7 @@ def test_replay_folds_compaction_lifecycle_into_one_stable_message() -> None:
         {
             "event": "context_compaction",
             "compaction_id": "compact-1",
-            "phase": "succeeded",
-            "checkpoint_source": "raw_fallback",
+            "phase": phase,
             "created_at_ms": 1_700_000_001_000,
         },
     ])
@@ -29,8 +31,7 @@ def test_replay_folds_compaction_lifecycle_into_one_stable_message() -> None:
         "turnPhase": "activity",
         "compaction": {
             "id": "compact-1",
-            "phase": "succeeded",
-            "checkpointSource": "raw_fallback",
+            "phase": phase,
         },
     }]
 

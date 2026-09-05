@@ -13,6 +13,7 @@ from nanobot.agent.context_governance import (
     ContextGovernanceConfig,
     ContextGovernor,
     ContextWindowExceededError,
+    ModelRequestState,
 )
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.bus.outbound_events import ContextCompactionEvent
@@ -24,7 +25,8 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, CompactionResult
+from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -189,7 +191,7 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
             else (100, "test-counter")
         ),
     )
-    consolidate = AsyncMock(return_value=CompactionResult("fresh checkpoint", "llm_summary"))
+    consolidate = AsyncMock(return_value="fresh checkpoint")
     previous = {"text": "existing checkpoint", "last_active": "2026-08-30T00:00:00"}
 
     result = await AgentRunner().run(make_run_spec(
@@ -287,7 +289,7 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
             else (600, "test-counter")
         ),
     )
-    consolidate = AsyncMock(return_value=CompactionResult("fresh checkpoint", "llm_summary"))
+    consolidate = AsyncMock(return_value="fresh checkpoint")
 
     await AgentRunner().run(make_run_spec(
         provider,
@@ -369,9 +371,9 @@ async def test_native_compaction_uses_provider_request_boundary(
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         lambda *_args: (100, "test-counter"),
     )
-    consolidate = AsyncMock(return_value=CompactionResult("portable checkpoint", "llm_summary"))
+    consolidate = AsyncMock(return_value="portable checkpoint")
     consolidate_native = AsyncMock(
-        return_value=CompactionResult("portable checkpoint", "llm_summary")
+        return_value="portable checkpoint"
     )
     compaction_events: list[ContextCompactionEvent] = []
 
@@ -417,7 +419,6 @@ async def test_native_compaction_uses_provider_request_boundary(
     assert {event.compaction_id for event in compaction_events} == {
         compaction_events[0].compaction_id
     }
-    assert compaction_events[-1].checkpoint_source == "llm_summary"
 
 
 async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
@@ -454,7 +455,7 @@ async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         estimate,
     )
-    consolidate = AsyncMock(return_value=CompactionResult("fresh checkpoint", "llm_summary"))
+    consolidate = AsyncMock(return_value="fresh checkpoint")
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -520,8 +521,8 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         estimate,
     )
     consolidate = AsyncMock(side_effect=[
-        CompactionResult(summary="checkpoint-1", checkpoint_source="llm_summary"),
-        CompactionResult(summary="checkpoint-2", checkpoint_source="raw_fallback"),
+        "checkpoint-1",
+        "checkpoint-2",
     ])
     compaction_events: list[ContextCompactionEvent] = []
 
@@ -561,8 +562,6 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     assert first_id == compaction_events[1].compaction_id
     assert second_id == compaction_events[3].compaction_id
     assert first_id != second_id
-    assert compaction_events[1].checkpoint_source == "llm_summary"
-    assert compaction_events[3].checkpoint_source == "raw_fallback"
 
 
 async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch):
@@ -583,7 +582,7 @@ async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch)
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         estimate,
     )
-    consolidate = AsyncMock(return_value=CompactionResult("small checkpoint", "llm_summary"))
+    consolidate = AsyncMock(return_value="small checkpoint")
 
     with pytest.raises(ContextWindowExceededError):
         await AgentRunner().run(make_run_spec(
@@ -904,7 +903,7 @@ async def test_runner_fits_max_iteration_finalization_before_dispatch(monkeypatc
     ("input_tokens", "expected_fitted"),
     [(500, True), (100, False)],
 )
-def test_matching_reported_provider_usage_avoids_local_estimate(
+async def test_matching_reported_provider_usage_avoids_local_estimate(
     monkeypatch,
     input_tokens,
     expected_fitted,
@@ -931,18 +930,25 @@ def test_matching_reported_provider_usage_avoids_local_estimate(
 
     governor = ContextGovernor()
     monkeypatch.setattr(governor, "fit_to_budget", lambda *_args, **_kwargs: [])
-    _messages, fitted = governor.fit_request(
-        _governance_config(provider, tools, spec),
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        usage=LLMUsage.reported(input_tokens=input_tokens, output_tokens=10),
+        messages=spec.initial_messages,
+        tool_definitions=[],
+    )
+    messages, _context = await governor.prepare_request(
+        state,
         spec.initial_messages,
-        LLMUsage.reported(input_tokens=input_tokens, output_tokens=10),
-        usage_matches_messages=True,
         tool_definitions=tools.get_definitions(),
     )
 
-    assert fitted is expected_fitted
+    assert messages == ([] if expected_fitted else spec.initial_messages)
 
 
-def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
+async def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -964,15 +970,22 @@ def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
 
     governor = ContextGovernor()
     monkeypatch.setattr(governor, "fit_to_budget", lambda *_args, **_kwargs: [])
-    _messages, fitted = governor.fit_request(
-        _governance_config(provider, tools, spec),
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        usage=LLMUsage.reported(input_tokens=900, output_tokens=10),
+        messages=[{"role": "user", "content": "previous request"}],
+        tool_definitions=[],
+    )
+    messages, _context = await governor.prepare_request(
+        state,
         spec.initial_messages,
-        LLMUsage.reported(input_tokens=900, output_tokens=10),
-        usage_matches_messages=False,
         tool_definitions=tools.get_definitions(),
     )
 
-    assert fitted is True
+    assert messages == []
     estimate.assert_called_once()
 
 

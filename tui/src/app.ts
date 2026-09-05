@@ -1063,6 +1063,9 @@ export class NanobotTui {
     }
 
     switch (event.event) {
+      case "context_compaction":
+        this.transcript.compaction({ id: event.compaction_id, phase: event.phase })
+        return
       case "message_accepted":
         this.reconcileTurnOwnership(event)
         return

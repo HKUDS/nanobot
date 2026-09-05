@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
-from nanobot.bus.outbound_events import ContextCompactionEvent
+from nanobot.bus.outbound_events import ContextCompactionCallback
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
 from nanobot.session.summary import SessionSummary, session_summary_from_metadata
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
     from nanobot.utils.llm_runtime import LLMRuntime
 
-IdleCompactionCallback = Callable[[str, ContextCompactionEvent], Coroutine[Any, Any, None]]
+IdleCompactionCallback = Callable[[str], ContextCompactionCallback | None]
 
 
 class AutoCompact:
@@ -25,13 +25,13 @@ class AutoCompact:
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0,
-                 on_compaction: IdleCompactionCallback | None = None):
+                 bind_compaction: IdleCompactionCallback | None = None):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, SessionSummary] = {}
-        self._on_compaction = on_compaction
+        self._bind_compaction = bind_compaction
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -53,7 +53,10 @@ class AutoCompact:
 
     def _has_unarchived_messages(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
-        return session.last_archived < len(session.messages)
+        return any(
+            not message.get("_command")
+            for message in session.messages[session.last_archived:]
+        )
 
     @classmethod
     def _is_internal_session(cls, key: str) -> bool:
@@ -89,18 +92,11 @@ class AutoCompact:
             self._archiving.discard(key)
             return
         try:
-            async def _publish(event: ContextCompactionEvent) -> None:
-                if self._on_compaction is not None:
-                    await self._on_compaction(key, event)
-
-            event_callback: dict[str, Any] = {}
-            if self._on_compaction is not None:
-                event_callback["on_compaction"] = _publish
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,
                 max_suffix=self._RECENT_SUFFIX_MESSAGES,
-                **event_callback,
+                on_compaction=self._bind_compaction(key) if self._bind_compaction else None,
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)

@@ -1,4 +1,4 @@
-import { Archive, CircleAlert, LoaderCircle, TriangleAlert } from "lucide-react";
+import { Archive, CircleAlert, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
@@ -10,26 +10,18 @@ interface ContextCompactionNoticeProps {
 
 export function ContextCompactionNotice({ compaction }: ContextCompactionNoticeProps) {
   const { t } = useTranslation();
-  const rawFallback = compaction.checkpointSource === "raw_fallback";
   const title = compaction.phase === "started"
     ? t("thread.compaction.started", { defaultValue: "Compressing context…" })
     : compaction.phase === "failed"
       ? t("thread.compaction.failed", { defaultValue: "Context compaction failed" })
-      : t("thread.compaction.succeeded", { defaultValue: "Context compacted" });
-  const source = compaction.phase === "succeeded"
-    ? rawFallback
-      ? t("thread.compaction.source.raw", { defaultValue: "Raw fallback" })
-      : compaction.checkpointSource === "llm_summary"
-        ? t("thread.compaction.source.llm", { defaultValue: "LLM summary" })
-        : null
-    : null;
+      : compaction.phase === "cancelled"
+        ? t("thread.compaction.cancelled", { defaultValue: "Context compaction cancelled" })
+        : t("thread.compaction.succeeded", { defaultValue: "Context compacted" });
   const Icon = compaction.phase === "started"
     ? LoaderCircle
     : compaction.phase === "failed"
       ? CircleAlert
-      : rawFallback
-        ? TriangleAlert
-        : Archive;
+      : Archive;
 
   return (
     <div
@@ -43,8 +35,6 @@ export function ContextCompactionNotice({ compaction }: ContextCompactionNoticeP
         className={cn(
           "flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/60",
           compaction.phase === "failed" && "text-destructive",
-          rawFallback && compaction.phase === "succeeded"
-            && "text-amber-600 dark:text-amber-400",
         )}
       >
         <Icon
@@ -55,10 +45,7 @@ export function ContextCompactionNotice({ compaction }: ContextCompactionNoticeP
           aria-hidden
         />
       </span>
-      <p className="min-w-0 leading-5">
-        <span className="font-medium text-foreground/80">{title}</span>
-        {source ? <span className="ml-1.5">{source}</span> : null}
-      </p>
+      <p className="min-w-0 font-medium leading-5 text-foreground/80">{title}</p>
     </div>
   );
 }

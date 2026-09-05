@@ -2327,18 +2327,13 @@ def replay_transcript_to_ui_messages(
             if (
                 not isinstance(compaction_id, str)
                 or not compaction_id
-                or phase not in {"started", "succeeded", "failed"}
+                or phase not in {"started", "succeeded", "failed", "cancelled"}
             ):
                 continue
-            checkpoint_source = rec.get("checkpoint_source")
-            if checkpoint_source not in {"llm_summary", "raw_fallback"}:
-                checkpoint_source = None
             compaction: dict[str, Any] = {
                 "id": compaction_id,
                 "phase": phase,
             }
-            if checkpoint_source is not None:
-                compaction["checkpointSource"] = checkpoint_source
             payload: dict[str, Any] = {
                 "id": f"compaction-{compaction_id}",
                 "role": "assistant",

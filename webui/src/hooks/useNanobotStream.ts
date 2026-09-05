@@ -777,7 +777,6 @@ export function useNanobotStream(
         const compaction = {
           id: ev.compaction_id,
           phase: ev.phase,
-          ...(ev.checkpoint_source ? { checkpointSource: ev.checkpoint_source } : {}),
           announce: true,
         };
         setMessages((prev) => {
@@ -799,9 +798,6 @@ export function useNanobotStream(
               : message
           ));
         });
-        if (ev.completes_command && typeof ev.turn_id === "string") {
-          sideChannelTurnIdsRef.current.delete(ev.turn_id);
-        }
         return;
       }
       if (ev.event === "delta") {
@@ -887,6 +883,7 @@ export function useNanobotStream(
       }
 
       if (ev.event === "turn_end") {
+        if (typeof ev.turn_id === "string") sideChannelTurnIdsRef.current.delete(ev.turn_id);
         if ("goal_state" in ev && ev.goal_state != null && typeof ev.goal_state === "object") {
           setGoalState(ev.goal_state);
         }

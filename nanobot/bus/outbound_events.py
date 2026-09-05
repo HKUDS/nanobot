@@ -15,7 +15,6 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.providers.base import LLMUsage
-from nanobot.session.summary import CheckpointSource
 
 
 class OutboundEvent:
@@ -122,9 +121,7 @@ class ContextCompactionEvent(OutboundEvent):
     """A channel-safe transition for one logical context compaction."""
 
     compaction_id: str
-    phase: Literal["started", "succeeded", "failed"]
-    checkpoint_source: CheckpointSource | None = None
-    completes_command: bool = False
+    phase: Literal["started", "succeeded", "failed", "cancelled"]
 
 
 ContextCompactionCallback = Callable[[ContextCompactionEvent], Awaitable[None]]
@@ -196,10 +193,8 @@ def _event_content(event: OutboundEvent) -> str:
             return "Compressing context…"
         if event.phase == "failed":
             return "Unable to compact context."
-        if event.checkpoint_source == "raw_fallback":
-            return "Context compacted · raw fallback"
-        if event.checkpoint_source == "llm_summary":
-            return "Context compacted · LLM summary"
+        if event.phase == "cancelled":
+            return "Context compaction cancelled."
         return "Context compacted."
     return ""
 

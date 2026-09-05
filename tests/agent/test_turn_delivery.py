@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.session.manager import SessionManager
@@ -12,6 +13,80 @@ from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+
+
+@pytest.mark.parametrize("unified", [False, True])
+@pytest.mark.parametrize(("key", "channel", "chat_id", "metadata"), [
+    ("slack:C123:1700000000.000100", "slack", "C123",
+     {"slack": {"thread_ts": "1700000000.000100"}}),
+    ("telegram:-100123:topic:42", "telegram", "-100123", {"message_thread_id": 42}),
+    ("discord:456:thread:777", "discord", "777", {}),
+    ("mattermost:channel:root", "mattermost", "channel", {"mattermost": {"root_id": "root"}}),
+    ("matrix:!room:example.org:thread:$root", "matrix", "!room:example.org",
+     {"thread_root_event_id": "$root", "thread_reply_to_event_id": "$reply"}),
+    ("feishu:chat:thread:root", "feishu", "chat",
+     {"message_id": "reply", "thread_id": "root", "chat_type": "group"}),
+    ("dingtalk:group:conversation:user", "dingtalk", "group:conversation", {}),
+])
+async def test_idle_compaction_uses_the_session_delivery_route(
+    key, channel, chat_id, metadata, unified,
+) -> None:
+    factory = TurnDeliveryFactory(MessageBus(), RuntimeEventBus())
+    event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+    key = "unified:default" if unified else key
+    msg = InboundMessage(
+        channel=channel, sender_id="user", chat_id=chat_id, content="hello",
+        metadata={
+            "webui_turn_id": "turn-1", "sender_name": "User",
+            "message_id": "received-1", "thread_id": "received-thread", **metadata,
+        },
+    )
+    delivery = factory.create(msg, key)
+    session_metadata = {}
+    delivery.remember_session_route(session_metadata)
+
+    callback = factory.session_compaction_callback(key, session_metadata)
+    assert callback is not None
+    await callback(event)
+
+    outbound = factory.bus.outbound.get_nowait()
+    assert (outbound.channel, outbound.chat_id, outbound.metadata) == (channel, chat_id, metadata)
+    assert outbound.event is event
+
+
+async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
+    factory = TurnDeliveryFactory(MessageBus(), RuntimeEventBus())
+    key = "unified:default"
+    session_metadata = {}
+    original = InboundMessage(
+        channel="slack", sender_id="user", chat_id="C123", content="hello",
+        metadata={"slack": {"thread_ts": "1700000000.000100"}},
+    )
+    factory.create(original, key).remember_session_route(session_metadata)
+    callback = factory.session_compaction_callback(key, session_metadata)
+    assert callback is not None
+    await callback(ContextCompactionEvent("compact-1", "started"))
+
+    latest = InboundMessage(
+        channel="telegram", sender_id="user", chat_id="42", content="next question",
+    )
+    factory.create(latest, key).remember_session_route(session_metadata)
+    await callback(ContextCompactionEvent("compact-1", "succeeded"))
+
+    events = [factory.bus.outbound.get_nowait() for _ in range(2)]
+    assert [(msg.channel, msg.chat_id, msg.metadata) for msg in events] == [
+        ("slack", "C123", {"slack": {"thread_ts": "1700000000.000100"}}),
+    ] * 2
+
+
+async def test_idle_compaction_can_deliver_to_a_legacy_websocket_session() -> None:
+    factory = TurnDeliveryFactory(MessageBus(), RuntimeEventBus())
+    event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
+    callback = factory.session_compaction_callback("websocket:chat", {})
+    assert callback is not None
+    await callback(event)
+    outbound = factory.bus.outbound.get_nowait()
+    assert (outbound.channel, outbound.chat_id, outbound.event) == ("websocket", "chat", event)
 
 
 def test_websocket_lifecycles_get_distinct_internal_owners(tmp_path: Path) -> None:

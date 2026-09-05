@@ -66,6 +66,26 @@ describe("normalizeLegacyLongTaskMessages", () => {
 });
 
 describe("projectWebuiThreadMessages", () => {
+  it("marks only fixed replies belonging to a compact command turn", () => {
+    const rows = [
+      message("user", { content: " /COMPACT ", turnId: "compact" }),
+      message("assistant", { content: "Nothing to compact.", turnId: "compact" }),
+      message("assistant", {
+        content: "Unable to compact context. Check the logs and try again.", turnId: "compact",
+      }),
+      message("assistant", { content: "Nothing to compact.", turnId: "unrelated" }),
+      message("assistant", { content: "Nothing to compact." }),
+      message("assistant", { content: "Nothing to compact.", turnId: "compact", isStreaming: true }),
+      message("assistant", { content: "Quoted: Nothing to compact.", turnId: "compact" }),
+    ];
+    const projected = projectWebuiThreadMessages(rows);
+    expect(projected.map(({ compactReply }) => compactReply)).toEqual([
+      undefined, "empty", "failed", undefined, undefined, undefined, undefined,
+    ]);
+    expect(projected.map(({ content }) => content)).toEqual(rows.map(({ content }) => content));
+    expect(projectWebuiThreadMessages(projected)).toEqual(projected);
+  });
+
   it("derives replayed completion time from the matching user turn", () => {
     const firstOutputAt = STARTED_AT + 5_000;
     const latencyMs = 13_000;

@@ -1070,10 +1070,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "Pemadatan konteks dibatalkan",
+      "empty": "Tidak ada konteks yang perlu dipadatkan.",
       "started": "Memadatkan konteks…",
       "failed": "Pemadatan konteks gagal",
-      "succeeded": "Konteks dipadatkan",
-      "source": { "llm": "Ringkasan LLM", "raw": "Fallback mentah" }
+      "succeeded": "Konteks dipadatkan"
     },
     "loadingConversation": "Memuat percakapan…",
     "empty": {

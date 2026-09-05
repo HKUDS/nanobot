@@ -1084,10 +1084,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "上下文压缩已取消",
+      "empty": "无需压缩上下文",
       "started": "正在压缩上下文…",
       "failed": "上下文压缩失败",
-      "succeeded": "上下文已压缩",
-      "source": { "llm": "LLM 摘要", "raw": "原始内容回退" }
+      "succeeded": "上下文已压缩"
     },
     "loadingConversation": "正在加载话题…",
     "empty": {

@@ -8,6 +8,7 @@ session history list in place.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -42,7 +43,6 @@ from nanobot.runtime_context import (
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
-    CompactionResult,
     SessionSummaryCheckpoint,
 )
 from nanobot.utils.helpers import (
@@ -61,11 +61,11 @@ if TYPE_CHECKING:
 TranscriptBuilder = Callable[[TranscriptInput], list[dict[str, Any]]]
 HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
-    Awaitable[CompactionResult | None],
+    Awaitable[str | None],
 ]
 ProviderCompactionConsolidator = Callable[
     [ProviderConversationState, list[dict[str, Any]], str | None],
-    Awaitable[CompactionResult | None],
+    Awaitable[str | None],
 ]
 
 SNIP_SAFETY_BUFFER = 1024
@@ -420,33 +420,6 @@ class ContextGovernor:
             return None
         return measured, source
 
-    def fit_request(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-        usage: LLMUsage | None,
-        *,
-        usage_matches_messages: bool,
-        tool_definitions: list[dict[str, Any]] | None,
-        request_context_tokens: int | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Fit the request when its measured or estimated input is pressured."""
-        pressure = self.request_pressure(
-            config,
-            messages,
-            usage,
-            usage_matches_messages=usage_matches_messages,
-            tool_definitions=tool_definitions,
-            request_context_tokens=request_context_tokens,
-        )
-        if pressure is None:
-            return messages, False
-        return self.fit_to_budget(
-            config,
-            messages,
-            tool_definitions=tool_definitions,
-        ), True
-
     @staticmethod
     def _summary_transcript(
         compaction: ContextCompactionState,
@@ -507,24 +480,26 @@ class ContextGovernor:
             ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
         try:
-            result = await compaction.consolidate_provider_compaction(
+            summary = await compaction.consolidate_provider_compaction(
                 response.provider_compaction_state,
                 deepcopy(accepted_messages),
                 compaction.active_summary,
             )
-        except Exception:
+        except (Exception, asyncio.CancelledError) as exc:
             await emit_context_compaction(
                 state.compaction_callback,
-                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                ),
             )
             raise
-        if result is None or not result.summary:
+        if not summary:
             await emit_context_compaction(
                 state.compaction_callback,
                 ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
             )
             return
-        summary = result.summary
         compaction.active_summary = summary
         compaction.summary_checkpoint = SessionSummaryCheckpoint(
             summary=summary,
@@ -535,7 +510,6 @@ class ContextGovernor:
             ContextCompactionEvent(
                 compaction_id=compaction_id,
                 phase="succeeded",
-                checkpoint_source=result.checkpoint_source,
             ),
         )
 
@@ -561,11 +535,11 @@ class ContextGovernor:
                 state.config,
                 compaction.accepted_messages,
             )
-            result = await compaction.consolidate_history(
+            summary = await compaction.consolidate_history(
                 deepcopy(consolidation_prefix),
                 compaction.active_summary,
             )
-            if result is None or not result.summary:
+            if not summary:
                 raise ContextWindowExceededError(
                     session_key=state.config.session_key,
                     estimated_tokens=measured,
@@ -573,7 +547,6 @@ class ContextGovernor:
                     source=_source,
                 )
 
-            summary = result.summary
             compaction.active_summary = summary
             prepared = self.prepare_messages_for_model(
                 state.config,
@@ -597,10 +570,13 @@ class ContextGovernor:
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
             )
-        except Exception:
+        except (Exception, asyncio.CancelledError) as exc:
             await emit_context_compaction(
                 state.compaction_callback,
-                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                ),
             )
             raise
         await emit_context_compaction(
@@ -608,7 +584,6 @@ class ContextGovernor:
             ContextCompactionEvent(
                 compaction_id=compaction_id,
                 phase="succeeded",
-                checkpoint_source=result.checkpoint_source,
             ),
         )
         return prepared

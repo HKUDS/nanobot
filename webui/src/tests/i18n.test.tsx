@@ -7,8 +7,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { MessageBubble } from "@/components/MessageBubble";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import { resources } from "@/i18n";
+import { resources, setAppLanguage } from "@/i18n";
 import {
   LOCALE_STORAGE_KEY,
   resolveInitialLocale,
@@ -417,6 +419,30 @@ describe("webui i18n", () => {
     expect(INDEX_HTML.indexOf(PREBOOT_SCRIPT ?? "")).toBeGreaterThan(
       INDEX_HTML.indexOf(BOOT_COPY_MARKUP),
     );
+  });
+
+  it.each(supportedLocales)("localizes compaction states in $code", async ({ code }) => {
+    await setAppLanguage(code);
+    const copy = resources[code].common.thread.compaction;
+    const { container, rerender } = render(
+      <ContextCompactionNotice compaction={{ id: "compact-1", phase: "started", announce: true }} />,
+    );
+    for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+      rerender(<ContextCompactionNotice compaction={{
+        id: "compact-1", phase, announce: true,
+      }} />);
+      const notice = container.querySelector("[data-context-compaction]");
+      expect(copy[phase]).toBeTruthy();
+      expect(notice?.textContent).toBe(copy[phase]);
+      expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+    }
+    for (const compactReply of ["empty", "failed"] as const) {
+      rerender(<MessageBubble message={{
+        id: "reply", role: "assistant", content: "original command reply",
+        compactReply, createdAt: 1,
+      }} />);
+      expect(screen.getByText(copy[compactReply])).toBeInTheDocument();
+    }
   });
 
   it("keeps preboot copy aligned with every registered locale", () => {

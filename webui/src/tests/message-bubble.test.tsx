@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { setAppLanguage } from "@/i18n";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import type {
   CliAppInfo,
@@ -95,7 +96,23 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
-  it("renders raw-fallback compaction as a distinct warning notice", () => {
+  it("copies the localized compact reply instead of the stored English text", async () => {
+    await setAppLanguage("zh-CN");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<MessageBubble message={{
+      id: "compact-empty", role: "assistant", content: "Nothing to compact.",
+      compactReply: "empty", createdAt: 1,
+    }} />);
+    expect(screen.getByText("无需压缩上下文")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("无需压缩上下文"));
+  });
+
+  it("renders a compacted context notice", () => {
     const message: UIMessage = {
       id: "compaction-1",
       role: "assistant",
@@ -105,7 +122,6 @@ describe("MessageBubble", () => {
       compaction: {
         id: "compact-1",
         phase: "succeeded",
-        checkpointSource: "raw_fallback",
         announce: true,
       },
     };
@@ -116,7 +132,8 @@ describe("MessageBubble", () => {
     expect(notice).toHaveAttribute("role", "status");
     expect(notice).toHaveAttribute("aria-live", "polite");
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
-    expect(screen.getByText("Raw fallback")).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/^Context compacted$/);
+    expect(notice?.querySelector(".lucide-archive")).toBeInTheDocument();
   });
 
   it("renders user messages as right-aligned pills", () => {

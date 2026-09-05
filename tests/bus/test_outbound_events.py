@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
@@ -16,6 +17,18 @@ from nanobot.bus.outbound_events import (
     outbound_message_for_event,
     replace_outbound_event,
 )
+
+
+def test_compaction_events_have_readable_channel_fallbacks() -> None:
+    for event, expected in [
+        (ContextCompactionEvent("1", "started"), "Compressing context…"),
+        (ContextCompactionEvent("1", "succeeded"), "Context compacted."),
+        (ContextCompactionEvent("1", "failed"), "Unable to compact context."),
+        (ContextCompactionEvent("1", "cancelled"), "Context compaction cancelled."),
+    ]:
+        msg = outbound_message_for_event(channel="cli", chat_id="direct", event=event)
+        assert msg.content == expected
+        assert msg.event is event
 
 
 def test_progress_event_lives_on_outbound_message_event_field() -> None:

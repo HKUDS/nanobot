@@ -1070,10 +1070,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "컨텍스트 압축이 취소되었습니다",
+      "empty": "압축할 컨텍스트가 없습니다.",
       "started": "컨텍스트 압축 중…",
       "failed": "컨텍스트 압축 실패",
-      "succeeded": "컨텍스트를 압축했습니다",
-      "source": { "llm": "LLM 요약", "raw": "원시 대체" }
+      "succeeded": "컨텍스트를 압축했습니다"
     },
     "loadingConversation": "대화 불러오는 중…",
     "empty": {

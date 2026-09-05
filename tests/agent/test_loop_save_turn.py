@@ -1197,6 +1197,9 @@ async def test_process_message_persists_unified_session_delivery_route(tmp_path:
     loop.sessions.invalidate(UNIFIED_SESSION_KEY)
     persisted = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
     assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
+    assert persisted.metadata["_compaction_route"] == {
+        "channel": "feishu", "chat_id": "oc_123", "metadata": {},
+    }
 
 
 @pytest.mark.parametrize(
@@ -1251,7 +1254,10 @@ def test_unified_session_route_ignores_non_user_destinations(
     session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
     session.metadata[LAST_CHANNEL_METADATA_KEY] = "telegram:existing"
 
-    loop._remember_unified_session_route(session, msg, is_user_turn=is_user_turn)
+    loop._remember_session_route(
+        session, msg, is_user_turn=is_user_turn,
+        delivery=loop.turn_delivery_factory.unrouted(msg, session.key),
+    )
 
     assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
 

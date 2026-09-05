@@ -1070,10 +1070,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "Compression du contexte annulée",
+      "empty": "Aucun contexte à compresser.",
       "started": "Compression du contexte…",
       "failed": "Échec de la compression du contexte",
-      "succeeded": "Contexte compressé",
-      "source": { "llm": "Résumé LLM", "raw": "Repli brut" }
+      "succeeded": "Contexte compressé"
     },
     "loadingConversation": "Chargement de la conversation…",
     "empty": {

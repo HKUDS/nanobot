@@ -5,11 +5,13 @@ from __future__ import annotations
 import dataclasses
 import time
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
+    ContextCompactionCallback,
     ContextCompactionEvent,
     RetryWaitEvent,
     StreamDeltaEvent,
@@ -21,6 +23,7 @@ from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventPublisher
 from nanobot.providers.base import LLMUsage
+from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -44,7 +47,7 @@ RetryWaitCallback = Callable[[str], Awaitable[None]]
 
 
 class TurnDeliveryFactory:
-    """Create per-turn delivery objects from an optional edge-owned route policy."""
+    """Route turn delivery and session-level notifications."""
 
     def __init__(
         self,
@@ -91,6 +94,45 @@ class TurnDeliveryFactory:
                 metadata=dict(msg.metadata or {}),
             ),
         )
+
+    def session_compaction_callback(
+        self,
+        session_key: str,
+        session_metadata: dict[str, Any],
+    ) -> ContextCompactionCallback | None:
+        """Bind idle notifications to one route without acquiring a turn owner."""
+        saved_route = session_metadata.get("_compaction_route")
+        if isinstance(saved_route, dict):
+            saved_route = cast(dict[str, Any], saved_route)
+            channel, chat_id = saved_route.get("channel"), saved_route.get("chat_id")
+            metadata = saved_route.get("metadata", {})
+            if not isinstance(channel, str) or not isinstance(chat_id, str):
+                return
+            if not isinstance(metadata, dict):
+                return
+            metadata = cast(dict[str, Any], metadata)
+        else:
+            # Older sessions have no route snapshot. Only direct clients have a
+            # session key that is also an unambiguous delivery address.
+            route = (
+                last_channel_from_metadata(session_metadata)
+                if session_key == UNIFIED_SESSION_KEY
+                else tuple(session_key.split(":", 1))
+            )
+            if not route or len(route) != 2 or route[0] not in {"websocket", "cli"}:
+                return
+            channel, chat_id = route
+            metadata = {}
+        metadata = deepcopy(metadata)
+
+        async def publish(event: ContextCompactionEvent) -> None:
+            await self.bus.publish_outbound(
+                outbound_message_for_event(
+                    channel=channel, chat_id=chat_id, event=event, metadata=metadata,
+                )
+            )
+
+        return publish
 
     @staticmethod
     def _default_route(msg: InboundMessage, session_key: str) -> TurnRoute:
@@ -185,6 +227,30 @@ class TurnDelivery:
                 metadata=self.delivery_message.metadata,
             )
         )
+
+    def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
+        """Keep only routing fields needed to deliver a later idle notification."""
+        source = self.route.metadata
+        channel_type = self.route.channel.split(".", 1)[0]
+        fields = {
+            "telegram": ("message_thread_id",),
+            "matrix": ("thread_root_event_id", "thread_reply_to_event_id"),
+            "feishu": ("message_id", "thread_id", "chat_type"),
+        }.get(channel_type, ())
+        metadata = {
+            key: source[key] for key in fields if key in source
+        }
+        if channel_type in {"slack", "mattermost"}:
+            nested = source.get(channel_type)
+            if isinstance(nested, dict):
+                nested = cast(dict[str, Any], nested)
+                fields = ("thread_ts",) if channel_type == "slack" else ("root_id", "thread_ts")
+                metadata[channel_type] = {key: nested[key] for key in fields if key in nested}
+        session_metadata["_compaction_route"] = {
+            "channel": self.route.channel,
+            "chat_id": self.route.chat_id,
+            "metadata": metadata,
+        }
 
     async def started(self) -> None:
         if self.route.publish_lifecycle:

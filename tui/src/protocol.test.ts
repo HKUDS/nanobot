@@ -706,6 +706,54 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("receives compaction phases and rejects malformed compaction events", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+    const events: InboundEvent[] = []
+    const statuses: string[] = []
+    const client = new NanobotClient({
+      url: "ws://nanobot.test/ws",
+      onEvent: (event) => events.push(event),
+      onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+    })
+    try {
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      const base = { event: "context_compaction", chat_id: "chat", compaction_id: "compact-1" }
+      for (const phase of ["started", "succeeded", "failed", "cancelled"]) {
+        socket.emit("message", { data: JSON.stringify({
+          ...base, phase,
+        }) })
+      }
+      for (const invalid of [
+        { phase: "unknown" },
+        { phase: "started", compaction_id: "" },
+        { phase: "started", compaction_id: 42 },
+        { phase: "started", compaction_id: undefined },
+        { phase: "started", chat_id: undefined },
+      ]) {
+        socket.emit("message", { data: JSON.stringify({ ...base, ...invalid }) })
+      }
+      expect(events.map((event) => event.event)).toEqual(Array(4).fill("context_compaction"))
+      expect(events.map((event) => "phase" in event ? event.phase : null)).toEqual([
+        "started", "succeeded", "failed", "cancelled",
+      ])
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(5)
+    } finally {
+      client.close()
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("validates nested unified diff payloads at the websocket boundary", () => {
     const original = globalThis.WebSocket
     let socket: FakeSocket | undefined
@@ -922,6 +970,43 @@ describe("gateway protocol", () => {
         userMessageOffset: 0,
       })
       expect(requested).toContain("before=newer-page")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads compaction history as activity rows", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = Object.assign(async () => Response.json({
+      messages: [
+        { role: "assistant", content: "before" },
+        ...["started", "succeeded", "failed", "cancelled"].map((phase) => ({
+          role: "assistant",
+          kind: "compaction",
+          content: "",
+          compaction: { id: phase, phase },
+        })),
+        { role: "assistant", kind: "compaction", content: "invalid", compaction: null },
+        {
+          role: "assistant", kind: "compaction", content: "invalid",
+          compaction: { id: "", phase: "succeeded" },
+        },
+        {
+          role: "assistant", kind: "compaction", content: "invalid",
+          compaction: { id: "unknown", phase: "unknown" },
+        },
+        { role: "assistant", content: "after" },
+      ],
+    }), { preconnect: original.preconnect })
+    try {
+      const history = await fetchHistory("http://nanobot.test", "token", "chat")
+      expect(history.messages).toEqual([
+        { role: "assistant", content: "before", forkIndex: 0 },
+        ...(["started", "succeeded", "failed", "cancelled"] as const).map((phase) => ({
+          role: "activity" as const, content: "", compaction: { id: phase, phase },
+        })),
+        { role: "assistant", content: "after", forkIndex: 0 },
+      ])
     } finally {
       globalThis.fetch = original
     }

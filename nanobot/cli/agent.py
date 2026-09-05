@@ -121,7 +121,6 @@ def agent(
     from nanobot.agent.tools.mcp import MCPProvider
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.bus.outbound_events import (
-        ContextCompactionEvent,
         StreamDeltaEvent,
         StreamedResponseEvent,
         StreamEndEvent,
@@ -347,11 +346,6 @@ def agent(
                             renderer,
                             reasoning_buffer,
                         ):
-                            if (
-                                isinstance(event, ContextCompactionEvent)
-                                and event.completes_command
-                            ):
-                                turn_done.set()
                             continue
 
                         if not turn_done.is_set():

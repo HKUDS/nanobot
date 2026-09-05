@@ -1070,10 +1070,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "コンテキストの圧縮をキャンセルしました",
+      "empty": "圧縮するコンテキストはありません。",
       "started": "コンテキストを圧縮中…",
       "failed": "コンテキストの圧縮に失敗しました",
-      "succeeded": "コンテキストを圧縮しました",
-      "source": { "llm": "LLM 要約", "raw": "Raw フォールバック" }
+      "succeeded": "コンテキストを圧縮しました"
     },
     "loadingConversation": "会話を読み込み中…",
     "empty": {

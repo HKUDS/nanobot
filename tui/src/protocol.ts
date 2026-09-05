@@ -86,6 +86,11 @@ export interface RecoveryState {
   can_continue?: boolean
 }
 
+export interface ContextCompaction {
+  id: string
+  phase: "started" | "succeeded" | "failed" | "cancelled"
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -152,6 +157,12 @@ export type InboundEvent =
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
   | ({ event: "recovery_state"; chat_id: string } & RecoveryState)
+  | {
+      event: "context_compaction"
+      chat_id: string
+      compaction_id: string
+      phase: ContextCompaction["phase"]
+    }
   | {
       event: "session_updated"
       chat_id: string
@@ -234,6 +245,7 @@ export interface HistoryMessage {
   media?: MediaAttachment[]
   toolEvents?: ToolProgressEvent[]
   fileEdits?: FileEditEvent[]
+  compaction?: ContextCompaction
   forkIndex?: number
 }
 
@@ -356,6 +368,7 @@ const CHAT_EVENTS = new Set([
   "goal_status",
   "goal_state",
   "recovery_state",
+  "context_compaction",
   "session_updated",
   "turn_model_updated",
   "error",
@@ -367,6 +380,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optional(value: unknown, type: "boolean" | "number" | "string"): boolean {
   return value === undefined || typeof value === type
+}
+
+function isCompactionPhase(value: unknown): value is ContextCompaction["phase"] {
+  return value === "started" || value === "succeeded" || value === "failed" || value === "cancelled"
 }
 
 function isToolEvent(value: unknown): value is ToolProgressEvent {
@@ -545,6 +562,12 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   if (name === "goal_state" && !isRecord(record.goal_state)) return null
   if (name === "recovery_state" && !isRecoveryState(record)) return null
   if (
+    name === "context_compaction"
+    && (typeof record.compaction_id !== "string"
+      || !record.compaction_id
+      || !isCompactionPhase(record.phase))
+  ) return null
+  if (
     name === "session_updated"
     && (!optional(record.scope, "string")
       || (record.workspace_scope !== undefined && !isWorkspaceScope(record.workspace_scope)))
@@ -608,6 +631,20 @@ export async function fetchHistory(
   for (const message of payload.messages || []) {
     const role = message.role
     const content = message.content
+    if (message.kind === "compaction") {
+      const compaction = message.compaction
+      if (isRecord(compaction)
+        && typeof compaction.id === "string"
+        && compaction.id
+        && isCompactionPhase(compaction.phase)) {
+        messages.push({
+          role: "activity",
+          content: "",
+          compaction: { id: compaction.id, phase: compaction.phase },
+        })
+      }
+      continue
+    }
     if (role === "tool" && message.kind === "trace") {
       const traces = Array.isArray(message.traces)
         ? message.traces.filter((value): value is string => typeof value === "string")

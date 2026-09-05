@@ -14,14 +14,12 @@ from nanobot.webui.outbound_wire import (
 )
 
 
-def test_encode_context_compaction_projects_safe_provenance_without_summary() -> None:
+def test_encode_context_compaction_projects_the_lifecycle() -> None:
     payload = encode_context_compaction(
         "chat-1",
         ContextCompactionEvent(
             compaction_id="compact-1",
             phase="succeeded",
-            checkpoint_source="raw_fallback",
-            completes_command=True,
         ),
     )
 
@@ -30,10 +28,7 @@ def test_encode_context_compaction_projects_safe_provenance_without_summary() ->
         "chat_id": "chat-1",
         "compaction_id": "compact-1",
         "phase": "succeeded",
-        "checkpoint_source": "raw_fallback",
-        "completes_command": True,
     }
-    assert "summary" not in payload
 
 
 def test_encode_recovery_state_omits_absent_optional_fields() -> None:

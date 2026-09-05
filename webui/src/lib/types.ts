@@ -6,8 +6,7 @@ type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction {
   id: string;
-  phase: "started" | "succeeded" | "failed";
-  checkpointSource?: "llm_summary" | "raw_fallback" | string;
+  phase: "started" | "succeeded" | "failed" | "cancelled";
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
   announce?: boolean;
 }
@@ -96,6 +95,8 @@ export interface UIMessage {
   activityKind?: "model";
   /** Context-compaction lifecycle rendered as a standalone channel notice. */
   compaction?: UIContextCompaction;
+  /** Display-only localization marker for fixed /compact command replies. */
+  compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
@@ -1389,9 +1390,7 @@ export type InboundEvent =
       event: "context_compaction";
       chat_id: string;
       compaction_id: string;
-      phase: "started" | "succeeded" | "failed";
-      checkpoint_source?: string;
-      completes_command?: boolean;
+      phase: UIContextCompaction["phase"];
     } & InboundTurnMetadata)
   | ({
       event: "file_edit";

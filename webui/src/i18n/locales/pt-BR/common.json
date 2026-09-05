@@ -1084,10 +1084,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "Compactação do contexto cancelada",
+      "empty": "Não há contexto para compactar.",
       "started": "Compactando contexto…",
       "failed": "Falha ao compactar o contexto",
-      "succeeded": "Contexto compactado",
-      "source": { "llm": "Resumo do LLM", "raw": "Fallback bruto" }
+      "succeeded": "Contexto compactado"
     },
     "loadingConversation": "Carregando conversa…",
     "empty": {

@@ -445,7 +445,12 @@ export function MessageBubble({
     );
   }
 
-  const empty = message.content.trim().length === 0;
+  const assistantContent = message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+  const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
@@ -512,7 +517,7 @@ export function MessageBubble({
               preserveStreamingLayout
               onOpenFilePreview={onOpenFilePreview}
             >
-              {message.content}
+              {assistantContent}
             </MarkdownText>
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
@@ -533,7 +538,7 @@ export function MessageBubble({
             )}
           >
             {showCopyButton ? (
-              <MessageCopyButton content={message.content} />
+              <MessageCopyButton content={assistantContent} />
             ) : null}
             {showForkButton ? (
               <Tooltip>

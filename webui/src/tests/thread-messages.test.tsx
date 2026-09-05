@@ -1692,7 +1692,6 @@ describe("ThreadMessages", () => {
         compaction: {
           id: "compact-1",
           phase: "succeeded",
-          checkpointSource: "llm_summary",
         },
       },
     ]);

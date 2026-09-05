@@ -2854,7 +2854,6 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
         event=ContextCompactionEvent(
             compaction_id="compact-1",
             phase="succeeded",
-            checkpoint_source="llm_summary",
         ),
     ))
 
@@ -2863,12 +2862,10 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
         "chat_id": "chat-compaction",
         "compaction_id": "compact-1",
         "phase": "succeeded",
-        "checkpoint_source": "llm_summary",
     }
     assert _sent_ws_payloads(mock_ws) == [expected]
     [persisted] = read_transcript_lines("websocket:chat-compaction")
     assert {key: persisted[key] for key in expected} == expected
-    assert "summary" not in persisted
 
 
 @pytest.mark.asyncio

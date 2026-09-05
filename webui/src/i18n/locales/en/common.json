@@ -1084,10 +1084,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "Context compaction cancelled",
+      "empty": "Nothing to compact.",
       "started": "Compressing context…",
       "failed": "Context compaction failed",
-      "succeeded": "Context compacted",
-      "source": { "llm": "LLM summary", "raw": "Raw fallback" }
+      "succeeded": "Context compacted"
     },
     "loadingConversation": "Loading conversation…",
     "empty": {

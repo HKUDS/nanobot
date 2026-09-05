@@ -197,7 +197,7 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
-  it("updates one stable row across a context-compaction lifecycle", () => {
+  it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
     const fake = fakeClient();
     const { result } = renderHook(
       () => useNanobotStream("chat-compaction", EMPTY_MESSAGES),
@@ -230,8 +230,7 @@ describe("useNanobotStream", () => {
         event: "context_compaction",
         chat_id: "chat-compaction",
         compaction_id: "compact-1",
-        phase: "succeeded",
-        checkpoint_source: "raw_fallback",
+        phase,
       });
     });
 
@@ -240,8 +239,7 @@ describe("useNanobotStream", () => {
       id: "compaction-compact-1",
       createdAt,
       compaction: {
-        phase: "succeeded",
-        checkpointSource: "raw_fallback",
+        phase,
         announce: true,
       },
     });

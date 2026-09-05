@@ -11,12 +11,10 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from loguru import logger
+
 from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
-from nanobot.bus.outbound_events import (
-    ContextCompactionEvent,
-    outbound_message_for_event,
-)
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import build_status_content
@@ -347,52 +345,27 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_compact(ctx: CommandContext) -> OutboundMessage:
+async def cmd_compact(ctx: CommandContext) -> None:
     """Compact the current session without resetting the conversation."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     runtime = ctx.runtime or loop.runtime_for_session(session)
     delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
-    terminal_event: ContextCompactionEvent | None = None
-
-    async def _on_compaction(event: ContextCompactionEvent) -> None:
-        nonlocal terminal_event
-        if event.phase == "started":
-            await delivery.context_compaction(event)
-        else:
-            terminal_event = replace(event, completes_command=True)
 
     try:
         summary = await loop.consolidator.compact_idle_session(
             ctx.key,
             runtime=runtime,
-            on_compaction=_on_compaction,
+            on_compaction=delivery.context_compaction,
         )
     except Exception:
-        summary = None
+        logger.exception("Manual context compaction failed for {}", ctx.key)
+        return
 
     if summary:
         refreshed = loop.sessions.get_or_create(ctx.key)
         refreshed.provider_state = None
         loop.sessions.save(refreshed)
-    if terminal_event is not None:
-        return outbound_message_for_event(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            event=terminal_event,
-            metadata=dict(ctx.msg.metadata or {}),
-        )
-    content = (
-        "Nothing to compact."
-        if summary == ""
-        else "Unable to compact context. Check the logs and try again."
-    )
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=content,
-        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-    )
 
 
 def _format_preset_names(names: list[str]) -> str:

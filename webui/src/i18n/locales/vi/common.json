@@ -1070,10 +1070,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "Đã hủy nén ngữ cảnh",
+      "empty": "Không có ngữ cảnh cần nén.",
       "started": "Đang nén ngữ cảnh…",
       "failed": "Nén ngữ cảnh không thành công",
-      "succeeded": "Đã nén ngữ cảnh",
-      "source": { "llm": "Bản tóm tắt LLM", "raw": "Dữ liệu thô dự phòng" }
+      "succeeded": "Đã nén ngữ cảnh"
     },
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {

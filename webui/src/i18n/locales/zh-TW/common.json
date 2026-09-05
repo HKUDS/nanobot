@@ -1070,10 +1070,11 @@
   },
   "thread": {
     "compaction": {
+      "cancelled": "上下文壓縮已取消",
+      "empty": "無需壓縮上下文",
       "started": "正在壓縮上下文…",
       "failed": "上下文壓縮失敗",
-      "succeeded": "上下文已壓縮",
-      "source": { "llm": "LLM 摘要", "raw": "原始內容回退" }
+      "succeeded": "上下文已壓縮"
     },
     "loadingConversation": "正在載入話題…",
     "empty": {

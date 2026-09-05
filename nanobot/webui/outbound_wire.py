@@ -40,8 +40,6 @@ class ContextCompactionWirePayload(_ChatWirePayload):
     event: Literal["context_compaction"]
     compaction_id: str
     phase: str
-    checkpoint_source: NotRequired[str]
-    completes_command: NotRequired[bool]
 
 
 WebUIWirePayload: TypeAlias = (
@@ -84,10 +82,6 @@ def encode_context_compaction(
         "compaction_id": event.compaction_id,
         "phase": event.phase,
     }
-    if event.checkpoint_source is not None:
-        payload["checkpoint_source"] = event.checkpoint_source
-    if event.completes_command:
-        payload["completes_command"] = True
     return payload
 
 
