@@ -40,7 +40,11 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
-from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
+from nanobot.security.workspace_access import (
+    current_scope_allows_loopback,
+    current_tool_workspace,
+    workspace_sandbox_status,
+)
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -446,22 +450,52 @@ class ExecTool(Tool):
             if guard_error:
                 return guard_error
 
+        # Command-string inspection cannot prove where a relative path will
+        # resolve after shell expansion, symlink traversal, or command
+        # substitution. Restricted exec therefore requires a real process
+        # boundary instead of treating the best-effort guard above as one.
+        sandbox_enforced = bool(
+            access.scope is not None and access.scope.sandbox_status.enforced
+        )
+        if not sandbox_enforced:
+            sandbox_enforced = workspace_sandbox_status(
+                restrict_to_workspace=access.restrict_to_workspace,
+                workspace=workspace_root or cwd,
+            ).enforced
+        if access.restrict_to_workspace and (
+            not sandbox_enforced and (not self.sandbox or _IS_WINDOWS)
+        ):
+            return ToolResult.error(
+                "Error: restricted shell execution requires a supported OS-level sandbox. "
+                "Configure tools.exec.sandbox='bwrap' on Linux, use an externally enforced "
+                "sandbox, or select full workspace access for trusted commands."
+                + _WORKSPACE_BOUNDARY_NOTE
+            )
+
         if self.sandbox:
             if _IS_WINDOWS:
                 logger.warning(
-                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
+                    "Sandbox '{}' is not supported on Windows; using the externally "
+                    "enforced sandbox boundary",
                     self.sandbox,
                 )
             else:
                 workspace = workspace_root or cwd
-                command = wrap_command(
-                    self.sandbox,
-                    command,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                )
+                try:
+                    command = wrap_command(
+                        self.sandbox,
+                        command,
+                        workspace,
+                        cwd,
+                        resolve_launcher=True,
+                        sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                        sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                    )
+                except (FileNotFoundError, OSError, ValueError) as exc:
+                    return ToolResult.error(
+                        f"Error: {exc}. Restricted shell execution remains disabled."
+                        + _WORKSPACE_BOUNDARY_NOTE
+                    )
                 cwd = str(Path(workspace).resolve())
 
         effective_timeout = self._resolve_timeout(timeout)
