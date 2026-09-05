@@ -298,7 +298,11 @@ function ChannelSetupSurface({
   const optionalFields = fields.filter((field) => field.optional);
   const manualFields = setup.manualFields ?? [];
   const advancedFields = mode === "connect" ? manualFields : optionalFields;
-  const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
+  const editableFields = mode === "credentials"
+    ? fields
+    : mode === "connect"
+      ? [...fields, ...manualFields]
+      : [];
   const hasAdvanced = advancedFields.length > 0;
   const requirements = channelRequirements(feature, t);
   const summary = setup.summary ?? tx(
@@ -311,6 +315,9 @@ function ChannelSetupSurface({
 
   useEffect(() => {
     setNotice(null);
+  }, [feature.name]);
+
+  useEffect(() => {
     setVisibleSecrets({});
     setSaving(false);
     setValidating(false);
@@ -381,6 +388,32 @@ function ChannelSetupSurface({
     }
   };
 
+  const saveConnectSettings = async () => {
+    setSaving(true);
+    setValidating(true);
+    setNotice(null);
+    const values = channelValuesForSubmit(editableFields, fieldValues, touchedFields);
+    try {
+      const validationPayload = await validateChannel(client, feature.name, values);
+      setValidation(validationPayload);
+      const payload = await configureChannel(client, feature.name, values);
+      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+      setNotice(
+        validationPayload.can_enable
+          ? tx("settings.channels.settingsSaved", "Settings saved. Continue with authorization.")
+          : tx(
+              "settings.channels.incompleteSaved",
+              "Partial settings saved. Complete the required fields before connecting.",
+            ),
+      );
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setSaving(false);
+      setValidating(false);
+    }
+  };
+
   const checkCurrentSettings = async () => {
     setValidating(true);
     setNotice(null);
@@ -440,15 +473,44 @@ function ChannelSetupSurface({
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
         {mode === "connect" && ConnectFlow ? (
-          <Suspense fallback={<ChannelPluginLoading compact />}>
-            <ConnectFlow
-              token={token}
-              feature={feature}
-              idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-              connectRequestId={connectRequestId}
-              onFeaturesUpdate={onFeaturesUpdate}
-            />
-          </Suspense>
+          <>
+            {fields.length ? (
+              <CredentialForm
+                fields={fields}
+                values={fieldValues}
+                configuredFields={configuredFields}
+                visibleSecrets={visibleSecrets}
+                onChange={setFieldValue}
+                onToggleSecret={toggleSecret}
+              />
+            ) : null}
+            {editableFields.length ? (
+              <div className="mt-3 flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                  onClick={() => void saveConnectSettings()}
+                  disabled={saving}
+                >
+                  {saving || validating ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : null}
+                  {tx("settings.actions.save", "Save settings")}
+                </Button>
+              </div>
+            ) : null}
+            <Suspense fallback={<ChannelPluginLoading compact />}>
+              <ConnectFlow
+                token={token}
+                feature={feature}
+                idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
+                connectRequestId={connectRequestId}
+                onFeaturesUpdate={onFeaturesUpdate}
+              />
+            </Suspense>
+          </>
         ) : mode === "connect" ? (
           <>
             <div className="mt-3 flex flex-wrap justify-end gap-2">

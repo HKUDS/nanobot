@@ -25,7 +25,7 @@ function channelSetupField(
 }
 
 function channelSetupContract(
-  channel: "discord" | "email" | "feishu" | "matrix" | "qq",
+  channel: "discord" | "email" | "feishu" | "linear" | "matrix" | "qq",
 ): ChannelSetupContract {
   const field = (
     name: string,
@@ -83,6 +83,22 @@ function channelSetupContract(
           }),
           field("allowFrom", "list"),
           field("topicIsolation", "bool"),
+        ],
+      };
+    case "linear":
+      return {
+        fields: [
+          field("clientId", "string", { required: true }),
+          field("clientSecret", "secret", { required: true }),
+          field("webhookSigningSecret", "secret", { required: true }),
+          field("publicBaseUrl", "string", { required: true }),
+          field("host", "string", { defaultValue: "0.0.0.0" }),
+          field("port", "int", { defaultValue: "3979" }),
+          field("webhookPath", "string", { defaultValue: "/linear/webhook" }),
+          field("oauthCallbackPath", "string", {
+            defaultValue: "/linear/oauth/callback",
+          }),
+          field("allowFrom", "list"),
         ],
       };
     case "matrix":
@@ -343,6 +359,103 @@ describe("Settings channels", () => {
       ),
     );
     expect(await screen.findByText("Scan with Feishu")).toBeInTheDocument();
+  });
+
+  it("saves a Linear public URL before OAuth credentials and reveals the app manifest", async () => {
+    const linearFeature = {
+      name: "linear",
+      display_name: "Linear",
+      webui: "webui/index.tsx",
+      type: "channel",
+      enabled: false,
+      configured: false,
+      installed: true,
+      ready: false,
+      status: "not_enabled",
+      install_supported: true,
+      requires_restart: false,
+      setup: channelSetupContract("linear"),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({ features: [linearFeature], enabled_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock
+      .mockResolvedValueOnce({
+        name: "linear",
+        status: "needs_setup",
+        checks: [],
+        missing_fields: [
+          "channels.linear.clientId",
+          "channels.linear.clientSecret",
+          "channels.linear.webhookSigningSecret",
+        ],
+        can_enable: false,
+        requires_restart: false,
+        message: "Missing Linear credentials.",
+      })
+      .mockResolvedValueOnce({
+        name: "linear",
+        saved: true,
+        saved_keys: ["channels.linear.publicBaseUrl"],
+        nanobot_features: {
+          features: [{
+            ...linearFeature,
+            config_values: {
+              "channels.linear.publicBaseUrl": "https://nanobot.example.com",
+              "channels.linear.host": "0.0.0.0",
+              "channels.linear.port": "3979",
+              "channels.linear.webhookPath": "/linear/webhook",
+              "channels.linear.oauthCallbackPath": "/linear/oauth/callback",
+            },
+            configured_fields: ["channels.linear.publicBaseUrl"],
+          }],
+          enabled_count: 0,
+          requires_restart: false,
+        },
+      });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Linear settings" })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("https://nanobot.example.com"), {
+      target: { value: "https://nanobot.example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.channel.configure",
+        expect.objectContaining({
+          name: "linear",
+          values: expect.objectContaining({
+            "channels.linear.publicBaseUrl": "https://nanobot.example.com",
+          }),
+        }),
+        150_000,
+      ),
+    );
+    expect(
+      await screen.findByText(
+        "Partial settings saved. Complete the required fields before connecting.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Create prefilled Linear app" }),
+    ).toBeInTheDocument();
   });
 
   it("enables configured Feishu assistant without starting a new connect flow", async () => {

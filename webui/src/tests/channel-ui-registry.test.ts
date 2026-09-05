@@ -14,13 +14,14 @@ describe("channel UI contributions", () => {
   it("selects channel-owned UI only through the backend manifest entry", () => {
     expect(channelUiContribution("feishu", "webui/index.tsx")?.Panel).toBeDefined();
     expect(channelUiContribution("weixin", "webui/index.tsx")?.ConnectFlow).toBeDefined();
+    expect(channelUiContribution("linear", "webui/index.tsx")?.ConnectFlow).toBeDefined();
     expect(channelUiContribution("feishu", undefined)).toBeUndefined();
     expect(channelUiContribution("feishu", "webui/missing.tsx")).toBeUndefined();
     expect(channelUiContribution("missing", "webui/index.tsx")).toBeUndefined();
 
     const registrations = registeredChannelUiContributions();
     const channels = registrations.map((entry) => entry.channel);
-    expect(channels).toEqual(expect.arrayContaining(["feishu", "weixin"]));
+    expect(channels).toEqual(expect.arrayContaining(["feishu", "linear", "weixin"]));
     expect(new Set(channels).size).toBe(channels.length);
     expect(registrations.every((entry) => /^webui\/index\.tsx?$/.test(entry.webui))).toBe(true);
     expect(channelUiContribution("slack", "webui/index.ts")?.presentation.displayName).toBe("Slack");
@@ -62,7 +63,7 @@ describe("channel UI contributions", () => {
   });
 
   it("derives channel identity from the package directory", () => {
-    for (const channel of ["feishu", "weixin"]) {
+    for (const channel of ["feishu", "linear", "weixin"]) {
       const source = readFileSync(
         resolve(process.cwd(), `../nanobot/channels/${channel}/webui/index.tsx`),
         "utf8",

@@ -283,7 +283,18 @@ def test_channels_config_has_no_per_channel_fields():
 
 @pytest.mark.parametrize(
     "name",
-    ["websocket", "telegram", "discord", "slack", "email", "feishu", "matrix", "weixin", "whatsapp"],
+    [
+        "websocket",
+        "telegram",
+        "discord",
+        "slack",
+        "email",
+        "feishu",
+        "linear",
+        "matrix",
+        "weixin",
+        "whatsapp",
+    ],
 )
 def test_special_setup_validation_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
@@ -294,7 +305,7 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "weixin"])
+@pytest.mark.parametrize("name", ["feishu", "linear", "weixin"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
 
@@ -2655,6 +2666,7 @@ def test_optional_dependency_metadata_for_enable():
         "dingtalk",
         "discord",
         "feishu",
+        "linear",
         "matrix",
         "mochat",
         "msteams",
