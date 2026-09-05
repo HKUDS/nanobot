@@ -248,6 +248,12 @@ Deploy nanobot's gateway and bundled WebUI from the repository's ready-to-use Bl
 
 Render will ask for `ANTHROPIC_API_KEY` and a private `NANOBOT_WEB_TOKEN`, then provision persistent storage for sessions, memory, and WebUI history. Persistent disks require a paid Render service.
 
+**RepoCloud — one click**
+
+Deploy nanobot on RepoCloud with managed hosting for open-source applications:
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/nanobot/)
+
 **Self-host**
 
 Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.md) for Docker, Docker Compose, Linux services, and macOS LaunchAgent setup.
