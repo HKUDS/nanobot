@@ -2289,6 +2289,10 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr("nanobot.cli.webui.run_webui_dev_server", fake_dev_server)
     _patch_webui_managed_gateway(monkeypatch, seen)
     monkeypatch.setattr(
+        "nanobot.cli.webui._prepare_webui_bundle_for_gateway",
+        lambda *_args, **_kwargs: pytest.fail("dev mode must not inspect the bundled WebUI"),
+    )
+    monkeypatch.setattr(
         "nanobot.cli.webui._attach_to_background_gateway",
         lambda runtime, **kwargs: seen.update(
             attached_runtime=runtime,

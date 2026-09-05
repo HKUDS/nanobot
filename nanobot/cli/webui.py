@@ -216,11 +216,9 @@ def webui(
                 f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
             )
 
-    webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
-    _prepare_webui_bundle_for_gateway(
-        runtime_config,
-        mode="skip" if dev else webui_bundle_mode,
-    )
+    if not dev:
+        webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
+        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
 
     instance = GatewayInstance.resolve(
         config_path=config_path,

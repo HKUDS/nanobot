@@ -21,7 +21,7 @@ def test_source_checkout_preserves_warn_only_gateway_startup(monkeypatch) -> Non
     assert modes == ["warn"]
 
 
-def test_vite_mode_does_not_build_the_source_webui_bundle(monkeypatch) -> None:
+def test_skip_mode_does_not_build_the_source_webui_bundle(monkeypatch) -> None:
     modes: list[str] = []
     monkeypatch.setattr(
         "nanobot.cli.webui_support.inspect_webui_bundle",
