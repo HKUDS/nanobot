@@ -29,6 +29,7 @@ EXPECTED_CHANNELS = {
     "telegram",
     "websocket",
     "wecom",
+    "zalo",
     "weixin",
     "whatsapp",
 }
