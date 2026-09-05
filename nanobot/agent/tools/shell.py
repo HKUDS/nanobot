@@ -212,7 +212,8 @@ class ExecTool(Tool):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
-        self.deny_patterns = (deny_patterns or []) + [
+        self.user_deny_patterns = list(deny_patterns or [])
+        self.deny_patterns = self.user_deny_patterns + [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
@@ -432,6 +433,16 @@ class ExecTool(Tool):
                     "Error: working_dir is outside the configured workspace"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
+
+        # User-configured deny patterns are treated as an explicit, intentional safety
+        # boundary that must be enforced across all access modes (including Full Access mode).
+        # While Full Access grants full filesystem and working directory freedom, explicit user
+        # deny patterns (e.g. blocking destructive commands like Remove-Item) still apply unless
+        # explicitly exempted by allow_patterns.
+        if self.user_deny_patterns:
+            user_guard_error = self._check_deny_patterns(command, self.user_deny_patterns)
+            if user_guard_error:
+                return user_guard_error
 
         # Full access is an explicit trust decision. Keep the application-level
         # command guard aligned with the selected access mode instead of
@@ -797,6 +808,20 @@ class ExecTool(Tool):
                 env[key] = val
         return env
 
+    def _check_deny_patterns(self, command: str, patterns: list[str]) -> str | None:
+        """Check command against a deny pattern list, respecting allow_patterns priority."""
+        cmd = command.strip()
+        segments = self._split_shell_segments(cmd)
+        explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
+            any(re.fullmatch(pattern, segment, re.IGNORECASE) for pattern in self.allow_patterns)
+            for segment in segments
+        )
+        if not explicitly_allowed:
+            for pattern in patterns:
+                if re.search(pattern, cmd, re.IGNORECASE):
+                    return ToolResult.error("Error: Command blocked by deny pattern filter")
+        return None
+
     def _guard_command(
         self,
         command: str,
@@ -807,23 +832,22 @@ class ExecTool(Tool):
     ) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
-        lower = cmd.lower()
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
         # from the hardcoded deny list via configuration. A chained command is
         # only explicitly allowed when every top-level shell segment matches.
-        segments = self._split_shell_segments(lower)
-        explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
-            any(re.fullmatch(pattern, segment) for pattern in self.allow_patterns)
-            for segment in segments
-        )
-        if not explicitly_allowed:
-            for pattern in self.deny_patterns:
-                if re.search(pattern, lower):
-                    return ToolResult.error("Error: Command blocked by deny pattern filter")
+        deny_error = self._check_deny_patterns(command, self.deny_patterns)
+        if deny_error:
+            return deny_error
 
-            if self.allow_patterns:
+        if self.allow_patterns:
+            segments = self._split_shell_segments(cmd)
+            explicitly_allowed = bool(segments) and all(
+                any(re.fullmatch(pattern, segment, re.IGNORECASE) for pattern in self.allow_patterns)
+                for segment in segments
+            )
+            if not explicitly_allowed:
                 return ToolResult.error("Error: Command blocked by allowlist filter (not in allowlist)")
 
         from nanobot.security.network import contains_internal_url
