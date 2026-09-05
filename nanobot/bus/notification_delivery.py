@@ -16,7 +16,7 @@ NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
 def notification_is_deliverable(
     event: AgentEvent, *, channel: str, publish_lifecycle: bool,
 ) -> bool:
-    """Unknown internal events are observable but never become chat messages."""
+    """Admit operation notifications to a channel only by explicit policy."""
     audience = NOTIFICATION_AUDIENCES.get(type(event))
     if audience is None:
         return False

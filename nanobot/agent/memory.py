@@ -21,8 +21,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.bus.outbound_events import ContextCompactionCallback
-from nanobot.events import NO_EVENTS, AgentEvent, ContextCompactionEvent, EventSink
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
@@ -1189,7 +1188,6 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
         max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
-        on_compaction: ContextCompactionCallback | None = None,
         events: EventSink = NO_EVENTS,
     ) -> str | None:
         """Archive the full idle tail while keeping recent messages replayable.
@@ -1198,15 +1196,6 @@ class Consolidator:
         is now derived independently from archive progress using the project-wide
         compacted-session window.
         """
-        if on_compaction is not None:
-            parent_events = events
-
-            async def publish(event: AgentEvent) -> None:
-                await parent_events.emit(event)
-                if isinstance(event, ContextCompactionEvent):
-                    await on_compaction(event)
-
-            events = EventSink(publish)
         if max_suffix != MIN_COMPACTED_REPLAY_MESSAGES:
             logger.debug(
                 "Idle-session compact for {} uses the fixed replay window ({}, requested {})",

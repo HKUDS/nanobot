@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage
-from nanobot.events import AgentEvent
 from nanobot.providers.base import LLMUsage
 
 if TYPE_CHECKING:
@@ -33,14 +32,6 @@ class RuntimeEventContext:
     session_key: str
     metadata: dict[str, Any] = field(default_factory=dict)
     attributes: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class NotificationPublished:
-    """A scoped internal notification, whether or not its audience includes a channel."""
-
-    context: RuntimeEventContext
-    event: AgentEvent
 
 
 @dataclass(frozen=True)
@@ -113,8 +104,7 @@ class RuntimeModelChanged:
 
 
 RuntimeEvent = (
-    NotificationPublished
-    | UserInputAccepted
+    UserInputAccepted
     | SessionTurnStarted
     | TurnRuntimeAdmitted
     | SessionTurnPersisted
@@ -124,8 +114,7 @@ RuntimeEvent = (
     | RuntimeModelChanged
 )
 RuntimeEventType = (
-    type[NotificationPublished]
-    | type[UserInputAccepted]
+    type[UserInputAccepted]
     | type[SessionTurnStarted]
     | type[TurnRuntimeAdmitted]
     | type[SessionTurnPersisted]

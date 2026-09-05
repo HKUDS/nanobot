@@ -35,10 +35,11 @@ class RecoveryStateEvent(AgentEvent):
 
 @dataclass(frozen=True)
 class EventSink:
-    """A publisher bound to one operation's delivery scope.
+    """A thin send callback bound to one operation's MessageBus route.
 
-    Observer failures must not change the operation's result. Cancellation still
-    propagates to the owner. The callback is injected, never global or persisted.
+    Notification failures must not change the operation's result. Cancellation
+    still propagates. This owns no queue or subscribers; SDK callers may inject
+    their own callback instead of channel delivery.
     """
 
     publish: Callable[[AgentEvent], Awaitable[None]] | None = None

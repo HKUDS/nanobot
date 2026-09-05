@@ -10,7 +10,7 @@ from nanobot.agent.memory import (
     Consolidator,
     MemoryStore,
 )
-from nanobot.bus.outbound_events import ContextCompactionEvent
+from nanobot.events import AgentEvent, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     GenerationSettings,
     LLMResponse,
@@ -569,13 +569,14 @@ class TestCompactIdleSession:
         real_consolidator.sessions.save(session)
         events: list[ContextCompactionEvent] = []
 
-        async def observe(event: ContextCompactionEvent) -> None:
-            events.append(event)
+        async def observe(event: AgentEvent) -> None:
+            if isinstance(event, ContextCompactionEvent):
+                events.append(event)
 
         result = await real_consolidator.compact_idle_session(
             "cli:events",
             runtime=runtime,
-            on_compaction=observe,
+            events=EventSink(observe),
         )
 
         assert result == "Summary."
@@ -593,13 +594,13 @@ class TestCompactIdleSession:
         session.add_message("user", "question")
         real_consolidator.sessions.save(session)
 
-        async def fail_observer(_event: ContextCompactionEvent) -> None:
+        async def fail_observer(_event: AgentEvent) -> None:
             raise RuntimeError("channel unavailable")
 
         result = await real_consolidator.compact_idle_session(
             "cli:event-callback-failure",
             runtime=runtime,
-            on_compaction=fail_observer,
+            events=EventSink(fail_observer),
         )
 
         assert result == "Summary."

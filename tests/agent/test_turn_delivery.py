@@ -45,9 +45,9 @@ async def test_idle_compaction_uses_the_session_delivery_route(
     session_metadata = {}
     delivery.remember_session_route(session_metadata)
 
-    callback = factory.session_compaction_callback(key, session_metadata)
-    assert callback is not None
-    await callback(event)
+    sink = factory.session_events(key, session_metadata)
+    assert sink.publish is not None
+    await sink.emit(event)
 
     outbound = factory.bus.outbound.get_nowait()
     assert (outbound.channel, outbound.chat_id, outbound.metadata) == (channel, chat_id, metadata)
@@ -63,15 +63,15 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
         metadata={"slack": {"thread_ts": "1700000000.000100"}},
     )
     factory.create(original, key).remember_session_route(session_metadata)
-    callback = factory.session_compaction_callback(key, session_metadata)
-    assert callback is not None
-    await callback(ContextCompactionEvent("compact-1", "started"))
+    sink = factory.session_events(key, session_metadata)
+    assert sink.publish is not None
+    await sink.emit(ContextCompactionEvent("compact-1", "started"))
 
     latest = InboundMessage(
         channel="telegram", sender_id="user", chat_id="42", content="next question",
     )
     factory.create(latest, key).remember_session_route(session_metadata)
-    await callback(ContextCompactionEvent("compact-1", "succeeded"))
+    await sink.emit(ContextCompactionEvent("compact-1", "succeeded"))
 
     events = [factory.bus.outbound.get_nowait() for _ in range(2)]
     assert [(msg.channel, msg.chat_id, msg.metadata) for msg in events] == [
@@ -82,9 +82,9 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
 async def test_idle_compaction_can_deliver_to_a_legacy_websocket_session() -> None:
     factory = TurnDeliveryFactory(MessageBus(), RuntimeEventBus())
     event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
-    callback = factory.session_compaction_callback("websocket:chat", {})
-    assert callback is not None
-    await callback(event)
+    sink = factory.session_events("websocket:chat", {})
+    assert sink.publish is not None
+    await sink.emit(event)
     outbound = factory.bus.outbound.get_nowait()
     assert (outbound.channel, outbound.chat_id, outbound.event) == ("websocket", "chat", event)
 

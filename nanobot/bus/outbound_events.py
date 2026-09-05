@@ -7,11 +7,9 @@ message's explicit ``event`` field rather than in reserved metadata flags.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, cast
-
-from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.events import AgentEvent as OutboundEvent
@@ -100,22 +98,6 @@ class TurnModelUpdatedEvent(OutboundEvent):
     model_preset: str | None = None
     context_window_tokens: int | None = None
     fallback: bool = False
-
-
-ContextCompactionCallback = Callable[[ContextCompactionEvent], Awaitable[None]]
-
-
-async def emit_context_compaction(
-    callback: ContextCompactionCallback | None,
-    event: ContextCompactionEvent,
-) -> None:
-    """Notify observers without allowing delivery failure to alter compaction."""
-    if callback is None:
-        return
-    try:
-        await callback(event)
-    except Exception:
-        logger.exception("Failed to publish context compaction event")
 
 
 def outbound_message_for_event(
