@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.client.auth import OAuthClientProvider
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 
 from nanobot.agent.tools.mcp_oauth import (
     MCPAuthorizationRequiredError,
     MCPOAuthHandlers,
     MCPOAuthStorage,
+    MCPTokenRefreshError,
     create_mcp_oauth_auth,
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
@@ -20,6 +24,32 @@ from nanobot.config.schema import MCPServerConfig
 
 def _use_data_dir(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
+
+
+def _oauth_metadata() -> OAuthMetadata:
+    return OAuthMetadata.model_validate({
+        "issuer": "https://auth.example.com",
+        "authorization_endpoint": "https://auth.example.com/authorize",
+        "token_endpoint": "https://auth.example.com/oauth/token",
+        "registration_endpoint": "https://auth.example.com/register",
+        "response_types_supported": ["code"],
+        "code_challenge_methods_supported": ["S256"],
+    })
+
+
+def test_refresh_provider_sdk_private_method_contract() -> None:
+    """Fail dependency updates loudly while the SDK refresh workaround is needed."""
+    expected_parameters = {
+        "_initialize": ("self",),
+        "_refresh_token": ("self",),
+        "_handle_refresh_response": ("self", "response"),
+        "_perform_authorization": ("self",),
+        "async_auth_flow": ("self", "request"),
+    }
+
+    for method_name, expected in expected_parameters.items():
+        method = getattr(OAuthClientProvider, method_name)
+        assert tuple(inspect.signature(method).parameters) == expected
 
 
 def test_mcp_server_config_accepts_explicit_oauth() -> None:
@@ -91,7 +121,7 @@ async def test_reset_and_delete_credentials_are_scoped_to_one_server(
     _use_data_dir(tmp_path, monkeypatch)
     first = MCPOAuthStorage("first", "https://mcp.example.com/mcp")
     second = MCPOAuthStorage("second", "https://mcp.example.com/mcp")
-    await first.set_tokens(OAuthToken(access_token="first-token"))
+    await first.set_tokens(OAuthToken(access_token="first-token", expires_in=3600))
     await second.set_tokens(OAuthToken(access_token="second-token"))
 
     await first.prepare_redirect_uri(
@@ -100,6 +130,7 @@ async def test_reset_and_delete_credentials_are_scoped_to_one_server(
     )
 
     assert await first.get_tokens() is None
+    assert (await first.get_snapshot()).expires_at is None
     assert await second.get_tokens() is not None
     assert delete_mcp_oauth_credentials("first")
     assert not delete_mcp_oauth_credentials("first")
@@ -232,6 +263,461 @@ async def test_background_authorization_request_clears_rejected_token(
 
 
 @pytest.mark.asyncio
+async def test_expired_token_refreshes_from_persisted_metadata_after_restart(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(
+        access_token="expired-access",
+        refresh_token="refresh-token",
+        expires_in=-1,
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+    requests: list[tuple[str, str]] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, str(request.url)))
+        if request.url.path == "/oauth/token":
+            form = parse_qs(request.content.decode())
+            assert form["grant_type"] == ["refresh_token"]
+            assert form["refresh_token"] == ["refresh-token"]
+            return httpx.Response(200, json={
+                "access_token": "fresh-access",
+                "refresh_token": "rotated-refresh",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })
+        assert request.headers["Authorization"] == "Bearer fresh-access"
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
+        response = await client.get(server_url)
+
+    assert response.status_code == 200
+    assert requests == [
+        ("POST", "https://auth.example.com/oauth/token"),
+        ("GET", server_url),
+    ]
+    snapshot = await MCPOAuthStorage("linear", server_url).get_snapshot()
+    assert snapshot.tokens is not None
+    assert snapshot.tokens.access_token == "fresh-access"
+    assert snapshot.tokens.refresh_token == "rotated-refresh"
+    assert snapshot.token_issuer == "https://auth.example.com"
+    lock = storage.refresh_lock()
+    await asyncio.wait_for(lock.acquire(), timeout=1)
+    await lock.release()
+
+
+@pytest.mark.asyncio
+async def test_issuer_bound_token_refreshes_after_401_discovers_endpoint(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(
+        access_token="stale-access",
+        refresh_token="refresh-token",
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    await storage.clear_oauth_metadata()
+    auth = await create_mcp_oauth_auth("linear", server_url)
+    resource_requests = 0
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal resource_requests
+        if str(request.url) == server_url:
+            resource_requests += 1
+            if request.headers.get("Authorization") == "Bearer fresh-access":
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(401, headers={
+                "WWW-Authenticate": (
+                    'Bearer resource_metadata="https://mcp.example.com/'
+                    '.well-known/oauth-protected-resource"'
+                )
+            })
+        if request.url.path == "/.well-known/oauth-protected-resource":
+            return httpx.Response(200, json={
+                "resource": server_url,
+                "authorization_servers": ["https://auth.example.com"],
+            })
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json=_oauth_metadata().model_dump(mode="json"))
+        if request.url.path == "/oauth/token":
+            return httpx.Response(200, json={
+                "access_token": "fresh-access",
+                "refresh_token": "rotated-refresh",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
+        response = await client.get(server_url)
+
+    assert response.status_code == 200
+    assert resource_requests == 2
+    reloaded = MCPOAuthStorage("linear", server_url)
+    assert (await reloaded.get_snapshot()).oauth_metadata == _oauth_metadata()
+    stored = await reloaded.get_tokens()
+    assert stored is not None
+    assert stored.refresh_token == "rotated-refresh"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", [False, True], ids=["legacy-unbound", "issuer-changed"])
+async def test_untrusted_issuer_never_receives_refresh_token(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    bound: bool,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    if bound:
+        await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(
+        access_token="stale-access",
+        refresh_token="legacy-refresh-secret",
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    if bound:
+        await storage.clear_oauth_metadata()
+    auth = await create_mcp_oauth_auth("linear", server_url)
+    refresh_requests: list[str] = []
+    attacker_payload = _oauth_metadata().model_dump(mode="json")
+    attacker_payload.update({
+        "authorization_endpoint": "https://attacker.example.com/authorize",
+        "token_endpoint": "https://attacker.example.com/oauth/token",
+        "registration_endpoint": "https://attacker.example.com/register",
+    })
+    attacker_metadata = OAuthMetadata.model_validate(attacker_payload)
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == server_url:
+            return httpx.Response(401, headers={
+                "WWW-Authenticate": (
+                    'Bearer resource_metadata="https://mcp.example.com/'
+                    '.well-known/oauth-protected-resource"'
+                )
+            })
+        if request.url.path == "/.well-known/oauth-protected-resource":
+            return httpx.Response(200, json={
+                "resource": server_url,
+                "authorization_servers": ["https://attacker.example.com"],
+            })
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json=attacker_metadata.model_dump(mode="json"))
+        if request.url.path == "/register":
+            return httpx.Response(201, json={
+                "client_id": "replacement-client",
+                "redirect_uris": ["http://127.0.0.1/auth/mcp/callback"],
+                "token_endpoint_auth_method": "none",
+            })
+        if request.url.path == "/oauth/token":
+            refresh_requests.append(str(request.url))
+            return httpx.Response(200, json={
+                "access_token": "stolen-refresh-result",
+                "token_type": "Bearer",
+            })
+        return httpx.Response(404)
+
+    with pytest.raises(MCPAuthorizationRequiredError):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            auth=auth,
+        ) as client:
+            await client.get(server_url)
+
+    assert refresh_requests == []
+    snapshot = await MCPOAuthStorage("linear", server_url).get_snapshot()
+    assert snapshot.tokens is None
+    assert snapshot.token_issuer is None
+
+
+@pytest.mark.asyncio
+async def test_transient_refresh_failure_preserves_credentials(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    original = OAuthToken(
+        access_token="expired-access",
+        refresh_token="refresh-token",
+        expires_in=-1,
+    )
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(original)
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+
+    async def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="temporarily unavailable")
+
+    with pytest.raises(MCPTokenRefreshError, match="will retry later"):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            auth=auth,
+        ) as client:
+            await client.get(server_url)
+
+    stored = await MCPOAuthStorage("linear", server_url).get_tokens()
+    assert stored == original
+
+
+@pytest.mark.asyncio
+async def test_stale_token_endpoint_is_rediscovered_once(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    stale_payload = _oauth_metadata().model_dump(mode="json")
+    stale_payload["token_endpoint"] = "https://auth.example.com/old/token"
+    stale_metadata = OAuthMetadata.model_validate(stale_payload)
+    await storage.set_oauth_metadata(stale_metadata)
+    await storage.set_tokens(OAuthToken(
+        access_token="expired-access",
+        refresh_token="refresh-token",
+        expires_in=-1,
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+    refresh_urls: list[str] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/old/token":
+            refresh_urls.append(str(request.url))
+            return httpx.Response(404)
+        if str(request.url) == server_url:
+            if request.headers.get("Authorization") == "Bearer fresh-access":
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(401, headers={
+                "WWW-Authenticate": (
+                    'Bearer resource_metadata="https://mcp.example.com/'
+                    '.well-known/oauth-protected-resource"'
+                )
+            })
+        if request.url.path == "/.well-known/oauth-protected-resource":
+            return httpx.Response(200, json={
+                "resource": server_url,
+                "authorization_servers": ["https://auth.example.com"],
+            })
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json=_oauth_metadata().model_dump(mode="json"))
+        if request.url.path == "/oauth/token":
+            refresh_urls.append(str(request.url))
+            return httpx.Response(200, json={
+                "access_token": "fresh-access",
+                "refresh_token": "rotated-refresh",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
+        response = await client.get(server_url)
+
+    assert response.status_code == 200
+    assert refresh_urls == [
+        "https://auth.example.com/old/token",
+        "https://auth.example.com/oauth/token",
+    ]
+    reloaded = await MCPOAuthStorage("linear", server_url).get_snapshot()
+    assert reloaded.oauth_metadata == _oauth_metadata()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "clears_client"),
+    [("invalid_grant", False), ("invalid_client", True)],
+)
+async def test_unrecoverable_refresh_error_requires_authorization(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: str,
+    clears_client: bool,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(
+        access_token="expired-access",
+        refresh_token="rejected-refresh",
+        expires_in=-1,
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/token":
+            return httpx.Response(400, json={"error": error})
+        if str(request.url) == server_url:
+            return httpx.Response(401, headers={
+                "WWW-Authenticate": (
+                    'Bearer resource_metadata="https://mcp.example.com/'
+                    '.well-known/oauth-protected-resource"'
+                )
+            })
+        if request.url.path == "/.well-known/oauth-protected-resource":
+            return httpx.Response(200, json={
+                "resource": server_url,
+                "authorization_servers": ["https://auth.example.com"],
+            })
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json=_oauth_metadata().model_dump(mode="json"))
+        if request.url.path == "/register":
+            return httpx.Response(201, json={
+                "client_id": "replacement-client",
+                "redirect_uris": ["http://127.0.0.1/auth/mcp/callback"],
+                "token_endpoint_auth_method": "none",
+            })
+        return httpx.Response(404)
+
+    with pytest.raises(MCPAuthorizationRequiredError):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            auth=auth,
+        ) as client:
+            await client.get(server_url)
+
+    reloaded = MCPOAuthStorage("linear", server_url)
+    assert await reloaded.get_tokens() is None
+    client_info = await reloaded.get_client_info()
+    assert client_info is not None
+    assert client_info.client_id == (
+        "replacement-client" if clears_client else "registered-client"
+    )
+    lock = storage.refresh_lock()
+    await asyncio.wait_for(lock.acquire(), timeout=1)
+    await lock.release()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_expired_requests_share_one_refresh(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(
+        access_token="expired-access",
+        refresh_token="refresh-token",
+        expires_in=-1,
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+    refresh_requests = 0
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal refresh_requests
+        if request.url.path == "/oauth/token":
+            refresh_requests += 1
+            await asyncio.sleep(0.01)
+            return httpx.Response(200, json={
+                "access_token": "fresh-access",
+                "refresh_token": "rotated-refresh",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })
+        assert request.headers["Authorization"] == "Bearer fresh-access"
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
+        responses = await asyncio.gather(client.get(server_url), client.get(server_url))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert refresh_requests == 1
+
+
+@pytest.mark.asyncio
+async def test_separate_providers_share_storage_refresh_lock(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(
+        access_token="expired-access",
+        refresh_token="refresh-token",
+        expires_in=-1,
+    ))
+    await storage.set_client_info(OAuthClientInformationFull(
+        redirect_uris=["https://agent.example/auth/mcp/callback"],
+        client_id="registered-client",
+    ))
+    first_auth = await create_mcp_oauth_auth("linear", server_url)
+    second_auth = await create_mcp_oauth_auth("linear", server_url)
+    refresh_requests = 0
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal refresh_requests
+        if request.url.path == "/oauth/token":
+            refresh_requests += 1
+            await asyncio.sleep(0.05)
+            return httpx.Response(200, json={
+                "access_token": "fresh-access",
+                "refresh_token": "rotated-refresh",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })
+        assert request.headers["Authorization"] == "Bearer fresh-access"
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(respond)
+    async with (
+        httpx.AsyncClient(transport=transport, auth=first_auth) as first_client,
+        httpx.AsyncClient(transport=transport, auth=second_auth) as second_client,
+    ):
+        responses = await asyncio.gather(
+            first_client.get(server_url),
+            second_client.get(server_url),
+        )
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert refresh_requests == 1
+    stored = await MCPOAuthStorage("linear", server_url).get_tokens()
+    assert stored is not None
+    assert stored.refresh_token == "rotated-refresh"
+
+
+@pytest.mark.asyncio
 async def test_official_mcp_sdk_completes_discovery_registration_and_token_exchange(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -319,7 +805,9 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
     )
     assert ("POST", "https://auth.example.com/register") in requests
     assert ("POST", "https://auth.example.com/token") in requests
-    stored = await MCPOAuthStorage("company-mcp", server_url).get_tokens()
-    assert stored is not None
-    assert stored.access_token == "access-token"
-    assert stored.refresh_token == "refresh-token"
+    snapshot = await MCPOAuthStorage("company-mcp", server_url).get_snapshot()
+    assert snapshot.tokens is not None
+    assert snapshot.tokens.access_token == "access-token"
+    assert snapshot.tokens.refresh_token == "refresh-token"
+    assert snapshot.token_issuer == "https://auth.example.com"
+    assert snapshot.oauth_issuer == "https://auth.example.com"
