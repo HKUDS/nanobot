@@ -353,7 +353,7 @@ def _run_gateway(
     gateway_instance: GatewayInstance | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.model_presets import load_model_preset_catalog
+    from nanobot.agent.model_presets import load_model_preset_catalog, load_spawn_presets
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
@@ -492,6 +492,7 @@ def _run_gateway(
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
+        spawn_presets_loader=lambda: load_spawn_presets(Path(config_path)),
         runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,

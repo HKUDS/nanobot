@@ -306,6 +306,8 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        spawn_presets: list[str] | None = None,
+        spawn_presets_loader: preset_helpers.SpawnPresetsLoader | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -466,7 +468,11 @@ class AgentLoop:
         self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
-        self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
+        self._register_default_tools(
+            provider_snapshot_loader=provider_snapshot_loader,
+            spawn_presets=spawn_presets,
+            spawn_presets_loader=spawn_presets_loader,
+        )
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -515,6 +521,7 @@ class AgentLoop:
             model=model,
             max_iterations=defaults.max_tool_iterations,
             max_concurrent_subagents=defaults.max_concurrent_subagents,
+            spawn_presets=defaults.spawn_presets,
             context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
@@ -545,10 +552,11 @@ class AgentLoop:
     def invalidate_runtime_config(self) -> None:
         """Invalidate runtime config for lazy refresh at the next admission."""
         self.runtime_resolver.invalidate()
+        self.tools.invalidate_definitions()
 
     def refresh_runtime_config(self) -> LLMRuntime:
         """Refresh runtime config now and publish the canonical selection."""
-        self.runtime_resolver.invalidate()
+        self.invalidate_runtime_config()
         runtime = self.runtime_resolver.admit()
         self._publish_runtime_selection(runtime)
         return runtime
@@ -633,6 +641,8 @@ class AgentLoop:
         self,
         *,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
+        spawn_presets: list[str] | None,
+        spawn_presets_loader: preset_helpers.SpawnPresetsLoader | None,
     ) -> None:
         """Register the default set of tools via plugin loader."""
         from nanobot.agent.tools.context import ToolContext
@@ -647,6 +657,8 @@ class AgentLoop:
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
+            preset_runtime_resolver=self.runtime_resolver.resolve_preset,
+            spawn_presets_loader=spawn_presets_loader or (lambda: list(spawn_presets or [])),
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,

@@ -2242,6 +2242,27 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `4` | Maximum number of subagents that may run at the same time. Additional tasks wait for capacity. |
+| `agents.defaults.spawnPresets` | `[]` | Model presets that the `spawn` tool may select. Omit `preset` to inherit the parent runtime. |
+
+Allow a subagent to use selected entries from `modelPresets` by adding their names to
+`agents.defaults.spawnPresets`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "spawnPresets": ["fast", "deep"]
+    }
+  },
+  "modelPresets": {
+    "fast": { "model": "openai/gpt-4.1-mini" },
+    "deep": { "model": "openai/gpt-5" }
+  }
+}
+```
+
+The `spawn` tool lists the allowed names and rejects any other `preset`. Gateway config
+reloads update the allowlist before the next tool call.
 
 
 ## Auto Compact

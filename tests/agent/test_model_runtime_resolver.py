@@ -95,6 +95,35 @@ def test_resolver_resolves_preset_without_mutating_selected_runtime() -> None:
     assert resolved.generation == GenerationSettings(0.5, 512, None)
 
 
+def test_resolver_preserves_exact_legacy_preset_name() -> None:
+    name = " fast "
+    preset = ModelPresetConfig(model="fast-model")
+    resolver = ModelRuntimeResolver(
+        _runtime(),
+        model_presets={name: preset},
+        preset_snapshot_loader=lambda loaded_name: ProviderSnapshot(
+            provider=_provider(),
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=(loaded_name, preset.model),
+        ),
+    )
+
+    resolved = resolver.resolve_preset(name)
+
+    assert resolved.model_preset == name
+
+
+def test_resolver_rejects_whitespace_only_legacy_preset_name() -> None:
+    resolver = ModelRuntimeResolver(
+        _runtime(),
+        model_presets={"   ": ModelPresetConfig(model="fast-model")},
+    )
+
+    with pytest.raises(ValueError, match="non-empty"):
+        resolver.resolve_preset("   ")
+
+
 def test_resolver_reuses_preset_until_runtime_config_is_invalidated() -> None:
     initial = _runtime()
     preset = ModelPresetConfig(model="fast-model")

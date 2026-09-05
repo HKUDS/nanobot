@@ -37,6 +37,10 @@ class ToolRegistry:
         self._tools.pop(name, None)
         self._cached_definitions = None
 
+    def invalidate_definitions(self) -> None:
+        """Rebuild dynamic tool descriptions on the next request."""
+        self._cached_definitions = None
+
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
