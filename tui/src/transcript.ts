@@ -343,7 +343,7 @@ export class Transcript {
   compaction(compaction: ContextCompaction, index?: number): boolean {
     let entry = this.compactions.get(compaction.id)
     // Hydration can replay a terminal state before an already queued start event.
-    if (entry && (entry.phase !== "started" || entry.phase === compaction.phase)) return false
+    if (!acceptsCompactionPhase(entry?.phase, compaction.phase)) return false
     const added = !entry
     if (index === undefined) {
       this.noteOutput()
@@ -797,3 +797,4 @@ function formatDiffStat(edit: FileEditEvent): string {
   const deleted = typeof edit.deleted === "number" ? `-${edit.deleted}` : ""
   return [added, deleted].filter(Boolean).join(" ")
 }
+import { acceptsCompactionPhase } from "../../packages/client-events/notifications"

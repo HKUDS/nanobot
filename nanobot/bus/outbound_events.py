@@ -9,16 +9,16 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.events import AgentEvent as OutboundEvent
+from nanobot.events import ContextCompactionEvent as ContextCompactionEvent
+from nanobot.events import RecoveryStateEvent as RecoveryStateEvent
+from nanobot.events import RetryWaitEvent as RetryWaitEvent
 from nanobot.providers.base import LLMUsage
-
-
-class OutboundEvent:
-    """Marker base for internal outbound runtime events."""
 
 
 @dataclass(frozen=True)
@@ -31,11 +31,6 @@ class ProgressEvent(OutboundEvent):
     stream_id: str | None = None
     tool_events: list[dict[str, Any]] | None = None
     file_edit_events: list[dict[str, Any]] | None = None
-
-
-@dataclass(frozen=True)
-class RetryWaitEvent(OutboundEvent):
-    content: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,15 +59,6 @@ class TurnEndEvent(OutboundEvent):
     usage: LLMUsage | None = None
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
-
-
-@dataclass(frozen=True)
-class RecoveryStateEvent(OutboundEvent):
-    status: str
-    recovery_id: str
-    reason: str | None = None
-    attempts: int = 0
-    can_continue: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -114,14 +100,6 @@ class TurnModelUpdatedEvent(OutboundEvent):
     model_preset: str | None = None
     context_window_tokens: int | None = None
     fallback: bool = False
-
-
-@dataclass(frozen=True)
-class ContextCompactionEvent(OutboundEvent):
-    """A channel-safe transition for one logical context compaction."""
-
-    compaction_id: str
-    phase: Literal["started", "succeeded", "failed", "cancelled"]
 
 
 ContextCompactionCallback = Callable[[ContextCompactionEvent], Awaitable[None]]

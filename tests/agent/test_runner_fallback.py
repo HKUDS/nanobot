@@ -169,6 +169,28 @@ def test_fallback_models_accept_preset_refs_and_inline_configs() -> None:
     )
 
 
+async def test_fallback_preserves_the_operation_event_sink():
+    from nanobot.events import EventSink
+
+    async def observe(event):
+        pass
+
+    events = EventSink(observe)
+    primary = _FakeProvider("primary", _error_response())
+    fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+    fb = FallbackProvider(
+        primary=primary, fallback_presets=[_fallback("fallback-a")],
+        provider_factory=MagicMock(return_value=fallback),
+    )
+    result = await fb.chat_with_context(
+        messages=[{"role": "user", "content": "hello"}], model="primary",
+        provider_context=ProviderCallContext(events=events),
+    )
+    assert result.content == "fallback ok"
+    assert primary.context_calls[0].events is events
+    assert fallback.context_calls[0].events is events
+
+
 def test_fallback_model_preset_ref_must_exist() -> None:
     from nanobot.config.schema import Config
 

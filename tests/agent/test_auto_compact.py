@@ -14,6 +14,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.providers.base import LLMResponse
+from nanobot.events import NO_EVENTS
 
 
 def _make_loop(
@@ -89,7 +90,7 @@ def _make_fake_compact(
         runtime,
         max_suffix: int = 8,
         trigger: str = "policy",
-        on_compaction=None,
+        events=NO_EVENTS,
     ) -> str:
         state["count"] += 1
         session = loop.sessions.get_or_create(key)

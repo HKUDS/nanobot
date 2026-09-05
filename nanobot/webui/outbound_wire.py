@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
 from nanobot.bus.outbound_events import (
@@ -10,6 +11,7 @@ from nanobot.bus.outbound_events import (
     RecoveryStateEvent,
     TurnEndEvent,
 )
+from nanobot.events import AgentEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 
@@ -39,7 +41,7 @@ class TurnEndWirePayload(_ChatWirePayload):
 class ContextCompactionWirePayload(_ChatWirePayload):
     event: Literal["context_compaction"]
     compaction_id: str
-    phase: str
+    phase: Literal["started", "succeeded", "failed", "cancelled"]
 
 
 WebUIWirePayload: TypeAlias = (
@@ -83,6 +85,30 @@ def encode_context_compaction(
         "phase": event.phase,
     }
     return payload
+
+
+@dataclass(frozen=True)
+class NotificationProjection:
+    """Allowlisted public payload and its durability policy."""
+
+    payload: WebUIWirePayload
+    persistence: WebUIWirePersistence = "transient"
+    deliver_offline: bool = False
+    attach_turn_metadata: bool = False
+
+
+def project_notification(chat_id: str, event: AgentEvent | None) -> NotificationProjection | None:
+    """Keep notification serialization and persistence decisions at one boundary."""
+    if isinstance(event, ContextCompactionEvent):
+        return NotificationProjection(
+            encode_context_compaction(chat_id, event),
+            persistence="transient" if event.phase == "started" else "turn_activity",
+            deliver_offline=True,
+            attach_turn_metadata=True,
+        )
+    if isinstance(event, RecoveryStateEvent):
+        return NotificationProjection(encode_recovery_state(chat_id, event))
+    return None
 
 
 def encode_turn_end(

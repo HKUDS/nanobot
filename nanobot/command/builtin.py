@@ -356,7 +356,7 @@ async def cmd_compact(ctx: CommandContext) -> None:
         summary = await loop.consolidator.compact_idle_session(
             ctx.key,
             runtime=runtime,
-            on_compaction=delivery.context_compaction,
+            events=delivery.events,
         )
     except Exception:
         logger.exception("Manual context compaction failed for {}", ctx.key)

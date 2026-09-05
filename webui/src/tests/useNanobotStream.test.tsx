@@ -245,6 +245,19 @@ describe("useNanobotStream", () => {
     });
   });
 
+  it("keeps a hydrated terminal compaction when a queued start arrives", () => {
+    const fake = fakeClient();
+    const initial = [{ id: "compaction-c1", role: "assistant" as const, content: "",
+      kind: "compaction" as const, createdAt: 123,
+      compaction: { id: "c1", phase: "succeeded" as const } }];
+    const { result } = renderHook(() => useNanobotStream("chat", initial), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => fake.emit("chat", { event: "context_compaction", chat_id: "chat",
+      compaction_id: "c1", phase: "started" }));
+    expect(result.current.messages).toEqual(initial);
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");

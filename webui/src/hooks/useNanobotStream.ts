@@ -782,6 +782,7 @@ export function useNanobotStream(
         setMessages((prev) => {
           const id = `compaction-${ev.compaction_id}`;
           const existing = prev.findIndex((message) => message.id === id);
+          if (!acceptsCompactionPhase(prev[existing]?.compaction?.phase, ev.phase)) return prev;
           const next = {
             id,
             role: "assistant" as const,
@@ -1343,3 +1344,4 @@ export function useNanobotStream(
     dismissStreamError,
   };
 }
+import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";

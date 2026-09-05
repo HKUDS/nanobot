@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import json_repair
 from loguru import logger
 
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -260,6 +261,7 @@ class ProviderCallContext:
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
     context_window_tokens: int | None = None
     session_id: str | None = field(default=None, repr=False)
+    events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1737,6 +1739,7 @@ class LLMProvider(ABC):
                                 provider_context.context_window_tokens
                             ),
                             session_id=provider_context.session_id,
+                            events=provider_context.events,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(

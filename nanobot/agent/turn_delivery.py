@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.notification_delivery import notification_is_deliverable
 from nanobot.bus.outbound_events import (
     ContextCompactionCallback,
     ContextCompactionEvent,
@@ -21,7 +22,14 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventBus, RuntimeEventPublisher
+from nanobot.bus.runtime_events import (
+    NotificationPublished,
+    RuntimeEventBus,
+    RuntimeEventContext,
+    RuntimeEventPublisher,
+)
+from nanobot.channels.notification_routes import notification_metadata
+from nanobot.events import AgentEvent, EventSink
 from nanobot.providers.base import LLMUsage
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 
@@ -44,6 +52,31 @@ ProgressCallback = Callable[..., Awaitable[None]]
 StreamCallback = Callable[[str], Awaitable[None]]
 StreamEndCallback = Callable[..., Awaitable[None]]
 RetryWaitCallback = Callable[[str], Awaitable[None]]
+
+
+def _bind_events(
+    bus: MessageBus, runtime_events: RuntimeEventBus, session_key: str, route: TurnRoute,
+) -> EventSink:
+    context = RuntimeEventContext(
+        channel=route.channel, chat_id=route.chat_id,
+        session_key=session_key, metadata=deepcopy(route.metadata),
+    )
+
+    async def publish(event: AgentEvent) -> None:
+        if not notification_is_deliverable(
+            event, channel=context.channel, publish_lifecycle=route.publish_lifecycle,
+        ):
+            await runtime_events.publish(NotificationPublished(context, event))
+            return
+        await bus.publish_outbound(
+            outbound_message_for_event(
+                channel=context.channel, chat_id=context.chat_id,
+                event=event, metadata=deepcopy(context.metadata),
+            )
+        )
+        await runtime_events.publish(NotificationPublished(context, event))
+
+    return EventSink(publish)
 
 
 class TurnDeliveryFactory:
@@ -95,11 +128,11 @@ class TurnDeliveryFactory:
             ),
         )
 
-    def session_compaction_callback(
+    def session_events(
         self,
         session_key: str,
         session_metadata: dict[str, Any],
-    ) -> ContextCompactionCallback | None:
+    ) -> EventSink:
         """Bind idle notifications to one route without acquiring a turn owner."""
         saved_route = session_metadata.get("_compaction_route")
         if isinstance(saved_route, dict):
@@ -107,9 +140,9 @@ class TurnDeliveryFactory:
             channel, chat_id = saved_route.get("channel"), saved_route.get("chat_id")
             metadata = saved_route.get("metadata", {})
             if not isinstance(channel, str) or not isinstance(chat_id, str):
-                return
+                return EventSink()
             if not isinstance(metadata, dict):
-                return
+                return EventSink()
             metadata = cast(dict[str, Any], metadata)
         else:
             # Older sessions have no route snapshot. Only direct clients have a
@@ -120,19 +153,19 @@ class TurnDeliveryFactory:
                 else tuple(session_key.split(":", 1))
             )
             if not route or len(route) != 2 or route[0] not in {"websocket", "cli"}:
-                return
+                return EventSink()
             channel, chat_id = route
             metadata = {}
         metadata = deepcopy(metadata)
 
-        async def publish(event: ContextCompactionEvent) -> None:
-            await self.bus.publish_outbound(
-                outbound_message_for_event(
-                    channel=channel, chat_id=chat_id, event=event, metadata=metadata,
-                )
-            )
+        return _bind_events(self.bus, self.runtime_events, session_key, TurnRoute(channel, chat_id, metadata))
 
-        return publish
+    def session_compaction_callback(
+        self, session_key: str, session_metadata: dict[str, Any],
+    ) -> ContextCompactionCallback | None:
+        """Compatibility adapter for callers supplying compaction callbacks."""
+        events = self.session_events(session_key, session_metadata)
+        return events.emit if events.publish is not None else None
 
     @staticmethod
     def _default_route(msg: InboundMessage, session_key: str) -> TurnRoute:
@@ -174,8 +207,12 @@ class TurnDelivery:
     _stream_base_id: str | None = field(init=False, default=None)
     _stream_segment: int = field(init=False, default=0)
     _stream_open: bool = field(init=False, default=False)
+    events: EventSink = field(init=False)
 
     def __post_init__(self) -> None:
+        self.events = _bind_events(
+            self.bus, self.runtime_event_publisher.bus, self.session_key, self.route,
+        )
         self.delivery_message = dataclasses.replace(
             self.input_message,
             channel=self.route.channel,
@@ -206,50 +243,21 @@ class TurnDelivery:
             return None
 
         async def _on_retry_wait(content: str) -> None:
-            await self.bus.publish_outbound(
-                outbound_message_for_event(
-                    channel=self.delivery_message.channel,
-                    chat_id=self.delivery_message.chat_id,
-                    event=RetryWaitEvent(content=content),
-                    metadata=self.delivery_message.metadata,
-                )
-            )
+            await self.events.emit(RetryWaitEvent(content))
 
         return _on_retry_wait
 
     async def context_compaction(self, event: ContextCompactionEvent) -> None:
-        """Publish one compaction transition without completing the active turn."""
-        await self.bus.publish_outbound(
-            outbound_message_for_event(
-                channel=self.delivery_message.channel,
-                chat_id=self.delivery_message.chat_id,
-                event=event,
-                metadata=self.delivery_message.metadata,
-            )
-        )
+        """Compatibility adapter; operation code publishes through ``events``."""
+        await self.events.emit(event)
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
-        source = self.route.metadata
-        channel_type = self.route.channel.split(".", 1)[0]
-        fields = {
-            "telegram": ("message_thread_id",),
-            "matrix": ("thread_root_event_id", "thread_reply_to_event_id"),
-            "feishu": ("message_id", "thread_id", "chat_type"),
-        }.get(channel_type, ())
-        metadata = {
-            key: source[key] for key in fields if key in source
-        }
-        if channel_type in {"slack", "mattermost"}:
-            nested = source.get(channel_type)
-            if isinstance(nested, dict):
-                nested = cast(dict[str, Any], nested)
-                fields = ("thread_ts",) if channel_type == "slack" else ("root_id", "thread_ts")
-                metadata[channel_type] = {key: nested[key] for key in fields if key in nested}
+        # Keep the storage key readable by older gateways.
         session_metadata["_compaction_route"] = {
             "channel": self.route.channel,
             "chat_id": self.route.chat_id,
-            "metadata": metadata,
+            "metadata": notification_metadata(self.route.channel, self.route.metadata),
         }
 
     async def started(self) -> None:
