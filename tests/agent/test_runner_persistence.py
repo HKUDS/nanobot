@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -96,6 +97,65 @@ def test_persist_tool_result_leaves_no_temp_files(tmp_path):
 
     assert (root / "current_session" / "call_big.txt").exists()
     assert list((root / "current_session").glob("*.tmp")) == []
+
+
+def test_persist_json_result_summarizes_root_scalars_after_large_nested_data(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    nested_detail = "private transcript " * 1000
+    payload = {
+        "private": {"turns": [nested_detail], "notes": {"raw": nested_detail}},
+        "artifact": "artifact://run/complete.json",
+        "revision": 37,
+        "result_id": "result-at-tail",
+    }
+    raw = json.dumps(payload)
+
+    persisted = maybe_persist_tool_result(
+        tmp_path,
+        "current:session",
+        "call_json",
+        raw,
+        max_chars=64,
+    )
+
+    assert "[tool output persisted]" in persisted
+    assert "[JSON structure summary]" in persisted
+    assert '"artifact": "artifact://run/complete.json"' in persisted
+    assert '"revision": 37' in persisted
+    assert '"result_id": "result-at-tail"' in persisted
+    assert '"private": "<object: 2 fields>"' in persisted
+    assert nested_detail not in persisted
+    assert len(persisted) < 1800
+
+    saved = tmp_path / ".nanobot" / "tool-results" / "current_session" / "call_json.txt"
+    assert saved.read_text(encoding="utf-8") == raw
+
+
+def test_persist_json_result_keeps_root_failure_fields_visible(tmp_path):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    raw = json.dumps(
+        {
+            "diagnostics": {"requests": ["sensitive detail" * 2000]},
+            "ok": False,
+            "status": "failed",
+            "error": "revision conflict",
+        }
+    )
+
+    persisted = maybe_persist_tool_result(
+        tmp_path,
+        "current:session",
+        "call_error",
+        raw,
+        max_chars=64,
+    )
+
+    assert '"ok": false' in persisted
+    assert '"status": "failed"' in persisted
+    assert '"error": "revision conflict"' in persisted
+    assert "sensitive detail" not in persisted
 
 
 def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
