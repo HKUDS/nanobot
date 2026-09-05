@@ -216,6 +216,23 @@ class TestConvertMessages:
         assert items[0]["name"] == "get_weather"
         assert items[0]["arguments"] == '{"city": "SF"}'
 
+    def test_can_omit_item_ids_without_changing_call_ids(self):
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_1|fc_1",
+                    "function": {"name": "get_weather", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
+        ], include_item_ids=False)
+
+        assert all("id" not in item for item in items)
+        assert items[0]["call_id"] == "call_1"
+        assert items[1]["call_id"] == "call_1"
+
     def test_assistant_tool_call_history_repairs_malformed_arguments(self):
         _, items = convert_messages([{
             "role": "assistant",
@@ -753,6 +770,36 @@ class TestParseResponseOutput:
 
 
 class TestResponsesConversationState:
+    def test_replayed_reasoning_items_omit_unsupported_status(self):
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[{"role": "user", "content": "previous"}],
+            output_items=[{
+                "type": "reasoning",
+                "id": "rs_1",
+                "status": None,
+                "encrypted_content": "opaque",
+            }],
+        ).with_pending_messages([
+            {"role": "user", "content": "continue"},
+        ])
+
+        _, items, replayed = prepare_responses_input(
+            [{"role": "user", "content": "current"}],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is True
+        reasoning_item = next(
+            item for item in items
+            if item.get("type") == "reasoning"
+        )
+        assert "status" not in reasoning_item
+        assert reasoning_item["encrypted_content"] == "opaque"
+
     def test_server_compaction_prunes_superseded_prefix(self):
         state = build_responses_state(
             provider="openai:test",
@@ -851,6 +898,46 @@ class TestResponsesConversationState:
         assert "pending_messages=1" in log_text
         assert "dropped_items=2" in log_text
         assert secret not in log_text
+
+    def test_fresh_and_pending_conversions_omit_item_ids(self):
+        pending_messages = [{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1|fc_1",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }],
+        }]
+
+        _, fresh_items, replayed = prepare_responses_input(
+            pending_messages,
+            state=None,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is False
+        assert fresh_items[0]["call_id"] == "call_1"
+        assert "id" not in fresh_items[0]
+
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[{"role": "user", "content": "previous"}],
+            output_items=[{"type": "message", "id": "msg_previous"}],
+        ).with_pending_messages(pending_messages)
+
+        _, items, replayed = prepare_responses_input(
+            [{"role": "user", "content": "current"}],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is True
+        assert items[1]["id"] == "msg_previous"
+        assert items[2]["call_id"] == "call_1"
+        assert "id" not in items[2]
 
     def test_replays_exact_items_then_only_pending_and_new_messages(self):
         prior_items = [
