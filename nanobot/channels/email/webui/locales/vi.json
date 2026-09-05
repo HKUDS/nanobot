@@ -64,6 +64,19 @@
         "label": "Địa chỉ gửi",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "ID người thuê (tenant) Microsoft",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "Chỉ dành cho Office365/Outlook. Là giải pháp thay thế cho mật khẩu IMAP/SMTP — để trống nếu dùng mật khẩu. Chạy `nanobot channels login email` sau khi lưu ba trường này."
+      },
+      "oauthClientId": {
+        "label": "ID ứng dụng (client) Microsoft",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Client secret Microsoft",
+        "placeholder": "Giá trị secret của đăng ký ứng dụng"
+      },
       "pollIntervalSeconds": {
         "label": "Chu kỳ kiểm tra",
         "placeholder": "30"

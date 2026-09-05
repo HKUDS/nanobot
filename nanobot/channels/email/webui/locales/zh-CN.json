@@ -64,6 +64,19 @@
         "label": "发件地址",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "Microsoft 租户 ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "仅适用于 Office365/Outlook。作为 IMAP/SMTP 密码的替代方案 — 若使用密码请留空。保存这三个字段后运行 `nanobot channels login email`。"
+      },
+      "oauthClientId": {
+        "label": "Microsoft 应用(客户端) ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Microsoft 客户端密钥",
+        "placeholder": "应用注册的密钥值"
+      },
       "pollIntervalSeconds": {
         "label": "轮询间隔",
         "placeholder": "30"

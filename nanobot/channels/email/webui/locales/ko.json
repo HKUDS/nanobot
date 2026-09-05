@@ -64,6 +64,19 @@
         "label": "보내는 주소",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "Microsoft 테넌트 ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "Office365/Outlook 전용입니다. IMAP/SMTP 비밀번호의 대안입니다 — 비밀번호를 사용하려면 비워 두세요. 이 세 필드를 저장한 후 `nanobot channels login email`을 실행하세요."
+      },
+      "oauthClientId": {
+        "label": "Microsoft 앱(클라이언트) ID",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Microsoft 클라이언트 암호",
+        "placeholder": "앱 등록 암호 값"
+      },
       "pollIntervalSeconds": {
         "label": "확인 간격",
         "placeholder": "30"

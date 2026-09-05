@@ -64,6 +64,19 @@
         "label": "Alamat pengirim",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "ID penyewa (tenant) Microsoft",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "Hanya Office365/Outlook. Alternatif untuk kata sandi IMAP/SMTP — kosongkan untuk menggunakan kata sandi. Jalankan `nanobot channels login email` setelah menyimpan ketiga kolom ini."
+      },
+      "oauthClientId": {
+        "label": "ID aplikasi (klien) Microsoft",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Rahasia klien Microsoft",
+        "placeholder": "Nilai rahasia pendaftaran aplikasi"
+      },
       "pollIntervalSeconds": {
         "label": "Interval pemeriksaan",
         "placeholder": "30"

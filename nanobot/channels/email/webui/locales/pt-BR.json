@@ -64,6 +64,19 @@
         "label": "Endereço remetente",
         "placeholder": "bot@example.com"
       },
+      "oauthTenantId": {
+        "label": "ID do locatário da Microsoft",
+        "placeholder": "00000000-0000-0000-0000-000000000000",
+        "help": "Somente Office365/Outlook. Alternativa às senhas IMAP/SMTP — deixe em branco para usar senhas. Execute `nanobot channels login email` depois de salvar estes três campos."
+      },
+      "oauthClientId": {
+        "label": "ID do aplicativo (cliente) da Microsoft",
+        "placeholder": "00000000-0000-0000-0000-000000000000"
+      },
+      "oauthClientSecret": {
+        "label": "Segredo do cliente da Microsoft",
+        "placeholder": "Valor do segredo do registro do aplicativo"
+      },
       "pollIntervalSeconds": {
         "label": "Intervalo de consulta",
         "placeholder": "30"
