@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +17,6 @@ from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
-from nanobot.session import io as session_io
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
@@ -34,7 +32,7 @@ from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.manager import Session, SessionManager
 
 
 _GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
@@ -63,48 +61,37 @@ class _GoalToolsMixin:
         self._sessions = sessions
         self._bus = bus
 
-    async def _get_or_create_session(self, key: str):
-        return await session_io.get_or_create(self._sessions, key)
-
-    async def _save_session(self, session: Any) -> None:
-        await session_io.save(self._sessions, session)
-
-    async def _session(self):
+    async def _session(self) -> Session | None:
         request_ctx = current_request_context()
         if request_ctx is None:
             return None
         key = request_ctx.session_key
         if not key:
             return None
-        return await self._get_or_create_session(key)
+        return await self._sessions.get_or_create_async(key)
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
 
     async def _save_goal_state(
         self,
-        sess: Any,
+        sess: Session,
         blob: dict[str, Any],
         *,
         reset_continuation: bool = False,
         revoke_permission: bool = False,
     ) -> None:
-        previous_metadata = deepcopy(sess.metadata)
-
         saved = False
+
+        def edit(metadata: dict[str, Any]) -> None:
+            metadata[GOAL_STATE_KEY] = blob
+            discard_legacy_goal_state_key(metadata)
+            if reset_continuation:
+                reset_goal_continuation_rounds(metadata)
 
         async def save_and_publish() -> None:
             nonlocal saved
-            sess.metadata[GOAL_STATE_KEY] = blob
-            discard_legacy_goal_state_key(sess.metadata)
-            if reset_continuation:
-                reset_goal_continuation_rounds(sess.metadata)
-            try:
-                await self._save_session(sess)
-            except BaseException:
-                sess.metadata.clear()
-                sess.metadata.update(previous_metadata)
-                raise
+            await self._sessions.edit_metadata_async(sess, edit)
             saved = True
             await self._publish_goal_state_changed(sess.metadata)
 
@@ -199,7 +186,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     ) -> RuntimeContextBlock | None:
         if not request.session_key:
             return None
-        session = await self._get_or_create_session(request.session_key)
+        session = await self._sessions.get_or_create_async(request.session_key)
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(session.metadata)
         if not goal_start_requested and not goal_active:

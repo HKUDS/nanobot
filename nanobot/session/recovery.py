@@ -24,7 +24,6 @@ from nanobot.bus.outbound_events import (
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.session import io as session_io
 from nanobot.session import turn_continuation
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.session.manager import Session, SessionManager
@@ -485,7 +484,7 @@ class RecoveryCoordinator:
     async def scan(self) -> None:
         """Recover every interrupted WebUI session once at gateway startup."""
         for key in await self._recovery_candidates():
-            metadata_payload = await session_io.read_session_metadata(self.sessions, key)
+            metadata_payload = await self.sessions.read_session_metadata_async(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
             metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
             route = self._websocket_route_for(key, metadata)
@@ -494,7 +493,7 @@ class RecoveryCoordinator:
             unfinished = self._has_unfinished_webui_transcript(key)
             if not self._needs_recovery(metadata) and not unfinished:
                 continue
-            session = await session_io.get_or_create(self.sessions, key)
+            session = await self.sessions.get_or_create_async(key)
             try:
                 await self._recover_session(session, route[1])
                 await self._requeue_pending_followups(session)
@@ -509,14 +508,14 @@ class RecoveryCoordinator:
                     reason="recovery_failed",
                     can_continue=False,
                 )
-                await session_io.save(self.sessions, session)
+                await self.sessions.save_async(session)
                 await self._publish(route[1], failed)
 
     async def _recovery_candidates(self) -> list[str]:
         """Discover canonical and transcript-only WebUI sessions cheaply."""
         candidates = dict.fromkeys(
             key
-            for item in await session_io.list_sessions(self.sessions)
+            for item in await self.sessions.list_sessions_async()
             if isinstance((key := item.get("key")), str)
         )
         try:
@@ -551,7 +550,7 @@ class RecoveryCoordinator:
         """Reject stale queued recoveries and let new user input supersede them."""
         recovery_id = message.metadata.get(RECOVERY_INBOUND_METADATA_KEY)
         if isinstance(recovery_id, str):
-            session = await session_io.get_or_create(self.sessions, message.session_key)
+            session = await self.sessions.get_or_create_async(message.session_key)
             state = recovery_state_from_metadata(session.metadata)
             return bool(
                 state
@@ -560,7 +559,7 @@ class RecoveryCoordinator:
             )
         if message.channel != "websocket":
             return True
-        session = await session_io.get_or_create(self.sessions, message.session_key)
+        session = await self.sessions.get_or_create_async(message.session_key)
         state = recovery_state_from_metadata(session.metadata)
         if state and state["status"] in {"resuming", "awaiting_user", "failed"}:
             await self._cancel_active_recovery(message.session_key)
@@ -574,13 +573,13 @@ class RecoveryCoordinator:
                 attempts=cast(int, state.get("attempts", 0)),
                 reason="superseded",
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(message.chat_id, recovered)
         return True
 
     async def turn_completed(self, session_key: str) -> None:
         """Resolve a resuming state after the recovered turn commits."""
-        session = await session_io.get_or_create(self.sessions, session_key)
+        session = await self.sessions.get_or_create_async(session_key)
         state = recovery_state_from_metadata(session.metadata)
         if not state or state["status"] != "resuming":
             return
@@ -594,7 +593,7 @@ class RecoveryCoordinator:
             attempts=cast(int, state.get("attempts", 0)),
             reason="continued",
         )
-        await session_io.save(self.sessions, session)
+        await self.sessions.save_async(session)
         await self._publish(route[1], recovered)
 
     async def handle_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -605,7 +604,7 @@ class RecoveryCoordinator:
             raise RecoveryActionError("missing chat_id")
         if not isinstance(recovery_id, str) or not recovery_id:
             raise RecoveryActionError("missing recovery_id")
-        session = await session_io.get_or_create(self.sessions, self._session_key(chat_id))
+        session = await self.sessions.get_or_create_async(self._session_key(chat_id))
         state = recovery_state_from_metadata(session.metadata)
         if not state or state["recovery_id"] != recovery_id:
             raise RecoveryActionError("recovery state is stale", status=409)
@@ -620,7 +619,7 @@ class RecoveryCoordinator:
                 attempts=cast(int, state.get("attempts", 0)),
                 reason="dismissed",
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(chat_id, next_state)
             return next_state
         if action != "continue":
@@ -637,7 +636,7 @@ class RecoveryCoordinator:
             reason="user_confirmed",
             resume_message_count=len(session.messages),
         )
-        await session_io.save(self.sessions, session)
+        await self.sessions.save_async(session)
         await self._publish(chat_id, next_state)
         await self._queue_continuation(session, chat_id, next_state)
         return next_state
@@ -670,7 +669,7 @@ class RecoveryCoordinator:
                         attempts=cast(int, state.get("attempts", 1)),
                         reason="loop_guard",
                     )
-                await session_io.save(self.sessions, session)
+                await self.sessions.save_async(session)
                 await self._publish(chat_id, next_state)
             elif self._has_unfinished_webui_transcript(session.key):
                 # A normal last-client shutdown can materialize the checkpoint
@@ -692,7 +691,7 @@ class RecoveryCoordinator:
                     ),
                     can_continue=can_continue,
                 )
-                await session_io.save(self.sessions, session)
+                await self.sessions.save_async(session)
                 await self._publish(chat_id, waiting)
             return
         if state and state["status"] in {"awaiting_user", "failed"}:
@@ -708,7 +707,7 @@ class RecoveryCoordinator:
                 attempts=cast(int, state.get("attempts", 1)),
                 reason="loop_guard",
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(chat_id, waiting)
             return
 
@@ -726,7 +725,7 @@ class RecoveryCoordinator:
                 reason="checkpoint_unknown",
                 can_continue=False,
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(chat_id, waiting)
             return
         if checkpoint is not None and not _runtime_checkpoint_is_well_formed(checkpoint):
@@ -740,7 +739,7 @@ class RecoveryCoordinator:
                 reason="checkpoint_invalid",
                 can_continue=False,
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(chat_id, waiting)
             return
         if phase == "final_response":
@@ -752,7 +751,7 @@ class RecoveryCoordinator:
                 attempts=0,
                 reason="answer_restored",
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(chat_id, recovered)
             return
         if phase in _UNCERTAIN_TOOL_PHASES or pending_calls:
@@ -764,7 +763,7 @@ class RecoveryCoordinator:
                 attempts=0,
                 reason="tool_state_unknown",
             )
-            await session_io.save(self.sessions, session)
+            await self.sessions.save_async(session)
             await self._publish(chat_id, waiting)
             return
         # A gateway restart is a lifecycle boundary.  Never enqueue model work
@@ -779,7 +778,7 @@ class RecoveryCoordinator:
             attempts=0,
             reason="restart_requires_confirmation",
         )
-        await session_io.save(self.sessions, session)
+        await self.sessions.save_async(session)
         await self._publish(chat_id, waiting)
 
     async def _queue_continuation(
