@@ -17,6 +17,7 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.cli import commands as cli_commands
 from nanobot.cli import gateway_runtime as cli_gateway_runtime
 from nanobot.cli import provider as provider_commands
@@ -2867,7 +2868,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
@@ -2934,7 +2935,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
         cron_service=_StopCron,
     )
@@ -3286,7 +3287,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     config.agents.defaults.dream.enabled = False
     config.gateway.heartbeat.enabled = False
-    bus = MagicMock()
+    bus = MessageBus()
     seen: dict[str, object] = {}
 
     _patch_cli_command_runtime(
@@ -3440,7 +3441,7 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
         cron_service=_StopCron,
         get_cron_dir=lambda: legacy_dir,
@@ -3479,7 +3480,7 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
         cron_service=_StopCron,
         get_cron_dir=lambda: legacy_dir,
@@ -3680,7 +3681,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
@@ -3891,7 +3892,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
@@ -4020,7 +4021,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        message_bus=lambda: object(),
+        message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
