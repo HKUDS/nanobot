@@ -81,7 +81,9 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const pickFolder = getRuntimeHost().pickFolder ?? onPickFolder;
+  const pickFolder = controls?.can_pick_folder
+    ? getRuntimeHost().pickFolder ?? onPickFolder
+    : undefined;
   const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {
