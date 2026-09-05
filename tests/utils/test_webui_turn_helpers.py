@@ -7,8 +7,8 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent, UserInputEvent
+from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
-    RuntimeEventBus,
     RuntimeEventContext,
     TurnRuntimeAdmitted,
     UserInputAccepted,
@@ -37,7 +37,7 @@ def _clear_turn_wall_clock() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_turn_run_status_running_records_wall_clock() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(
         channel="websocket",
@@ -61,7 +61,7 @@ async def test_publish_turn_run_status_running_records_wall_clock() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_turn_run_status_reuses_explicit_wall_clock() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(channel="websocket", sender_id="u", chat_id="chat-a", content="hi")
 
@@ -75,7 +75,7 @@ async def test_publish_turn_run_status_reuses_explicit_wall_clock() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_turn_run_status_idle_retains_registry_until_delivery() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(
         channel="websocket",
@@ -110,7 +110,7 @@ def test_clear_websocket_turn_only_clears_matching_owner() -> None:
 
 @pytest.mark.asyncio
 async def test_ownerless_turns_receive_distinct_internal_owners() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     first = InboundMessage(
         channel="websocket",
@@ -139,7 +139,7 @@ async def test_ownerless_turns_receive_distinct_internal_owners() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(channel="telegram", sender_id="u", chat_id="1", content="hi")
 
@@ -151,7 +151,7 @@ async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
 
 @pytest.mark.asyncio
 async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     observer = wth.build_webui_fallback_model_observer(bus)
 
@@ -185,37 +185,35 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
 async def test_coordinator_connections_end_on_scope_exit_and_can_reconnect(tmp_path):
     from nanobot.bus.runtime_events import RuntimeModelChanged
 
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
-    runtime_events = RuntimeEventBus()
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus, sessions=SessionManager(tmp_path),
         schedule_background=lambda coro: coro.close(),
     )
     event = RuntimeModelChanged("model", None)
     with pytest.raises(RuntimeError, match="shutdown"):
-        with coordinator.connected(runtime_events):
-            await runtime_events.publish(event)
+        with coordinator.connected():
+            await bus.publish(event)
             raise RuntimeError("shutdown")
     bus.publish_outbound.assert_awaited_once()
-    await runtime_events.publish(event)
+    await bus.publish(event)
     bus.publish_outbound.assert_awaited_once()
-    with coordinator.connected(runtime_events):
-        runtime_events.publish_nowait(event)
-        await runtime_events.drain()
+    with coordinator.connected():
+        bus.publish_nowait(event)
+        await bus.drain()
     assert bus.publish_outbound.await_count == 2
 
 
 async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path) -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
-    runtime_events = RuntimeEventBus()
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus,
         sessions=SessionManager(tmp_path),
         schedule_background=lambda coro: coro.close(),
     )
-    coordinator.subscribe(runtime_events)
+    coordinator.subscribe()
     runtime = LLMRuntime(
         provider=MagicMock(),
         model="openai-codex/gpt-5.6",
@@ -224,7 +222,7 @@ async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path)
         model_preset="Codex",
     )
 
-    await runtime_events.publish(
+    await bus.publish(
         TurnRuntimeAdmitted(
             context=RuntimeEventContext(
                 channel="websocket",
@@ -249,7 +247,7 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
     tmp_path,
     monkeypatch,
 ) -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     sessions = SessionManager(tmp_path)
     target_session = sessions.get_or_create("websocket:target")
@@ -266,15 +264,14 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
     }
     append_input = MagicMock()
     monkeypatch.setattr(wth, "append_session_message_input", append_input)
-    runtime_events = RuntimeEventBus()
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus,
         sessions=sessions,
         schedule_background=lambda coro: coro.close(),
     )
-    coordinator.subscribe(runtime_events)
+    coordinator.subscribe()
 
-    await runtime_events.publish(UserInputAccepted(
+    await bus.publish(UserInputAccepted(
         context=RuntimeEventContext(
             channel="system",
             chat_id="websocket:target",
@@ -298,7 +295,7 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
 
 @pytest.mark.asyncio
 async def test_fallback_model_ignores_non_websocket_requests() -> None:
-    bus = MagicMock()
+    bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     observer = wth.build_webui_fallback_model_observer(bus)
 

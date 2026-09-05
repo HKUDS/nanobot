@@ -27,7 +27,6 @@ from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
     ProgressEvent,
     RetryWaitEvent,
-    outbound_event_from_message,
 )
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
@@ -369,7 +368,7 @@ async def _maybe_print_interactive_progress(
     renderer: StreamRenderer | None = None,
     reasoning_buffer: _ReasoningBuffer | None = None,
 ) -> bool:
-    event = outbound_event_from_message(msg)
+    event = msg.event
     if isinstance(event, ContextCompactionEvent):
         await _print_interactive_progress_line(msg.content, thinking, renderer)
         return True

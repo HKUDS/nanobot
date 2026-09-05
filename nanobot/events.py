@@ -37,12 +37,20 @@ class RecoveryStateEvent(AgentEvent):
 class EventSink:
     """A thin send callback bound to one operation's MessageBus route.
 
-    Notification failures must not change the operation's result. Cancellation
-    still propagates. This owns no queue or subscribers; SDK callers may inject
-    their own callback instead of channel delivery.
+    Operations use best-effort emit; execution hooks await publish directly so
+    output failures retain their runner error semantics. Both propagate
+    cancellation. This owns no queue or subscribers. accepts lets expensive
+    producers skip work when the bound consumer cannot use their event type.
     """
 
     publish: Callable[[AgentEvent], Awaitable[None]] | None = None
+    accepts_type: Callable[[type[AgentEvent]], bool] | None = None
+
+    def accepts(self, event_type: type[AgentEvent]) -> bool:
+        """Whether producing this event has a consumer in the bound scope."""
+        return self.publish is not None and (
+            self.accepts_type is None or self.accepts_type(event_type)
+        )
 
     async def emit(self, event: AgentEvent) -> None:
         if self.publish is None:

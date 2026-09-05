@@ -21,7 +21,6 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
-    outbound_event_from_message,
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -698,7 +697,7 @@ class ChannelManager:
 
     def _should_suppress_outbound(self, msg: OutboundMessage) -> bool:
         metadata = msg.metadata or {}
-        if isinstance(outbound_event_from_message(msg), ProgressEvent):
+        if isinstance(msg.event, ProgressEvent):
             return False
         fingerprint = self._fingerprint_content(msg.content)
         if not fingerprint:
@@ -784,7 +783,7 @@ class ChannelManager:
                         timeout=1.0
                     )
 
-                event = outbound_event_from_message(msg)
+                event = msg.event
                 progress_event = event if isinstance(event, ProgressEvent) else None
                 if progress_event and (
                     progress_event.reasoning_delta
@@ -826,7 +825,7 @@ class ChannelManager:
                 if isinstance(event, StreamDeltaEvent):
                     msg, extra_pending = self._coalesce_stream_deltas(msg)
                     pending.extend(extra_pending)
-                    event = outbound_event_from_message(msg)
+                    event = msg.event
 
                 channel = self.channels.get(msg.channel)
                 if channel:
@@ -909,7 +908,7 @@ class ChannelManager:
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if isinstance(event, ProgressEvent) and event.reasoning_end:
             await ChannelManager._send_reasoning_end(channel, msg, event)
         elif isinstance(event, ProgressEvent) and event.reasoning_delta:
@@ -942,7 +941,7 @@ class ChannelManager:
         Returns:
             tuple of (merged_message, list_of_non_matching_messages)
         """
-        first_event = outbound_event_from_message(first_msg)
+        first_event = first_msg.event
         first_stream_id = first_event.stream_id if isinstance(first_event, StreamDeltaEvent) else None
         target_key = (first_msg.channel, first_msg.chat_id, first_stream_id)
         combined_content = first_msg.content
@@ -962,7 +961,7 @@ class ChannelManager:
                 break
 
             # Check if this message belongs to the same stream
-            next_event = outbound_event_from_message(next_msg)
+            next_event = next_msg.event
             next_stream_id = (
                 next_event.stream_id
                 if isinstance(next_event, StreamDeltaEvent | StreamEndEvent)

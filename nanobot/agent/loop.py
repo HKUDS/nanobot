@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import inspect
 import os
 import time
 import weakref
@@ -51,14 +50,15 @@ from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
+    StreamDeltaEvent,
     StreamedResponseEvent,
+    StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import normalize_command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.events import NO_EVENTS, EventSink
+from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
@@ -109,6 +109,7 @@ from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.progress_events import output_events
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
 )
@@ -162,9 +163,8 @@ class TurnContext:
     outbound: OutboundMessage | None = None
     suppress_response: bool = False
 
-    on_progress: Callable[..., Awaitable[None]] | None = None
-    on_stream: Callable[[str], Awaitable[None]] | None = None
-    on_stream_end: Callable[..., Awaitable[None]] | None = None
+    events: EventSink = NO_EVENTS
+    streaming: bool = False
     on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
@@ -298,7 +298,6 @@ class AgentLoop:
         model_preset: str | None = None,
         dream_model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
-        runtime_events: RuntimeEventBus | None = None,
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
@@ -315,16 +314,9 @@ class AgentLoop:
         if turn_delivery_factory is not None:
             if turn_delivery_factory.bus is not bus:
                 raise ValueError("turn delivery factory must use the agent message bus")
-            if (
-                runtime_events is not None
-                and turn_delivery_factory.runtime_events is not runtime_events
-            ):
-                raise ValueError("turn delivery factory must use the agent runtime event bus")
             self.turn_delivery_factory = turn_delivery_factory
-            self.runtime_events = turn_delivery_factory.runtime_events
         else:
-            self.runtime_events = runtime_events or RuntimeEventBus()
-            self.turn_delivery_factory = TurnDeliveryFactory(bus, self.runtime_events)
+            self.turn_delivery_factory = TurnDeliveryFactory(bus)
         self.runtime_event_publisher = self.turn_delivery_factory.runtime_event_publisher
         self.channels_config = channels_config
         self.restart_mode = restart_mode
@@ -649,7 +641,6 @@ class AgentLoop:
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
-            runtime_events=self.runtime_events,
             runtime_control=AgentRuntimeControl(self),
         )
         loader = ToolLoader()
@@ -956,10 +947,8 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         transcript_input: TranscriptInput,
-        on_progress: Callable[..., Awaitable[None]] | None = None,
-        on_stream: Callable[[str], Awaitable[None]] | None = None,
-        on_stream_end: Callable[..., Awaitable[None]] | None = None,
         events: EventSink = NO_EVENTS,
+        streaming: bool = False,
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
@@ -975,8 +964,8 @@ class AgentLoop:
     ) -> AgentRunResult:
         """Run the agent iteration loop.
 
-        *on_stream*: called with each content delta during streaming.
-        *on_stream_end(resuming, merge_next)*: called when a streaming session finishes.
+        *events*: scoped operation and output events.
+        *streaming*: request incremental output from the runner.
         ``resuming=True`` means the active turn continues. ``merge_next=True`` means
         the next text segment belongs to the same user-visible assistant message.
 
@@ -1169,9 +1158,8 @@ class AgentLoop:
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
             hook = build_agent_turn_hook(AgentTurnHookSpec(
-                on_progress=on_progress,
-                on_stream=on_stream,
-                on_stream_end=on_stream_end,
+                events=events,
+                streaming=streaming,
                 channel=request_ctx.channel,
                 chat_id=request_ctx.chat_id,
                 message_id=request_ctx.message_id,
@@ -1263,14 +1251,14 @@ class AgentLoop:
             )
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
-            if on_stream and on_stream_end and should_stream:
+            if events.publish is not None and streaming and should_stream:
                 stream_content = (
                     result.pending_stream_content
                     if result.pending_stream_content is not None
                     else result.final_content or ""
                 )
-                await on_stream(stream_content)
-                await on_stream_end(resuming=False)
+                await events.publish(StreamDeltaEvent(content=stream_content))
+                await events.publish(StreamEndEvent())
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result
@@ -1457,8 +1445,6 @@ class AgentLoop:
                     )
                     response = await self._process_message(
                         msg,
-                        on_stream=delivery.on_stream,
-                        on_stream_end=delivery.on_stream_end,
                         pending_queue=pending,
                         delivery=delivery,
                     )
@@ -1653,10 +1639,6 @@ class AgentLoop:
             delivery = self.turn_delivery_factory.create(msg, key)
         elif delivery.session_key != key:
             raise ValueError("turn delivery session does not match the processing session")
-        if on_stream is None:
-            on_stream = delivery.on_stream
-        if on_stream_end is None:
-            on_stream_end = delivery.on_stream_end
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,
@@ -1676,9 +1658,13 @@ class AgentLoop:
             visible_run_started_at=turn_continuation.internal_continuation_run_started_at(
                 msg.metadata,
             ),
-            on_progress=on_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
+            events=output_events(
+                default=delivery.events,
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+            ),
+            streaming=on_stream is not None or delivery.streaming,
             on_runtime_admitted=on_runtime_admitted,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
@@ -1691,46 +1677,21 @@ class AgentLoop:
         # A streaming callback may be present even when the final text comes from a
         # non-streaming recovery. Only the last completed segment can suppress the
         # regular outbound message.
-        if ctx.on_stream is not None:
-            stream_callback = ctx.on_stream
-            stream_end_callback = ctx.on_stream_end
-            stream_end_accepts_merge_next = False
-            if stream_end_callback is not None:
-                try:
-                    stream_end_signature = inspect.signature(stream_end_callback)
-                    stream_end_accepts_merge_next = (
-                        "merge_next" in stream_end_signature.parameters
-                        or any(
-                            parameter.kind is inspect.Parameter.VAR_KEYWORD
-                            for parameter in stream_end_signature.parameters.values()
-                        )
-                    )
-                except (TypeError, ValueError):
-                    pass
+        if ctx.streaming:
+            publish = ctx.events.publish
             segment_streamed_content = False
 
-            async def _tracked_stream(delta: str) -> None:
+            async def track_output(event: AgentEvent) -> None:
                 nonlocal segment_streamed_content
-                if delta:
+                if isinstance(event, StreamDeltaEvent) and event.content:
                     segment_streamed_content = True
-                await stream_callback(delta)
+                elif isinstance(event, StreamEndEvent):
+                    ctx.streamed_content = segment_streamed_content
+                    segment_streamed_content = False
+                if publish is not None:
+                    await publish(event)
 
-            async def _tracked_stream_end(
-                *,
-                resuming: bool = False,
-                merge_next: bool = False,
-            ) -> None:
-                nonlocal segment_streamed_content
-                ctx.streamed_content = segment_streamed_content
-                segment_streamed_content = False
-                if stream_end_callback is not None:
-                    if merge_next and stream_end_accepts_merge_next:
-                        await stream_end_callback(resuming=resuming, merge_next=True)
-                    else:
-                        await stream_end_callback(resuming=resuming)
-
-            ctx.on_stream = _tracked_stream
-            ctx.on_stream_end = _tracked_stream_end
+            ctx.events = EventSink(track_output, ctx.events.accepts)
 
         await self._run_turn_stage(ctx, "restore", self._restore_turn)
         await self._run_turn_stage(ctx, "compact", self._compact_session)
@@ -2026,8 +1987,6 @@ class AgentLoop:
             self.sessions.save(session)
         ctx.transcript_input = self._build_transcript_input(ctx)
 
-        if ctx.on_progress is None:
-            ctx.on_progress = ctx.delivery.progress_callback()
 
     async def _run_turn(self, ctx: TurnContext) -> None:
         runtime = ctx.require_runtime()
@@ -2039,9 +1998,7 @@ class AgentLoop:
             result = await self._run_agent_loop(
                 ctx.transcript_input,
                 runtime=runtime,
-                on_progress=ctx.on_progress,
-                on_stream=ctx.on_stream,
-                on_stream_end=ctx.on_stream_end,
+                streaming=ctx.streaming,
                 session=ctx.session,
                 pending_queue=ctx.pending_queue,
                 ephemeral=ctx.ephemeral,
@@ -2052,7 +2009,7 @@ class AgentLoop:
                 tools=ctx.tools,
                 request_context=ctx.request_context,
                 provider_state=ctx.provider_state,
-                events=ctx.delivery.events,
+                events=ctx.events,
             )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages

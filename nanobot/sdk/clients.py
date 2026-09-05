@@ -206,7 +206,7 @@ class RuntimeClient:
         handler: Callable[[SessionTurnPersisted], Awaitable[None] | None],
     ) -> Callable[[], None]:
         """Register a persisted-turn callback and return an unsubscribe callback."""
-        return self._loop.runtime_events.subscribe(handler, SessionTurnPersisted)
+        return self._loop.bus.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Archive one session through the shared idle-compaction path."""

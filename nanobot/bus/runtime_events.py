@@ -1,25 +1,16 @@
-"""Runtime event bus for agent state notifications.
-
-This bus is separate from :mod:`nanobot.bus.queue`: message bus events are
-user/chat delivery, while runtime events are in-process state notifications
-that optional subscribers such as WebUI adapters may render.
-"""
+"""Runtime state facts and turn-scoped publication through MessageBus."""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import inspect
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar, overload
-
-from loguru import logger
+from typing import TYPE_CHECKING, Any
 
 from nanobot.bus.events import InboundMessage
+from nanobot.events import AgentEvent
 from nanobot.providers.base import LLMUsage
 
 if TYPE_CHECKING:
+    from nanobot.bus.queue import MessageBus
     from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -35,14 +26,14 @@ class RuntimeEventContext:
 
 
 @dataclass(frozen=True)
-class SessionTurnStarted:
+class SessionTurnStarted(AgentEvent):
     """A user/system turn has loaded its session and is about to build context."""
 
     context: RuntimeEventContext
 
 
 @dataclass(frozen=True)
-class UserInputAccepted:
+class UserInputAccepted(AgentEvent):
     """User input was accepted for dispatch or injection into a session."""
 
     context: RuntimeEventContext
@@ -50,7 +41,7 @@ class UserInputAccepted:
 
 
 @dataclass(frozen=True)
-class TurnRuntimeAdmitted:
+class TurnRuntimeAdmitted(AgentEvent):
     """The immutable model runtime selected for one admitted turn."""
 
     context: RuntimeEventContext
@@ -58,7 +49,7 @@ class TurnRuntimeAdmitted:
 
 
 @dataclass(frozen=True)
-class TurnRunStatusChanged:
+class TurnRunStatusChanged(AgentEvent):
     """Visible run status changed for a turn."""
 
     context: RuntimeEventContext
@@ -67,7 +58,7 @@ class TurnRunStatusChanged:
 
 
 @dataclass(frozen=True)
-class TurnCompleted:
+class TurnCompleted(AgentEvent):
     """A turn has delivered its final user-visible response."""
 
     context: RuntimeEventContext
@@ -79,7 +70,7 @@ class TurnCompleted:
 
 
 @dataclass(frozen=True)
-class SessionTurnPersisted:
+class SessionTurnPersisted(AgentEvent):
     """A completed turn has been written to local session storage."""
 
     context: RuntimeEventContext
@@ -88,7 +79,7 @@ class SessionTurnPersisted:
 
 
 @dataclass(frozen=True)
-class GoalStateChanged:
+class GoalStateChanged(AgentEvent):
     """A session's sustained-goal state changed."""
 
     context: RuntimeEventContext
@@ -96,115 +87,11 @@ class GoalStateChanged:
 
 
 @dataclass(frozen=True)
-class RuntimeModelChanged:
+class RuntimeModelChanged(AgentEvent):
     """The active runtime model/preset changed."""
 
     model: str
     model_preset: str | None
-
-
-RuntimeEvent = (
-    UserInputAccepted
-    | SessionTurnStarted
-    | TurnRuntimeAdmitted
-    | SessionTurnPersisted
-    | TurnRunStatusChanged
-    | TurnCompleted
-    | GoalStateChanged
-    | RuntimeModelChanged
-)
-RuntimeEventType = (
-    type[UserInputAccepted]
-    | type[SessionTurnStarted]
-    | type[TurnRuntimeAdmitted]
-    | type[SessionTurnPersisted]
-    | type[TurnRunStatusChanged]
-    | type[TurnCompleted]
-    | type[GoalStateChanged]
-    | type[RuntimeModelChanged]
-)
-_EventT = TypeVar("_EventT", bound=RuntimeEvent)
-RuntimeEventHandler = Callable[[RuntimeEvent], Awaitable[None] | None]
-
-
-class RuntimeEventBus:
-    """Small in-process pub/sub bus for runtime state.
-
-    Subscribers run in registration order. ``publish`` awaits async handlers so
-    callers can preserve ordering when a runtime event must follow a user
-    message. ``publish_nowait`` is available for synchronous call sites.
-    """
-
-    def __init__(self) -> None:
-        self._handlers: list[RuntimeEventHandler] = []
-        self._pending: set[asyncio.Task[None]] = set()
-
-    @overload
-    def subscribe(
-        self, handler: Callable[[_EventT], Awaitable[None] | None],
-        event_type: type[_EventT],
-    ) -> Callable[[], None]: ...
-
-    @overload
-    def subscribe(
-        self, handler: RuntimeEventHandler, event_type: None = None,
-    ) -> Callable[[], None]: ...
-
-    def subscribe(
-        self,
-        handler: Callable[..., Awaitable[None] | None],
-        event_type: RuntimeEventType | None = None,
-    ) -> Callable[[], None]:
-        """Connect an ordered, awaited handler; return its idempotent disconnect.
-
-        The overloads bind handler and event type. The erased callable exists
-        only at this heterogeneous dispatch boundary, behind the type filter.
-        """
-        active = True
-
-        def entry(event: RuntimeEvent) -> Awaitable[None] | None:
-            if active and (event_type is None or isinstance(event, event_type)):
-                return handler(event)
-            return None
-        self._handlers.append(entry)
-
-        def _unsubscribe() -> None:
-            nonlocal active
-            active = False
-            with contextlib.suppress(ValueError):
-                self._handlers.remove(entry)
-
-        return _unsubscribe
-
-    async def publish(self, event: RuntimeEvent) -> None:
-        for handler in list(self._handlers):
-            try:
-                result = handler(event)
-                if inspect.isawaitable(result):
-                    await result
-            except Exception:
-                logger.exception("runtime event handler failed for {}", type(event).__name__)
-
-    def publish_nowait(self, event: RuntimeEvent) -> asyncio.Task[None] | None:
-        """Schedule ordered dispatch, retaining it until completion.
-
-        Unlike ``publish``, the caller does not wait for handlers. This does not
-        turn individual handlers into independent workers or change their order.
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            logger.debug("dropping runtime event without a running loop: {}", type(event).__name__)
-            return None
-        task = loop.create_task(self.publish(event))
-        self._pending.add(task)
-        task.add_done_callback(self._pending.discard)
-        return task
-
-    async def drain(self) -> None:
-        """Finish scheduled dispatches after producers stop, before disconnecting."""
-        while self._pending:
-            await asyncio.gather(*self._pending, return_exceptions=True)
 
 
 class RuntimeEventPublisher:
@@ -214,8 +101,8 @@ class RuntimeEventPublisher:
     the mechanics of building event contexts and carrying per-turn metadata.
     """
 
-    def __init__(self, bus: RuntimeEventBus | None = None) -> None:
-        self.bus = bus or RuntimeEventBus()
+    def __init__(self, bus: MessageBus) -> None:
+        self.bus = bus
         self._turn_latency_ms: dict[str, int] = {}
         self._turn_runtime: dict[str, LLMRuntime] = {}
         self._turn_usage: dict[str, LLMUsage] = {}

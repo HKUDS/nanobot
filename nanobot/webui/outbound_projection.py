@@ -17,7 +17,6 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
     TurnModelUpdatedEvent,
     UserInputEvent,
-    outbound_event_from_message,
 )
 from nanobot.session.webui_turns import clear_websocket_turn_if_current
 from nanobot.webui.metadata import (
@@ -134,7 +133,7 @@ class WebUIOutboundProjector:
             )
 
     async def send(self, msg: OutboundMessage) -> None:
-        event = outbound_event_from_message(msg)
+        event = msg.event
         progress_event = event if isinstance(event, ProgressEvent) else None
         if isinstance(event, RuntimeModelUpdatedEvent):
             await self._transport.send_runtime_model_updated(

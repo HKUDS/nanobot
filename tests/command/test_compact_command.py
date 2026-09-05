@@ -98,7 +98,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
         session.add_message("assistant", "Nothing to compact.", _command=True)
     loop.sessions.save(session)
     completions = []
-    loop.runtime_events.subscribe(completions.append, TurnCompleted)
+    loop.bus.subscribe(completions.append, TurnCompleted)
 
     await loop._dispatch(InboundMessage(
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
@@ -155,7 +155,7 @@ async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loo
         metadata={"webui_turn_id": "queued-compact"},
     )
     completions = []
-    loop.runtime_events.subscribe(completions.append, TurnCompleted)
+    loop.bus.subscribe(completions.append, TurnCompleted)
     async with loop._get_session_lock(key):
         await loop._dispatch_command_inline(msg, key, msg.content, loop.commands.dispatch)
         reply = await cmd_stop(CommandContext(
@@ -181,7 +181,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
 
     loop.provider.chat_with_retry.side_effect = wait_for_cancel
     completions = []
-    loop.runtime_events.subscribe(completions.append, TurnCompleted)
+    loop.bus.subscribe(completions.append, TurnCompleted)
     msg = InboundMessage(
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},

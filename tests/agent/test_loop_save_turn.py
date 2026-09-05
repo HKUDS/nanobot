@@ -128,7 +128,7 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
         bus=loop.bus,
         sessions=loop.sessions,
         schedule_background=lambda coro: loop.schedule_background(coro),
-    ).subscribe(loop.runtime_events)
+    ).subscribe()
     return loop
 
 
@@ -1451,7 +1451,7 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
 
     calls = 0
 
-    async def fake_run_agent_loop(transcript_input, *, on_stream=None, on_stream_end=None, **_kwargs):
+    async def fake_run_agent_loop(transcript_input, *, events, streaming, **_kwargs):
         nonlocal calls
         initial_messages = _assembled_messages(loop.context, transcript_input)
         calls += 1
@@ -1461,10 +1461,9 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
                 stop_reason="max_iterations",
             )
-        assert on_stream is not None
-        assert on_stream_end is not None
-        await on_stream("done")
-        await on_stream_end(resuming=False)
+        assert streaming
+        await events.emit(StreamDeltaEvent(content="done"))
+        await events.emit(StreamEndEvent())
         return _agent_run_result(
             "done",
             [*initial_messages, {"role": "assistant", "content": "done"}],

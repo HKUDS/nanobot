@@ -3,8 +3,9 @@ import asyncio
 import pytest
 
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
-    RuntimeEventBus,
     RuntimeEventContext,
     RuntimeEventPublisher,
     RuntimeModelChanged,
@@ -17,8 +18,32 @@ from nanobot.bus.runtime_events import (
 from nanobot.providers.base import LLMUsage
 
 
+async def test_local_state_subscriber_does_not_block_routed_delivery():
+    bus = MessageBus()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def observe(event):
+        entered.set()
+        await release.wait()
+
+    bus.subscribe(observe, RuntimeModelChanged)
+    dispatch = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await asyncio.wait_for(
+            bus.publish_event(ProgressEvent(content="working"), channel="cli", chat_id="other"),
+            timeout=1,
+        )
+        message = await asyncio.wait_for(bus.consume_outbound(), timeout=1)
+        assert (message.chat_id, message.content) == ("other", "working")
+        assert not dispatch.done()
+    finally:
+        release.set()
+        await dispatch
+
+
 async def test_disconnect_skips_a_handler_in_an_existing_dispatch_snapshot():
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen = []
 
     def first(event):
@@ -32,7 +57,7 @@ async def test_disconnect_skips_a_handler_in_an_existing_dispatch_snapshot():
 
 
 async def test_awaited_dispatch_preserves_order_and_propagates_cancellation():
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     entered, release = asyncio.Event(), asyncio.Event()
     seen = []
 
@@ -62,7 +87,7 @@ async def test_awaited_dispatch_preserves_order_and_propagates_cancellation():
 
 
 async def test_scheduled_dispatch_is_owned_and_can_be_drained():
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     entered, release = asyncio.Event(), asyncio.Event()
     seen = []
 
@@ -87,7 +112,7 @@ async def test_scheduled_dispatch_is_owned_and_can_be_drained():
 
 @pytest.mark.asyncio
 async def test_runtime_event_bus_filters_by_event_type() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[str] = []
 
     async def handle_run_status(event: TurnRunStatusChanged) -> None:
@@ -112,7 +137,7 @@ async def test_runtime_event_bus_filters_by_event_type() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_event_bus_keeps_catch_all_subscription() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[str] = []
 
     def handle_any(event) -> None:
@@ -127,7 +152,7 @@ async def test_runtime_event_bus_keeps_catch_all_subscription() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_builds_context_from_inbound_message() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
     msg = InboundMessage(
@@ -163,7 +188,7 @@ async def test_runtime_event_publisher_builds_context_from_inbound_message() -> 
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
 
@@ -204,7 +229,7 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_exposes_admitted_runtime() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
     msg = InboundMessage(
@@ -235,7 +260,7 @@ async def test_runtime_event_publisher_exposes_admitted_runtime() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_emits_persisted_turn_attributes() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
     msg = InboundMessage(

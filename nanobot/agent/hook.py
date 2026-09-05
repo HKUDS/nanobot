@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
 
@@ -51,7 +52,7 @@ class AgentRunHookContext:
 class AgentTurnHookContext:
     """Turn-local inputs available when constructing per-turn hooks."""
 
-    on_progress: Callable[..., Awaitable[None]] | None = None
+    events: EventSink = NO_EVENTS
     workspace: Path | None = None
     channel: str = "cli"
     chat_id: str = "direct"

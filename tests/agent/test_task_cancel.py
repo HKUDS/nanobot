@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
 from nanobot.session.keys import UNIFIED_SESSION_KEY
@@ -277,7 +278,6 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_streaming_preserves_message_metadata(self):
         from nanobot.bus.events import InboundMessage
-        from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 
         loop, bus = _make_loop()
         msg = InboundMessage(
@@ -292,11 +292,10 @@ class TestDispatch:
             },
         )
 
-        async def fake_process(_msg, *, on_stream=None, on_stream_end=None, **kwargs):
-            assert on_stream is not None
-            assert on_stream_end is not None
-            await on_stream("hi")
-            await on_stream_end(resuming=False)
+        async def fake_process(_msg, *, delivery, **kwargs):
+            assert delivery.streaming
+            await delivery.events.emit(StreamDeltaEvent(content="hi"))
+            await delivery.events.emit(StreamEndEvent())
             return None
 
         loop._process_message = fake_process

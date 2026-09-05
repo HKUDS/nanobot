@@ -255,7 +255,7 @@ async def test_config_invalidation_defers_canonical_notification_until_default_r
         model_preset="fast",
         preset_snapshot_loader=load_preset,
     )
-    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    loop.bus.subscribe(published.append, RuntimeModelChanged)
     session = loop.sessions.get_or_create("websocket:chat")
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
     current_model = "model-b"
@@ -306,7 +306,7 @@ async def test_config_refresh_publishes_renamed_canonical_preset(tmp_path: Path)
         model_preset="fast",
         preset_snapshot_loader=load_preset,
     )
-    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    loop.bus.subscribe(published.append, RuntimeModelChanged)
     catalog["Codex"] = catalog.pop("fast")
     default_name = "Codex"
 

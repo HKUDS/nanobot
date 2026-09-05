@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -15,14 +15,9 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
-    outbound_message_for_event,
 )
-from nanobot.bus.progress import build_bus_progress_callback
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import (
-    RuntimeEventBus,
-    RuntimeEventPublisher,
-)
+from nanobot.bus.runtime_events import RuntimeEventPublisher
 from nanobot.channels.notification_routes import notification_metadata
 from nanobot.events import AgentEvent, EventSink
 from nanobot.providers.base import LLMUsage
@@ -43,9 +38,6 @@ class TurnRoute:
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
-ProgressCallback = Callable[..., Awaitable[None]]
-StreamCallback = Callable[[str], Awaitable[None]]
-StreamEndCallback = Callable[..., Awaitable[None]]
 
 
 def _bind_events(
@@ -54,16 +46,19 @@ def _bind_events(
     channel, chat_id = route.channel, route.chat_id
     metadata = deepcopy(route.metadata)
 
+    def accepts(event_type: type[AgentEvent]) -> bool:
+        return notification_is_deliverable(
+            event_type, channel=channel, publish_lifecycle=route.publish_lifecycle,
+        )
+
     async def publish(event: AgentEvent) -> None:
-        if not notification_is_deliverable(
-            event, channel=channel, publish_lifecycle=route.publish_lifecycle,
-        ):
+        if not accepts(type(event)):
             return
         await bus.publish_event(
             event, channel=channel, chat_id=chat_id, metadata=deepcopy(metadata),
         )
 
-    return EventSink(publish)
+    return EventSink(publish, accepts)
 
 
 class TurnDeliveryFactory:
@@ -72,12 +67,10 @@ class TurnDeliveryFactory:
     def __init__(
         self,
         bus: MessageBus,
-        runtime_events: RuntimeEventBus,
         route_policy: TurnRoutePolicy | None = None,
     ) -> None:
         self.bus = bus
-        self.runtime_events = runtime_events
-        self.runtime_event_publisher = RuntimeEventPublisher(runtime_events)
+        self.runtime_event_publisher = RuntimeEventPublisher(bus)
         self.route_policy = route_policy
 
     def create(
@@ -188,9 +181,11 @@ class TurnDelivery:
     _stream_segment: int = field(init=False, default=0)
     _stream_open: bool = field(init=False, default=False)
     events: EventSink = field(init=False)
+    _routed_events: EventSink = field(init=False)
 
     def __post_init__(self) -> None:
-        self.events = _bind_events(self.bus, self.route)
+        self._routed_events = _bind_events(self.bus, self.route)
+        self.events = EventSink(self._publish_event, self._routed_events.accepts)
         self.delivery_message = dataclasses.replace(
             self.input_message,
             channel=self.route.channel,
@@ -204,17 +199,8 @@ class TurnDelivery:
             self._stream_base_id = f"{self.session_key}:{time.time_ns()}"
 
     @property
-    def on_stream(self) -> StreamCallback | None:
-        return self._publish_stream if self._stream_base_id is not None else None
-
-    @property
-    def on_stream_end(self) -> StreamEndCallback | None:
-        return self._publish_stream_end if self._stream_base_id is not None else None
-
-    def progress_callback(self) -> ProgressCallback | None:
-        if not self.route.publish_lifecycle:
-            return None
-        return build_bus_progress_callback(self.bus, self.delivery_message)
+    def streaming(self) -> bool:
+        return self._stream_base_id is not None
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
@@ -342,40 +328,21 @@ class TurnDelivery:
         assert self._stream_base_id is not None
         return f"{self._stream_base_id}:{self._stream_segment}"
 
-    async def _publish_stream(self, delta: str) -> None:
-        await self.bus.publish_outbound(
-            outbound_message_for_event(
-                channel=self.delivery_message.channel,
-                chat_id=self.delivery_message.chat_id,
-                event=StreamDeltaEvent(content=delta, stream_id=self._stream_id()),
-                metadata=self.delivery_message.metadata,
-            )
-        )
-        self._stream_open = True
-
-    async def _publish_stream_end(
-        self,
-        *,
-        resuming: bool = False,
-        merge_next: bool = False,
-    ) -> None:
-        await self.bus.publish_outbound(
-            outbound_message_for_event(
-                channel=self.delivery_message.channel,
-                chat_id=self.delivery_message.chat_id,
-                event=StreamEndEvent(
-                    stream_id=self._stream_id(),
-                    resuming=resuming,
-                    merge_next=merge_next,
-                ),
-                metadata=self.delivery_message.metadata,
-            )
-        )
-        self._stream_open = merge_next
-        if not merge_next:
-            self._stream_segment += 1
+    async def _publish_event(self, event: AgentEvent) -> None:
+        if isinstance(event, StreamDeltaEvent | StreamEndEvent):
+            if not self.streaming:
+                return
+            event = dataclasses.replace(event, stream_id=self._stream_id())
+        if self._routed_events.publish is not None:
+            await self._routed_events.publish(event)
+        if isinstance(event, StreamDeltaEvent):
+            self._stream_open = True
+        elif isinstance(event, StreamEndEvent):
+            self._stream_open = event.merge_next
+            if not event.merge_next:
+                self._stream_segment += 1
 
     async def abort_stream(self) -> None:
         """Close an interrupted stream so stateful channels can release its buffer."""
         if self._stream_open:
-            await self._publish_stream_end()
+            await self._publish_event(StreamEndEvent())

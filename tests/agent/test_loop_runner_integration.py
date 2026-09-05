@@ -22,6 +22,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.progress_events import output_events
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 _GOAL_RUNTIME_GUIDANCE_TAG = "[Goal Runtime Guidance — host instructions]"
@@ -400,8 +401,8 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     result = await loop._run_agent_loop(
         TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
-        on_stream=on_stream,
-        on_stream_end=on_stream_end,
+        events=output_events(on_stream=on_stream, on_stream_end=on_stream_end),
+        streaming=True,
     )
 
     assert result.final_content == "Hello"
@@ -427,7 +428,8 @@ async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
     result = await loop._run_agent_loop(
         TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
-        on_stream=on_stream,
+        events=output_events(on_stream=on_stream),
+        streaming=True,
     )
 
     assert result.final_content == "Hello World"
@@ -452,7 +454,8 @@ async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
     result = await loop._run_agent_loop(
         TranscriptInput(history=[], current_message=None),
         runtime=loop.llm_runtime(),
-        on_stream=on_stream,
+        events=output_events(on_stream=on_stream),
+        streaming=True,
     )
 
     assert result.final_content == "Hello World"
