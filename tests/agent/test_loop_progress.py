@@ -1214,6 +1214,52 @@ class TestToolEventProgress:
         assert captured["model"] == "test-model"
 
     @pytest.mark.asyncio
+    async def test_webui_title_generates_when_session_has_webui_flag_but_event_metadata_does_not(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Regression: title must be generated when session has webui=True
+        even if event context metadata lacks the flag (e.g., trusted third-party
+        WebSocket frame that did not include webui: true)."""
+        from nanobot.session.webui_turns import (
+            WEBUI_SESSION_METADATA_KEY,
+            maybe_generate_webui_title_after_turn,
+        )
+        from nanobot.session.manager import SessionManager
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        sessions = SessionManager(tmp_path / "sessions")
+        session = sessions.get_or_create("websocket:chat1")
+        session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+        sessions.save(session)
+
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+
+        inner_called = []
+
+        async def fake_maybe_generate_webui_title(**kwargs: object) -> bool:
+            inner_called.append(kwargs)
+            return True
+
+        with patch(
+            "nanobot.session.webui_turns.maybe_generate_webui_title",
+            side_effect=fake_maybe_generate_webui_title,
+        ):
+            result = await maybe_generate_webui_title_after_turn(
+                channel="websocket",
+                chat_id="chat1",
+                metadata={},  # lacks webui flag
+                sessions=sessions,
+                session_key="websocket:chat1",
+                provider=provider,
+                model="test-model",
+            )
+
+        assert result is True
+        assert len(inner_called) == 1
+
+    @pytest.mark.asyncio
     async def test_webui_command_turn_does_not_schedule_title_generation(
         self,
         tmp_path: Path,
