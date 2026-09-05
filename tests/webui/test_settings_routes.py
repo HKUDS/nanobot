@@ -372,6 +372,12 @@ async def test_oauth_completion_reads_websocket_payload(
             {},
         ),
         (
+            "/api/settings/provider/delete",
+            "delete_provider_settings",
+            {"provider": "openai"},
+            {"provider": ["openai"]},
+        ),
+        (
             "/api/settings/model-call-order/update",
             "update_model_call_order",
             {"order": ["backup"]},
