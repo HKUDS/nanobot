@@ -1366,7 +1366,11 @@ describe("ThreadComposer", () => {
         variant="hero"
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{
+          can_change_project: true,
+          can_use_full_access: true,
+          can_pick_folder: true,
+        }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
@@ -1381,6 +1385,46 @@ describe("ThreadComposer", () => {
       access_mode: "full",
       restrict_to_workspace: false,
     }));
+  });
+
+  it("does not use a native host picker when the gateway disallows folder picking", async () => {
+    const user = userEvent.setup();
+    const onWorkspaceScopeChange = vi.fn();
+    const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
+    const onPickWorkspaceFolder = vi.fn().mockResolvedValue("/srv/nas-project");
+    const defaultScope = {
+      project_path: "/srv/nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    Object.defineProperty(window, "nanobotHost", {
+      configurable: true,
+      value: { pickFolder },
+    });
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{
+          can_change_project: true,
+          can_use_full_access: true,
+          can_pick_folder: false,
+        }}
+        onPickWorkspaceFolder={onPickWorkspaceFolder}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByLabelText("Paste path")).toBeInTheDocument();
+    expect(pickFolder).not.toHaveBeenCalled();
+    expect(onPickWorkspaceFolder).not.toHaveBeenCalled();
   });
 
   it("uses the gateway folder picker for a locally hosted WebUI", async () => {
