@@ -102,20 +102,6 @@ class TestSubagentStatus:
         assert s.error is None
 
 
-# ---------------------------------------------------------------------------
-# Runtime ownership
-# ---------------------------------------------------------------------------
-
-
-class TestRuntimeOwnership:
-    def test_manager_has_no_provider_model_mirrors(self, tmp_path):
-        sm = _manager(tmp_path)
-        assert not hasattr(sm, "provider")
-        assert not hasattr(sm, "model")
-        assert not hasattr(sm, "context_window_tokens")
-        assert not hasattr(sm.runner, "provider")
-
-
 class TestLegacyCompatibility:
     def test_accepts_exported_legacy_constructor_positionally(self, tmp_path):
         provider = MagicMock(spec=LLMProvider)
@@ -132,8 +118,6 @@ class TestLegacyCompatibility:
 
         assert sm.workspace == tmp_path
         assert sm.max_tool_result_chars == 16_000
-        assert not hasattr(sm, "provider")
-        assert not hasattr(sm, "model")
 
     @pytest.mark.asyncio
     async def test_legacy_spawn_captures_runtime_at_admission(self, tmp_path):

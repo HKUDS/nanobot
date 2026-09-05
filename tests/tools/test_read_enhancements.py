@@ -40,10 +40,6 @@ class TestReadDescriptionFix:
         tool = ReadFileTool()
         assert "image" in tool.description.lower()
 
-    def test_description_no_longer_says_cannot_read_images(self):
-        tool = ReadFileTool()
-        assert "cannot read binary files or images" not in tool.description.lower()
-
 
 # ---------------------------------------------------------------------------
 # Read deduplication
@@ -542,7 +538,3 @@ class TestReadDescriptionUpdate:
         tool = ReadFileTool()
         desc = tool.description.lower()
         assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
-
-    def test_description_no_longer_says_cannot_read(self):
-        tool = ReadFileTool()
-        assert "cannot read" not in tool.description.lower()

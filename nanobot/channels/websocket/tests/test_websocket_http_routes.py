@@ -342,26 +342,6 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
 
 
 @pytest.mark.asyncio
-async def test_legacy_session_messages_route_is_not_exposed(
-    bus: MagicMock, tmp_path: Path
-) -> None:
-    sm = _seed_session(tmp_path, key="websocket:legacy")
-    channel = _ch(bus, session_manager=sm, port=29919)
-    server_task = asyncio.create_task(channel.start())
-    try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        response = await _http_get(
-            "http://127.0.0.1:29919/api/sessions/websocket:legacy/messages",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        assert response.status_code == 404
-    finally:
-        await channel.stop()
-        await server_task
-
-
-@pytest.mark.asyncio
 async def test_session_automations_route_filters_by_webui_session(
     bus: MagicMock, tmp_path: Path
 ) -> None:

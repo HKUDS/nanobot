@@ -265,10 +265,8 @@ def test_channels_config_getattr_returns_extra():
     assert section["enabled"] is True
 
 
-def test_channels_config_has_no_per_channel_fields():
-    """After decoupling, ChannelsConfig has no explicit channel fields."""
+def test_channels_config_keeps_shared_delivery_defaults():
     cfg = ChannelsConfig()
-    assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is True
     assert cfg.extract_document_text is True

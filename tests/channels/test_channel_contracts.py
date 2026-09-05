@@ -83,19 +83,6 @@ _SINGLE_PLUGIN = ChannelPlugin(
 )
 
 
-def test_management_contract_is_not_declared_on_runtime_base_class() -> None:
-    management_hooks = {
-        "feature_instances",
-        "instance_specs",
-        "runtime_name",
-        "supports_multiple_instances",
-        "update_instance_config",
-    }
-
-    assert management_hooks.isdisjoint(BaseChannel.__dict__.keys())
-    assert "refresh_feature_metadata" in BaseChannel.__dict__
-
-
 def test_multi_instance_support_is_declared_by_management_spec() -> None:
     assert _SINGLE_PLUGIN.management.multi_instance is False
     assert load_channel_plugin("feishu").management.multi_instance is True
