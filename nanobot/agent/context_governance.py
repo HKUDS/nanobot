@@ -122,7 +122,6 @@ class ContextGovernanceConfig:
     session_key: str | None
     max_tool_result_chars: int
     context_window_tokens: int | None = None
-    context_block_limit: int | None = None
     max_tokens: int | None = None
 
 
@@ -699,9 +698,7 @@ class ContextGovernor:
         max_output = config.max_tokens if isinstance(config.max_tokens, int) else (
             provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
         )
-        budget = config.context_block_limit or (
-            config.context_window_tokens - max_output - SNIP_SAFETY_BUFFER
-        )
+        budget = config.context_window_tokens - max_output - SNIP_SAFETY_BUFFER
         return budget if budget > 0 else 0
 
     @staticmethod

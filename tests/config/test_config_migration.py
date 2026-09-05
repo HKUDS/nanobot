@@ -8,6 +8,31 @@ from nanobot.config.loader import load_config, save_config
 from nanobot.security.network import validate_url_target
 
 
+@pytest.mark.parametrize("field_name", ["contextBlockLimit", "context_block_limit"])
+def test_config_round_trip_ignores_legacy_context_block_limit(tmp_path, field_name) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {
+            "contextWindowTokens": 32_000,
+            "maxTokens": 4_000,
+            field_name: 500,
+        }}}),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    assert config.agents.defaults.context_window_tokens == 32_000
+    assert config.agents.defaults.max_tokens == 4_000
+    assert not hasattr(config.agents.defaults, "context_block_limit")
+
+    save_config(config, config_path)
+    defaults = json.loads(config_path.read_text(encoding="utf-8"))["agents"]["defaults"]
+    assert defaults["contextWindowTokens"] == 32_000
+    assert defaults["maxTokens"] == 4_000
+    assert "contextBlockLimit" not in defaults
+    assert "context_block_limit" not in defaults
+
+
 def _fake_resolve(host: str, results: list[str]):
     """Return a getaddrinfo mock that maps the given host to fake IP results."""
     def _resolver(hostname, port, family=0, type_=0):

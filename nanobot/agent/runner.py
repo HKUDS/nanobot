@@ -104,7 +104,6 @@ class AgentRunSpec:
     concurrent_tools: bool = False
     workspace: Path | None = None
     session_key: str | None = None
-    context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
@@ -426,7 +425,6 @@ class AgentRunner:
             session_key=spec.session_key,
             max_tool_result_chars=spec.max_tool_result_chars,
             context_window_tokens=spec.runtime.context_window_tokens,
-            context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
         )
         request_state = ModelRequestState(

@@ -33,9 +33,6 @@ def _make_loop(
         workspace=tmp_path,
         model="test-model",
         context_window_tokens=context_window_tokens,
-        # These tests isolate Memory consolidation; Runner request fitting is
-        # covered separately with realistic context windows.
-        context_block_limit=10_000,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
@@ -44,9 +41,9 @@ def _make_loop(
 
 @pytest.mark.asyncio
 async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=2_000)
-    loop.context_block_limit = 500
-    loop.provider.generation = GenerationSettings(max_tokens=100)
+    loop = _make_loop(
+        tmp_path, estimated_tokens=100, context_window_tokens=1_624, max_tokens=100,
+    )
     loop.provider.can_resume_conversation_state.return_value = False
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
 

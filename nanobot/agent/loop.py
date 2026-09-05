@@ -274,7 +274,6 @@ class AgentLoop:
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
         context_window_tokens: int | None = None,
-        context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
@@ -355,7 +354,6 @@ class AgentLoop:
             preset_snapshot_loader=preset_snapshot_loader,
         )
         self.dream_model_preset = dream_model_preset
-        self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
             max_tool_result_chars
             if max_tool_result_chars is not None
@@ -516,7 +514,6 @@ class AgentLoop:
             max_iterations=defaults.max_tool_iterations,
             max_concurrent_subagents=defaults.max_concurrent_subagents,
             context_window_tokens=context_window_tokens,
-            context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
@@ -1201,7 +1198,6 @@ class AgentLoop:
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
-                context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,

@@ -56,7 +56,6 @@ def _governance_config(
         session_key=spec.session_key,
         max_tool_result_chars=spec.max_tool_result_chars,
         context_window_tokens=spec.runtime.context_window_tokens,
-        context_block_limit=spec.context_block_limit,
         max_tokens=spec.runtime.generation.max_tokens,
     )
 
@@ -136,8 +135,7 @@ async def test_runner_locally_fits_oversized_initial_transcript(monkeypatch):
         ],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -210,8 +208,7 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
         provider_state=prior_state,
         tools=tools,
         model="test-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -261,8 +258,7 @@ async def test_runner_rejects_oversized_delta_without_summarizable_history(monke
             consolidate_history=consolidate,
             tools=tools,
             model="test-model",
-            context_window_tokens=2_000,
-            context_block_limit=500,
+            context_window_tokens=1_624,
             max_tokens=100,
             max_iterations=1,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -313,8 +309,7 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
         consolidate_history=consolidate,
         tools=tools,
         model="test-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -395,8 +390,7 @@ async def test_native_compaction_uses_provider_request_boundary(
         consolidate_provider_compaction=consolidate_native,
         tools=tools,
         model="test-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -465,8 +459,7 @@ async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
         consolidate_history=consolidate,
         tools=tools,
         model="test-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -537,8 +530,7 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         consolidate_history=consolidate,
         tools=tools,
         model="test-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -596,8 +588,7 @@ async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch)
             consolidate_history=consolidate,
             tools=tools,
             model="test-model",
-            context_window_tokens=2_000,
-            context_block_limit=500,
+            context_window_tokens=1_624,
             max_tokens=100,
             max_iterations=1,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -638,8 +629,8 @@ async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatc
             initial_messages=[{"role": "user", "content": "hello"}],
             tools=tools,
             model="local-model",
-            context_window_tokens=2_000,
-            context_block_limit=500,
+            context_window_tokens=1_624,
+            max_tokens=100,
             max_iterations=1,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=MutatingHook(),
@@ -703,8 +694,8 @@ async def test_runner_drops_resumable_provider_state_when_request_is_fitted(monk
         ],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         provider_state=saved_state,
@@ -760,8 +751,8 @@ async def test_runner_fits_each_malformed_retry_with_its_actual_tools(monkeypatc
         initial_messages=[{"role": "user", "content": "use a tool"}],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
@@ -825,8 +816,8 @@ async def test_runner_fits_empty_response_finalization_before_dispatch(monkeypat
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
@@ -883,8 +874,8 @@ async def test_runner_fits_max_iteration_finalization_before_dispatch(monkeypatc
         initial_messages=[{"role": "user", "content": "inspect"}],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
@@ -916,8 +907,8 @@ async def test_matching_reported_provider_usage_avoids_local_estimate(
         initial_messages=[{"role": "user", "content": "hello"}],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
@@ -957,8 +948,8 @@ async def test_changed_messages_use_local_estimate_after_reported_usage(monkeypa
         initial_messages=[{"role": "user", "content": "new tool output"}],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
@@ -998,8 +989,8 @@ def test_resumed_provider_context_avoids_full_transcript_estimate(monkeypatch):
         initial_messages=[{"role": "user", "content": "pending delta"}],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
@@ -1066,8 +1057,8 @@ async def test_runner_counts_resumed_provider_state_before_dispatch(monkeypatch)
         initial_messages=[current_message],
         tools=tools,
         model="local-model",
-        context_window_tokens=2_000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         provider_state=saved_state,
@@ -1082,12 +1073,12 @@ async def test_runner_counts_resumed_provider_state_before_dispatch(monkeypatch)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("context_block_limit", "expected_budget"),
-    [(500, 500), (None, 0)],
+    ("context_window_tokens", "expected_budget"),
+    [(1_624, 500), (1_000, 0)],
 )
 async def test_runner_refuses_locally_fitted_request_that_still_cannot_fit(
     monkeypatch,
-    context_block_limit,
+    context_window_tokens,
     expected_budget,
 ):
     from nanobot.agent.runner import AgentRunner
@@ -1110,8 +1101,8 @@ async def test_runner_refuses_locally_fitted_request_that_still_cannot_fit(
             ],
             tools=tools,
             model="local-model",
-            context_window_tokens=1_000,
-            context_block_limit=context_block_limit,
+            context_window_tokens=context_window_tokens,
+            max_tokens=100,
             max_iterations=1,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
@@ -1142,8 +1133,8 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=100,
+        context_window_tokens=1_224,
+        max_tokens=100,
     )
 
     monkeypatch.setattr(
@@ -1193,8 +1184,8 @@ def test_snip_history_reserves_budget_for_tool_definitions(monkeypatch):
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=500,
+        context_window_tokens=1_624,
+        max_tokens=100,
     )
 
     def _estimate(_provider, _model, estimate_messages, estimate_tools):
@@ -1581,8 +1572,8 @@ def test_snip_history_preserves_user_message_after_truncation(monkeypatch):
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=100,
+        context_window_tokens=1_224,
+        max_tokens=100,
     )
 
     # Make estimate_prompt_tokens_chain report above budget so _snip_history activates.
@@ -1639,8 +1630,8 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=100,
+        context_window_tokens=1_224,
+        max_tokens=100,
     )
 
     monkeypatch.setattr(
