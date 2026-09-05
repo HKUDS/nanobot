@@ -902,6 +902,26 @@ class OpenAICompatProvider(LLMProvider):
         name = model_name.lower()
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
+    def _opencode_affinity_headers(
+        self,
+        provider_context: "ProviderCallContext | None",
+    ) -> dict[str, str] | None:
+        """Per-request OpenCode session-affinity header.
+
+        OpenCode Zen/Go relays route backend affinity and prompt-cache by
+        ``x-opencode-session``; the generic ``x-session-affinity`` default
+        header does not activate it. Applies to registered ``opencode*``
+        providers or base URLs aimed at ``opencode.ai``, keyed by the stable
+        conversation-scoped ``session_id``.
+        """
+        if provider_context is None or not provider_context.session_id:
+            return None
+        spec_name = (self._spec.name if self._spec else "") or ""
+        base = self._effective_base or ""
+        if not spec_name.lower().startswith("opencode") and "opencode.ai" not in base.lower():
+            return None
+        return {"x-opencode-session": provider_context.session_id}
+
     def _build_kwargs(
         self,
         messages: list[dict[str, Any]],
@@ -911,6 +931,7 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float,
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         model_name = model or self.default_model
         spec = self._spec
@@ -1074,6 +1095,8 @@ class OpenAICompatProvider(LLMProvider):
         # otherwise lets extra_body.tools replace nanobot's generated functions.
         if self._extra_body:
             kwargs = _merge_chat_extra_body(kwargs, self._extra_body)
+        if extra_headers:
+            kwargs["extra_headers"] = extra_headers
 
         return kwargs
 
@@ -1343,10 +1366,11 @@ class OpenAICompatProvider(LLMProvider):
         self,
         client: Any,
         body: dict[str, Any],
+        extra_headers: dict[str, str] | None = None,
     ) -> Any:
         """Retry Responses once without server compaction on compatibility errors."""
         try:
-            return await client.responses.create(**body)
+            return await client.responses.create(**body, extra_headers=extra_headers)
         except Exception as exc:
             if (
                 "context_management" not in body
@@ -1360,7 +1384,7 @@ class OpenAICompatProvider(LLMProvider):
                 "(status={})",
                 getattr(exc, "status_code", None),
             )
-            return await client.responses.create(**body)
+            return await client.responses.create(**body, extra_headers=extra_headers)
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -1935,6 +1959,7 @@ class OpenAICompatProvider(LLMProvider):
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
+        affinity = self._opencode_affinity_headers(provider_context)
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1946,6 +1971,7 @@ class OpenAICompatProvider(LLMProvider):
                     responses_raw = await self._create_response_with_compaction_fallback(
                         client,
                         body,
+                        extra_headers=affinity,
                     )
                     result = parse_response_output(
                         responses_raw,
@@ -1970,6 +1996,7 @@ class OpenAICompatProvider(LLMProvider):
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
+                extra_headers=affinity,
             )
             chat_raw = cast(
                 Any,
@@ -1995,6 +2022,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> LLMResponse:
         client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
+        affinity = self._opencode_affinity_headers(provider_context)
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -2007,6 +2035,7 @@ class OpenAICompatProvider(LLMProvider):
                     responses_stream = await self._create_response_with_compaction_fallback(
                         client,
                         body,
+                        extra_headers=affinity,
                     )
 
                     async def _timed_stream() -> AsyncIterator[Any]:
@@ -2078,6 +2107,7 @@ class OpenAICompatProvider(LLMProvider):
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
+                extra_headers=affinity,
             )
             if self._spec and self._spec.name == "zhipu" and tools and on_tool_call_delta:
                 # Z.AI/GLM keeps streaming tool-call arguments behind an
