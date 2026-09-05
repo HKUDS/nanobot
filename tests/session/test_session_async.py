@@ -1,15 +1,20 @@
 """Async session adapter persistence and cancellation guarantees."""
 
 import asyncio
+import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from nanobot.session import io as session_io
+from nanobot.session import manager as session_manager
 from nanobot.session.manager import Session, SessionManager, SessionStore
 
 
@@ -262,3 +267,92 @@ async def test_session_lock_contention_keeps_event_loop_responsive(
 
     await asyncio.wait_for(save_task, timeout=1)
     assert ticks == 3
+
+
+async def test_local_store_contention_does_not_consume_file_lock_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_manager, "_SESSION_FILES_LOCK_TIMEOUT_SECONDS", 0.05)
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("test:local-contention")
+    session.add_message("user", "queued write")
+    started = threading.Event()
+    release = threading.Event()
+
+    def hold_files() -> None:
+        with manager.locked_session_files():
+            started.set()
+            assert release.wait(timeout=3)
+
+    holder = asyncio.create_task(asyncio.to_thread(hold_files))
+    save = None
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        save = asyncio.create_task(session_io.save(manager, session))
+        await asyncio.sleep(0.2)
+        assert not save.done(), "local work must queue instead of timing out on its own store"
+    finally:
+        release.set()
+        await holder
+        if save is not None:
+            await save
+
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+    assert restored.messages[0]["content"] == "queued write"
+
+
+async def test_external_file_lock_timeout_still_propagates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_manager, "_SESSION_FILES_LOCK_TIMEOUT_SECONDS", 0.05)
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("test:external-contention")
+    session.add_message("user", "not saved")
+    with FileLock(str(manager.sessions_dir / ".session-files.lock")):
+        with pytest.raises(Timeout):
+            await session_io.save(manager, session)
+    assert manager.read_session_file(session.key) is None
+
+
+def test_nested_file_transaction_does_not_deadlock_with_queued_save(tmp_path: Path) -> None:
+    # A subprocess bounds a lock-order regression without leaving blocked threads
+    # in pytest. Handle allocation and Dream pruning both reenter the manager.
+    script = dedent('''
+        import threading
+        import time
+        import sys
+        from pathlib import Path
+        from nanobot.session.manager import SessionManager
+
+        root = Path(sys.argv[1])
+        manager = SessionManager(root / "workspace", sessions_root=root / "sessions")
+        session = manager.get_or_create("test:nested")
+        manager.save(session)
+        started = threading.Event()
+        finished = threading.Event()
+
+        def save():
+            started.set()
+            manager.save(session)
+            finished.set()
+
+        with manager.locked_session_files():
+            threading.Thread(target=save, daemon=True).start()
+            assert started.wait(1)
+            time.sleep(0.1)
+            assert not finished.is_set()
+            assert manager.update_session_metadata(session.key, {"handle": "nested"})
+        assert finished.wait(2)
+        restored = SessionManager(root / "workspace", sessions_root=root / "sessions")
+        assert restored.get_or_create(session.key).metadata["handle"] == "nested"
+    ''')
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        env={**os.environ, "USERPROFILE": str(tmp_path / "home")},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr

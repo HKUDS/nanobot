@@ -132,6 +132,8 @@ class AutoCompact:
             return
         try:
             async with self._session_lock(key):
+                # Keep the session live while the synchronous callback binds its route.
+                session = await session_io.get_or_create(self.sessions, key)
                 summary = await self.consolidator.compact_idle_session(
                     key,
                     runtime=runtime,
