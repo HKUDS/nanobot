@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal, TypeAlias, TypeVar, cast
+from typing import Any, Awaitable, Callable, Literal, TypeAlias, TypedDict, TypeVar, cast
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
@@ -47,6 +47,11 @@ TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # boundary so the final rendered message never overflows.
 TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+TELEGRAM_STICKER_MARKER_RE = re.compile(
+    r"^\[sticker:\s*file_id=(?P<file_id>[A-Za-z0-9_-]+)"
+    r"(?:,\s*emoji=[^,\]]*)?(?:,\s*set_name=[^\]]*)?\]$",
+    re.IGNORECASE,
+)
 
 # python-telegram-bot exposes a six-parameter Application generic. Nanobot
 # doesn't customize its context/data/job-queue types, so keep that SDK boundary
@@ -89,6 +94,14 @@ class _LivenessTrackedRequest(BaseRequest):
         result = await self.inner.do_request(*args, **kwargs)
         self._on_round_trip()
         return result
+
+
+class TelegramStickerMetadata(TypedDict):
+    """Agent-visible subset of Telegram's inbound sticker payload."""
+
+    file_id: str
+    emoji: str | None
+    set_name: str | None
 
 
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
@@ -657,12 +670,12 @@ class TelegramChannel(BaseChannel):
         )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
 
-        # Add message handler for text, photos, video, voice, documents, and locations
+        # Add message handler for text, media, stickers, and locations
         self._app.add_handler(
             MessageHandler(
                 (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE
                  | filters.ANIMATION | filters.VOICE | filters.AUDIO
-                 | filters.Document.ALL | filters.LOCATION)
+                 | filters.Document.ALL | filters.Sticker.ALL | filters.LOCATION)
                 & ~filters.COMMAND,
                 self._on_message
             )
@@ -995,6 +1008,26 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+
+        sticker_file_id = self._extract_sticker_file_id(msg.content)
+        if sticker_file_id is not None:
+            try:
+                await self._call_with_retry(
+                    app.bot.send_sticker,
+                    chat_id=chat_id,
+                    sticker=sticker_file_id,
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                )
+            except Exception:
+                self.logger.exception("Failed to send Telegram sticker")
+                await app.bot.send_message(
+                    chat_id=chat_id,
+                    text="[Failed to send sticker]",
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                )
+            return
 
         # Send media files
         for media_path in (msg.media or []):
@@ -1429,7 +1462,7 @@ class TelegramChannel(BaseChannel):
     def _build_message_metadata(message: Message, user: User) -> dict[str, Any]:
         """Build common Telegram inbound metadata payload."""
         reply_to = getattr(message, "reply_to_message", None)
-        return {
+        metadata: dict[str, Any] = {
             "message_id": message.message_id,
             "user_id": user.id,
             "username": user.username,
@@ -1439,6 +1472,40 @@ class TelegramChannel(BaseChannel):
             "is_forum": bool(getattr(message.chat, "is_forum", False)),
             "reply_to_message_id": getattr(reply_to, "message_id", None) if reply_to else None,
         }
+        if sticker := TelegramChannel._get_sticker_metadata(message):
+            metadata["sticker"] = sticker
+        return metadata
+
+    @staticmethod
+    def _get_sticker_metadata(message: Message) -> TelegramStickerMetadata | None:
+        """Normalize the reusable part of an inbound Telegram sticker."""
+        sticker = getattr(message, "sticker", None)
+        file_id = getattr(sticker, "file_id", None)
+        if not isinstance(file_id, str) or not file_id:
+            return None
+        emoji = getattr(sticker, "emoji", None)
+        set_name = getattr(sticker, "set_name", None)
+        return {
+            "file_id": file_id,
+            "emoji": emoji if isinstance(emoji, str) else None,
+            "set_name": set_name if isinstance(set_name, str) else None,
+        }
+
+    @staticmethod
+    def _format_sticker_content(sticker: TelegramStickerMetadata) -> str:
+        """Expose sticker data in a marker that can be reused as an outbound reply."""
+        emoji = sticker["emoji"] or "unknown"
+        set_name = sticker["set_name"] or "unknown"
+        return (
+            f"[sticker: file_id={sticker['file_id']}, "
+            f"emoji={emoji}, set_name={set_name}]"
+        )
+
+    @staticmethod
+    def _extract_sticker_file_id(content: str) -> str | None:
+        """Return a Telegram file_id only when the whole response is a sticker marker."""
+        match = TELEGRAM_STICKER_MARKER_RE.fullmatch(content.strip())
+        return match.group("file_id") if match else None
 
     async def _extract_reply_context(self, message: Message) -> str | None:
         """Extract text from the message being replied to, if any."""
@@ -1701,7 +1768,7 @@ class TelegramChannel(BaseChannel):
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle incoming messages (text, photos, voice, documents)."""
+        """Handle incoming messages (text, media, stickers, and locations)."""
         if not update.message or not update.effective_user:
             return
         if not self._running:
@@ -1744,6 +1811,9 @@ class TelegramChannel(BaseChannel):
             lat = message.location.latitude
             lon = message.location.longitude
             content_parts.append(f"[location: {lat}, {lon}]")
+
+        if sticker := self._get_sticker_metadata(message):
+            content_parts.append(self._format_sticker_content(sticker))
 
         # Download current message media
         current_media_paths, current_media_parts = await self._download_message_media(

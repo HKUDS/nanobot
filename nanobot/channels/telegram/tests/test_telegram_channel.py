@@ -92,6 +92,9 @@ class _FakeBot:
     async def send_document(self, **kwargs) -> None:
         self.sent_media.append({"kind": "document", **kwargs})
 
+    async def send_sticker(self, **kwargs) -> None:
+        self.sent_media.append({"kind": "sticker", **kwargs})
+
     async def send_chat_action(self, **kwargs) -> None:
         pass
 
@@ -174,6 +177,8 @@ def _make_telegram_update(
     caption_entities=None,
     reply_to_message=None,
     location=None,
+    sticker=None,
+    message_thread_id=None,
 ):
     user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
     message = SimpleNamespace(
@@ -188,9 +193,10 @@ def _make_telegram_update(
         voice=None,
         audio=None,
         document=None,
+        sticker=sticker,
         location=location,
         media_group_id=None,
-        message_thread_id=None,
+        message_thread_id=message_thread_id,
         message_id=1,
     )
     return SimpleNamespace(message=message, effective_user=user)
@@ -1482,6 +1488,54 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_sticker_file_id_preserves_topic_and_reply() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
+    channel = TelegramChannel(config, MessageBus())
+    _install_ready_app(channel)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="-100123",
+            content=(
+                "[sticker: file_id=CAACAgQAAxkBAA_test, "
+                "emoji=🐝, set_name=NanobotBees]"
+            ),
+            metadata={"message_id": 10, "message_thread_id": 42},
+        )
+    )
+
+    assert len(channel._app.bot.sent_media) == 1
+    sent = channel._app.bot.sent_media[0]
+    assert sent["kind"] == "sticker"
+    assert sent["chat_id"] == -100123
+    assert sent["sticker"] == "CAACAgQAAxkBAA_test"
+    assert sent["message_thread_id"] == 42
+    assert sent["reply_parameters"].message_id == 10
+    assert channel._app.bot.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_send_does_not_interpret_sticker_marker_embedded_in_text() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Use [sticker: file_id=CAACAgQAAxkBAA_test] to reply.",
+        )
+    )
+
+    assert channel._app.bot.sent_media == []
+    assert channel._app.bot.sent_messages[0]["text"].startswith("Use [sticker:")
+
+
+@pytest.mark.asyncio
 async def test_send_remote_media_url_after_security_validation(monkeypatch) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -2200,6 +2254,45 @@ async def test_on_message_location_content() -> None:
 
     assert len(handled) == 1
     assert handled[0]["content"] == "[location: 48.8566, 2.3522]"
+
+
+@pytest.mark.asyncio
+async def test_on_message_exposes_reusable_sticker_content_and_metadata() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+    update = _make_telegram_update(
+        sticker=SimpleNamespace(
+            file_id="CAACAgQAAxkBAA_test",
+            file_unique_id="AgAD_test",
+            emoji="🐝",
+            set_name="NanobotBees",
+        ),
+        message_thread_id=42,
+    )
+
+    await channel._on_message(update, None)
+
+    assert handled[0]["content"] == (
+        "[sticker: file_id=CAACAgQAAxkBAA_test, emoji=🐝, set_name=NanobotBees]"
+    )
+    assert handled[0]["metadata"]["sticker"] == {
+        "file_id": "CAACAgQAAxkBAA_test",
+        "emoji": "🐝",
+        "set_name": "NanobotBees",
+    }
+    assert handled[0]["metadata"]["message_thread_id"] == 42
+    assert handled[0]["session_key"] == "telegram:-100123:topic:42"
+    assert handled[0]["media"] == []
 
 
 @pytest.mark.asyncio
