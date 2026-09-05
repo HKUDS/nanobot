@@ -68,6 +68,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     RuntimeContextProvider,
     append_runtime_context,
+    persistable_runtime_context_blocks,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
 )
@@ -712,7 +713,12 @@ class AgentLoop:
         ]
         content_value = cast(object, msg.content)
         has_text = isinstance(content_value, str) and content_value.strip()
-        if has_text or media_paths or runtime_context_blocks:
+        # Ephemeral blocks are request-only: they must never enter the session
+        # row, which is replayed verbatim on every later turn via get_history.
+        persistable_blocks = persistable_runtime_context_blocks(
+            runtime_context_blocks or ()
+        )
+        if has_text or media_paths or persistable_blocks:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = content_value if isinstance(content_value, str) else ""
@@ -722,7 +728,7 @@ class AgentLoop:
             extra.update(automation_extra)
             text, runtime_context_meta = append_runtime_context(
                 text,
-                runtime_context_blocks or (),
+                persistable_blocks,
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
@@ -1054,9 +1060,12 @@ class AgentLoop:
                         pending_request,
                         effective_tools,
                     )
+                    # This coalesced row is persisted and replayed via
+                    # get_history, so ephemeral blocks must be excluded; the
+                    # active turn's current message still carries them.
                     row["content"], runtime_marker = append_runtime_context(
                         user_content,
-                        blocks,
+                        persistable_runtime_context_blocks(blocks),
                     )
                     if runtime_marker is not None:
                         row["_meta"] = {
