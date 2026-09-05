@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPProvider,
@@ -144,11 +145,19 @@ def _fake_mcp_module(
     monkeypatch.setitem(sys.modules, "mcp.shared.exceptions", exc_mod)
 
 
-def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
+def _make_wrapper(
+    session: object,
+    *,
+    timeout: float = 0.1,
+    meta: dict | None = None,
+) -> MCPToolWrapper:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
         inputSchema={"type": "object", "properties": {}},
+        outputSchema={"type": "object"},
+        annotations={"readOnlyHint": True},
+        meta=meta,
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
 
@@ -564,6 +573,58 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     assert not is_tool_error_result(result)
 
 
+@pytest.mark.asyncio
+async def test_execute_preserves_mcp_app_result_outside_model_text() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent("model summary")],
+            structuredContent={"rows": [{"id": 1}]},
+            meta={"requestId": "req-1"},
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(
+        SimpleNamespace(call_tool=call_tool),
+        meta={
+            "ui": {
+                "resourceUri": "ui://inventory/dashboard",
+                "visibility": ["model", "app"],
+            }
+        },
+    )
+
+    result = await wrapper.execute()
+
+    assert isinstance(result, ToolResult)
+    assert str(result) == "model summary"
+    assert "rows" not in str(result)
+    assert result.data == {
+        "kind": "mcp_app_result",
+        "tool": {
+            "server": "test",
+            "name": "demo",
+            "ui": {
+                "resourceUri": "ui://inventory/dashboard",
+                "visibility": ["model", "app"],
+            },
+            "outputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": True},
+            "_meta": {
+                "ui": {
+                    "resourceUri": "ui://inventory/dashboard",
+                    "visibility": ["model", "app"],
+                }
+            },
+        },
+        "result": {
+            "content": [{"text": "model summary"}],
+            "structuredContent": {"rows": [{"id": 1}]},
+            "_meta": {"requestId": "req-1"},
+            "isError": False,
+        },
+    }
+
+
 # Smallest valid 1x1 PNG, base64 without the data: prefix.
 _PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
@@ -677,11 +738,14 @@ async def test_execute_handles_generic_exception() -> None:
     assert is_tool_error_result(result)
 
 
-def _make_tool_def(name: str) -> SimpleNamespace:
+def _make_tool_def(name: str, *, meta: dict | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         name=name,
         description=f"{name} tool",
         inputSchema={"type": "object", "properties": {}},
+        outputSchema=None,
+        annotations=None,
+        meta=meta,
     )
 
 
@@ -725,6 +789,40 @@ async def test_connect_mcp_servers_enabled_tools_defaults_to_all(
         await stack.aclose()
 
     assert registry.tool_names == ["mcp_test_demo", "mcp_test_other"]
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_hides_app_only_tools_from_model(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    session = _make_fake_session(["model-visible"])
+
+    async def list_tools() -> SimpleNamespace:
+        return SimpleNamespace(
+            tools=[
+                _make_tool_def(
+                    "app-only",
+                    meta={"ui/visibility": ["app"], "ui/resourceUri": "ui://app"},
+                ),
+                _make_tool_def(
+                    "model-visible",
+                    meta={"ui/visibility": ["model", "app"]},
+                ),
+            ]
+        )
+
+    session.list_tools = list_tools
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake")},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == ["mcp_test_model-visible"]
 
 
 @pytest.mark.asyncio
