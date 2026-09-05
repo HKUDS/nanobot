@@ -545,12 +545,12 @@ def _run_gateway(
             and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = session_manager.get_or_create(key)
+            session = await session_manager.get_or_create_async(key)
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
             session.add_message("assistant", msg.content, **extra)
-            session_manager.save(session)
+            await session_manager.save_async(session)
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")

@@ -36,7 +36,7 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     bus = MessageBus()
     provider = _make_provider()
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", autospec=True), \
          patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
         mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
         return AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
@@ -62,7 +62,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", autospec=True), \
          patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
         mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
@@ -94,8 +94,8 @@ async def test_dispatch_cancellation_restores_checkpoint():
         messages=[{"role": "user", "content": "Search for something"}],
     )
 
-    loop.sessions.get_or_create = MagicMock(return_value=session)
-    loop.sessions.save = MagicMock()
+    loop.sessions.get_or_create_async = AsyncMock(return_value=session)
+    loop.sessions.save_async = AsyncMock()
 
     async def _cancel(*_args, **_kwargs):
         raise asyncio.CancelledError()
@@ -114,7 +114,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     )
     assert checkpoint_key not in session.metadata, \
         "Checkpoint metadata should be cleared after restore"
-    assert loop.sessions.save.called, \
+    assert loop.sessions.save_async.called, \
         "Session should be persisted so the restored state survives process restart"
 
 
@@ -135,7 +135,7 @@ async def test_dispatch_cancellation_keeps_checkpoint_for_gateway_shutdown(tmp_p
         messages=[],
         provider_state=None,
     )
-    loop.sessions.get_or_create.return_value = session
+    loop.sessions.get_or_create_async.return_value = session
 
     async def _cancel(*_args: object, **_kwargs: object) -> None:
         raise asyncio.CancelledError()

@@ -373,7 +373,7 @@ class MyTool(Tool):
         if not self._modify_allowed:
             return ToolResult.error("Error: set is disabled (tools.my.allow_set is false)")
         if action in ("modify", "set"):
-            return self._modify(key, value)
+            return await self._modify(key, value)
         return f"Unknown action: {action}"
 
     # -- inspect --
@@ -456,7 +456,7 @@ class MyTool(Tool):
 
     # -- modify --
 
-    def _modify(self, key: str | None, value: Any) -> str:
+    async def _modify(self, key: str | None, value: Any) -> str:
         if err := self._validate_key(key):
             return err
         key = cast(str, key)
@@ -482,7 +482,7 @@ class MyTool(Tool):
             self._audit("modify", f"READ_ONLY {key}")
             return ToolResult.error(f"Error: '{key}' is read-only and cannot be modified")
         if key == "model_preset":
-            return self._modify_model_preset(value)
+            return await self._modify_model_preset(value)
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         if key in RUNTIME_COMMAND_KEYS:
@@ -492,14 +492,14 @@ class MyTool(Tool):
             return ToolResult.error(f"Error: '{key}' is read-only and cannot be modified")
         return self._modify_scratchpad(key, value)
 
-    def _modify_model_preset(self, value: Any) -> str:
+    async def _modify_model_preset(self, value: Any) -> str:
         if not isinstance(value, str) or not value.strip():
             return ToolResult.error("Error: 'model_preset' must be a non-empty string")
         name = value.strip()
         session_key = current_request_session_key()
         old = self._runtime_control.snapshot().model_preset
         try:
-            runtime = self._runtime_control.set_model_preset(
+            runtime = await self._runtime_control.set_model_preset_async(
                 name,
                 session_key=session_key,
             )

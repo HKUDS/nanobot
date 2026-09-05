@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -28,10 +27,11 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.turn_continuation import reset_goal_continuation_rounds
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.manager import Session, SessionManager
 
 
 _GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
@@ -60,36 +60,46 @@ class _GoalToolsMixin:
         self._sessions = sessions
         self._runtime_events = runtime_events
 
-    def _session(self):
+    async def _session(self) -> Session | None:
         request_ctx = current_request_context()
         if request_ctx is None:
             return None
         key = request_ctx.session_key
         if not key:
             return None
-        return self._sessions.get_or_create(key)
+        return await self._sessions.get_or_create_async(key)
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
 
-    def _save_goal_state(
+    async def _save_goal_state(
         self,
-        sess: Any,
+        sess: Session,
         blob: dict[str, Any],
         *,
         reset_continuation: bool = False,
+        revoke_permission: bool = False,
     ) -> None:
-        previous_metadata = deepcopy(sess.metadata)
-        sess.metadata[GOAL_STATE_KEY] = blob
-        discard_legacy_goal_state_key(sess.metadata)
-        if reset_continuation:
-            reset_goal_continuation_rounds(sess.metadata)
+        saved = False
+
+        def edit(metadata: dict[str, Any]) -> None:
+            metadata[GOAL_STATE_KEY] = blob
+            discard_legacy_goal_state_key(metadata)
+            if reset_continuation:
+                reset_goal_continuation_rounds(metadata)
+
+        async def save_and_publish() -> None:
+            nonlocal saved
+            await self._sessions.edit_metadata_async(sess, edit)
+            saved = True
+            await self._publish_goal_state_changed(sess.metadata)
+
         try:
-            self._sessions.save(sess)
-        except BaseException:
-            sess.metadata.clear()
-            sess.metadata.update(previous_metadata)
-            raise
+            await shield_and_drain(save_and_publish())
+        finally:
+            # This ContextVar belongs to the caller task, not the settlement task.
+            if revoke_permission and saved:
+                revoke_goal_mutation_permission()
 
     async def _publish_goal_state_changed(self, metadata: dict[str, Any]) -> None:
         runtime_events = self._runtime_events
@@ -175,7 +185,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     ) -> RuntimeContextBlock | None:
         if not request.session_key:
             return None
-        session = self._sessions.get_or_create(request.session_key)
+        session = await self._sessions.get_or_create_async(request.session_key)
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(session.metadata)
         if not goal_start_requested and not goal_active:
@@ -197,7 +207,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         ui_summary: str | None = None,
         **kwargs: Any,
     ) -> str:
-        sess = self._session()
+        sess = await self._session()
         if sess is None:
             return ToolResult.error(
                 "Error: create_goal requires an active chat session (missing routing context)."
@@ -225,8 +235,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "ui_summary": summary,
             "started_at": _iso_now(),
         }
-        self._save_goal_state(sess, blob, reset_continuation=True)
-        await self._publish_goal_state_changed(sess.metadata)
+        await self._save_goal_state(sess, blob, reset_continuation=True)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
             "Goal recorded. Keep working toward the objective using ordinary tools. "
@@ -305,7 +314,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         ui_summary: str | None = None,
         **kwargs: Any,
     ) -> str:
-        sess = self._session()
+        sess = await self._session()
         if sess is None:
             return ToolResult.error("Error: update_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
@@ -340,8 +349,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 "previous_objective": str(prior.get("objective") or ""),
                 "recap": (recap or "").strip(),
             }
-            self._save_goal_state(sess, blob, reset_continuation=True)
-            await self._publish_goal_state_changed(sess.metadata)
+            await self._save_goal_state(sess, blob, reset_continuation=True)
             extra = f"\nSummary line: {summary}" if summary else ""
             return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
 
@@ -359,9 +367,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         }
         if normalized == "complete":
             blob["completed_at"] = ended
-        self._save_goal_state(sess, blob)
-        revoke_goal_mutation_permission()
-        await self._publish_goal_state_changed(sess.metadata)
+        await self._save_goal_state(sess, blob, revoke_permission=True)
 
         tail = (recap or "").strip()
         label = {

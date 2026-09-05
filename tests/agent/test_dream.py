@@ -402,7 +402,6 @@ class TestEphemeralDirect:
         )
 
         with (
-            patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
             patch("nanobot.agent.loop.Consolidator"),
         ):
@@ -684,7 +683,6 @@ class TestEphemeralHooks:
         spy.after_iteration = AsyncMock()
 
         with (
-            patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
             patch("nanobot.agent.loop.Consolidator"),
         ):
@@ -697,6 +695,8 @@ class TestEphemeralHooks:
                 hooks=[spy],
             )
 
+        loop.sessions.save_async = AsyncMock()
+        loop.sessions.save_runtime_checkpoint_async = AsyncMock()
         return loop, spy
 
     async def test_extra_hooks_skipped_when_ephemeral(self, tmp_path, _make_loop_with_spy):

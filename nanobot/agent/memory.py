@@ -1209,8 +1209,8 @@ class Consolidator:
             )
         lock = self.get_lock(session_key)
         async with lock:
-            self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            await self.sessions.invalidate_async(session_key)
+            session = await self.sessions.get_or_create_async(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1240,7 +1240,7 @@ class Consolidator:
                     # A turn can append while the provider call is in flight. Advance only
                     # through the captured batch so new messages remain eligible next time.
                     session.last_archived = archive_end
-                    self.sessions.save(session)
+                    await self.sessions.save_async(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await emit_context_compaction(
                     on_compaction,

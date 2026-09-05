@@ -17,6 +17,7 @@ from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -266,8 +267,8 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.runtime_for_session(session)
+    session = ctx.session or await loop.sessions.get_or_create_async(ctx.key)
+    runtime = ctx.runtime or await loop.runtime_for_session_async(session)
     ctx_est = 0
     with suppress(Exception):
         ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
@@ -315,29 +316,32 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     loop.discard_session_file_state(ctx.key)
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    session = ctx.session or await loop.sessions.get_or_create_async(ctx.key)
     snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
     if session.last_archived < len(snapshot):
-        runtime = ctx.runtime or loop.runtime_for_session(session)
+        runtime = ctx.runtime or await loop.runtime_for_session_async(session)
         archive_snapshot = replace(
             session,
             messages=snapshot,
             metadata=dict(session.metadata),
             provider_state=None,
         )
-    session.clear()
-    loop.sessions.save(session)
-    loop.sessions.invalidate(session.key)
-    if archive_snapshot is not None and runtime is not None:
-        loop.schedule_background(
-            loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
-                archive_snapshot,
-                archive_end=len(snapshot),
-                runtime=runtime,
+    async def reset_and_schedule_archive() -> None:
+        session.clear()
+        await loop.sessions.save_async(session)
+        await loop.sessions.invalidate_async(session.key)
+        if archive_snapshot is not None and runtime is not None:
+            loop.schedule_background(
+                loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
+                    archive_snapshot,
+                    archive_end=len(snapshot),
+                    runtime=runtime,
+                )
             )
-        )
+
+    await shield_and_drain(reset_and_schedule_archive())
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -409,7 +413,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
     if not args:
-        session = ctx.session or loop.sessions.get_or_create(ctx.key)
+        session = ctx.session or await loop.sessions.get_or_create_async(ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
@@ -419,7 +423,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
     name = args
     try:
-        runtime = loop.set_session_model_preset(ctx.key, name)
+        runtime = await loop.set_session_model_preset_async(ctx.key, name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -880,7 +884,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
                 metadata=dict(ctx.msg.metadata or {}),
             )
 
-    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    session = ctx.session or await ctx.loop.sessions.get_or_create_async(ctx.key)
     history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
