@@ -675,11 +675,28 @@ class MemoryStore:
         max_chars: int | None = None,
         session_key: str | None = None,
     ) -> str:
-        """Persist and return a bounded raw checkpoint when summarization degrades."""
-        checkpoint = self._build_raw_checkpoint(messages, max_chars=max_chars)
-        self.append_history(checkpoint, session_key=session_key)
+        """Persist raw messages in bounded chunks and return a checkpoint."""
+        limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
+        chunk_size = min(max(1, limit), _HISTORY_ENTRY_HARD_CAP - 1_000)
+        formatted = self._format_messages(public_history_messages(messages))
+        chunks = [
+            formatted[start:start + chunk_size]
+            for start in range(0, len(formatted), chunk_size)
+        ] or [""]
+        for part, chunk in enumerate(chunks, start=1):
+            suffix = f" (part {part}/{len(chunks)})" if len(chunks) > 1 else ""
+            self.append_history(
+                f"[RAW] {len(messages)} messages{suffix}\n{chunk}",
+                session_key=session_key,
+            )
         logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages", len(messages)
+            "Memory consolidation degraded: raw-archived {} messages in {} entries",
+            len(messages),
+            len(chunks),
+        )
+        checkpoint = self._normalize_history_entry(
+            f"[RAW] {len(messages)} messages\n{formatted}",
+            max_chars=limit,
         )
         return checkpoint
 
