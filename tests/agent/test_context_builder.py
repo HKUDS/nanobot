@@ -435,6 +435,33 @@ class TestBuildMessages:
             "explicit_skills"
         ]
 
+    def test_manual_only_skill_is_hidden_until_explicitly_invoked(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "deploy"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: deploy\n"
+            "description: Deploy the current project.\n"
+            "disable-model-invocation: true\n"
+            "---\n\n"
+            "# Deploy workflow\n\nFollow the private deployment checklist.",
+            encoding="utf-8",
+        )
+        builder = _builder(tmp_path)
+
+        ordinary_messages = builder.build_messages([], "Is the project ready?")
+        invoked_messages = builder.build_messages([], "Please $deploy now.")
+        ordinary_system_prompt = ordinary_messages[0]["content"]
+        invoked_system_prompt = invoked_messages[0]["content"]
+        invoked_user_prompt = invoked_messages[-1]["content"]
+
+        assert "Deploy the current project." not in ordinary_system_prompt
+        assert "private deployment checklist" not in ordinary_system_prompt
+        assert "Deploy the current project." not in invoked_system_prompt
+        assert "private deployment checklist" not in invoked_system_prompt
+        assert "### Skill: deploy" in invoked_user_prompt
+        assert "private deployment checklist" in invoked_user_prompt
+
     def test_unknown_skill_reference_does_not_change_active_skills(self, tmp_path):
         messages = _builder(tmp_path).build_messages([], "Keep the shell literal $HOME.")
 
