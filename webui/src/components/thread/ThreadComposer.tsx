@@ -954,6 +954,9 @@ export function ThreadComposer({
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still get the newline-on-Enter behavior.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1944,11 +1947,14 @@ export function ThreadComposer({
         : undefined;
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
+    // While streaming, sending carries continueActiveTurn so the new message
+    // interjects instead of waiting for the running turn to finish.
     const options: SendOptions | undefined =
       attachedCliApps.length > 0
       || attachedMcpPresets.length > 0
       || activeSessionMentions.length > 0
       || normalizedQuotedContext
+      || isStreaming
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
@@ -1956,6 +1962,7 @@ export function ThreadComposer({
               ? { sessionMentions: activeSessionMentions }
               : {}),
             ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+            ...(isStreaming ? { continueActiveTurn: true } : {}),
           }
         : undefined;
     const hasPlainTextCommandPayload =
@@ -2086,6 +2093,19 @@ export function ThreadComposer({
         return;
       }
     }
+    // Touch keyboards: a plain Enter inserts a newline; sending stays on the
+    // send button. The select-on-Enter menu branches above take precedence.
+    if (
+      e.key === "Enter"
+      && !e.shiftKey
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && !e.nativeEvent.isComposing
+      && hasCoarsePointer
+    ) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
@@ -2174,7 +2194,12 @@ export function ThreadComposer({
       : voiceRecorder.state === "transcribing"
         ? t("thread.composer.voice.transcribing")
         : t("thread.composer.voice.hint");
-  const showStopButton = isStreaming && !!onStop;
+  // While streaming, the primary action is Stop only while the composer is
+  // empty. Once the user types, the send affordance takes over (like ChatGPT):
+  // tapping send interjects instead of waiting — this keeps the flow working
+  // on touch devices where Enter now inserts a newline instead of queueing
+  // guidance.
+  const showStopButton = isStreaming && !!onStop && !hasComposerContent;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
@@ -2355,6 +2380,7 @@ export function ThreadComposer({
             onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onPaste={onPaste}
             rows={1}
+            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
@@ -2540,10 +2566,10 @@ export function ThreadComposer({
             >
               {showStopButton ? (
                 <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
-              ) : isStreaming ? (
-                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
-              ) : (
+              ) : canSend || !isStreaming ? (
                 <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+              ) : (
+                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
               )}
             </Button>
           </div>
