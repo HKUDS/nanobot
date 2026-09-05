@@ -34,6 +34,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
+from nanobot.providers.langsmith_integration import wrap_openai_client
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
     build_responses_compaction_state,
@@ -588,7 +589,7 @@ class OpenAICompatProvider(LLMProvider):
         # else: http_client stays None → SDK creates DefaultAsyncHttpxClient
         # which already reads proxy env vars via trust_env=True, has proper
         # connection limits, and follows redirects.
-        self._client = AsyncOpenAI(
+        client = AsyncOpenAI(
             api_key=self._api_key_for_client,
             base_url=self._effective_base,
             default_headers=self._default_headers,
@@ -597,6 +598,7 @@ class OpenAICompatProvider(LLMProvider):
             timeout=timeout_s,
             http_client=http_client,
         )
+        self._client = wrap_openai_client(client)
 
     async def _ensure_client(self) -> AsyncOpenAIType:
         """Return the shared OpenAI client, creating it on first call."""
