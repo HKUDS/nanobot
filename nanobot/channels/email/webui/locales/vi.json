@@ -68,6 +68,11 @@
         "label": "Chu kỳ kiểm tra",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "Địa chỉ alias",
+        "placeholder": "assistant@example.com",
+        "help": "Chỉ xử lý email thực sự được gửi đến alias này (To/Cc/Delivered-To). Để trống để xử lý mọi thư hộp thư nhận được."
+      },
       "allowFrom": {
         "label": "Người gửi được phép",
         "placeholder": "Địa chỉ email, phân tách bằng dấu phẩy",

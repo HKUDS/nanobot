@@ -68,6 +68,11 @@
         "label": "확인 간격",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "별칭 주소",
+        "placeholder": "assistant@example.com",
+        "help": "이 별칭으로 실제 수신된 메일만 처리합니다(수신/참조/Delivered-To). 비워 두면 메일함이 받는 모든 메일을 처리합니다."
+      },
       "allowFrom": {
         "label": "허용된 발신자",
         "placeholder": "이메일 주소, 쉼표로 구분",

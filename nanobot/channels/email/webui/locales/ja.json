@@ -68,6 +68,11 @@
         "label": "確認間隔",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "エイリアスアドレス",
+        "placeholder": "assistant@example.com",
+        "help": "このエイリアス宛て (To/Cc/Delivered-To) のメールのみを処理します。空欄にするとメールボックスが受信したすべてを処理します。"
+      },
       "allowFrom": {
         "label": "許可する送信者",
         "placeholder": "メールアドレス（カンマ区切り）",

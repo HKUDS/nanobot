@@ -68,6 +68,11 @@
         "label": "轮询间隔",
         "placeholder": "30"
       },
+      "aliasAddress": {
+        "label": "别名地址",
+        "placeholder": "assistant@example.com",
+        "help": "仅处理确实发送到此别名的邮件(收件人/抄送/Delivered-To)。留空则处理邮箱收到的所有邮件。"
+      },
       "allowFrom": {
         "label": "允许的发件人",
         "placeholder": "邮箱地址，用逗号分隔",

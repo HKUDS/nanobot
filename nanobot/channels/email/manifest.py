@@ -19,6 +19,10 @@ SETUP_SPEC = ChannelSetupSpec(
         "fromAddress": field(),
         "pollIntervalSeconds": field("int", default=30),
         "allowFrom": field("list"),
+        # When set, only process mail actually addressed to this alias (To/Cc/
+        # Delivered-To/X-Original-To) — leave blank to process anything the
+        # mailbox receives.
+        "aliasAddress": field(),
         "verifyDkim": field("bool", default=True),
         "verifySpf": field("bool", default=True),
     },
