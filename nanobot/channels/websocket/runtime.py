@@ -539,9 +539,6 @@ class WebSocketChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
 
-    def _expected_path(self) -> str:
-        return _normalize_config_path(self.config.path)
-
     def _build_ssl_context(self) -> ssl.SSLContext | None:
         cert = self.config.ssl_certfile.strip()
         key = self.config.ssl_keyfile.strip()
@@ -578,9 +575,6 @@ class WebSocketChannel(BaseChannel):
             query,
             headers,
         )
-
-    def _consume_issued_token(self, connection: ServerConnection, token: str) -> bool:
-        return self.gateway.endpoint.consume_issued_token(connection, token)
 
     # -- Server lifecycle and connection ingress ---------------------------
 

@@ -26,6 +26,7 @@ from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RUNTIME_CONTEXT_MESSAGE_META,
+    RUNTIME_CONTEXT_TAG,
     RuntimeContextBlock,
     append_runtime_context,
     public_history_message,
@@ -680,7 +681,7 @@ def test_build_and_save_preserves_multimodal_user_block_starting_with_runtime_ta
     image = tmp_path / "user-tag.png"
     image.write_bytes(_PNG_1X1)
     user_text = (
-        f"{ContextBuilder._RUNTIME_CONTEXT_TAG}\n"
+        f"{RUNTIME_CONTEXT_TAG}\n"
         "This entire block is user-authored and must remain in history."
     )
     messages = ContextBuilder(tmp_path).build_messages(

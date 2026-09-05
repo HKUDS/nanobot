@@ -1,15 +1,3 @@
-export function parsePublicHttpUrl(value: string): URL | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.username || url.password) return null;
-    if (isPrivateHostname(url.hostname)) return null;
-    return url;
-  } catch {
-    return null;
-  }
-}
-
 /** Public URL normalized for timeline display, with credentials and request-specific noise removed. */
 export function parseSafeActivityHttpUrl(value: string): URL | null {
   try {

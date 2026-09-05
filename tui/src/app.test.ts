@@ -24,7 +24,7 @@ import type {
 } from "./protocol"
 import type { TuiHost } from "./host"
 import type { ClipboardImageReader } from "./clipboard-image"
-import { userMessageText, type Transcript } from "./transcript"
+import type { Transcript } from "./transcript"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -58,20 +58,6 @@ test("formats a reusable session ID after exit", () => {
   expect(sessionExitMessage("resume-chat")).toBe(
     "Resume with: nanobot agent --session websocket:resume-chat\n",
   )
-})
-
-test("projects image media as stable placeholders without exposing filenames", () => {
-  expect(userMessageText("What is this?", [
-    { name: "clipboard-image-2.png" },
-    { kind: "image", name: "screenshot.png" },
-    { kind: "file", name: "report.pdf" },
-  ])).toBe([
-    "What is this? [Image #2] [Image #1]",
-    "Attachments: report.pdf",
-  ].join("\n"))
-  expect(userMessageText("What is this?", [
-    { name: "clipboard-image-1.png" },
-  ], "What is this? [Image #1]")).toBe("What is this? [Image #1]")
 })
 
 function contrastRatio(foreground: string, background: string): number {

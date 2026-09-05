@@ -57,7 +57,6 @@ import {
   updateMcpServerTools,
   updateNetworkSafetySettings,
   updateProviderSettings,
-  updateSettings,
   updateSkillEnabled,
   updateWebSearchSettings,
   validateChannel,
@@ -398,30 +397,6 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenCalledWith(
       "session.delete",
       { key: "websocket:chat-1", delete_automations: true },
-      20_000,
-    );
-  });
-
-  it("serializes settings updates as a narrow mutation payload", async () => {
-    await updateSettings(mutationTransport, {
-      modelPreset: "default",
-      model: "openrouter/test",
-      provider: "openrouter",
-      contextWindowTokens: 262144,
-      timezone: "Asia/Shanghai",
-      toolHintMaxLength: 120,
-    });
-
-    expect(requestMutation).toHaveBeenCalledWith(
-      "settings.agent.update",
-      {
-        model_preset: "default",
-        model: "openrouter/test",
-        provider: "openrouter",
-        context_window_tokens: 262144,
-        timezone: "Asia/Shanghai",
-        tool_hint_max_length: 120,
-      },
       20_000,
     );
   });

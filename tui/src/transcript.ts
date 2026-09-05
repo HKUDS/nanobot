@@ -104,18 +104,6 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
   return { imageLabels, attachmentNames }
 }
 
-export function userMessageText(
-  content: string,
-  media: readonly UserMessageMedia[] = [],
-  displayContent?: string,
-): string {
-  const { imageLabels, attachmentNames } = projectUserMessage(media)
-  return [
-    displayContent ?? [content, imageLabels.join(" ")].filter(Boolean).join(" "),
-    attachmentNames.length ? `Attachments: ${attachmentNames.join(", ")}` : "",
-  ].filter(Boolean).join("\n")
-}
-
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
   readonly root: ScrollBoxRenderable

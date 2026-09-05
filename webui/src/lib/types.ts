@@ -1204,15 +1204,6 @@ export interface ChannelConfigurePayload {
   nanobot_features?: NanobotFeaturesPayload;
 }
 
-export interface SettingsUpdate {
-  model?: string;
-  provider?: string;
-  modelPreset?: string | null;
-  contextWindowTokens?: number;
-  timezone?: string;
-  toolHintMaxLength?: number;
-}
-
 export interface ModelConfigurationCreate {
   name: string;
   provider: string;
