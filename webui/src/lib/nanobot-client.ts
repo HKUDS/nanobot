@@ -1,3 +1,4 @@
+import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
   ConnectionStatus,
   InboundEvent,
@@ -1523,4 +1524,3 @@ export class NanobotClient {
     }
   }
 }
-import { decodeNotification } from "../../../packages/client-events/notifications";

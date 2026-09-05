@@ -1,3 +1,4 @@
+import { acceptsCompactionPhase } from "../../packages/client-events/notifications"
 import {
   BoxRenderable,
   CodeRenderable,
@@ -797,4 +798,3 @@ function formatDiffStat(edit: FileEditEvent): string {
   const deleted = typeof edit.deleted === "number" ? `-${edit.deleted}` : ""
   return [added, deleted].filter(Boolean).join(" ")
 }
-import { acceptsCompactionPhase } from "../../packages/client-events/notifications"

@@ -1,3 +1,4 @@
+import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -1344,4 +1345,3 @@ export function useNanobotStream(
     dismissStreamError,
   };
 }
-import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
