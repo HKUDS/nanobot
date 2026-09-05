@@ -1,5 +1,6 @@
 import animate from "tailwindcss-animate";
 import typography from "@tailwindcss/typography";
+import plugin from "tailwindcss/plugin";
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -122,5 +123,14 @@ export default {
       },
     },
   },
-  plugins: [animate, typography],
+  plugins: [
+    animate,
+    typography,
+    plugin(({ addVariant }) => {
+      // Touch devices get :hover applied on the first tap, which makes iOS
+      // Safari drop click synthesis for that tap; gate hover styles to
+      // devices that can actually hover.
+      addVariant("media-hover", "@media (hover: hover)");
+    }),
+  ],
 };

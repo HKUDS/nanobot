@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=auto"
+content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="color-scheme" content="light dark" />
     <meta
@@ -52,9 +52,19 @@
           sans-serif;
       }
 
-      html.dark body {
+html.dark body {
         background: #303030;
         color: #fafafa;
+      }
+
+      /* Devices that report no safe-area inset (e.g. floating-status-bar
+         iPhones) still need the header kept below the status bar; a small
+         load-time script toggles .no-safe-area on <html> when detected. */
+      .thread-header-safe {
+        padding-top: env(safe-area-inset-top);
+      }
+      html.no-safe-area .thread-header-safe {
+        padding-top: 20px;
       }
 
       .boot-splash {
@@ -219,5 +229,24 @@
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Devices that report no safe-area inset (floating status bar) still
+      // need the header kept below the status bar.
+      window.addEventListener("load", function () {
+        try {
+          var probe = document.createElement("div");
+          probe.style.cssText =
+            "position:fixed;top:env(safe-area-inset-top);left:0;width:1px;height:1px;";
+          document.body.appendChild(probe);
+          var top = Math.round(probe.getBoundingClientRect().top);
+          probe.remove();
+          if (top === 0 && navigator.standalone === true) {
+            document.documentElement.classList.add("no-safe-area");
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      });
+    </script>
   </body>
 </html>
