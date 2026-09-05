@@ -35,6 +35,7 @@ Pick the row that matches what you want to accomplish next:
 | Manage Agent Plugins, CLI Apps, or MCP integrations | [WebUI Apps](./webui.md#apps) |
 | Add an MCP tool server | [Configure MCP Tools](./guides/configure-mcp-tools.md) |
 | Generate images | [Image Generation](./image-generation.md) |
+| Generate music | [Music Generation](./music-generation.md) |
 | Schedule work or create a local trigger | [Automations](./automations.md) |
 | Understand and manage long-term memory | [Memory](./memory.md) |
 | Run nanobot continuously | [Deployment](./deployment.md) |
