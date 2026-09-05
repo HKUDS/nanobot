@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
+  "aimlapi",
   "atomic_chat",
   "byteplus",
   "byteplus_coding_plan",
@@ -583,6 +584,7 @@ export const PROVIDER_ICONS: Record<string, LucideIcon> = {
   orcarouter: Sparkles,
   skywork: Sparkles,
   aihubmix: Triangle,
+  aimlapi: Sparkles,
   anthropic: Brain,
   openai: Bot,
   deepseek: Waves,
