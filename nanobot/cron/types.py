@@ -61,6 +61,11 @@ class CronPayload:
     origin_channel: str | None = None
     origin_chat_id: str | None = None
     origin_metadata: dict[str, Any] = field(default_factory=dict)
+    # Visible result delivery. None/None falls back to the origin route while
+    # session_key continues to own execution history and workspace context.
+    delivery_channel: str | None = None
+    delivery_chat_id: str | None = None
+    delivery_metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronPayload:
@@ -78,6 +83,15 @@ class CronPayload:
             origin_chat_id=get_camel_snake(data, "originChatId", "origin_chat_id"),
             origin_metadata=dict(
                 get_camel_snake(data, "originMetadata", "origin_metadata", {}) or {}
+            ),
+            delivery_channel=get_camel_snake(
+                data, "deliveryChannel", "delivery_channel"
+            ),
+            delivery_chat_id=get_camel_snake(
+                data, "deliveryChatId", "delivery_chat_id"
+            ),
+            delivery_metadata=dict(
+                get_camel_snake(data, "deliveryMetadata", "delivery_metadata", {}) or {}
             ),
         )
 
@@ -146,6 +160,7 @@ class CronJob:
     created_at_ms: int = 0
     updated_at_ms: int = 0
     delete_after_run: bool = False
+    archived_at_ms: int | None = None
 
     @classmethod
     def from_dict(cls, kwargs: dict[str, Any]) -> CronJob:
@@ -178,7 +193,20 @@ class CronJob:
             delete_after_run=bool(
                 get_camel_snake(data, "deleteAfterRun", "delete_after_run", False)
             ),
+            archived_at_ms=_store_int(
+                get_camel_snake(data, "archivedAtMs", "archived_at_ms"), None
+            ),
         )
+
+
+@dataclass
+class CronArchiveResult:
+    """Grouped outcome for one idempotent batch archive request."""
+
+    archived: list[str] = field(default_factory=list)
+    already_archived: list[str] = field(default_factory=list)
+    protected: list[str] = field(default_factory=list)
+    not_found: list[str] = field(default_factory=list)
 
 
 @dataclass
