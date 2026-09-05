@@ -95,6 +95,30 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
+  it("renders raw-fallback compaction as a distinct warning notice", () => {
+    const message: UIMessage = {
+      id: "compaction-1",
+      role: "assistant",
+      content: "",
+      kind: "compaction",
+      createdAt: Date.now(),
+      compaction: {
+        id: "compact-1",
+        phase: "succeeded",
+        checkpointSource: "raw_fallback",
+        announce: true,
+      },
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    const notice = container.querySelector("[data-context-compaction='succeeded']");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(screen.getByText("Raw fallback")).toBeInTheDocument();
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",

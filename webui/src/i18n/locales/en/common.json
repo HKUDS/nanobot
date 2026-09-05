@@ -1083,6 +1083,12 @@
     "error": "Connection error"
   },
   "thread": {
+    "compaction": {
+      "started": "Compressing context…",
+      "failed": "Context compaction failed",
+      "succeeded": "Context compacted",
+      "source": { "llm": "LLM summary", "raw": "Raw fallback" }
+    },
     "loadingConversation": "Loading conversation…",
     "empty": {
       "greetings": {
@@ -1276,6 +1282,10 @@
           "new": {
             "title": "New chat",
             "description": "Reset this chat and start a fresh conversation."
+          },
+          "compact": {
+            "title": "Compact context",
+            "description": "Compact this chat's context and continue the conversation."
           },
           "stop": {
             "title": "Stop current task",

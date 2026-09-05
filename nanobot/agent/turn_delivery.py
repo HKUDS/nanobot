@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     RetryWaitEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -173,6 +174,17 @@ class TurnDelivery:
             )
 
         return _on_retry_wait
+
+    async def context_compaction(self, event: ContextCompactionEvent) -> None:
+        """Publish one compaction transition without completing the active turn."""
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=self.delivery_message.channel,
+                chat_id=self.delivery_message.chat_id,
+                event=event,
+                metadata=self.delivery_message.metadata,
+            )
+        )
 
     async def started(self) -> None:
         if self.route.publish_lifecycle:

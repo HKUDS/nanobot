@@ -39,6 +39,16 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
       hasLaterUnitBeforeUser = false;
       continue;
     }
+    if (
+      unit.type === "message"
+      && unit.message.role === "assistant"
+      && unit.message.kind === "compaction"
+    ) {
+      // Compaction notices are session lifecycle markers, not assistant answers.
+      // They must neither expose nor displace the answer-level fork action.
+      flags[i] = false;
+      continue;
+    }
     if (unit.type === "message" && unit.message.role === "assistant") {
       flags[i] = !hasLaterUnitBeforeUser;
     }

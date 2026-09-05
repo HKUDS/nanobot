@@ -1388,7 +1388,14 @@ class WebSocketChannel(BaseChannel):
         """Persist as requested, frame, and fan out one encoded WebUI payload."""
         conns = list(self._subs.get(chat_id, ()))
         body: dict[str, Any] = dict(payload)
-        if persistence == "turn_complete":
+        if persistence == "turn_activity":
+            self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="activity",
+            )
+        elif persistence == "turn_complete":
             canonical_webui_turn = (metadata or {}).get("webui") is True
             prior_persistence_failure = (
                 canonical_webui_turn

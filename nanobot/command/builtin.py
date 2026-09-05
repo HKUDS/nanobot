@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
+from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
+    outbound_message_for_event,
+)
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import build_status_content
@@ -70,6 +74,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Reset this chat and start a fresh conversation.",
         "square-pen",
         lifecycle="finalize_active_turn",
+    ),
+    BuiltinCommandSpec(
+        "/compact",
+        "Compact context",
+        "Compact this chat's context and continue the conversation.",
+        "archive",
     ),
     BuiltinCommandSpec(
         "/stop",
@@ -334,6 +344,54 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
         metadata=dict(ctx.msg.metadata or {})
+    )
+
+
+async def cmd_compact(ctx: CommandContext) -> OutboundMessage:
+    """Compact the current session without resetting the conversation."""
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    runtime = ctx.runtime or loop.runtime_for_session(session)
+    delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
+    terminal_event: ContextCompactionEvent | None = None
+
+    async def _on_compaction(event: ContextCompactionEvent) -> None:
+        nonlocal terminal_event
+        if event.phase == "started":
+            await delivery.context_compaction(event)
+        else:
+            terminal_event = replace(event, completes_command=True)
+
+    try:
+        summary = await loop.consolidator.compact_idle_session(
+            ctx.key,
+            runtime=runtime,
+            on_compaction=_on_compaction,
+        )
+    except Exception:
+        summary = None
+
+    if summary:
+        refreshed = loop.sessions.get_or_create(ctx.key)
+        refreshed.provider_state = None
+        loop.sessions.save(refreshed)
+    if terminal_event is not None:
+        return outbound_message_for_event(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            event=terminal_event,
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+    content = (
+        "Nothing to compact."
+        if summary == ""
+        else "Unable to compact context. Check the logs and try again."
+    )
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
@@ -1044,6 +1102,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
+    router.exact("/compact", cmd_compact)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

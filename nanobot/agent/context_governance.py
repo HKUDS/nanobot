@@ -14,10 +14,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.bus.outbound_events import (
+    ContextCompactionCallback,
+    ContextCompactionEvent,
+    emit_context_compaction,
+)
 from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
@@ -36,6 +42,7 @@ from nanobot.runtime_context import (
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
+    CompactionResult,
     SessionSummaryCheckpoint,
 )
 from nanobot.utils.helpers import (
@@ -54,11 +61,11 @@ if TYPE_CHECKING:
 TranscriptBuilder = Callable[[TranscriptInput], list[dict[str, Any]]]
 HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
-    Awaitable[str | None],
+    Awaitable[CompactionResult | None],
 ]
 ProviderCompactionConsolidator = Callable[
     [ProviderConversationState, list[dict[str, Any]], str | None],
-    Awaitable[str | None],
+    Awaitable[CompactionResult | None],
 ]
 
 SNIP_SAFETY_BUFFER = 1024
@@ -198,6 +205,7 @@ class ModelRequestState:
     tool_definitions: list[dict[str, Any]] | None = None
     compaction: ContextCompactionState | None = None
     provider_compaction_applied: bool = False
+    compaction_callback: ContextCompactionCallback | None = None
 
 
 class ContextGovernor:
@@ -493,17 +501,42 @@ class ContextGovernor:
             )
             return
 
-        summary = await compaction.consolidate_provider_compaction(
-            response.provider_compaction_state,
-            deepcopy(accepted_messages),
-            compaction.active_summary,
+        compaction_id = uuid4().hex
+        await emit_context_compaction(
+            state.compaction_callback,
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
-        if not summary:
+        try:
+            result = await compaction.consolidate_provider_compaction(
+                response.provider_compaction_state,
+                deepcopy(accepted_messages),
+                compaction.active_summary,
+            )
+        except Exception:
+            await emit_context_compaction(
+                state.compaction_callback,
+                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+            )
+            raise
+        if result is None or not result.summary:
+            await emit_context_compaction(
+                state.compaction_callback,
+                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+            )
             return
+        summary = result.summary
         compaction.active_summary = summary
         compaction.summary_checkpoint = SessionSummaryCheckpoint(
             summary=summary,
             transcript_boundary=transcript_boundary,
+        )
+        await emit_context_compaction(
+            state.compaction_callback,
+            ContextCompactionEvent(
+                compaction_id=compaction_id,
+                phase="succeeded",
+                checkpoint_source=result.checkpoint_source,
+            ),
         )
 
     async def _compact_request_history(
@@ -516,46 +549,67 @@ class ContextGovernor:
         tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         """Replace accepted history H with a checkpoint while preserving delta."""
-        delta_messages = compaction.delta_after_accepted(messages)
-        consolidation_prefix = self.prepare_messages_for_model(
-            state.config,
-            compaction.accepted_messages,
+        measured, _source = pressure
+        compaction_id = uuid4().hex
+        await emit_context_compaction(
+            state.compaction_callback,
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
-        summary = await compaction.consolidate_history(
-            deepcopy(consolidation_prefix),
-            compaction.active_summary,
-        )
-        if not summary:
-            measured, source = pressure
-            raise ContextWindowExceededError(
-                session_key=state.config.session_key,
-                estimated_tokens=measured,
-                input_budget=self.input_budget(state.config),
-                source=source,
+        try:
+            delta_messages = compaction.delta_after_accepted(messages)
+            consolidation_prefix = self.prepare_messages_for_model(
+                state.config,
+                compaction.accepted_messages,
             )
+            result = await compaction.consolidate_history(
+                deepcopy(consolidation_prefix),
+                compaction.active_summary,
+            )
+            if result is None or not result.summary:
+                raise ContextWindowExceededError(
+                    session_key=state.config.session_key,
+                    estimated_tokens=measured,
+                    input_budget=self.input_budget(state.config),
+                    source=_source,
+                )
 
-        compaction.active_summary = summary
-        prepared = self.prepare_messages_for_model(
-            state.config,
-            [
-                *self._summary_transcript(compaction, summary),
-                {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
-                *delta_messages,
-            ],
-        )
-        # Responses-style state is append-only. Replacing H with a
-        # checkpoint requires a fresh request; a successful response may
-        # establish a new provider-owned state at the rewritten boundary.
-        state.conversation.replace_transcript(compaction.raw_messages)
-        state.usage = None
-        prepared = self.ensure_request_fits(
-            state.config,
-            prepared,
-            tool_definitions=tool_definitions,
-        )
-        compaction.summary_checkpoint = SessionSummaryCheckpoint(
-            summary=summary,
-            transcript_boundary=compaction.raw_accepted_boundary,
+            summary = result.summary
+            compaction.active_summary = summary
+            prepared = self.prepare_messages_for_model(
+                state.config,
+                [
+                    *self._summary_transcript(compaction, summary),
+                    {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
+                    *delta_messages,
+                ],
+            )
+            # Responses-style state is append-only. Replacing H with a
+            # checkpoint requires a fresh request; a successful response may
+            # establish a new provider-owned state at the rewritten boundary.
+            state.conversation.replace_transcript(compaction.raw_messages)
+            state.usage = None
+            prepared = self.ensure_request_fits(
+                state.config,
+                prepared,
+                tool_definitions=tool_definitions,
+            )
+            compaction.summary_checkpoint = SessionSummaryCheckpoint(
+                summary=summary,
+                transcript_boundary=compaction.raw_accepted_boundary,
+            )
+        except Exception:
+            await emit_context_compaction(
+                state.compaction_callback,
+                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+            )
+            raise
+        await emit_context_compaction(
+            state.compaction_callback,
+            ContextCompactionEvent(
+                compaction_id=compaction_id,
+                phase="succeeded",
+                checkpoint_source=result.checkpoint_source,
+            ),
         )
         return prepared
 
@@ -590,7 +644,7 @@ class ContextGovernor:
         request_was_fitted = False
         compaction = state.compaction
         if compaction is None:
-            prepared, request_was_fitted = self.fit_request(
+            pressure = self.request_pressure(
                 state.config,
                 prepared,
                 state.usage,
@@ -598,6 +652,29 @@ class ContextGovernor:
                 tool_definitions=tool_definitions,
                 request_context_tokens=request_context_tokens,
             )
+            if pressure is not None:
+                compaction_id = uuid4().hex
+                await emit_context_compaction(
+                    state.compaction_callback,
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                )
+                try:
+                    prepared = self.fit_to_budget(
+                        state.config,
+                        prepared,
+                        tool_definitions=tool_definitions,
+                    )
+                except Exception:
+                    await emit_context_compaction(
+                        state.compaction_callback,
+                        ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                    )
+                    raise
+                await emit_context_compaction(
+                    state.compaction_callback,
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="succeeded"),
+                )
+                request_was_fitted = True
         else:
             pressure = self.request_pressure(
                 state.config,

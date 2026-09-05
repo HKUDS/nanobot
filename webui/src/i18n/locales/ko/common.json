@@ -1069,6 +1069,12 @@
     "error": "연결 오류"
   },
   "thread": {
+    "compaction": {
+      "started": "컨텍스트 압축 중…",
+      "failed": "컨텍스트 압축 실패",
+      "succeeded": "컨텍스트를 압축했습니다",
+      "source": { "llm": "LLM 요약", "raw": "원시 대체" }
+    },
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
       "greetings": {
@@ -1252,6 +1258,10 @@
           "new": {
             "title": "새 채팅",
             "description": "이 채팅을 초기화하고 새 대화를 시작합니다."
+          },
+          "compact": {
+            "title": "컨텍스트 압축",
+            "description": "이 채팅의 컨텍스트를 압축하고 대화를 계속합니다."
           },
           "stop": {
             "title": "현재 작업 중지",

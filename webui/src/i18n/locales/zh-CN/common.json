@@ -1083,6 +1083,12 @@
     "error": "连接出错"
   },
   "thread": {
+    "compaction": {
+      "started": "正在压缩上下文…",
+      "failed": "上下文压缩失败",
+      "succeeded": "上下文已压缩",
+      "source": { "llm": "LLM 摘要", "raw": "原始内容回退" }
+    },
     "loadingConversation": "正在加载话题…",
     "empty": {
       "greetings": {
@@ -1275,6 +1281,10 @@
           "new": {
             "title": "新建话题",
             "description": "重置当前话题，并开始一个新的话题。"
+          },
+          "compact": {
+            "title": "压缩上下文",
+            "description": "压缩当前对话的上下文并继续对话。"
           },
           "stop": {
             "title": "停止当前任务",

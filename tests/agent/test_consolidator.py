@@ -4,12 +4,14 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from loguru import logger
 
 from nanobot.agent.memory import (
     _HISTORY_ENTRY_HARD_CAP,
     Consolidator,
     MemoryStore,
 )
+from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.providers.base import (
     GenerationSettings,
     LLMResponse,
@@ -23,6 +25,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
+from nanobot.session.summary import CompactionResult
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -141,7 +144,7 @@ class TestTurnTranscriptSummary:
             content="replacement checkpoint",
         )
 
-        summary = await consolidator.summarize_transcript(
+        result = await consolidator.summarize_transcript(
             accepted,
             "previous checkpoint",
             runtime=runtime,
@@ -149,7 +152,7 @@ class TestTurnTranscriptSummary:
             tools=tools,
         )
 
-        assert summary == "replacement checkpoint"
+        assert result == CompactionResult("replacement checkpoint", "llm_summary")
         call = mock_provider.chat_with_retry.await_args.kwargs
         assert call["messages"][:-1] == accepted
         assert call["messages"][-1]["role"] == "user"
@@ -172,7 +175,7 @@ class TestTurnTranscriptSummary:
             content="replacement checkpoint",
         )
 
-        summary = await consolidator.summarize_provider_compaction(
+        result = await consolidator.summarize_provider_compaction(
             state,
             accepted,
             "previous checkpoint",
@@ -181,7 +184,7 @@ class TestTurnTranscriptSummary:
             tools=[{"type": "function", "function": {"name": "inspect"}}],
         )
 
-        assert summary == "replacement checkpoint"
+        assert result == CompactionResult("replacement checkpoint", "llm_summary")
         call = mock_provider.chat_with_retry.await_args.kwargs
         assert call["messages"][0] == accepted[0]
         assert call["messages"][-1]["content"] == _ARCHIVE_PROMPT
@@ -250,8 +253,14 @@ class TestConsolidatorSummarize:
             {"role": "user", "content": "fix the auth bug"},
             {"role": "assistant", "content": "Done, fixed the race condition."},
         ]
-        result = await _archive(consolidator, messages, runtime)
-        assert result == "User fixed a bug in the auth module."
+        debug_logs: list[str] = []
+        sink_id = logger.add(debug_logs.append, level="DEBUG", format="{message}")
+        try:
+            result = await _archive(consolidator, messages, runtime)
+        finally:
+            logger.remove(sink_id)
+        assert result == CompactionResult("User fixed a bug in the auth module.", "llm_summary")
+        assert any("User fixed a bug in the auth module." in line for line in debug_logs)
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
 
@@ -286,8 +295,9 @@ class TestConsolidatorSummarize:
         messages = [{"role": "user", "content": "hello"}]
         result = await _archive(consolidator, messages, runtime)
         assert result is not None
-        assert "[RAW]" in result
-        assert "hello" in result
+        assert result.checkpoint_source == "raw_fallback"
+        assert "[RAW]" in result.summary
+        assert "hello" in result.summary
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" in entries[0]["content"]
@@ -329,11 +339,11 @@ class TestConsolidatorSummarize:
         )
 
         assert result is not None
-        assert "[Previous archived context]" in result
-        assert "OLD_MARKER" in result
-        assert "[Newly archived raw context]" in result
-        assert "NEW_MARKER" in result
-        assert "... (truncated)" in result
+        assert "[Previous archived context]" in result.summary
+        assert "OLD_MARKER" in result.summary
+        assert "[Newly archived raw context]" in result.summary
+        assert "NEW_MARKER" in result.summary
+        assert "... (truncated)" in result.summary
 
     async def test_summarize_skips_empty_messages(self, consolidator, runtime):
         result = await _archive(consolidator, [], runtime)
@@ -387,7 +397,7 @@ class TestConsolidatorArchiveErrorHandling:
         ]
         result = await _archive(consolidator, messages, runtime)
         assert result is not None
-        assert "[RAW]" in result
+        assert "[RAW]" in result.summary
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" in entries[0]["content"]
@@ -406,7 +416,7 @@ class TestConsolidatorArchiveErrorHandling:
             {"role": "assistant", "content": "Done."},
         ]
         result = await _archive(consolidator, messages, runtime)
-        assert result == "User fixed a bug in the auth module."
+        assert result == CompactionResult("User fixed a bug in the auth module.", "llm_summary")
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" not in entries[0]["content"]
@@ -554,6 +564,57 @@ class TestCompactIdleSession:
         assert meta["text"] == "Summary of old conversation."
         assert "last_active" in meta
         assert reloaded.updated_at == old_ts
+
+    @pytest.mark.asyncio
+    async def test_emits_manual_compaction_lifecycle_with_checkpoint_source(
+        self, real_consolidator, mock_provider, runtime
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        session = real_consolidator.sessions.get_or_create("cli:events")
+        session.add_message("user", "question")
+        session.add_message("assistant", "answer")
+        real_consolidator.sessions.save(session)
+        events: list[ContextCompactionEvent] = []
+
+        async def observe(event: ContextCompactionEvent) -> None:
+            events.append(event)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:events",
+            runtime=runtime,
+            on_compaction=observe,
+        )
+
+        assert result == "Summary."
+        assert [event.phase for event in events] == ["started", "succeeded"]
+        assert events[0].compaction_id == events[1].compaction_id
+        assert events[1].checkpoint_source == "llm_summary"
+
+    @pytest.mark.asyncio
+    async def test_event_callback_failure_does_not_abort_compaction(
+        self, real_consolidator, mock_provider, runtime
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        session = real_consolidator.sessions.get_or_create("cli:event-callback-failure")
+        session.add_message("user", "question")
+        real_consolidator.sessions.save(session)
+
+        async def fail_observer(_event: ContextCompactionEvent) -> None:
+            raise RuntimeError("channel unavailable")
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:event-callback-failure",
+            runtime=runtime,
+            on_compaction=fail_observer,
+        )
+
+        assert result == "Summary."
+        reloaded = real_consolidator.sessions.get_or_create("cli:event-callback-failure")
+        assert reloaded.last_archived == 1
 
     @pytest.mark.asyncio
     async def test_short_idle_session_archives_once(
@@ -1356,7 +1417,8 @@ class TestArchivePersistence:
         )
 
         persisted = store.read_unprocessed_history(since_cursor=0)[0]["content"]
-        assert summary == persisted == "safe summary"
+        assert summary is not None
+        assert summary.summary == persisted == "safe summary"
 
     async def test_oversized_summary_uses_history_emergency_cap(
         self, consolidator, mock_provider, store, runtime
@@ -1376,4 +1438,5 @@ class TestArchivePersistence:
 
         entry = store.read_unprocessed_history(since_cursor=0)[0]
         assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
-        assert summary == entry["content"]
+        assert summary is not None
+        assert summary.summary == entry["content"]

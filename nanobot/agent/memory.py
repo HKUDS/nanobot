@@ -17,9 +17,15 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
+from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.bus.outbound_events import (
+    ContextCompactionCallback,
+    ContextCompactionEvent,
+    emit_context_compaction,
+)
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
@@ -28,7 +34,7 @@ from nanobot.session.manager import (
     Session,
     SessionManager,
 )
-from nanobot.session.summary import session_summary_from_metadata
+from nanobot.session.summary import CompactionResult, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -778,13 +784,16 @@ class MemoryArchiver:
         session_key: str,
         previous_summary: str | None,
         max_tokens: int,
-    ) -> str:
+    ) -> CompactionResult:
         """Persist the failed chunk and return a bounded replacement checkpoint."""
         raw = self.store.raw_archive(messages, session_key=session_key)
-        return self._combine_raw_checkpoint(
-            raw,
-            previous_summary=previous_summary,
-            max_tokens=max_tokens,
+        return CompactionResult(
+            summary=self._combine_raw_checkpoint(
+                raw,
+                previous_summary=previous_summary,
+                max_tokens=max_tokens,
+            ),
+            checkpoint_source="raw_fallback",
         )
 
     @staticmethod
@@ -831,12 +840,12 @@ class MemoryArchiver:
         input_token_budget: int | None = None,
         fallback_max_tokens: int | None = None,
         provider_state: ProviderConversationState | None = None,
-    ) -> str | None:
+    ) -> CompactionResult | None:
         """Append the archive prompt to H and persist its summary."""
         if not source_messages:
             return None
 
-        def raw_fallback() -> str:
+        def raw_fallback() -> CompactionResult:
             return self._raw_checkpoint(
                 source_messages,
                 session_key=session_key,
@@ -931,9 +940,10 @@ class MemoryArchiver:
             logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
             return raw_fallback()
         if summary == "(nothing)":
-            return "(nothing)"
+            return CompactionResult(summary=summary, checkpoint_source="llm_summary")
         self.store.append_history(summary, session_key=session_key)
-        return summary
+        logger.debug("Memory archive LLM summary for {}:\n{}", session_key, summary)
+        return CompactionResult(summary=summary, checkpoint_source="llm_summary")
 
     async def archive_session(
         self,
@@ -942,7 +952,7 @@ class MemoryArchiver:
         archive_end: int,
         runtime: LLMRuntime,
         input_token_budget: int,
-    ) -> str | None:
+    ) -> CompactionResult | None:
         """Archive a captured session prefix without mutating the session."""
         messages = list(session.messages[session.last_archived:archive_end])
         if not messages:
@@ -1048,7 +1058,7 @@ class Consolidator:
         session_key: str,
         tools: list[dict[str, Any]],
         provider_state: ProviderConversationState | None = None,
-    ) -> str | None:
+    ) -> CompactionResult | None:
         """Summarize the exact transcript prefix already accepted by the model."""
         source_messages = [
             dict(message)
@@ -1065,7 +1075,7 @@ class Consolidator:
             max(1, (input_token_budget - self._SAFETY_BUFFER) // 2),
         )
 
-        summary = await self.archiver.archive(
+        result = await self.archiver.archive(
             source_messages,
             runtime=runtime,
             session_key=session_key,
@@ -1076,16 +1086,19 @@ class Consolidator:
             fallback_max_tokens=max(1, checkpoint_tokens),
             provider_state=provider_state,
         )
-        if summary == "(nothing)":
-            summary = self.archiver._raw_checkpoint(
+        if result is not None and result.summary == "(nothing)":
+            result = self.archiver._raw_checkpoint(
                 source_messages,
                 session_key=session_key,
                 previous_summary=previous_summary,
                 max_tokens=max_output_tokens,
             )
-        if summary is None:
+        if result is None:
             return None
-        return truncate_text_to_tokens(summary, max(1, max_output_tokens))
+        return CompactionResult(
+            summary=truncate_text_to_tokens(result.summary, max(1, max_output_tokens)),
+            checkpoint_source=result.checkpoint_source,
+        )
 
     async def summarize_provider_compaction(
         self,
@@ -1096,7 +1109,7 @@ class Consolidator:
         runtime: LLMRuntime,
         session_key: str,
         tools: list[dict[str, Any]],
-    ) -> str | None:
+    ) -> CompactionResult | None:
         """Prompt a native compacted state without replaying its raw history."""
         return await self.summarize_transcript(
             fallback_messages,
@@ -1169,7 +1182,7 @@ class Consolidator:
         *,
         archive_end: int,
         runtime: LLMRuntime,
-    ) -> str | None:
+    ) -> CompactionResult | None:
         """Archive one captured session range through the shared Memory path."""
         return await self.archiver.archive_session(
             session,
@@ -1184,6 +1197,7 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
         max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
+        on_compaction: ContextCompactionCallback | None = None,
     ) -> str | None:
         """Archive the full idle tail while keeping recent messages replayable.
 
@@ -1208,22 +1222,51 @@ class Consolidator:
             if not messages_to_archive:
                 return ""
 
+            compaction_id = uuid4().hex
+            await emit_context_compaction(
+                on_compaction,
+                ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+            )
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
-            summary = await self.archive_session(
-                session,
-                archive_end=archive_end,
-                runtime=runtime,
-            )
-            if summary is None:
+            try:
+                result = await self.archive_session(
+                    session,
+                    archive_end=archive_end,
+                    runtime=runtime,
+                )
+                if result is not None:
+                    self._set_last_summary(
+                        session,
+                        result.summary,
+                        last_active=last_active,
+                    )
+
+                    # A turn can append while the provider call is in flight. Advance only
+                    # through the captured batch so new messages remain eligible next time.
+                    session.last_archived = archive_end
+                    self.sessions.save(session)
+            except Exception:
+                await emit_context_compaction(
+                    on_compaction,
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                )
+                raise
+            if result is None:
+                await emit_context_compaction(
+                    on_compaction,
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                )
                 return None
 
-            self._set_last_summary(session, summary, last_active=last_active)
-
-            # A turn can append while the provider call is in flight. Advance only
-            # through the captured batch so new messages remain eligible next time.
-            session.last_archived = archive_end
-            self.sessions.save(session)
+            await emit_context_compaction(
+                on_compaction,
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="succeeded",
+                    checkpoint_source=result.checkpoint_source,
+                ),
+            )
 
             visible = session.get_history(
                 max_messages=MIN_COMPACTED_REPLAY_MESSAGES,
@@ -1236,7 +1279,7 @@ class Consolidator:
                 len(messages_to_archive),
                 len(visible),
                 len(session.messages),
-                bool(summary),
+                bool(result.summary),
             )
 
-            return summary
+            return result.summary

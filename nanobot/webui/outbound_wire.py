@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
-from nanobot.bus.outbound_events import RecoveryStateEvent, TurnEndEvent
+from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
+    RecoveryStateEvent,
+    TurnEndEvent,
+)
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 
@@ -32,8 +36,22 @@ class TurnEndWirePayload(_ChatWirePayload):
     context_window_tokens: NotRequired[int]
 
 
-WebUIWirePayload: TypeAlias = RecoveryStateWirePayload | TurnEndWirePayload
-WebUIWirePersistence: TypeAlias = Literal["transient", "turn_complete"]
+class ContextCompactionWirePayload(_ChatWirePayload):
+    event: Literal["context_compaction"]
+    compaction_id: str
+    phase: str
+    checkpoint_source: NotRequired[str]
+    completes_command: NotRequired[bool]
+
+
+WebUIWirePayload: TypeAlias = (
+    ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
+)
+WebUIWirePersistence: TypeAlias = Literal[
+    "transient",
+    "turn_activity",
+    "turn_complete",
+]
 
 
 def encode_recovery_state(
@@ -52,6 +70,24 @@ def encode_recovery_state(
         payload["reason"] = event.reason
     if event.can_continue is not None:
         payload["can_continue"] = event.can_continue
+    return payload
+
+
+def encode_context_compaction(
+    chat_id: str,
+    event: ContextCompactionEvent,
+) -> ContextCompactionWirePayload:
+    """Project one summary-free compaction transition onto its stable wire shape."""
+    payload: ContextCompactionWirePayload = {
+        "event": "context_compaction",
+        "chat_id": chat_id,
+        "compaction_id": event.compaction_id,
+        "phase": event.phase,
+    }
+    if event.checkpoint_source is not None:
+        payload["checkpoint_source"] = event.checkpoint_source
+    if event.completes_command:
+        payload["completes_command"] = True
     return payload
 
 

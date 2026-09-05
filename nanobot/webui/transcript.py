@@ -2321,6 +2321,53 @@ def replay_transcript_to_ui_messages(
             close_reasoning(messages)
             continue
 
+        if ev == "context_compaction":
+            compaction_id = rec.get("compaction_id")
+            phase = rec.get("phase")
+            if (
+                not isinstance(compaction_id, str)
+                or not compaction_id
+                or phase not in {"started", "succeeded", "failed"}
+            ):
+                continue
+            checkpoint_source = rec.get("checkpoint_source")
+            if checkpoint_source not in {"llm_summary", "raw_fallback"}:
+                checkpoint_source = None
+            compaction: dict[str, Any] = {
+                "id": compaction_id,
+                "phase": phase,
+            }
+            if checkpoint_source is not None:
+                compaction["checkpointSource"] = checkpoint_source
+            payload: dict[str, Any] = {
+                "id": f"compaction-{compaction_id}",
+                "role": "assistant",
+                "content": "",
+                "kind": "compaction",
+                "createdAt": _created_at_ms(rec, idx),
+                "compaction": compaction,
+                **_turn_fields(rec, "activity"),
+            }
+            existing = next(
+                (
+                    message_index
+                    for message_index, message in enumerate(messages)
+                    if message.get("id") == payload["id"]
+                ),
+                None,
+            )
+            if existing is None:
+                messages.append(payload)
+            else:
+                payload["createdAt"] = messages[existing].get(
+                    "createdAt",
+                    payload["createdAt"],
+                )
+                messages[existing] = payload
+            active_activity_segment_id = None
+            active_file_edit_segment_id = None
+            continue
+
         if ev == "message":
             if suppress_until_turn_end and rec.get("kind") in (
                 "tool_hint",

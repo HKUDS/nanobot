@@ -21,6 +21,7 @@ import {
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   Activity,
+  Archive,
   ArrowUp,
   BookOpen,
   Brain,
@@ -235,6 +236,7 @@ interface ThreadComposerProps {
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
   activity: Activity,
+  archive: Archive,
   "book-open": BookOpen,
   brain: Brain,
   "circle-help": CircleHelp,

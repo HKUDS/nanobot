@@ -9,7 +9,7 @@ from nanobot.providers.base import (
     LLMResponse,
     ProviderConversationState,
 )
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, CompactionResult
 
 
 def _make_loop(
@@ -121,7 +121,7 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
         provider_compaction_scope="current_request",
     ))
     loop.consolidator.summarize_provider_compaction = AsyncMock(
-        return_value="portable terminal checkpoint",
+        return_value=CompactionResult("portable terminal checkpoint", "llm_summary"),
     )
 
     result = await loop.process_direct("continue", session_key="cli:native")

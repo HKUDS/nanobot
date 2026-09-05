@@ -8,6 +8,7 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
@@ -28,6 +29,7 @@ from nanobot.webui.metadata import (
 from nanobot.webui.outbound_wire import (
     WebUIWirePayload,
     WebUIWirePersistence,
+    encode_context_compaction,
     encode_recovery_state,
     encode_turn_end,
 )
@@ -152,6 +154,7 @@ class WebUIOutboundProjector:
                 SessionUpdatedEvent,
                 GoalStatusEvent,
                 GoalStateSyncEvent,
+                ContextCompactionEvent,
             )
             log = (
                 logger.debug
@@ -186,6 +189,14 @@ class WebUIOutboundProjector:
                     encode_recovery_state(msg.chat_id, event),
                     persistence="transient",
                 )
+            return
+        if isinstance(event, ContextCompactionEvent):
+            await self._transport.send_payload(
+                msg.chat_id,
+                encode_context_compaction(msg.chat_id, event),
+                persistence="transient" if event.phase == "started" else "turn_activity",
+                metadata=msg.metadata,
+            )
             return
         if isinstance(event, GoalStateSyncEvent):
             if conns:

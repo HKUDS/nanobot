@@ -83,7 +83,14 @@ def _make_fake_compact(
 ):
     state = {"count": 0}
 
-    async def _fake_compact(key: str, *, runtime, max_suffix: int = 8) -> str:
+    async def _fake_compact(
+        key: str,
+        *,
+        runtime,
+        max_suffix: int = 8,
+        trigger: str = "policy",
+        on_compaction=None,
+    ) -> str:
         state["count"] += 1
         session = loop.sessions.get_or_create(key)
 
@@ -884,7 +891,7 @@ class TestProactiveAutoCompact:
         started = asyncio.Event()
         block_forever = asyncio.Event()
 
-        async def _slow_compact(key, *, runtime, max_suffix=8):
+        async def _slow_compact(key, *, runtime, max_suffix=8, **_kwargs):
             nonlocal archive_count
             archive_count += 1
             started.set()
@@ -916,7 +923,7 @@ class TestProactiveAutoCompact:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _failing_compact(key, *, runtime, max_suffix=8):
+        async def _failing_compact(key, *, runtime, max_suffix=8, **_kwargs):
             raise RuntimeError("LLM down")
 
         loop.consolidator.compact_idle_session = _failing_compact

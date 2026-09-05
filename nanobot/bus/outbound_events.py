@@ -7,12 +7,15 @@ message's explicit ``event`` field rather than in reserved metadata flags.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.providers.base import LLMUsage
+from nanobot.session.summary import CheckpointSource
 
 
 class OutboundEvent:
@@ -114,6 +117,32 @@ class TurnModelUpdatedEvent(OutboundEvent):
     fallback: bool = False
 
 
+@dataclass(frozen=True)
+class ContextCompactionEvent(OutboundEvent):
+    """A channel-safe transition for one logical context compaction."""
+
+    compaction_id: str
+    phase: Literal["started", "succeeded", "failed"]
+    checkpoint_source: CheckpointSource | None = None
+    completes_command: bool = False
+
+
+ContextCompactionCallback = Callable[[ContextCompactionEvent], Awaitable[None]]
+
+
+async def emit_context_compaction(
+    callback: ContextCompactionCallback | None,
+    event: ContextCompactionEvent,
+) -> None:
+    """Notify observers without allowing delivery failure to alter compaction."""
+    if callback is None:
+        return
+    try:
+        await callback(event)
+    except Exception:
+        logger.exception("Failed to publish context compaction event")
+
+
 def outbound_message_for_event(
     *,
     channel: str,
@@ -162,6 +191,16 @@ def _event_content(event: OutboundEvent) -> str:
         ProgressEvent | RetryWaitEvent | StreamDeltaEvent | StreamEndEvent | UserInputEvent,
     ):
         return event.content
+    if isinstance(event, ContextCompactionEvent):
+        if event.phase == "started":
+            return "Compressing context…"
+        if event.phase == "failed":
+            return "Unable to compact context."
+        if event.checkpoint_source == "raw_fallback":
+            return "Context compacted · raw fallback"
+        if event.checkpoint_source == "llm_summary":
+            return "Context compacted · LLM summary"
+        return "Context compacted."
     return ""
 
 

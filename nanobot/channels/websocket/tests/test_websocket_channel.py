@@ -24,6 +24,7 @@ from nanobot.bus.events import (
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
@@ -2803,6 +2804,71 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         {"event": "turn_end", "chat_id": "chat-1"},
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_context_compaction_started_is_live_only() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-compaction-started")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-compaction-started",
+        content="Compressing context…",
+        event=ContextCompactionEvent(
+            compaction_id="compact-started",
+            phase="started",
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "context_compaction",
+        "chat_id": "chat-compaction-started",
+        "compaction_id": "compact-started",
+        "phase": "started",
+    }]
+    assert read_transcript_lines("websocket:chat-compaction-started") == []
+
+
+@pytest.mark.asyncio
+async def test_context_compaction_is_structured_persisted_and_summary_free() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-compaction")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-compaction",
+        content="Context compacted · LLM summary",
+        event=ContextCompactionEvent(
+            compaction_id="compact-1",
+            phase="succeeded",
+            checkpoint_source="llm_summary",
+        ),
+    ))
+
+    expected = {
+        "event": "context_compaction",
+        "chat_id": "chat-compaction",
+        "compaction_id": "compact-1",
+        "phase": "succeeded",
+        "checkpoint_source": "llm_summary",
+    }
+    assert _sent_ws_payloads(mock_ws) == [expected]
+    [persisted] = read_transcript_lines("websocket:chat-compaction")
+    assert {key: persisted[key] for key in expected} == expected
+    assert "summary" not in persisted
 
 
 @pytest.mark.asyncio

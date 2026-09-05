@@ -1069,6 +1069,12 @@
     "error": "連線錯誤"
   },
   "thread": {
+    "compaction": {
+      "started": "正在壓縮上下文…",
+      "failed": "上下文壓縮失敗",
+      "succeeded": "上下文已壓縮",
+      "source": { "llm": "LLM 摘要", "raw": "原始內容回退" }
+    },
     "loadingConversation": "正在載入話題…",
     "empty": {
       "greetings": {
@@ -1252,6 +1258,10 @@
           "new": {
             "title": "新增話題",
             "description": "重置目前話題，並開始新的話題。"
+          },
+          "compact": {
+            "title": "壓縮上下文",
+            "description": "壓縮目前對話的上下文並繼續對話。"
           },
           "stop": {
             "title": "停止目前任務",

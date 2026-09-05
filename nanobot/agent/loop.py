@@ -50,7 +50,12 @@ from nanobot.agent.turn_delivery import (
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
-from nanobot.bus.outbound_events import StreamedResponseEvent
+from nanobot.bus.outbound_events import (
+    ContextCompactionCallback,
+    ContextCompactionEvent,
+    StreamedResponseEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
@@ -79,7 +84,11 @@ from nanobot.session.goal_state import (
     runner_wall_llm_timeout_s,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
+from nanobot.session.keys import (
+    UNIFIED_SESSION_KEY,
+    last_channel_from_metadata,
+    remember_last_channel,
+)
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
@@ -456,6 +465,7 @@ class AgentLoop:
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
+            on_compaction=self._publish_idle_compaction,
         )
         self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
@@ -909,6 +919,38 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
+    async def _publish_idle_compaction(
+        self,
+        session_key: str,
+        event: ContextCompactionEvent,
+    ) -> None:
+        """Route an idle compaction back to its last concrete channel."""
+        session = self.sessions.get_or_create(session_key)
+        route = (
+            last_channel_from_metadata(session.metadata)
+            if session_key == UNIFIED_SESSION_KEY
+            else None
+        )
+        metadata: dict[str, Any] = {}
+        if route is None:
+            if ":" not in session_key:
+                logger.debug("No channel route for idle compaction of {}", session_key)
+                return
+            channel, chat_id = session_key.split(":", 1)
+            if channel == "slack" and ":" in chat_id:
+                chat_id, thread_ts = chat_id.split(":", 1)
+                metadata = {"slack": {"thread_ts": thread_ts}}
+            route = (channel, chat_id)
+        channel, chat_id = route
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=channel,
+                chat_id=chat_id,
+                event=event,
+                metadata=metadata,
+            )
+        )
+
     def _remember_unified_session_route(
         self,
         session: Session,
@@ -937,6 +979,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_context_compaction: ContextCompactionCallback | None = None,
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
@@ -1222,6 +1265,7 @@ class AgentLoop:
                     channel=request_ctx.channel,
                     metadata=request_metadata,
                 ),
+                compaction_callback=on_context_compaction,
             ))
         finally:
             turn_scope_stack.close()
@@ -1859,6 +1903,12 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
         )
         result = await self.commands.dispatch(cmd_ctx)
+        if cmd_ctx.raw.lower() == "/compact":
+            # Manual compaction reloads the session under its consolidation
+            # lock. Continue command persistence against that committed object.
+            self.sessions.invalidate(ctx.session_key)
+            session = self.sessions.get_or_create(ctx.session_key)
+            ctx.session = session
         if result is not None:
             ctx.outbound = result
             # Shortcut commands skip BUILD and SAVE, so we must persist the
@@ -2022,6 +2072,7 @@ class AgentLoop:
                 tools=ctx.tools,
                 request_context=ctx.request_context,
                 provider_state=ctx.provider_state,
+                on_context_compaction=ctx.delivery.context_compaction,
             )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages

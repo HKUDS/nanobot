@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -20,6 +20,7 @@ const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portra
 const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
+  "compact",
   "stop",
   "restart",
   "status",
@@ -497,6 +498,36 @@ describe("webui i18n", () => {
     });
 
     expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
+  });
+
+  it("localizes a backend-provided compact slash command", async () => {
+    await act(async () => {
+      const { setAppLanguage } = await import("@/i18n");
+      await setAppLanguage("zh-CN");
+    });
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        slashCommands={[{
+          command: "/compact",
+          title: "Compact context",
+          description: "Compact this chat's context and continue the conversation.",
+          icon: "archive",
+          lifecycle: "side_channel",
+          acceptsArgs: false,
+        }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("消息输入框"), {
+      target: { value: "/co" },
+    });
+
+    expect(screen.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
+    expect(screen.getByText("压缩上下文")).toBeInTheDocument();
+    expect(screen.getByText("压缩当前对话的上下文并继续对话。")).toBeInTheDocument();
+    expect(screen.getByText("/compact")).toBeInTheDocument();
   });
 
   it("keeps empty landing resources localized for every registered locale", () => {

@@ -15,6 +15,7 @@ from nanobot.agent.context_governance import (
     ContextWindowExceededError,
 )
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import (
     LLMProvider,
@@ -23,7 +24,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, CompactionResult
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -188,7 +189,7 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
             else (100, "test-counter")
         ),
     )
-    consolidate = AsyncMock(return_value="fresh checkpoint")
+    consolidate = AsyncMock(return_value=CompactionResult("fresh checkpoint", "llm_summary"))
     previous = {"text": "existing checkpoint", "last_active": "2026-08-30T00:00:00"}
 
     result = await AgentRunner().run(make_run_spec(
@@ -286,7 +287,7 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
             else (600, "test-counter")
         ),
     )
-    consolidate = AsyncMock(return_value="fresh checkpoint")
+    consolidate = AsyncMock(return_value=CompactionResult("fresh checkpoint", "llm_summary"))
 
     await AgentRunner().run(make_run_spec(
         provider,
@@ -368,8 +369,14 @@ async def test_native_compaction_uses_provider_request_boundary(
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         lambda *_args: (100, "test-counter"),
     )
-    consolidate = AsyncMock(return_value="portable checkpoint")
-    consolidate_native = AsyncMock(return_value="portable checkpoint")
+    consolidate = AsyncMock(return_value=CompactionResult("portable checkpoint", "llm_summary"))
+    consolidate_native = AsyncMock(
+        return_value=CompactionResult("portable checkpoint", "llm_summary")
+    )
+    compaction_events: list[ContextCompactionEvent] = []
+
+    async def observe_compaction(event: ContextCompactionEvent) -> None:
+        compaction_events.append(event)
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -391,6 +398,7 @@ async def test_native_compaction_uses_provider_request_boundary(
         max_tokens=100,
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        compaction_callback=observe_compaction,
     ))
 
     consolidate.assert_not_awaited()
@@ -405,6 +413,11 @@ async def test_native_compaction_uses_provider_request_boundary(
     assert result.provider_compaction_applied is True
     assert any(message.get("content") == "inspect the project" for message in result.messages)
     assert any(message.get("content") == "complete tool result" for message in result.messages)
+    assert [event.phase for event in compaction_events] == ["started", "succeeded"]
+    assert {event.compaction_id for event in compaction_events} == {
+        compaction_events[0].compaction_id
+    }
+    assert compaction_events[-1].checkpoint_source == "llm_summary"
 
 
 async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
@@ -441,7 +454,7 @@ async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         estimate,
     )
-    consolidate = AsyncMock(return_value="fresh checkpoint")
+    consolidate = AsyncMock(return_value=CompactionResult("fresh checkpoint", "llm_summary"))
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -506,7 +519,14 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         estimate,
     )
-    consolidate = AsyncMock(side_effect=["checkpoint-1", "checkpoint-2"])
+    consolidate = AsyncMock(side_effect=[
+        CompactionResult(summary="checkpoint-1", checkpoint_source="llm_summary"),
+        CompactionResult(summary="checkpoint-2", checkpoint_source="raw_fallback"),
+    ])
+    compaction_events: list[ContextCompactionEvent] = []
+
+    async def observe_compaction(event: ContextCompactionEvent) -> None:
+        compaction_events.append(event)
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -521,6 +541,7 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         max_tokens=100,
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        compaction_callback=observe_compaction,
     ))
 
     assert consolidate.await_count == 2
@@ -533,6 +554,15 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     assert result.summary_checkpoint is not None
     assert result.summary_checkpoint.summary == "checkpoint-2"
     assert result.summary_checkpoint.transcript_boundary == 4
+    assert [event.phase for event in compaction_events] == [
+        "started", "succeeded", "started", "succeeded",
+    ]
+    first_id, second_id = compaction_events[0].compaction_id, compaction_events[2].compaction_id
+    assert first_id == compaction_events[1].compaction_id
+    assert second_id == compaction_events[3].compaction_id
+    assert first_id != second_id
+    assert compaction_events[1].checkpoint_source == "llm_summary"
+    assert compaction_events[3].checkpoint_source == "raw_fallback"
 
 
 async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch):
@@ -553,7 +583,7 @@ async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch)
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
         estimate,
     )
-    consolidate = AsyncMock(return_value="small checkpoint")
+    consolidate = AsyncMock(return_value=CompactionResult("small checkpoint", "llm_summary"))
 
     with pytest.raises(ContextWindowExceededError):
         await AgentRunner().run(make_run_spec(

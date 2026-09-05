@@ -1069,6 +1069,12 @@
     "error": "Kesalahan koneksi"
   },
   "thread": {
+    "compaction": {
+      "started": "Memadatkan konteks…",
+      "failed": "Pemadatan konteks gagal",
+      "succeeded": "Konteks dipadatkan",
+      "source": { "llm": "Ringkasan LLM", "raw": "Fallback mentah" }
+    },
     "loadingConversation": "Memuat percakapan…",
     "empty": {
       "greetings": {
@@ -1252,6 +1258,10 @@
           "new": {
             "title": "Obrolan baru",
             "description": "Reset chat ini dan mulai percakapan baru."
+          },
+          "compact": {
+            "title": "Ringkas konteks",
+            "description": "Ringkas konteks chat ini, lalu lanjutkan percakapan."
           },
           "stop": {
             "title": "Hentikan tugas saat ini",

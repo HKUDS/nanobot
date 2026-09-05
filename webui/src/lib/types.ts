@@ -2,7 +2,15 @@ type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-type MessageKind = "message" | "trace";
+type MessageKind = "message" | "trace" | "compaction";
+
+export interface UIContextCompaction {
+  id: string;
+  phase: "started" | "succeeded" | "failed";
+  checkpointSource?: "llm_summary" | "raw_fallback" | string;
+  /** Live wire transitions announce; hydrated transcript rows stay silent. */
+  announce?: boolean;
+}
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
@@ -86,6 +94,8 @@ export interface UIMessage {
   /** Internal projection marker for assistant text emitted before a later tool.
    * It is not a wire message and is rendered as a compact activity row. */
   activityKind?: "model";
+  /** Context-compaction lifecycle rendered as a standalone channel notice. */
+  compaction?: UIContextCompaction;
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
@@ -1375,6 +1385,14 @@ export type InboundEvent =
       event: "recovery_state";
       chat_id: string;
     } & RecoveryState)
+  | ({
+      event: "context_compaction";
+      chat_id: string;
+      compaction_id: string;
+      phase: "started" | "succeeded" | "failed";
+      checkpoint_source?: string;
+      completes_command?: boolean;
+    } & InboundTurnMetadata)
   | ({
       event: "file_edit";
       chat_id: string;

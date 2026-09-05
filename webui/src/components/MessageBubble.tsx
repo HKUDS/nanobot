@@ -25,6 +25,7 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import {
   Tooltip,
@@ -342,6 +343,10 @@ export function MessageBubble({
     () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
     [mcpPresets, message.mcpPresets],
   );
+
+  if (message.kind === "compaction" && message.compaction) {
+    return <ContextCompactionNotice compaction={message.compaction} />;
+  }
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} />;

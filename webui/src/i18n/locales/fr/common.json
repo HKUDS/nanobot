@@ -1069,6 +1069,12 @@
     "error": "Erreur de connexion"
   },
   "thread": {
+    "compaction": {
+      "started": "Compression du contexte…",
+      "failed": "Échec de la compression du contexte",
+      "succeeded": "Contexte compressé",
+      "source": { "llm": "Résumé LLM", "raw": "Repli brut" }
+    },
     "loadingConversation": "Chargement de la conversation…",
     "empty": {
       "greetings": {
@@ -1252,6 +1258,10 @@
           "new": {
             "title": "Nouvelle discussion",
             "description": "Réinitialiser cette discussion et démarrer une nouvelle conversation."
+          },
+          "compact": {
+            "title": "Compacter le contexte",
+            "description": "Compacter le contexte de cette discussion et poursuivre la conversation."
           },
           "stop": {
             "title": "Arrêter la tâche en cours",

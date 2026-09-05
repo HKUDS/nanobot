@@ -5,11 +5,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 SUMMARY_CONTINUATION_TEXT = (
     "Continue the active task from the working-memory checkpoint above."
 )
+
+CheckpointSource = Literal["llm_summary", "raw_fallback"]
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionResult:
+    """A replacement summary and how it was produced."""
+
+    summary: str
+    checkpoint_source: CheckpointSource
+
 
 class SessionSummary(TypedDict):
     text: str

@@ -197,6 +197,56 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("updates one stable row across a context-compaction lifecycle", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-compaction", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-compaction", {
+        event: "context_compaction",
+        chat_id: "chat-compaction",
+        compaction_id: "compact-1",
+        phase: "started",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    const createdAt = result.current.messages[0].createdAt;
+    expect(result.current.messages[0]).toMatchObject({
+      id: "compaction-compact-1",
+      kind: "compaction",
+      compaction: {
+        id: "compact-1",
+        phase: "started",
+        announce: true,
+      },
+    });
+
+    act(() => {
+      fake.emit("chat-compaction", {
+        event: "context_compaction",
+        chat_id: "chat-compaction",
+        compaction_id: "compact-1",
+        phase: "succeeded",
+        checkpoint_source: "raw_fallback",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      id: "compaction-compact-1",
+      createdAt,
+      compaction: {
+        phase: "succeeded",
+        checkpointSource: "raw_fallback",
+        announce: true,
+      },
+    });
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");
