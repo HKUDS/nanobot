@@ -33,6 +33,18 @@ API_KEY = "secret"
 AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 
+def _named_sse_payloads(body: str, event_name: str) -> list[dict]:
+    payloads: list[dict] = []
+    for block in body.split("\n\n"):
+        lines = block.splitlines()
+        if not lines or lines[0] != f"event: {event_name}":
+            continue
+        data_line = next((line for line in lines[1:] if line.startswith("data: ")), None)
+        if data_line is not None:
+            payloads.append(json.loads(data_line.removeprefix("data: ")))
+    return payloads
+
+
 def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value=response_text)
@@ -225,6 +237,138 @@ async def test_stream_true_returns_sse(aiohttp_client, app) -> None:
     )
     assert resp.status == 200
     assert resp.content_type == "text/event-stream"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_does_not_emit_tool_events_without_opt_in(aiohttp_client) -> None:
+    async def process_direct(*, on_progress=None, on_stream=None, **_kwargs):
+        assert on_progress is None
+        await on_stream("done")
+        return "done"
+
+    agent = _make_mock_agent()
+    agent.process_direct = AsyncMock(side_effect=process_direct)
+    client = await aiohttp_client(create_app(agent, model_name="test-model", api_key=API_KEY))
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": True,
+        },
+    )
+    body = await resp.text()
+
+    assert resp.status == 200
+    assert "event: nanobot.tool.progress" not in body
+    assert '"content": "done"' in body
+    assert body.endswith("data: [DONE]\n\n")
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_emits_opted_in_tool_events_in_order(aiohttp_client) -> None:
+    class NonJsonResult:
+        def __str__(self) -> str:
+            return "rendered-result"
+
+    async def process_direct(*, on_progress=None, on_stream=None, **_kwargs):
+        assert on_progress is not None
+        await on_progress(
+            "",
+            tool_events=[{
+                "version": 1,
+                "phase": "start",
+                "call_id": "call-1",
+                "name": "read_file",
+                "arguments": {"path": "README.md"},
+            }],
+        )
+        await on_progress(
+            "",
+            tool_events=[{
+                "version": 1,
+                "phase": "end",
+                "call_id": "call-1",
+                "name": "read_file",
+                "arguments": {"path": "README.md"},
+                "result": NonJsonResult(),
+            }],
+        )
+        await on_stream("finished")
+        return "finished"
+
+    agent = _make_mock_agent()
+    agent.process_direct = AsyncMock(side_effect=process_direct)
+    client = await aiohttp_client(create_app(agent, model_name="test-model", api_key=API_KEY))
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [{"role": "user", "content": "read the file"}],
+            "stream": True,
+            "stream_options": {"include_tool_events": True},
+        },
+    )
+    body = await resp.text()
+    payloads = _named_sse_payloads(body, "nanobot.tool.progress")
+
+    assert resp.status == 200
+    assert [payload["status"] for payload in payloads] == ["running", "completed"]
+    assert payloads[0]["tool"] == "read_file"
+    assert payloads[0]["toolCallId"] == "call-1"
+    assert payloads[0]["arguments"] == {"path": "README.md"}
+    assert payloads[1]["result"] == "rendered-result"
+    assert body.index('"status": "running"') < body.index('"status": "completed"')
+    assert body.index('"status": "completed"') < body.index('"content": "finished"')
+    assert body.endswith("data: [DONE]\n\n")
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_maps_tool_errors_to_failed_events(aiohttp_client) -> None:
+    async def process_direct(*, on_progress=None, on_stream=None, **_kwargs):
+        assert on_progress is not None
+        await on_progress(
+            "",
+            tool_events=[{
+                "version": 1,
+                "phase": "error",
+                "call_id": "call-2",
+                "name": "exec",
+                "arguments": {"command": "false"},
+                "error": "command failed",
+            }],
+        )
+        await on_stream("recovered")
+        return "recovered"
+
+    agent = _make_mock_agent()
+    agent.process_direct = AsyncMock(side_effect=process_direct)
+    client = await aiohttp_client(create_app(agent, model_name="test-model", api_key=API_KEY))
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [{"role": "user", "content": "run it"}],
+            "stream": True,
+            "stream_options": {"include_tool_events": True},
+        },
+    )
+    body = await resp.text()
+    payloads = _named_sse_payloads(body, "nanobot.tool.progress")
+
+    assert resp.status == 200
+    assert len(payloads) == 1
+    assert payloads[0]["status"] == "failed"
+    assert payloads[0]["error"] == "command failed"
+    assert payloads[0]["result"] is None
+    assert '"content": "recovered"' in body
+    assert body.endswith("data: [DONE]\n\n")
 
 
 @pytest.mark.asyncio
