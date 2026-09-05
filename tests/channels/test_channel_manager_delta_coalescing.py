@@ -89,6 +89,23 @@ def _delta(content: str, *, chat_id: str = "chat1", stream_id: str | None = None
     )
 
 
+def _delta_with_none_content(*, chat_id: str = "chat1", stream_id: str | None = None):
+    """A malformed stream-delta message with ``content=None``.
+
+    ``OutboundMessage`` is a plain dataclass with no runtime validation, so
+    this is constructible despite the ``content: str`` type hint -- it
+    reproduces the real trigger that used to kill ``_dispatch_outbound``
+    (``_coalesce_stream_deltas`` does ``combined_content += next_msg.content``
+    unconditionally).
+    """
+    return OutboundMessage(
+        channel="mock",
+        chat_id=chat_id,
+        content=None,  # type: ignore[arg-type]
+        event=StreamDeltaEvent(stream_id=stream_id),
+    )
+
+
 def _end(
     content: str = "",
     *,
@@ -489,3 +506,64 @@ class TestRetryWaitFiltering:
         sent = send_mock.await_args_list[0].args[0]
         assert sent.content == "final answer"
         assert sent.event is None
+
+
+class TestDispatcherExceptionBoundary:
+    """A failure while processing one message must not kill the dispatcher (#5376-class bug)."""
+
+    @pytest.mark.asyncio
+    async def test_malformed_message_does_not_kill_dispatcher(self, manager, bus):
+        # A matching second delta must be queued right behind the malformed one:
+        # _coalesce_stream_deltas only hits the crashing ``+=`` once it pulls a
+        # second message for the same (channel, chat_id, stream_id) via
+        # get_nowait() -- a lone malformed delta with an empty queue behind it
+        # returns without ever reaching that line.
+        await bus.publish_outbound(_delta_with_none_content(stream_id="s1"))
+        await bus.publish_outbound(_delta("more", stream_id="s1"))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            await asyncio.sleep(0.2)
+            assert not task.done(), "dispatcher died processing a malformed message"
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_subsequent_valid_message_still_delivered(self, manager, bus):
+        await bus.publish_outbound(_delta_with_none_content(stream_id="s1"))
+        await bus.publish_outbound(_delta("more", stream_id="s1"))
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="still alive",
+        ))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        assert send_mock.await_count == 1
+        assert send_mock.await_args_list[0].args[0].content == "still alive"
+
+    @pytest.mark.asyncio
+    async def test_cancellation_still_stops_the_loop_cleanly(self, manager, bus):
+        task = asyncio.create_task(manager._dispatch_outbound())
+        await asyncio.sleep(0.05)  # let it start and enter the idle wait
+
+        task.cancel()
+        await asyncio.wait_for(task, timeout=1.0)  # must complete promptly, not hang
+        assert task.cancelled() is False  # caught internally and broke out cleanly

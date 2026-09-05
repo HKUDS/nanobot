@@ -722,7 +722,12 @@ class ChannelManager:
                         self.bus.consume_outbound(),
                         timeout=1.0
                     )
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
 
+            try:
                 event = outbound_event_from_message(msg)
                 progress_event = event if isinstance(event, ProgressEvent) else None
                 if progress_event and (
@@ -783,11 +788,15 @@ class ChannelManager:
                     await self._send_with_retry(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
-
-            except asyncio.TimeoutError:
-                continue
             except asyncio.CancelledError:
                 break
+            except Exception:
+                logger.exception(
+                    "Outbound dispatcher failed processing message for {}:{}; dropping it",
+                    msg.channel,
+                    msg.chat_id,
+                )
+                continue
 
     @staticmethod
     async def _send_reasoning_delta(
