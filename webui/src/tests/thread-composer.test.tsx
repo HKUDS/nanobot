@@ -1523,7 +1523,7 @@ describe("ThreadComposer", () => {
         workspaceDefaultScope={defaultScope}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: true,
+          can_use_full_access: false,
           can_pick_folder: false,
         }}
         onPickWorkspaceFolder={onPickWorkspaceFolder}
@@ -1536,6 +1536,17 @@ describe("ThreadComposer", () => {
     expect(await screen.findByLabelText("Paste path")).toBeInTheDocument();
     expect(pickFolder).not.toHaveBeenCalled();
     expect(onPickWorkspaceFolder).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Paste path"), {
+      target: { value: "/srv/nas-project" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/srv/nas-project",
+      access_mode: "restricted",
+      restrict_to_workspace: true,
+    }));
   });
 
   it("uses the gateway folder picker for a locally hosted WebUI", async () => {
