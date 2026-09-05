@@ -116,6 +116,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
                 stdin=subprocess.DEVNULL,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
                 **self._popen_platform_kwargs(),
             )
         self._owned_process = process
