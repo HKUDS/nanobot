@@ -60,7 +60,6 @@ from nanobot.utils.runtime import (
 )
 
 ContinuationCallback = Callable[[], str | None]
-RetryWaitCallback = Callable[[str], Awaitable[None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[..., Awaitable[Iterable[Any] | None]]
 
@@ -106,7 +105,6 @@ class AgentRunSpec:
     session_key: str | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
-    retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
     consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
@@ -855,7 +853,6 @@ class AgentRunner:
             "tools": tools,
             "model": spec.runtime.model,
             "retry_mode": spec.provider_retry_mode,
-            "on_retry_wait": spec.retry_wait_callback,
         }
         generation = spec.runtime.generation
         kwargs["temperature"] = generation.temperature

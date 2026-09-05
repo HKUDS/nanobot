@@ -35,6 +35,20 @@ Observers must not republish the envelope to the same channel. Observer exceptio
 are logged without changing the operation's result; cancellation still propagates.
 This is neither a durable event log nor a globally ordered stream across sessions.
 
+Subscriptions bind the handler parameter to its event type at the static API.
+Catch-all handlers must accept the complete runtime event union. Disconnect is
+idempotent and prevents callbacks that have not started, including callbacks in
+an existing dispatch snapshot; it does not cancel a handler already executing.
+
+`publish` is an awaited connection: a slow handler delays the caller. Persistence
+and state transitions use this path deliberately. `publish_nowait` schedules the
+same ordered dispatch and returns its task; the bus retains the task until it
+finishes. It is not a per-subscriber worker queue. Gateway shutdown stops producers,
+closes runtime resources, drains scheduled dispatches, then exits the coordinator
+connection scope. Optional telemetry that needs independent throughput should use
+an explicitly owned, bounded worker; it must not be silently mixed into durability
+handlers. No such worker is needed by the current notification consumers.
+
 ## Compatibility and durability
 
 Compaction keeps its existing wire fields, phase values, stable IDs, and terminal
@@ -49,7 +63,11 @@ owners do not. A unified session changing destination cannot redirect an operati
 that already bound its sink.
 
 Existing compaction callback entry points and provider retry-text callbacks remain
-boundary adapters. Retry policy still decides when a wait or exhaustion notice is
+boundary adapters. Provider retry entry points adapt the default notification
+sink before dispatching to a single provider or fallback chain; loop and runner
+carry no retry-specific callback. Explicit provider callbacks take precedence,
+including candidate-exhaustion capture inside a fallback chain.
+Retry policy still decides when a wait or exhaustion notice is
 appropriate. Exhaustion of one candidate must not announce failure while a fallback
 can succeed. The sink must not infer retry state from callback text.
 
@@ -97,7 +115,30 @@ public admission. They do not constitute a port of the retry feature; its
 fallback, clearing, terminal-deduplication, and remote-clock tests remain required
 when that feature is rebased onto this boundary.
 
+## Other internal notification paths
+
+| Path | Classification | Boundary that must survive a migration |
+| --- | --- | --- |
+| Compaction and retry wait | Use the scoped sink | Stable compaction identity, cancellation terminal, candidate versus chain exhaustion |
+| Fallback model selection | Notification candidate | The successful model, admitted preset, and originating run must be captured together; the current gateway-installed observer reads request context |
+| Tool/file-edit progress and reasoning | Notification candidates | `AgentProgressHook` and `FileEditActivityHook` probe callback signatures; a typed event boundary can replace that probing, but custom progress callbacks still need capability-aware adaptation |
+| SDK runtime admission | Notification candidate | SDK `run_started` precedes stream output and also covers commands that do not admit a model runtime; subscribing only to `TurnRuntimeAdmitted` would lose that fallback |
+| Turn/run/model/goal state | Already runtime events | Coordinator ordering, session ownership, and persistence remain authoritative; a second envelope would only duplicate the existing contract |
+| Token streaming and stream recovery | Data flow and control, not only notification | SDK bounded queues, stream segment IDs, backpressure, and retry-after-partial-output guards must remain coupled to the operation |
+| Checkpoints, message injection, consolidation, continuation, content-finalization hooks | Calls with results or completion requirements | The runner consumes their return values or waits for durable completion; dropping a listener cannot mean success |
+
+The next useful notification cut is fallback-model selection: replace the shared
+provider's gateway-specific observer with a scoped domain event, then project it
+using the admitted runtime. A model-only event without the preset and originating
+run is insufficient. File-edit progress should migrate together with its callback
+capability adaptation, not gain a second output path beside `on_progress`.
+
 ## Design reference
+
+[Qt signals and slots](https://doc.qt.io/qt-6/signalsandslots.html) inform the
+handler/type pairing and connection-lifetime boundary. Gateway uses a lexical
+connection scope rather than object destruction. Awaited and scheduled dispatch
+are explicit, without importing Qt or adding automatic thread-affinity rules.
 
 [LangGraph custom streaming](https://docs.langchain.com/oss/python/langgraph/streaming)
 separates operation-generated progress from consumers through an execution-scoped

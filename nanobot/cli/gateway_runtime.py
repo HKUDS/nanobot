@@ -510,7 +510,6 @@ def _run_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    webui_turn_coordinator.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -1020,6 +1019,7 @@ def _run_gateway(
                     tasks,
                     runtime_tasks,
                 )
+                await runtime_events.drain()
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
@@ -1029,7 +1029,10 @@ def _run_gateway(
             finally:
                 restore_shutdown_handlers()
 
-    with gateway_runtime.foreground_instance(gateway_start_options):
+    with (
+        gateway_runtime.foreground_instance(gateway_start_options),
+        webui_turn_coordinator.connected(runtime_events),
+    ):
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

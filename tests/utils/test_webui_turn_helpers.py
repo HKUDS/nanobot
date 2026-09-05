@@ -182,6 +182,30 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_coordinator_connections_end_on_scope_exit_and_can_reconnect(tmp_path):
+    from nanobot.bus.runtime_events import RuntimeModelChanged
+
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus, sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: coro.close(),
+    )
+    event = RuntimeModelChanged("model", None)
+    with pytest.raises(RuntimeError, match="shutdown"):
+        with coordinator.connected(runtime_events):
+            await runtime_events.publish(event)
+            raise RuntimeError("shutdown")
+    bus.publish_outbound.assert_awaited_once()
+    await runtime_events.publish(event)
+    bus.publish_outbound.assert_awaited_once()
+    with coordinator.connected(runtime_events):
+        runtime_events.publish_nowait(event)
+        await runtime_events.drain()
+    assert bus.publish_outbound.await_count == 2
+
+
 async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path) -> None:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()

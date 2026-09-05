@@ -12,7 +12,7 @@ import contextlib
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 from loguru import logger
 
@@ -134,8 +134,8 @@ RuntimeEventType = (
     | type[GoalStateChanged]
     | type[RuntimeModelChanged]
 )
-RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
-_HandlerEntry = tuple[RuntimeEventType | None, RuntimeEventHandler]
+_EventT = TypeVar("_EventT", bound=RuntimeEvent)
+RuntimeEventHandler = Callable[[RuntimeEvent], Awaitable[None] | None]
 
 
 class RuntimeEventBus:
@@ -147,26 +147,48 @@ class RuntimeEventBus:
     """
 
     def __init__(self) -> None:
-        self._handlers: list[_HandlerEntry] = []
+        self._handlers: list[RuntimeEventHandler] = []
+        self._pending: set[asyncio.Task[None]] = set()
+
+    @overload
+    def subscribe(
+        self, handler: Callable[[_EventT], Awaitable[None] | None],
+        event_type: type[_EventT],
+    ) -> Callable[[], None]: ...
+
+    @overload
+    def subscribe(
+        self, handler: RuntimeEventHandler, event_type: None = None,
+    ) -> Callable[[], None]: ...
 
     def subscribe(
         self,
-        handler: RuntimeEventHandler,
+        handler: Callable[..., Awaitable[None] | None],
         event_type: RuntimeEventType | None = None,
     ) -> Callable[[], None]:
-        entry = (event_type, handler)
+        """Connect an ordered, awaited handler; return its idempotent disconnect.
+
+        The overloads bind handler and event type. The erased callable exists
+        only at this heterogeneous dispatch boundary, behind the type filter.
+        """
+        active = True
+
+        def entry(event: RuntimeEvent) -> Awaitable[None] | None:
+            if active and (event_type is None or isinstance(event, event_type)):
+                return handler(event)
+            return None
         self._handlers.append(entry)
 
         def _unsubscribe() -> None:
+            nonlocal active
+            active = False
             with contextlib.suppress(ValueError):
                 self._handlers.remove(entry)
 
         return _unsubscribe
 
     async def publish(self, event: RuntimeEvent) -> None:
-        for event_type, handler in list(self._handlers):
-            if event_type is not None and not isinstance(event, event_type):
-                continue
+        for handler in list(self._handlers):
             try:
                 result = handler(event)
                 if inspect.isawaitable(result):
@@ -174,13 +196,26 @@ class RuntimeEventBus:
             except Exception:
                 logger.exception("runtime event handler failed for {}", type(event).__name__)
 
-    def publish_nowait(self, event: RuntimeEvent) -> None:
+    def publish_nowait(self, event: RuntimeEvent) -> asyncio.Task[None] | None:
+        """Schedule ordered dispatch, retaining it until completion.
+
+        Unlike ``publish``, the caller does not wait for handlers. This does not
+        turn individual handlers into independent workers or change their order.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.debug("dropping runtime event without a running loop: {}", type(event).__name__)
-            return
-        loop.create_task(self.publish(event))
+            return None
+        task = loop.create_task(self.publish(event))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+        return task
+
+    async def drain(self) -> None:
+        """Finish scheduled dispatches after producers stop, before disconnecting."""
+        while self._pending:
+            await asyncio.gather(*self._pending, return_exceptions=True)
 
 
 class RuntimeEventPublisher:

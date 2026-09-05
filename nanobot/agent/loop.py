@@ -166,7 +166,6 @@ class TurnContext:
     on_stream: Callable[[str], Awaitable[None]] | None = None
     on_stream_end: Callable[..., Awaitable[None]] | None = None
     on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
-    on_retry_wait: Callable[[str], Awaitable[None]] | None = None
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
     pending_summary: SessionSummary | None = None
@@ -960,7 +959,6 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
         events: EventSink = NO_EVENTS,
         *,
         runtime: LLMRuntime,
@@ -1203,7 +1201,6 @@ class AgentLoop:
                 session_key=session.key if session else None,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
-                retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 consolidate_history=(
                     partial(
@@ -2036,8 +2033,6 @@ class AgentLoop:
         runtime = ctx.require_runtime()
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
-        if ctx.on_retry_wait is None:
-            ctx.on_retry_wait = ctx.delivery.retry_wait_callback()
         await ctx.delivery.running(started_at=ctx.visible_run_started_at)
         assert ctx.transcript_input is not None
         with capture_message_deliveries() as message_sends:
@@ -2047,7 +2042,6 @@ class AgentLoop:
                 on_progress=ctx.on_progress,
                 on_stream=ctx.on_stream,
                 on_stream_end=ctx.on_stream_end,
-                on_retry_wait=ctx.on_retry_wait,
                 session=ctx.session,
                 pending_queue=ctx.pending_queue,
                 ephemeral=ctx.ephemeral,
