@@ -750,7 +750,9 @@ class ChannelManager:
                     ):
                         continue
 
-                if isinstance(event, RetryWaitEvent):
+                if isinstance(event, RetryWaitEvent) and not self._should_send_progress(
+                    msg.channel, tool_hint=False,
+                ):
                     continue
 
                 if (

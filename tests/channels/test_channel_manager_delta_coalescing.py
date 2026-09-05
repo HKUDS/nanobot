@@ -454,10 +454,11 @@ class TestProgressFiltering:
 
 
 class TestRetryWaitFiltering:
-    """Internal provider retry heartbeats must never reach channels."""
+    """Provider retry waits should honor each channel's progress setting."""
 
     @pytest.mark.asyncio
-    async def test_retry_wait_message_dropped(self, manager, bus):
+    async def test_retry_wait_message_dropped_when_progress_disabled(self, manager, bus):
+        manager.channels["mock"].send_progress = False
         retry_msg = outbound_message_for_event(
             channel="mock",
             chat_id="chat1",
@@ -489,3 +490,34 @@ class TestRetryWaitFiltering:
         sent = send_mock.await_args_list[0].args[0]
         assert sent.content == "final answer"
         assert sent.event is None
+
+    @pytest.mark.asyncio
+    async def test_retry_wait_message_sent_when_progress_enabled(self, manager, bus):
+        manager.channels["mock"].send_progress = True
+        retry_event = RetryWaitEvent(
+            content="Model request failed, retry in 1s (attempt 1).",
+        )
+        await bus.publish_outbound(outbound_message_for_event(
+            channel="mock",
+            chat_id="chat1",
+            event=retry_event,
+        ))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        send_mock.assert_awaited_once()
+        sent = send_mock.await_args.args[0]
+        assert sent.content == retry_event.content
+        assert sent.event is retry_event
