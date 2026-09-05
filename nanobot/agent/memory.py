@@ -29,7 +29,6 @@ from nanobot.bus.outbound_events import (
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
-from nanobot.session import io as session_io
 from nanobot.session.manager import (
     MIN_COMPACTED_REPLAY_MESSAGES,
     Session,
@@ -1210,8 +1209,8 @@ class Consolidator:
             )
         lock = self.get_lock(session_key)
         async with lock:
-            await session_io.call(self.sessions.invalidate, session_key)
-            session = await session_io.get_or_create(self.sessions, session_key)
+            await self.sessions.invalidate_async(session_key)
+            session = await self.sessions.get_or_create_async(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1241,7 +1240,7 @@ class Consolidator:
                     # A turn can append while the provider call is in flight. Advance only
                     # through the captured batch so new messages remain eligible next time.
                     session.last_archived = archive_end
-                    await session_io.save(self.sessions, session)
+                    await self.sessions.save_async(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await emit_context_compaction(
                     on_compaction,

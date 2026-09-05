@@ -109,11 +109,11 @@ class TestMidTurnCommandDispatchedDirectly:
     def fake_loop(self) -> MagicMock:
         loop = MagicMock()
         loop.sessions = MagicMock()
-        loop.sessions.get_or_create = MagicMock(return_value=MagicMock(
+        loop.sessions.get_or_create_async = AsyncMock(return_value=MagicMock(
             key="test:chat1", messages=[], last_archived=0, clear=MagicMock(),
         ))
-        loop.sessions.save = MagicMock()
-        loop.sessions.invalidate = MagicMock()
+        loop.sessions.save_async = AsyncMock()
+        loop.sessions.invalidate_async = AsyncMock()
         loop.schedule_background = MagicMock()
         loop._cancel_active_tasks = AsyncMock(return_value=0)
         return loop
@@ -139,7 +139,7 @@ class TestMidTurnCommandDispatchedDirectly:
         result = await router.dispatch(ctx)
         assert result is not None
         assert "New session" in result.content
-        fake_loop.sessions.get_or_create.assert_called_once_with("test:chat1")
+        fake_loop.sessions.get_or_create_async.assert_called_once_with("test:chat1")
 
     @pytest.mark.asyncio
     async def test_help_dispatched_with_session_none(

@@ -374,7 +374,6 @@ def _run_gateway(
     )
     from nanobot.providers.fallback_provider import FallbackProvider
     from nanobot.providers.image_generation import image_gen_provider_configs
-    from nanobot.session import io as session_io
     from nanobot.session.manager import SessionManager
     from nanobot.session.recovery import RecoveryCoordinator
     from nanobot.session.webui_turns import (
@@ -546,12 +545,12 @@ def _run_gateway(
             and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = await session_io.get_or_create(session_manager, key)
+            session = await session_manager.get_or_create_async(key)
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
             session.add_message("assistant", msg.content, **extra)
-            await session_io.save(session_manager, session)
+            await session_manager.save_async(session)
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")

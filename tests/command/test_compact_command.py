@@ -118,7 +118,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     loop.sessions.save(reloaded)
     loop.auto_compact._ttl = 1
     schedule = MagicMock()
-    loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
+    await loop.auto_compact.check_expired(schedule, loop.runtime_for_session_async)
     schedule.assert_not_called()
 
 

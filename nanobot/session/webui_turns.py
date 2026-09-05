@@ -41,7 +41,6 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
-from nanobot.session import io as session_io
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -211,12 +210,12 @@ async def maybe_generate_webui_title(
     so pass ``target_session_key`` to project the title onto that per-chat
     session instead of storing it on the shared one.
     """
-    routed_session = await session_io.get_or_create(sessions, session_key)
+    routed_session = await sessions.get_or_create_async(session_key)
     target_is_routed = target_session_key is None or target_session_key == session_key
     if target_is_routed or target_session_key is None:
         target_session = routed_session
     else:
-        target_session = await session_io.get_or_create(sessions, target_session_key)
+        target_session = await sessions.get_or_create_async(target_session_key)
     if (
         routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
         and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
@@ -230,7 +229,7 @@ async def maybe_generate_webui_title(
         if cleaned_current_title:
             if cleaned_current_title != current_title:
                 target_session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                await session_io.save(sessions, target_session)
+                await sessions.save_async(target_session)
             return False
         target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
@@ -289,7 +288,7 @@ async def maybe_generate_webui_title(
         )
         return False
     target_session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    await session_io.save(sessions, target_session)
+    await sessions.save_async(target_session)
     return True
 
 
@@ -633,7 +632,7 @@ class WebuiTurnCoordinator:
             or not is_webui_session_key(session_key)
         ):
             return
-        persisted = await session_io.read_session_metadata(self.sessions, session_key)
+        persisted = await self.sessions.read_session_metadata_async(session_key)
         metadata_value: object = persisted.get("metadata") if persisted is not None else None
         metadata = (
             cast(dict[str, Any], metadata_value)
@@ -759,7 +758,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = await session_io.get_or_create(self.sessions, session_key)
+        session = await self.sessions.get_or_create_async(session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

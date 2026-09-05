@@ -37,7 +37,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
@@ -1560,7 +1559,7 @@ async def test_pending_queue_overflow_keeps_websocket_followup_durable(tmp_path)
 
     loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
     session = Session(key="websocket:c")
-    loop.sessions.get_or_create.return_value = session
+    loop.sessions.save(session)
     pending = asyncio.Queue(maxsize=1)
     pending.put_nowait(
         InboundMessage(channel="websocket", sender_id="u", chat_id="c", content="already queued")
