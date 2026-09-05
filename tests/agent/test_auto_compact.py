@@ -13,8 +13,8 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
-from nanobot.providers.base import LLMResponse
 from nanobot.events import NO_EVENTS
+from nanobot.providers.base import LLMResponse
 
 
 def _make_loop(
