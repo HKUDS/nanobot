@@ -64,7 +64,7 @@ async def test_user_shell_uses_exec_tool_with_workspace_scope(
     scope = SimpleNamespace(project_path=tmp_path)
     loop = MagicMock()
     loop.tools.get.return_value = tool
-    loop.sessions.get_or_create.return_value = session
+    loop.sessions.get_or_create_async = AsyncMock(return_value=session)
     loop.workspace_scopes.for_turn.return_value = scope
     ctx = _context(loop, trusted=True)
     if context_session:

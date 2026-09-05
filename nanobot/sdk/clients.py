@@ -15,7 +15,6 @@ from nanobot.sdk.types import (
     snapshot_from_payload,
     snapshot_from_session,
 )
-from nanobot.session import io as session_io
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -59,13 +58,13 @@ class SessionClient:
                 extra["source"] = source
             prepared.append((role, deepcopy(raw["content"]), extra))
 
-        session = await session_io.get_or_create(self._loop.sessions, session_key)
+        session = await self._loop.sessions.get_or_create_async(session_key)
         session.metadata.update(prepared_metadata)
         for role, content, extra in prepared:
             session.add_message(role, content, **extra)
 
         if save:
-            await session_io.save(self._loop.sessions, session)
+            await self._loop.sessions.save_async(session)
         return snapshot_from_session(session)
 
     def get(self, session_key: str) -> SessionSnapshot | None:
@@ -113,7 +112,7 @@ class SessionClient:
         key = session_key or snapshot.key
         if not key:
             raise ValueError("restored snapshots must include a session key")
-        session = await session_io.get_or_create(self._loop.sessions, key)
+        session = await self._loop.sessions.get_or_create_async(key)
         if session.messages:
             raise ValueError(f"restore target session is not empty: {key}")
 
@@ -136,7 +135,7 @@ class SessionClient:
             session.add_message(role, content, **extra)
 
         if save:
-            await session_io.save(self._loop.sessions, session)
+            await self._loop.sessions.save_async(session)
         return snapshot_from_session(session)
 
     def clear(self, session_key: str) -> SessionSnapshot:
@@ -215,18 +214,18 @@ class RuntimeClient:
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Summarize one session and exclude its archived messages from replay."""
         async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
-            session = await session_io.get_or_create(self._loop.sessions, session_key)
+            session = await self._loop.sessions.get_or_create_async(session_key)
             runtime = await self._loop.runtime_for_session_async(session)
             await self._loop.consolidator.compact_idle_session(
                 session_key,
                 runtime=runtime,
             )
-            return snapshot_from_session(await session_io.get_or_create(self._loop.sessions, session_key))
+            return snapshot_from_session(await self._loop.sessions.get_or_create_async(session_key))
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
         """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""
         async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
-            session = await session_io.get_or_create(self._loop.sessions, session_key)
+            session = await self._loop.sessions.get_or_create_async(session_key)
             runtime = await self._loop.runtime_for_session_async(session)
             return await self._loop.consolidator.compact_idle_session(
                 session_key,

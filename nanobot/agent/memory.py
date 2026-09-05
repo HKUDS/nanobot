@@ -25,7 +25,6 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
-from nanobot.session import io as session_io
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
@@ -1254,8 +1253,8 @@ class Consolidator:
         """
         lock = self.get_lock(session_key)
         async with lock:
-            await session_io.call(self.sessions.invalidate, session_key)
-            session = await session_io.get_or_create(self.sessions, session_key)
+            await self.sessions.invalidate_async(session_key)
+            session = await self.sessions.get_or_create_async(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1283,7 +1282,7 @@ class Consolidator:
                     )
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
-                    await session_io.save(self.sessions, session)
+                    await self.sessions.save_async(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(

@@ -178,13 +178,13 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     sess = sm.get_or_create("websocket:c1")
     sess.metadata["marker"] = {"keep": True}
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    original_save = sm.save
+    original_save = sm._store.save
     create_context = _request_context()
 
     def fail_save(_session, **_kwargs):
         raise OSError("disk unavailable")
 
-    monkeypatch.setattr(sm, "save", fail_save)
+    monkeypatch.setattr(sm._store, "save", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(create, create_context, objective="Old")
 
@@ -194,13 +194,13 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     }
     assert GOAL_STATE_KEY not in SessionManager(tmp_path).get_or_create("websocket:c1").metadata
 
-    monkeypatch.setattr(sm, "save", original_save)
+    monkeypatch.setattr(sm._store, "save", original_save)
     assert "Goal recorded" in await _execute(create, create_context, objective="Old")
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
     sm.save(sess)
     replace_context = _request_context()
 
-    monkeypatch.setattr(sm, "save", fail_save)
+    monkeypatch.setattr(sm._store, "save", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(update, replace_context, action="replace", objective="New")
 
@@ -210,7 +210,7 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     assert persisted[GOAL_STATE_KEY]["objective"] == "Old"
     assert persisted["_sustained_goal_continuation_rounds"] == 12
 
-    monkeypatch.setattr(sm, "save", original_save)
+    monkeypatch.setattr(sm._store, "save", original_save)
     assert "Goal replaced" in await _execute(
         update,
         replace_context,
@@ -465,3 +465,45 @@ async def test_goal_tools_registered_in_base_registry(tmp_path):
     ).lower()
     assert "authoriz" not in model_visible_contract
     assert "/goal" not in model_visible_contract
+
+
+async def test_cancelled_goal_completion_settles_state_event_and_permission(tmp_path, monkeypatch):
+    import threading
+
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:c1")
+    events = MagicMock(spec=RuntimeEventBus)
+    await _execute(CreateGoalTool(sessions), _request_context(), objective="Finish the work")
+    tool = UpdateGoalTool(sessions=sessions, runtime_events=events)
+    started, release = threading.Event(), threading.Event()
+    save = sessions._store.save
+
+    def blocked_save(snapshot, **kwargs):
+        started.set()
+        assert release.wait(3)
+        save(snapshot, **kwargs)
+
+    monkeypatch.setattr(sessions._store, "save", blocked_save)
+
+    async def create():
+        with request_context(_request_context()), goal_mutation_permission(True):
+            with pytest.raises(asyncio.CancelledError):
+                await tool.execute(action="complete", recap="Done")
+            assert goal_mutation_allowed() is False
+
+    task = asyncio.create_task(create())
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        assert session.metadata[GOAL_STATE_KEY]["status"] == "active"
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        session.metadata["unrelated"] = "preserved"
+    finally:
+        release.set()
+    await asyncio.wait_for(task, 3)
+    assert session.metadata["unrelated"] == "preserved"
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+    assert restored.metadata[GOAL_STATE_KEY]["objective"] == "Finish the work"
+    events.publish.assert_awaited_once()
+    assert events.publish.await_args.args[0].session_metadata[GOAL_STATE_KEY]["status"] == "completed"
