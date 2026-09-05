@@ -3,8 +3,10 @@
 import pytest
 
 from nanobot.agent.tools.filesystem import (
+    CopyFileTool,
     EditFileTool,
     ListDirTool,
+    MoveFileTool,
     ReadFileTool,
     WriteFileTool,
 )
@@ -267,6 +269,206 @@ class TestListDirTool:
     async def test_missing_path_returns_clear_error(self, tool):
         result = await tool.execute()
         assert result == "Error listing directory: Unknown path"
+
+
+# ---------------------------------------------------------------------------
+# CopyFileTool
+# ---------------------------------------------------------------------------
+
+class TestCopyFileTool:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return CopyFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_basic_copy(self, tool, tmp_path):
+        src = tmp_path / "tmp" / "test.txt"
+        src.parent.mkdir()
+        src.write_text("hello", encoding="utf-8")
+
+        result = await tool.execute(source=str(src), destination=str(tmp_path / "test2.txt"))
+
+        assert "Successfully copied" in result
+        assert (tmp_path / "test2.txt").read_text(encoding="utf-8") == "hello"
+        # Source is left in place.
+        assert src.read_text(encoding="utf-8") == "hello"
+
+    @pytest.mark.asyncio
+    async def test_copy_preserves_binary(self, tool, tmp_path):
+        src = tmp_path / "pixel.png"
+        blob = b"\x89PNG\r\n\x1a\n\x00\xff\xfe\x01"
+        src.write_bytes(blob)
+
+        result = await tool.execute(source=str(src), destination=str(tmp_path / "copy.png"))
+
+        assert "Successfully copied" in result
+        assert (tmp_path / "copy.png").read_bytes() == blob
+
+    @pytest.mark.asyncio
+    async def test_creates_parent_dirs(self, tool, tmp_path):
+        src = tmp_path / "a.txt"
+        src.write_text("x", encoding="utf-8")
+
+        result = await tool.execute(
+            source=str(src), destination=str(tmp_path / "nested" / "deep" / "a.txt")
+        )
+
+        assert "Successfully copied" in result
+        assert (tmp_path / "nested" / "deep" / "a.txt").read_text(encoding="utf-8") == "x"
+
+    @pytest.mark.asyncio
+    async def test_source_not_found(self, tool, tmp_path):
+        result = await tool.execute(
+            source=str(tmp_path / "nope.txt"), destination=str(tmp_path / "out.txt")
+        )
+        assert "Error" in result
+        assert "not found" in result
+
+    @pytest.mark.asyncio
+    async def test_source_directory_rejected(self, tool, tmp_path):
+        d = tmp_path / "dir"
+        d.mkdir()
+        result = await tool.execute(source=str(d), destination=str(tmp_path / "out.txt"))
+        assert "Error" in result
+        assert "directory" in result.lower()
+        assert not (tmp_path / "out.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_existing_destination_needs_overwrite(self, tool, tmp_path):
+        src = tmp_path / "a.txt"
+        src.write_text("new", encoding="utf-8")
+        dst = tmp_path / "b.txt"
+        dst.write_text("old", encoding="utf-8")
+
+        result = await tool.execute(source=str(src), destination=str(dst))
+
+        assert "Error" in result
+        assert "already exists" in result
+        assert dst.read_text(encoding="utf-8") == "old"
+
+    @pytest.mark.asyncio
+    async def test_overwrite_replaces_destination(self, tool, tmp_path):
+        src = tmp_path / "a.txt"
+        src.write_text("new", encoding="utf-8")
+        dst = tmp_path / "b.txt"
+        dst.write_text("old", encoding="utf-8")
+
+        result = await tool.execute(source=str(src), destination=str(dst), overwrite=True)
+
+        assert "Successfully copied" in result
+        assert dst.read_text(encoding="utf-8") == "new"
+
+    @pytest.mark.asyncio
+    async def test_same_source_and_destination_rejected(self, tool, tmp_path):
+        src = tmp_path / "a.txt"
+        src.write_text("x", encoding="utf-8")
+        result = await tool.execute(source=str(src), destination=str(src), overwrite=True)
+        assert "Error" in result
+        assert "same file" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_args_return_clear_error(self, tool, tmp_path):
+        result = await tool.execute(source=str(tmp_path / "a.txt"))
+        assert result == "Error copying file: Unknown destination"
+
+    @pytest.mark.asyncio
+    async def test_copy_blocked_outside_workspace(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        src = workspace / "a.txt"
+        src.write_text("secret", encoding="utf-8")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        tool = CopyFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(source=str(src), destination=str(outside / "leak.txt"))
+
+        assert "Error" in result
+        assert "outside" in result.lower()
+        assert not (outside / "leak.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# MoveFileTool
+# ---------------------------------------------------------------------------
+
+class TestMoveFileTool:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return MoveFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_basic_move(self, tool, tmp_path):
+        src = tmp_path / "tmp" / "test.txt"
+        src.parent.mkdir()
+        src.write_text("hello", encoding="utf-8")
+        dst = tmp_path / "test2.txt"
+
+        result = await tool.execute(source=str(src), destination=str(dst))
+
+        assert "Successfully moved" in result
+        assert dst.read_text(encoding="utf-8") == "hello"
+        # Original is gone.
+        assert not src.exists()
+
+    @pytest.mark.asyncio
+    async def test_source_not_found(self, tool, tmp_path):
+        result = await tool.execute(
+            source=str(tmp_path / "nope.txt"), destination=str(tmp_path / "out.txt")
+        )
+        assert "Error" in result
+        assert "not found" in result
+
+    @pytest.mark.asyncio
+    async def test_existing_destination_needs_overwrite(self, tool, tmp_path):
+        src = tmp_path / "a.txt"
+        src.write_text("new", encoding="utf-8")
+        dst = tmp_path / "b.txt"
+        dst.write_text("old", encoding="utf-8")
+
+        result = await tool.execute(source=str(src), destination=str(dst))
+
+        assert "Error" in result
+        assert "already exists" in result
+        assert src.exists()
+        assert dst.read_text(encoding="utf-8") == "old"
+
+    @pytest.mark.asyncio
+    async def test_overwrite_replaces_destination(self, tool, tmp_path):
+        src = tmp_path / "a.txt"
+        src.write_text("new", encoding="utf-8")
+        dst = tmp_path / "b.txt"
+        dst.write_text("old", encoding="utf-8")
+
+        result = await tool.execute(source=str(src), destination=str(dst), overwrite=True)
+
+        assert "Successfully moved" in result
+        assert dst.read_text(encoding="utf-8") == "new"
+        assert not src.exists()
+
+    @pytest.mark.asyncio
+    async def test_missing_args_return_clear_error(self, tool, tmp_path):
+        result = await tool.execute(source=str(tmp_path / "a.txt"))
+        assert result == "Error moving file: Unknown destination"
+
+    @pytest.mark.asyncio
+    async def test_move_blocked_when_source_outside_workspace(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        src = outside / "secret.txt"
+        src.write_text("top secret", encoding="utf-8")
+
+        tool = MoveFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(source=str(src), destination=str(workspace / "here.txt"))
+
+        assert "Error" in result
+        assert "outside" in result.lower()
+        # A move must not delete a file it is not allowed to touch.
+        assert src.exists()
 
 
 # ---------------------------------------------------------------------------

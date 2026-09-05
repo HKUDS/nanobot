@@ -5,6 +5,7 @@
 import difflib
 import mimetypes
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1186,3 +1187,140 @@ class ListDirTool(_FsTool):
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
             return ToolResult.error(f"Error listing directory: {e}")
+
+
+# ---------------------------------------------------------------------------
+# copy_file / move_file
+# ---------------------------------------------------------------------------
+
+
+@tool_parameters(
+    tool_parameters_schema(
+        source=StringSchema("The existing file to copy from"),
+        destination=StringSchema("The path to copy the file to"),
+        overwrite=BooleanSchema(
+            description="Replace the destination if it already exists (default false)",
+            default=False,
+        ),
+        required=["source", "destination"],
+    )
+)
+class CopyFileTool(_FsTool):
+    """Copy a single file to a new path."""
+    _scopes = {"core", "subagent", "memory"}
+
+    @property
+    def name(self) -> str:
+        return "copy_file"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Copy a single file to a new path, preserving its contents (binary files "
+            "included). Creates parent directories as needed. The source is read-only; "
+            "the destination must be writable. Pass overwrite=true to replace an "
+            "existing destination. Prefer this over reading a file and writing it back "
+            "by hand."
+        )
+
+    async def execute(
+        self,
+        source: str | None = None,
+        destination: str | None = None,
+        overwrite: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        try:
+            if not source:
+                raise ValueError("Unknown source")
+            if not destination:
+                raise ValueError("Unknown destination")
+            src = self._resolve_read(source)
+            dst = self._resolve_write(destination)
+            error = _check_transfer(src, dst, overwrite)
+            if error is not None:
+                return error
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            self._file_states.record_write(dst)
+            return f"Successfully copied {src} to {dst}"
+        except PermissionError as e:
+            return ToolResult.error(f"Error: {e}")
+        except Exception as e:
+            return ToolResult.error(f"Error copying file: {e}")
+
+
+@tool_parameters(
+    tool_parameters_schema(
+        source=StringSchema("The existing file to move from"),
+        destination=StringSchema("The path to move the file to"),
+        overwrite=BooleanSchema(
+            description="Replace the destination if it already exists (default false)",
+            default=False,
+        ),
+        required=["source", "destination"],
+    )
+)
+class MoveFileTool(_FsTool):
+    """Move or rename a single file."""
+    _scopes = {"core", "subagent", "memory"}
+
+    @property
+    def name(self) -> str:
+        return "move_file"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Move or rename a single file. Because the original is removed, both the "
+            "source and the destination must be writable. Creates parent directories "
+            "as needed. Pass overwrite=true to replace an existing destination."
+        )
+
+    async def execute(
+        self,
+        source: str | None = None,
+        destination: str | None = None,
+        overwrite: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        try:
+            if not source:
+                raise ValueError("Unknown source")
+            if not destination:
+                raise ValueError("Unknown destination")
+            # A move deletes the original, so the source needs write access too.
+            src = self._resolve_write(source)
+            dst = self._resolve_write(destination)
+            error = _check_transfer(src, dst, overwrite)
+            if error is not None:
+                return error
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            # shutil.move raises on Windows if the destination file exists; clear it
+            # first so overwrite behaves the same on every platform.
+            if dst.is_file():
+                dst.unlink()
+            shutil.move(str(src), str(dst))
+            self._file_states.record_write(dst)
+            return f"Successfully moved {src} to {dst}"
+        except PermissionError as e:
+            return ToolResult.error(f"Error: {e}")
+        except Exception as e:
+            return ToolResult.error(f"Error moving file: {e}")
+
+
+def _check_transfer(src: Path, dst: Path, overwrite: bool) -> str | None:
+    """Validate a copy/move; return an error message, or None when it may proceed."""
+    if not src.exists():
+        return ToolResult.error(f"Error: Source file not found: {src}")
+    if src.is_dir():
+        return ToolResult.error(f"Error: Source is a directory, not a file: {src}")
+    if src.resolve() == dst.resolve():
+        return ToolResult.error("Error: source and destination are the same file")
+    if dst.is_dir():
+        return ToolResult.error(f"Error: Destination is a directory: {dst}")
+    if dst.exists() and not overwrite:
+        return ToolResult.error(
+            f"Error: Destination already exists: {dst}. Pass overwrite=true to replace it."
+        )
+    return None
