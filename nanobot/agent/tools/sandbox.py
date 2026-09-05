@@ -101,7 +101,161 @@ def _bwrap(
     return shlex.join(args)
 
 
-_BACKENDS = {"bwrap": _bwrap}
+# Directories every command needs to read for the dynamic linker, system
+# binaries, certificates and device nodes.  Seatbelt evaluates resolved paths,
+# so the /private-prefixed form is what actually matches on macOS; the bare
+# symlink form is listed too because commands spell paths both ways.
+_SEATBELT_SYSTEM_READ_SUBPATHS = (
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/etc",
+    "/dev",
+    "/System",
+    "/Library",
+    "/private/etc",
+    "/var",
+    "/private/var",
+    "/tmp",
+    "/private/tmp",
+)
+
+# Writable scratch space.  /private/var/folders holds $TMPDIR, which build tools
+# and test runners rely on; /tmp is its symlink spelling.
+_SEATBELT_SCRATCH_SUBPATHS = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
+
+# Ancestors that must stay searchable but are not covered by any allowed
+# subpath.  Resolving "/private/var/..." stats "/private", and
+# (subpath "/private/var") does not cover its own parent.
+_SEATBELT_TRAVERSABLE_LITERALS = ("/private",)
+
+
+def _seatbelt_ancestors(*paths: Path) -> list[str]:
+    """Collect every ancestor directory of *paths*, closest first.
+
+    Seatbelt checks each path component while resolving, so a sandbox that
+    allows a deep directory but not its ancestors fails with ENOTDIR on every
+    command.  Only ``file-read-metadata`` is granted for these: the directories
+    stay searchable, but listing or reading them is still denied.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        for ancestor in path.parents:
+            name = str(ancestor)
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _sbpl_quote(path: str) -> str:
+    """Render *path* as an SBPL string literal.
+
+    SBPL uses C-style string escaping, so a backslash or a double quote in a
+    path would otherwise terminate the literal early and change the meaning of
+    every rule that follows it.
+    """
+    escaped = path.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _seatbelt(
+    command: str,
+    workspace: str,
+    cwd: str,
+    *,
+    sandbox_ro_binds: Iterable[str] | None = None,
+    sandbox_rw_binds: Iterable[str] | None = None,
+) -> str:
+    """Wrap command in a macOS Seatbelt sandbox (requires sandbox-exec(1)).
+
+    Mirrors the ``bwrap`` policy: the workspace is read-write, the media
+    directory is read-only, and the workspace's parent (which holds
+    ``config.json``) is unreadable so API keys stay hidden.
+
+    Seatbelt has no mount namespace, so masking the parent is expressed as a
+    deny rule placed *before* the workspace allow — the last matching rule
+    wins, which re-exposes the workspace subtree while the rest of the parent
+    stays denied.  Unlike ``bwrap``, a denied parent still appears in directory
+    listings; only its contents are inaccessible.
+
+    Network access is left unrestricted, matching ``bwrap`` (which does not pass
+    ``--unshare-net``).
+    """
+    ws = Path(workspace).resolve()
+    media = get_media_dir().resolve()
+
+    try:
+        sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
+    except ValueError:
+        sandbox_cwd = str(ws)
+
+    def subpaths(paths: Iterable[str]) -> str:
+        return " ".join(f"(subpath {_sbpl_quote(p)})" for p in paths)
+
+    ro_binds = _normalize_bind_paths(sandbox_ro_binds, workspace=ws)
+    rw_binds = _normalize_bind_paths(sandbox_rw_binds, workspace=ws)
+
+    rules = [
+        "(version 1)",
+        "(deny default)",
+        "(allow process*)",
+        "(allow sysctl-read)",
+        "(allow mach*)",
+        "(allow ipc*)",
+        # sh(1) reads the root directory while resolving a path, and
+        # (subpath "/usr") does not cover "/" itself.  Without this rule the
+        # shell aborts during startup.
+        '(allow file-read* (literal "/"))',
+        f"(allow file-read* {subpaths(_SEATBELT_SYSTEM_READ_SUBPATHS)})",
+        f"(allow file-write* {subpaths(_SEATBELT_SCRATCH_SUBPATHS)})",
+    ]
+
+    # Mask the config directory.  The workspace allow below re-exposes the
+    # workspace subtree, because the last matching rule wins.
+    parent = ws.parent
+    if parent != ws and str(parent) != "/":
+        rules.append(f"(deny file-read* file-write* (subpath {_sbpl_quote(str(parent))}))")
+
+    # Keep every ancestor of an allowed path searchable, including the masked
+    # parent: metadata only, so it cannot be listed or read.
+    traversable = _seatbelt_ancestors(
+        ws, media, *(Path(p) for p in ro_binds), *(Path(p) for p in rw_binds)
+    )
+    literals = [
+        *(p for p in _SEATBELT_TRAVERSABLE_LITERALS if p not in traversable),
+        *traversable,
+    ]
+    rules.append(
+        "(allow file-read-metadata "
+        + " ".join(f"(literal {_sbpl_quote(p)})" for p in literals)
+        + ")"
+    )
+
+    rules.append(f"(allow file-read* file-write* (subpath {_sbpl_quote(str(ws))}))")
+    rules.append(f"(allow file-read* (subpath {_sbpl_quote(str(media))}))")
+
+    for p in ro_binds:
+        rules.append(f"(allow file-read* (subpath {_sbpl_quote(p)}))")
+    for p in rw_binds:
+        rules.append(f"(allow file-read* file-write* (subpath {_sbpl_quote(p)}))")
+
+    # sandbox-exec(1) has no --chdir, so the working directory is entered by
+    # the wrapped shell.  `&&` keeps the command from running if cd is denied.
+    args = [
+        "sandbox-exec",
+        "-p",
+        "\n".join(rules),
+        "sh",
+        "-c",
+        f"cd {shlex.quote(sandbox_cwd)} && {command}",
+    ]
+    return shlex.join(args)
+
+
+_BACKENDS = {"bwrap": _bwrap, "seatbelt": _seatbelt}
 
 
 def wrap_command(
