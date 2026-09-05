@@ -39,6 +39,7 @@ from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
@@ -639,6 +640,28 @@ def _run_gateway(
             if channel == "cli":
                 return None
 
+            heartbeat_model = (
+                hb_cfg.model_override.strip() if hb_cfg.model_override else ""
+            )
+            heartbeat_runtime = (
+                agent.runtime_resolver.resolve_override(
+                    model=heartbeat_model,
+                    model_preset=None,
+                    config=config,
+                )
+                if heartbeat_model
+                else (
+                    agent.llm_runtime()
+                    if hasattr(agent, "llm_runtime")
+                    else LLMRuntime.capture(
+                        agent.provider,
+                        agent.model,
+                        context_window_tokens=getattr(agent, "context_window_tokens", 0),
+                    )
+                )
+            )
+            assert heartbeat_runtime is not None
+
             prompt = (
                 _HEARTBEAT_PREAMBLE
                 + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
@@ -657,6 +680,7 @@ def _run_gateway(
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,
+                    runtime=heartbeat_runtime,
                 )
             finally:
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
@@ -674,8 +698,8 @@ def _run_gateway(
                 should_notify = await evaluate_response(
                     response=response,
                     task_context=prompt,
-                    provider=agent.provider,
-                    model=agent.model,
+                    provider=heartbeat_runtime.provider,
+                    model=heartbeat_runtime.model,
                     evaluator_prompt=evaluator_prompt,
                     default_notify=False,
                 )
@@ -759,7 +783,14 @@ def _run_gateway(
 
     hb_cfg = config.gateway.heartbeat
     if hb_cfg.enabled:
-        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+        configured_heartbeat_model = (
+            hb_cfg.model_override.strip() if hb_cfg.model_override else ""
+        )
+        heartbeat_model = configured_heartbeat_model or agent.model
+        console.print(
+            f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s "
+            f"(model: {heartbeat_model})"
+        )
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
