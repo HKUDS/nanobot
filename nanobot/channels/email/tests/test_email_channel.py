@@ -50,7 +50,7 @@ def _make_raw_email(
     return msg.as_bytes()
 
 
-def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
+def test_fetch_new_messages_parses_unseen_without_marking_seen(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 
     fake = _make_fake_imap(raw, uid=b"123")
@@ -63,11 +63,13 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     assert items[0]["sender"] == "alice@example.com"
     assert items[0]["subject"] == "Invoice"
     assert "Please pay" in items[0]["content"]
-    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
     assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
         ("FETCH", "123", "(BODY.PEEK[HEADER])"),
         ("FETCH", "123", "(BODY.PEEK[])"),
     ]
+    # Marking \Seen is deferred to the caller (see start()) — fetching alone
+    # must never issue a STORE.
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
     assert skipped_uids == set()
 
     # Same UID should be deduped in-process.
@@ -401,17 +403,23 @@ async def test_start_applies_post_action_only_after_delivery(monkeypatch) -> Non
     async def _fake_handle_message(**_kwargs):
         calls.append("delivered")
 
-    def _fake_batch(actions):
+    def _fake_mark_seen(uids):
         assert calls == ["delivered"]
+        assert uids == ["123"]
+        calls.append("mark_seen")
+
+    def _fake_batch(actions):
+        assert calls == ["delivered", "mark_seen"]
         assert actions == ["123"]
         calls.append("post_action")
 
     monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
     monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", _fake_mark_seen)
     monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
 
     await channel.start()
-    assert calls == ["delivered", "post_action"]
+    assert calls == ["delivered", "mark_seen", "post_action"]
 
 
 @pytest.mark.asyncio
@@ -475,22 +483,139 @@ async def test_start_keeps_post_actions_for_successful_emails_when_later_deliver
         channel._running = False
         return fetched
 
+    called_mark_seen: list[str] = []
+
     async def _fake_handle_message(**kwargs):
         if kwargs["chat_id"] == "bob@example.com":
             raise RuntimeError("delivery failed")
+
+    def _fake_mark_seen(uids):
+        called_mark_seen.extend(uids)
 
     def _fake_batch(actions):
         called_actions.extend(actions)
 
     monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
     monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", _fake_mark_seen)
     monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
 
     await channel.start()
+    assert called_mark_seen == ["123"]
     assert called_actions == ["123"]
 
 
-def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) -> None:
+async def test_start_evicts_uid_from_dedup_cache_when_delivery_fails(monkeypatch) -> None:
+    """A UID that fails delivery must be retried on a later poll, not silently
+    dropped forever — it was never marked \\Seen, so it must not be stuck as
+    "already processed" either."""
+    channel = EmailChannel(_make_config(), MessageBus())
+
+    fetched = (
+        [
+            {
+                "sender": "alice@example.com",
+                "subject": "Hi",
+                "message_id": "<m1@example.com>",
+                "content": "hello",
+                "metadata": {"uid": "123"},
+            }
+        ],
+        [],
+    )
+
+    def _fake_fetch():
+        channel._running = False
+        return fetched
+
+    async def _fake_handle_message(**_kwargs):
+        raise RuntimeError("delivery failed")
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+
+    channel._processed_uids.add("123")
+    await channel.start()
+
+    assert "123" not in channel._processed_uids
+
+
+async def test_start_mark_seen_failure_does_not_suppress_post_action(monkeypatch) -> None:
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+
+    fetched = (
+        [
+            {
+                "sender": "alice@example.com",
+                "subject": "Hi",
+                "message_id": "<m1@example.com>",
+                "content": "hello",
+                "metadata": {"uid": "123"},
+            }
+        ],
+        [],
+    )
+
+    def _fake_fetch():
+        channel._running = False
+        return fetched
+
+    async def _fake_handle_message(**_kwargs):
+        return None
+
+    def _fake_mark_seen(_uids):
+        raise RuntimeError("IMAP connection dropped")
+
+    called_actions: list[str] = []
+
+    def _fake_batch(actions):
+        called_actions.extend(actions)
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", _fake_mark_seen)
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
+
+    await channel.start()
+
+    assert called_actions == ["123"]
+    # The message was already delivered — it must not be re-delivered, but
+    # the failed \Seen STORE must be retried on a later poll.
+    assert channel._pending_mark_seen == {"123"}
+
+
+async def test_start_retries_pending_mark_seen_without_redelivering(monkeypatch) -> None:
+    """A UID whose \\Seen STORE failed last cycle must be retried on the next
+    poll, without the message going through delivery again."""
+    channel = EmailChannel(_make_config(), MessageBus())
+    channel._pending_mark_seen.add("123")
+
+    def _fake_fetch():
+        channel._running = False
+        return ([], set())
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs):
+        handled.append(kwargs["chat_id"])
+
+    marked: list[list[str]] = []
+
+    def _fake_mark_seen(uids):
+        marked.append(uids)
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", _fake_mark_seen)
+
+    await channel.start()
+
+    assert handled == []
+    assert marked == [["123"]]
+    assert channel._pending_mark_seen == set()
+
+
+def test_fetch_new_messages_skips_self_sent_email_without_marking_seen(monkeypatch) -> None:
     raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
 
     fake = _make_fake_imap(raw, uid=b"123")
@@ -501,7 +626,7 @@ def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) ->
 
     assert items == []
     assert skipped_uids == {"123"}
-    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
 
     # Same UID should still be deduped after being ignored.
     items_again, skipped_again = channel._fetch_new_messages()
@@ -546,7 +671,7 @@ def test_fetch_new_messages_skips_self_sent_across_identity_sources(
     items, _ = channel._fetch_new_messages()
 
     assert items == []
-    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
 
 
 def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeypatch) -> None:
@@ -1200,7 +1325,7 @@ def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monke
     assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
         ("FETCH", "500", "(BODY.PEEK[HEADER])")
     ]
-    assert ("STORE", "500", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
 
 
 def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
