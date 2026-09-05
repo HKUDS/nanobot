@@ -3097,6 +3097,8 @@ describe("NanobotTui layout", () => {
     const app = mount(setup, sent)
     const composer = (app as unknown as { composer: TextareaRenderable }).composer
     const connection = app as unknown as {
+      ready: boolean
+      submitPending: boolean
       handleStatus(
         status: "reconnecting" | "connected",
         detail?: string,
@@ -3105,7 +3107,7 @@ describe("NanobotTui layout", () => {
     }
 
     app.accept({ event: "attached", chat_id: "chat" })
-    await Bun.sleep(1)
+    await waitUntil(() => connection.ready)
     connection.handleStatus("reconnecting", "connection closed", {
       endpoint: "127.0.0.1:8769",
       attempt: 1,
@@ -3114,16 +3116,16 @@ describe("NanobotTui layout", () => {
     connection.handleStatus("connected")
     composer.setText("draft before attach")
     composer.submit()
-    await Bun.sleep(5)
+    await waitUntil(() => !connection.submitPending)
     composer.submit()
-    await Bun.sleep(5)
+    await waitUntil(() => !connection.submitPending)
 
     expect(sent).toEqual([])
     expect(composer.plainText).toBe("draft before attach")
 
     app.accept({ event: "attached", chat_id: "chat" })
     app.accept({ event: "attached", chat_id: "chat" })
-    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    await waitUntil(() => connection.ready)
     expect(sent).toEqual([])
     composer.submit()
     await waitUntil(() => sent.length === 1)
