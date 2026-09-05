@@ -567,6 +567,7 @@ class JsonlSessionStore:
         with suppress(OSError):
             os.chmod(root, 0o700)
         self.workspace = canonical_workspace
+        self.transaction_lock = threading.RLock()
         self._migration_lock = FileLock(
             str(root / ".workspace-migration.lock"),
             timeout=_SESSION_MIGRATION_LOCK_TIMEOUT_SECONDS,
@@ -584,13 +585,15 @@ class JsonlSessionStore:
                 str(self.sessions_dir / _SESSION_FILES_LOCK_FILENAME),
                 timeout=_SESSION_FILES_LOCK_TIMEOUT_SECONDS,
             )
-            with self._session_files_lock:
+            with self.locked_session_files():
                 self._migrate_from_workspace(canonical_workspace)
 
     @contextmanager
     def locked_session_files(self) -> Generator[Path, None, None]:
         """Guard direct access to canonical session files in this directory."""
-        with self._session_files_lock:
+        # Queue local workers before polling the cross-process lock. Otherwise
+        # our own writes consume the external-lock timeout and poll in 50 ms steps.
+        with self.transaction_lock, self._session_files_lock:
             yield self.sessions_dir
 
     @staticmethod
@@ -974,7 +977,7 @@ class JsonlSessionStore:
             raise RuntimeError(f"refusing to restore into symlinked sessions directory: {old_dir}")
         ensure_dir(old_dir)
 
-        with self._migration_lock, self._session_files_lock:
+        with self._migration_lock, self.locked_session_files():
             for src in self.sessions_dir.glob("*.jsonl"):
                 if self.session_key_from_path(src) is None:
                     continue
@@ -1039,7 +1042,7 @@ class JsonlSessionStore:
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def load(self, key: str) -> Session | None:
-        with self._session_files_lock:
+        with self.locked_session_files():
             return self._load_unlocked(key)
 
     def _load_unlocked(self, key: str) -> Session | None:
@@ -1117,7 +1120,7 @@ class JsonlSessionStore:
             return repaired
 
     def repair(self, key: str, *, path: Path | None = None) -> Session | None:
-        with self._session_files_lock:
+        with self.locked_session_files():
             return self._repair_unlocked(key, path=path)
 
     def _repair_unlocked(self, key: str, *, path: Path | None = None) -> Session | None:
@@ -1212,7 +1215,7 @@ class JsonlSessionStore:
         }
 
     def save(self, session: Session, *, fsync: bool = False) -> None:
-        with self._session_files_lock:
+        with self.locked_session_files():
             self._save_unlocked(session, fsync=fsync)
 
     def save_runtime_checkpoint(self, session: Session) -> None:
@@ -1222,7 +1225,7 @@ class JsonlSessionStore:
         beside the append history avoids copying the full transcript at each safe
         recovery boundary.
         """
-        with self._session_files_lock:
+        with self.locked_session_files():
             path = self.get_session_path(session.key)
             if not path.exists():
                 # A user turn normally creates the session first. Internal callers
@@ -1371,7 +1374,7 @@ class JsonlSessionStore:
         fsync: bool = False,
     ) -> bool:
         """Atomically replace only a session file's metadata record."""
-        with self._session_files_lock:
+        with self.locked_session_files():
             path = self.get_session_path(key)
             if not path.exists():
                 return False
@@ -1407,7 +1410,7 @@ class JsonlSessionStore:
                 tmp_path.unlink(missing_ok=True)
 
     def delete(self, key: str) -> bool:
-        with self._session_files_lock:
+        with self.locked_session_files():
             return self._delete_unlocked(key)
 
     def _delete_unlocked(self, key: str) -> bool:
@@ -1429,7 +1432,7 @@ class JsonlSessionStore:
         return deleted
 
     def read(self, key: str) -> SessionPayload | None:
-        with self._session_files_lock:
+        with self.locked_session_files():
             return self._read_unlocked(key)
 
     def _read_unlocked(self, key: str) -> SessionPayload | None:
@@ -1490,7 +1493,7 @@ class JsonlSessionStore:
             return None
 
     def read_metadata(self, key: str) -> SessionMetadataPayload | None:
-        with self._session_files_lock:
+        with self.locked_session_files():
             return self._read_metadata_unlocked(key)
 
     def _read_metadata_unlocked(self, key: str) -> SessionMetadataPayload | None:
@@ -1540,7 +1543,7 @@ class JsonlSessionStore:
             return None
 
     def list_sessions(self) -> list[SessionInfo]:
-        with self._session_files_lock:
+        with self.locked_session_files():
             return self._list_sessions_unlocked()
 
     def _list_sessions_unlocked(self) -> list[SessionInfo]:
@@ -1664,18 +1667,10 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._cache_lock = threading.RLock()
-        self._session_locks_guard = threading.Lock()
-        self._session_locks: WeakValueDictionary[str, threading.RLock] = WeakValueDictionary()
+        # Direct file transactions may call back into manager methods (handles,
+        # Dream pruning). Share their lock rather than acquiring locks in reverse order.
+        self._transaction_lock = self._jsonl_store.transaction_lock
         self._delete_observer: Callable[[str], None] | None = None
-
-    def _session_lock(self, key: str) -> threading.RLock:
-        """Return the process-local transaction lock for one session key."""
-        with self._session_locks_guard:
-            lock = self._session_locks.get(key)
-            if lock is None:
-                lock = threading.RLock()
-                self._session_locks[key] = lock
-            return lock
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1764,7 +1759,10 @@ class SessionManager:
         Returns:
             The session.
         """
-        with self._session_lock(key):
+        session = self._cached(key)
+        if session is not None:
+            return session
+        with self._transaction_lock:
             session = self._cached(key)
             if session is not None:
                 return session
@@ -1788,7 +1786,7 @@ class SessionManager:
             log_content=False,
             disabled_tools=frozenset(disabled_tools),
         )
-        with self._session_lock(key):
+        with self._cache_lock:
             session = self.get_cached(key)
             if session is None or session.policy != policy:
                 session = Session(key=key, policy=policy)
@@ -1807,7 +1805,7 @@ class SessionManager:
         if not session.policy.persist:
             return
 
-        with self._session_lock(session.key):
+        with self._transaction_lock:
             self._store.save(session, fsync=fsync)
             self._remember(session)
 
@@ -1815,7 +1813,7 @@ class SessionManager:
         """Persist volatile recovery state without rewriting long history."""
         if not session.policy.persist:
             return
-        with self._session_lock(session.key):
+        with self._transaction_lock:
             if self._store is self._jsonl_store:
                 self._jsonl_store.save_runtime_checkpoint(session)
                 self._remember(session)
@@ -1887,13 +1885,13 @@ class SessionManager:
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
-        with self._session_lock(key), self._cache_lock:
+        with self._transaction_lock, self._cache_lock:
             self._cache.pop(key, None)
             self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
         """Delete a persisted session and invalidate its cache entry."""
-        with self._session_lock(key):
+        with self._transaction_lock:
             self.invalidate(key)
             deleted = self._store.delete(key)
             if self._delete_observer is not None:
@@ -1980,7 +1978,7 @@ class SessionManager:
         fsync: bool = False,
     ) -> bool:
         """Atomically update metadata without replacing session history."""
-        with self._session_lock(key):
+        with self._transaction_lock:
             updated = self._store.update_metadata(key, updates, fsync=fsync)
             if updated and (session := self.get_cached(key)) is not None:
                 session.metadata.update(deepcopy(updates))

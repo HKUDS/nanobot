@@ -125,6 +125,8 @@ class AutoCompact:
             self._archiving.discard(key)
             return
         try:
+            # Keep the session live while the synchronous callback binds its route.
+            session = await session_io.get_or_create(self.sessions, key)
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,

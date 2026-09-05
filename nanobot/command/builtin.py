@@ -332,7 +332,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     async def reset_and_schedule_archive() -> None:
         session.clear()
         await session_io.save(loop.sessions, session)
-        loop.sessions.invalidate(session.key)
+        await session_io.call(loop.sessions.invalidate, session.key)
         if archive_snapshot is not None and runtime is not None:
             loop.schedule_background(
                 loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]

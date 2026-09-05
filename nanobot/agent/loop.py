@@ -558,6 +558,19 @@ class AgentLoop:
         recover_removed: bool = True,
     ) -> LLMRuntime:
         """Resolve the immutable runtime selected by one session."""
+        runtime = self._resolve_session_runtime(session, recover_removed=recover_removed)
+        if runtime is not None:
+            return runtime
+        self.sessions.save(session)
+        return self.llm_runtime()
+
+    def _resolve_session_runtime(
+        self,
+        session: Session,
+        *,
+        recover_removed: bool,
+    ) -> LLMRuntime | None:
+        """Return the selected runtime, or clear a removed preset for persistence."""
         name = model_preset_from_metadata(session.metadata)
         if name is None:
             return self.llm_runtime()
@@ -572,8 +585,7 @@ class AgentLoop:
                 name,
             )
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
-            self.sessions.save(session)
-            return self.llm_runtime()
+            return None
 
     async def runtime_for_session_async(
         self,
@@ -582,11 +594,11 @@ class AgentLoop:
         recover_removed: bool = True,
     ) -> LLMRuntime:
         """Resolve a session runtime without blocking on recovery persistence."""
-        return await session_io.call(
-            self.runtime_for_session,
-            session,
-            recover_removed=recover_removed,
-        )
+        runtime = self._resolve_session_runtime(session, recover_removed=recover_removed)
+        if runtime is not None:
+            return runtime
+        await session_io.save(self.sessions, session)
+        return self.llm_runtime()
 
     def set_session_model_preset(
         self,
@@ -606,7 +618,11 @@ class AgentLoop:
         name: str,
     ) -> LLMRuntime:
         """Validate and persist one session's preset selection without blocking."""
-        return await session_io.call(self.set_session_model_preset, session_key, name)
+        runtime = self.runtime_resolver.resolve_preset(name)
+        session = await session_io.get_or_create(self.sessions, session_key)
+        session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
+        await session_io.save(self.sessions, session)
+        return runtime
 
     def _publish_runtime_selection(
         self,
@@ -957,7 +973,7 @@ class AgentLoop:
         """Stop active work for *key* and forget its cached session."""
         self._discarding_sessions.add(key)
         try:
-            self.sessions.invalidate(key)
+            await session_io.call(self.sessions.invalidate, key)
             await self._cancel_active_tasks(key)
         finally:
             self.discard_session_file_state(key)
@@ -978,7 +994,9 @@ class AgentLoop:
         session_key: str,
     ) -> ContextCompactionCallback | None:
         """Bind one idle compaction to its current user-facing destination."""
-        session = self.sessions.get_or_create(session_key)
+        session = self.sessions.get_cached(session_key)
+        if session is None:
+            return None
         return self.turn_delivery_factory.session_compaction_callback(
             session_key, session.metadata,
         )

@@ -1210,7 +1210,7 @@ class Consolidator:
             )
         lock = self.get_lock(session_key)
         async with lock:
-            self.sessions.invalidate(session_key)
+            await session_io.call(self.sessions.invalidate, session_key)
             session = await session_io.get_or_create(self.sessions, session_key)
 
             archive_start = session.last_archived

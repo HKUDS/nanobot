@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeModelChanged
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.nanobot import Nanobot
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
@@ -130,6 +131,31 @@ async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_p
     loop.sessions.invalidate(session_key)
     restored = loop.sessions.get_or_create(session_key)
     assert model_preset_from_metadata(restored.metadata) is None
+
+
+async def test_async_runtime_resolution_publishes_model_refresh_on_event_loop(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    provider = RecordingProvider("base-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="base-model")
+    session = loop.sessions.get_or_create("sdk:runtime-refresh")
+    refreshed = LLMRuntime.capture(provider, "updated-model", context_window_tokens=16_000)
+    monkeypatch.setattr(loop.runtime_resolver, "admit", lambda: refreshed)
+    published = asyncio.Event()
+    events: list[RuntimeModelChanged] = []
+
+    def on_changed(event: RuntimeModelChanged) -> None:
+        events.append(event)
+        published.set()
+
+    unsubscribe = loop.runtime_events.subscribe(on_changed, RuntimeModelChanged)
+    try:
+        assert await loop.runtime_for_session_async(session) is refreshed
+        await asyncio.wait_for(published.wait(), timeout=1)
+    finally:
+        unsubscribe()
+    assert events[0].model == "updated-model"
 
 
 @pytest.mark.asyncio
