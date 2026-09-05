@@ -80,6 +80,16 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class MemoryConfig(Base):
+    """Durable memory file size guardrails (SOUL.md, USER.md, memory/MEMORY.md)."""
+
+    # Per-file cap, not a combined budget across the three files: each of
+    # SOUL.md / USER.md / memory/MEMORY.md is checked against this limit
+    # independently. Mirrors the historical _DREAM_FILE_EMBED_CAP that
+    # existed before PR #5622 unified Dream onto the shared system-prompt path.
+    max_file_chars: int = Field(default=8_000, ge=1)
+
+
 class InlineFallbackConfig(Base):
     """One inline fallback model configuration."""
 
@@ -156,6 +166,7 @@ class AgentDefaults(Base):
         ge=0,
     )  # Minimum interval in seconds between scans for idle sessions
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
     @model_validator(mode="before")
     @classmethod

@@ -456,7 +456,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import MemoryStore
+        from nanobot.agent.memory import MemoryStore, dream_prompt_within_budget
 
         async def _silent(*_args: Any, **_kwargs: Any) -> None:
             pass
@@ -471,17 +471,25 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         diff_body = ""
         t0 = time.monotonic()
         try:
-            result = store.build_dream_prompt()
-            if result is None:
+            dream_runtime = loop.dream_runtime() or loop.llm_runtime()
+            result = dream_prompt_within_budget(
+                store,
+                runtime=dream_runtime,
+                build_messages=loop.context.build_messages,
+            )
+            if result.batch is None:
                 await loop.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content=_format_dream_no_input_message(),
+                    content=(
+                        _format_dream_over_budget_message()
+                        if result.over_budget
+                        else _format_dream_no_input_message()
+                    ),
                     metadata={"render_as": "text"},
                 ))
                 return
-            prompt, last_cursor = result
+            prompt, last_cursor = result.batch
             key = dream_session_key()
-            dream_runtime = loop.dream_runtime()
             resp = await loop.process_direct(
                 prompt,
                 session_key=key,
@@ -636,6 +644,20 @@ def _format_dream_no_input_message() -> str:
         "- Compact the current chat into memory once that manual action is available.",
         "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
         "- Use `/dream-prompt` to see or change how Dream organizes memory.",
+    ])
+
+
+def _format_dream_over_budget_message() -> str:
+    return "\n".join([
+        "Dream has history to process, but the assembled request doesn't fit "
+        "the current model's context window even at the smallest history batch.",
+        "",
+        "This usually means `SOUL.md`, `USER.md`, or `memory/MEMORY.md` has grown large.",
+        "",
+        "Next steps:",
+        "- Check the size of `SOUL.md`, `USER.md`, and `memory/MEMORY.md`.",
+        "- Switch Dream to a model with a larger context window "
+        "(`agents.defaults.dream.modelOverride`).",
     ])
 
 
