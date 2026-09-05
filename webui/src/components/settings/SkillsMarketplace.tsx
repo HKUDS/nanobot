@@ -58,9 +58,19 @@ export function SkillsMarketplace({
   const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
   const installedNames = useMemo(
-    () => new Set(installedSkills.map((skill) => skill.name)),
+    () =>
+      new Set(
+        installedSkills
+          .filter((skill) => skill.source === "workspace")
+          .map((skill) => skill.name),
+      ),
     [installedSkills],
   );
+  const selectedShadowsInstalled =
+    selected !== null &&
+    installedSkills.some(
+      (skill) => skill.name === selected.skill_id && skill.source !== "workspace",
+    );
   const visibleTrending = useMemo(
     () =>
       provider === "all"
@@ -316,6 +326,14 @@ export function SkillsMarketplace({
                     "This third-party skill comes from {{provider}} ({{source}}) and may include instructions or executable scripts.",
                 })}
               </span>
+              {selectedShadowsInstalled ? (
+                <span className="block rounded-control bg-amber-500/10 px-2.5 py-2 text-amber-800 dark:text-amber-200">
+                  {t("settings.skills.marketplaceOverrideNotice", {
+                    defaultValue:
+                      "This workspace copy will override the existing built-in or plugin skill until you delete it.",
+                  })}
+                </span>
+              ) : null}
               <span className="flex flex-wrap items-center gap-2 rounded-control bg-muted px-2 py-1.5 text-[12px] text-foreground">
                 {selected ? <ProviderMark provider={selected.provider} /> : null}
                 <code>{selected?.source}</code>

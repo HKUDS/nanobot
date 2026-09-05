@@ -961,6 +961,7 @@
       "marketplaceEmpty": "Nenhuma habilidade encontrada para “{{query}}”.",
       "marketplaceConfirmTitle": "Instalar {{name}}?",
       "marketplaceConfirmDescription": "Esta habilidade de terceiros vem de {{provider}} ({{source}}) e pode incluir instruções ou scripts executáveis.",
+      "marketplaceOverrideNotice": "Esta cópia do espaço de trabalho substituirá a habilidade integrada ou de plugin existente até ser excluída.",
       "marketplaceConfirmInstall": "Instalar habilidade",
       "marketplaceOpen": "Abrir {{name}} no {{provider}}",
       "marketplaceOpenProvider": "Abrir {{provider}}",

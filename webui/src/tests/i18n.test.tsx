@@ -137,6 +137,7 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.skills.marketplaceEmpty",
   "settings.skills.marketplaceConfirmTitle",
   "settings.skills.marketplaceConfirmDescription",
+  "settings.skills.marketplaceOverrideNotice",
   "settings.skills.marketplaceConfirmInstall",
   "settings.skills.marketplaceOpen",
   "settings.skills.marketplaceOpenProvider",

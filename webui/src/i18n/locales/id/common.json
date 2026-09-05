@@ -947,6 +947,7 @@
       "marketplaceEmpty": "Tidak ada keterampilan yang ditemukan untuk “{{query}}”.",
       "marketplaceConfirmTitle": "Pasang {{name}}?",
       "marketplaceConfirmDescription": "Keterampilan pihak ketiga ini berasal dari {{provider}} ({{source}}) dan mungkin berisi instruksi atau skrip yang dapat dijalankan.",
+      "marketplaceOverrideNotice": "Salinan ruang kerja ini akan menimpa keterampilan bawaan atau plugin yang ada hingga Anda menghapusnya.",
       "marketplaceConfirmInstall": "Pasang keterampilan",
       "marketplaceOpen": "Buka {{name}} di {{provider}}",
       "marketplaceOpenProvider": "Buka {{provider}}",
