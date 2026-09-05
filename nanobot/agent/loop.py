@@ -1323,7 +1323,11 @@ class AgentLoop:
                     msg.require_existing_session
                     and self.sessions.get_cached(effective_key) is None
                 ):
-                    continue
+                    if await asyncio.to_thread(
+                        self.sessions.read_session_metadata,
+                        effective_key,
+                    ) is None:
+                        continue
                 if msg.is_user_input:
                     await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
                 if msg.channel != "system" and self.commands.is_priority(raw):
@@ -1818,7 +1822,10 @@ class AgentLoop:
 
         if ctx.session is None:
             if msg.require_existing_session:
-                ctx.session = self.sessions.get_cached(ctx.session_key)
+                ctx.session = await asyncio.to_thread(
+                    self.sessions.get_existing,
+                    ctx.session_key,
+                )
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:
