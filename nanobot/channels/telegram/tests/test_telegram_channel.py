@@ -18,6 +18,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram.runtime import (
     TELEGRAM_MAX_MESSAGE_LEN,
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
+    TELEGRAM_RICH_DRAFT_MIN_INTERVAL,
+    TELEGRAM_RICH_MAX_LEN,
     TelegramChannel,
     TelegramConfig,
     _markdown_to_telegram_html,
@@ -904,6 +906,275 @@ async def test_rich_messages_default_skips_send_rich_message() -> None:
     channel._app.bot.do_api_request.assert_not_called()
     assert len(channel._app.bot.sent_messages) == 1
     assert channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_stream_updates_one_draft_then_persists_final() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            rich_messages=True,
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel.send_delta(
+        "123",
+        "# head",
+        {"is_group": False, "message_thread_id": 42},
+        stream_id="s:0",
+    )
+    draft_id = channel._stream_bufs["123"].draft_id
+    assert draft_id is not None and draft_id != 0
+    channel._stream_bufs["123"].last_edit = 0.0
+    metadata = {"is_group": False, "message_thread_id": 42}
+    await channel.send_delta("123", "\n\n**body**", metadata, stream_id="s:0")
+    await channel.send_delta("123", "", metadata, stream_id="s:0", stream_end=True)
+
+    calls = channel._app.bot.do_api_request.call_args_list
+    assert [call.args[0] for call in calls] == [
+        "sendRichMessageDraft",
+        "sendRichMessageDraft",
+        "sendRichMessage",
+    ]
+    assert calls[0].kwargs["api_kwargs"] == {
+        "chat_id": 123,
+        "draft_id": draft_id,
+        "message_thread_id": 42,
+        "rich_message": {"markdown": "# head"},
+    }
+    assert calls[1].kwargs["api_kwargs"]["draft_id"] == draft_id
+    assert calls[1].kwargs["api_kwargs"]["rich_message"] == {
+        "markdown": "# head\n\n**body**",
+    }
+    assert "draft_id" not in calls[2].kwargs["api_kwargs"]
+    assert calls[2].kwargs["api_kwargs"]["message_thread_id"] == 42
+    assert calls[2].kwargs["api_kwargs"]["rich_message"] == {
+        "markdown": "# head\n\n**body**",
+    }
+    assert channel._app.bot.sent_messages == []
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_initial_rejection_falls_back_to_legacy_preview() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("can't parse rich message"))
+
+    await channel.send_delta(
+        "123", "# head", {"is_group": False}, stream_id="s:0",
+    )
+
+    channel._app.bot.do_api_request.assert_awaited_once()
+    assert channel._app.bot.do_api_request.call_args.args[0] == "sendRichMessageDraft"
+    assert channel._rich_send_disabled is False
+    assert channel._app.bot.sent_messages[0]["text"] == "head"
+    assert channel._stream_bufs["123"].message_id == 1
+    assert channel._stream_bufs["123"].draft_id is None
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_draft_rejection_falls_back_to_legacy_preview() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            rich_messages=True,
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="# head", draft_id=17, last_edit=0.0, stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("can't parse rich message"))
+
+    await channel.send_delta("123", "\nbody", stream_id="s:0")
+
+    assert channel._app.bot.do_api_request.call_args.args[0] == "sendRichMessageDraft"
+    rich_kwargs = channel._app.bot.do_api_request.call_args.kwargs["api_kwargs"]
+    assert rich_kwargs["draft_id"] == 17
+    assert rich_kwargs["rich_message"] == {"markdown": "# head\nbody"}
+    assert channel._app.bot.sent_messages[0]["text"] == "head\nbody"
+    assert channel._stream_bufs["123"].message_id == 1
+    assert channel._stream_bufs["123"].draft_id is None
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_stream_end_persists_draft_with_send_rich_message() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="# heading\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+        draft_id=17,
+        last_edit=0.0,
+        stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+    channel._app.bot.delete_message = AsyncMock()
+
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
+
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "sendRichMessage"
+    assert "draft_id" not in call.kwargs["api_kwargs"]
+    assert call.kwargs["api_kwargs"]["rich_message"]["markdown"].startswith("# heading")
+    channel._app.bot.delete_message.assert_not_awaited()
+    assert channel._app.bot.sent_messages == []
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_does_not_flush_at_legacy_limit() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            rich_messages=True,
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="x" * TELEGRAM_MAX_MESSAGE_LEN,
+        draft_id=17,
+        last_edit=0.0,
+        stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel.send_delta("123", "y", stream_id="s:0")
+
+    channel._app.bot.do_api_request.assert_awaited_once()
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "sendRichMessageDraft"
+    assert call.kwargs["api_kwargs"]["draft_id"] == 17
+    assert len(call.kwargs["api_kwargs"]["rich_message"]["markdown"]) == (
+        TELEGRAM_MAX_MESSAGE_LEN + 1
+    )
+    assert channel._app.bot.sent_messages == []
+    assert channel._stream_bufs["123"].text.endswith("y")
+
+
+@pytest.mark.asyncio
+async def test_flush_stream_overflow_uses_rich_limit_and_reanchors_tail() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    text = "x" * TELEGRAM_RICH_MAX_LEN + "\n" + "**tail**"
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=text,
+        draft_id=17,
+        last_edit=0.0,
+        stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel._flush_stream_overflow(
+        123, channel._stream_bufs["123"], {"message_thread_id": 42},
+    )
+
+    calls = channel._app.bot.do_api_request.call_args_list
+    assert [call.args[0] for call in calls] == [
+        "sendRichMessage",
+        "sendRichMessageDraft",
+    ]
+    first = calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"]
+    tail = calls[1].kwargs["api_kwargs"]["rich_message"]["markdown"]
+    assert len(first) <= TELEGRAM_RICH_MAX_LEN
+    assert len(tail) <= TELEGRAM_RICH_MAX_LEN
+    assert calls[1].kwargs["api_kwargs"]["message_thread_id"] == 42
+    assert channel._stream_bufs["123"].message_id is None
+    assert channel._stream_bufs["123"].draft_id not in (None, 0, 17)
+    assert channel._stream_bufs["123"].text == tail
+    assert channel._app.bot.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_flush_stream_overflow_rich_limit_counts_unicode_characters() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    text = "测" * TELEGRAM_RICH_MAX_LEN + "\n尾"
+    buf = _StreamBuf(text=text, draft_id=17, last_edit=0.0, stream_id="s:0")
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel._flush_stream_overflow(123, buf, {})
+
+    calls = channel._app.bot.do_api_request.call_args_list
+    first = calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"]
+    assert len(first) == TELEGRAM_RICH_MAX_LEN
+    assert len(first.encode("utf-8")) > TELEGRAM_RICH_MAX_LEN
+    assert buf.text == "尾"
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_draft_rate_is_limited_to_40_per_30_seconds() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            rich_messages=True,
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel.send_delta(
+        "123", "first", {"is_group": False}, stream_id="s:0",
+    )
+    first_edit = channel._stream_bufs["123"].last_edit
+    await channel.send_delta("123", " second", stream_id="s:0")
+
+    assert TELEGRAM_RICH_DRAFT_MIN_INTERVAL == 30 / 40
+    channel._app.bot.do_api_request.assert_awaited_once()
+    assert channel._stream_bufs["123"].last_edit == first_edit
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_group_uses_persistent_legacy_preview() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel.send_delta(
+        "-100123", "hello", {"is_group": True}, stream_id="s:0",
+    )
+
+    channel._app.bot.do_api_request.assert_not_awaited()
+    assert channel._app.bot.sent_messages[0]["text"] == "hello"
+    assert channel._stream_bufs["-100123"].draft_id is None
+    assert channel._stream_bufs["-100123"].message_id == 1
 
 
 @pytest.mark.asyncio
