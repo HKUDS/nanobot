@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   ConnectionStatus,
@@ -3092,6 +3093,77 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("plays the turn-complete sound when enabled and the page is visible", () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, turnCompleteSound: true });
+
+    try {
+      const fake = fakeClient();
+      renderHook(() => useNanobotStream("chat-sound", EMPTY_MESSAGES), {
+        wrapper: wrap(fake.client),
+      });
+
+      act(() => {
+        fake.emit("chat-sound", {
+          event: "turn_end",
+          chat_id: "chat-sound",
+        });
+      });
+
+      expect(playSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      playSpy.mockRestore();
+      localStorage.clear();
+    }
+  });
+
+  it("does not play the turn-complete sound when disabled or the page is hidden", () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+
+    try {
+      // Preference disabled: no sound even when the page is visible.
+      writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, turnCompleteSound: false });
+      const disabled = fakeClient();
+      renderHook(() => useNanobotStream("chat-sound-off", EMPTY_MESSAGES), {
+        wrapper: wrap(disabled.client),
+      });
+      act(() => {
+        disabled.emit("chat-sound-off", {
+          event: "turn_end",
+          chat_id: "chat-sound-off",
+        });
+      });
+      expect(playSpy).not.toHaveBeenCalled();
+
+      // Preference enabled but the page is hidden: still no sound.
+      writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, turnCompleteSound: true });
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "hidden",
+      });
+      const hidden = fakeClient();
+      renderHook(() => useNanobotStream("chat-sound-hidden", EMPTY_MESSAGES), {
+        wrapper: wrap(hidden.client),
+      });
+      act(() => {
+        hidden.emit("chat-sound-hidden", {
+          event: "turn_end",
+          chat_id: "chat-sound-hidden",
+        });
+      });
+      expect(playSpy).not.toHaveBeenCalled();
+    } finally {
+      playSpy.mockRestore();
+      if (visibilityDescriptor) {
+        Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      } else {
+        delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
+      }
+      localStorage.clear();
+    }
   });
 
   it("replaces streamed content with final stream_end text when provided", async () => {
