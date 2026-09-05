@@ -3623,13 +3623,20 @@ async def test_workspace_folder_picker_is_local_authenticated_mutation(
         (_LOCAL, {"Host": "127.0.0.1:8765"}, True, True),
     ],
 )
+@pytest.mark.parametrize("native_picker_available", [True, False])
 def test_workspace_payload_separates_remote_project_selection_from_full_access(
     bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    native_picker_available: bool,
     connection: _FakeConn,
     headers: dict[str, str],
     can_use_full_access: bool,
     can_pick_folder: bool,
 ) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.native_folder_picker_available",
+        lambda: native_picker_available,
+    )
     channel = _ch(bus)
     token = channel.gateway.tokens.issue_api_token(300)
     request = _FakeReq(
@@ -3643,7 +3650,7 @@ def test_workspace_payload_separates_remote_project_selection_from_full_access(
     controls = json.loads(response.body.decode())["controls"]
     assert controls["can_change_project"] is True
     assert controls["can_use_full_access"] is can_use_full_access
-    assert controls["can_pick_folder"] is can_pick_folder
+    assert controls["can_pick_folder"] is (can_pick_folder and native_picker_available)
 
 
 @pytest.mark.asyncio
