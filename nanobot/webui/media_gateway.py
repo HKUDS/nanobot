@@ -13,6 +13,7 @@ from websockets.http11 import Response
 from nanobot.config.paths import get_media_dir
 from nanobot.webui.attachment_ingress import (
     AttachmentIngressResult,
+    discard_inbound_attachments,
     store_inbound_attachments,
 )
 from nanobot.webui.ingress_policy import AttachmentIngressLimits
@@ -54,6 +55,10 @@ class WebUIMediaGateway:
             logger=self.logger,
             limits=self.attachment_limits,
         )
+
+    def discard_inbound_attachments(self, paths: list[str]) -> None:
+        """Remove stored attachments that were rejected by later message checks."""
+        discard_inbound_attachments(paths, logger=self.logger)
 
     def serve_signed_media(
         self,

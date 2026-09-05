@@ -76,6 +76,15 @@ def extract_data_url_mime(url: Any) -> str | None:
     return match.group(1).strip().lower() or None
 
 
+def discard_inbound_attachments(paths: list[str], *, logger: Any) -> None:
+    """Remove attachment files that will not be associated with a message."""
+    for path in paths:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("failed to unlink rejected media {}: {}", path, exc)
+
+
 def store_inbound_attachments(
     media: list[Any],
     *,
@@ -116,11 +125,7 @@ def store_inbound_attachments(
     total_attachment_bytes = 0
 
     def abort(reason: AttachmentRejection) -> AttachmentIngressResult:
-        for path in paths:
-            try:
-                Path(path).unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning("failed to unlink partial media {}: {}", path, exc)
+        discard_inbound_attachments(paths, logger=logger)
         return [], reason
 
     for item in media:
