@@ -178,13 +178,13 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
 
     coordinator, _, restarted = _coordinator(tmp_path)
     loaded: list[str] = []
-    get_or_create = restarted.get_or_create_async
+    get_or_create = restarted.get_or_create
 
-    async def tracked_get_or_create(key: str) -> Session:
+    def tracked_get_or_create(key: str) -> Session:
         loaded.append(key)
-        return await get_or_create(key)
+        return get_or_create(key)
 
-    monkeypatch.setattr(restarted, "get_or_create_async", tracked_get_or_create)
+    monkeypatch.setattr(restarted, "get_or_create", tracked_get_or_create)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
         lambda _key: False,

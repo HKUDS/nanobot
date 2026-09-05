@@ -399,7 +399,7 @@ class MyTool(Tool):
         session_key = current_request_session_key()
         old = self._runtime_control.snapshot().model_preset
         try:
-            runtime = await self._runtime_control.set_model_preset_async(
+            runtime = await self._runtime_control.set_model_preset(
                 name,
                 session_key=session_key,
             )

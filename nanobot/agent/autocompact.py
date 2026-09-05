@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
+from nanobot.session import io as session_io
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import (
@@ -77,13 +78,13 @@ class AutoCompact:
         """Schedule idle archival without blocking the event loop."""
         now = datetime.now()
         active_keys = set(active_session_keys)
-        for info in await self.sessions.list_sessions_async():
+        for info in await session_io.list_sessions(self.sessions):
             key = info.get("key", "")
             if not key or self._is_internal_session(key) or key in self._archiving:
                 continue
             if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
-            session = await self.sessions.get_or_create_async(key)
+            session = await session_io.get_or_create(self.sessions, key)
             if not self._session_has_unarchived_messages(session):
                 continue
             try:
@@ -99,27 +100,24 @@ class AutoCompact:
             return
         try:
             # Keep the session live while the synchronous callback binds its route.
-            session = await self.sessions.get_or_create_async(key)
+            session = await session_io.get_or_create(self.sessions, key)
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,
                 events=self._bind_events(key) if self._bind_events else NO_EVENTS,
             )
             if summary:
-                session = await self.sessions.get_or_create_async(key)
-                self._record_stored_summary(key, session)
+                session = await session_io.get_or_create(self.sessions, key)
+                stored = session_summary_from_metadata(
+                    session.metadata,
+                    fallback_last_active=session.updated_at,
+                )
+                if stored is not None:
+                    self._summaries[key] = stored
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
             self._archiving.discard(key)
-
-    def _record_stored_summary(self, key: str, session: Session) -> None:
-        stored = session_summary_from_metadata(
-            session.metadata,
-            fallback_last_active=session.updated_at,
-        )
-        if stored is not None:
-            self._summaries[key] = stored
 
     async def prepare_session(
         self,
@@ -133,14 +131,7 @@ class AutoCompact:
             return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
-            session = await self.sessions.get_or_create_async(key)
-        return self._prepared_summary(session, key)
-
-    def _prepared_summary(
-        self,
-        session: Session,
-        key: str,
-    ) -> tuple[Session, SessionSummary | None]:
+            session = await session_io.get_or_create(self.sessions, key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:

@@ -87,14 +87,7 @@ class RuntimeControl(Protocol):
 
     def set_model(self, model: str) -> LLMRuntime: ...
 
-    def set_model_preset(
-        self,
-        name: str,
-        *,
-        session_key: str | None,
-    ) -> LLMRuntime: ...
-
-    async def set_model_preset_async(
+    async def set_model_preset(
         self,
         name: str,
         *,
@@ -149,8 +142,6 @@ class _RuntimeControlTarget(Protocol):
 
     def set_model_preset(self, name: str | None) -> LLMRuntime: ...
 
-    def set_session_model_preset(self, session_key: str, name: str) -> LLMRuntime: ...
-
     async def set_session_model_preset_async(
         self,
         session_key: str,
@@ -190,17 +181,7 @@ class AgentRuntimeControl:
     def set_model(self, model: str) -> LLMRuntime:
         return self.__target.set_runtime_model(model)
 
-    def set_model_preset(
-        self,
-        name: str,
-        *,
-        session_key: str | None,
-    ) -> LLMRuntime:
-        if session_key is not None:
-            return self.__target.set_session_model_preset(session_key, name)
-        return self.__target.set_model_preset(name)
-
-    async def set_model_preset_async(
+    async def set_model_preset(
         self,
         name: str,
         *,

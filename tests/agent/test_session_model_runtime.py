@@ -152,7 +152,7 @@ async def test_async_runtime_resolution_publishes_model_refresh_on_event_loop(
         events.append(event)
         published.set()
 
-    unsubscribe = loop.runtime_events.subscribe(on_changed, RuntimeModelChanged)
+    unsubscribe = loop.bus.subscribe(on_changed, RuntimeModelChanged)
     try:
         assert await loop.runtime_for_session_async(session) is refreshed
         await asyncio.wait_for(published.wait(), timeout=1)

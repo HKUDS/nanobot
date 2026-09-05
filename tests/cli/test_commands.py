@@ -122,7 +122,7 @@ class _GatewayAgentContractStub:
 class _EmptyGatewaySessionManager:
     """Minimal session-manager contract for gateway assembly tests."""
 
-    async def list_sessions_async(self) -> list[dict[str, object]]:
+    def list_sessions(self) -> list[dict[str, object]]:
         return []
 
     def flush_all(self) -> int:
@@ -3459,7 +3459,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         def flush_all(self) -> int:
             return 0
 
-        async def list_sessions_async(self) -> list[dict[str, object]]:
+        def list_sessions(self) -> list[dict[str, object]]:
             return []
 
     class _FakeCronService:
