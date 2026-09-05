@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
-from nanobot.bus.outbound_events import ContextCompactionCallback
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
 from nanobot.session.summary import SessionSummary, session_summary_from_metadata
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
     from nanobot.utils.llm_runtime import LLMRuntime
 
-IdleCompactionCallback = Callable[[str], ContextCompactionCallback | None]
+SessionEventFactory = Callable[[str], EventSink]
 
 
 class AutoCompact:
@@ -25,13 +25,13 @@ class AutoCompact:
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0,
-                 bind_compaction: IdleCompactionCallback | None = None):
+                 bind_events: SessionEventFactory | None = None):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, SessionSummary] = {}
-        self._bind_compaction = bind_compaction
+        self._bind_events = bind_events
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -96,7 +96,7 @@ class AutoCompact:
                 key,
                 runtime=runtime,
                 max_suffix=self._RECENT_SUFFIX_MESSAGES,
-                on_compaction=self._bind_compaction(key) if self._bind_compaction else None,
+                events=self._bind_events(key) if self._bind_events else NO_EVENTS,
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)

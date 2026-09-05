@@ -1,12 +1,13 @@
+import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../../packages/client-events/notifications";
+export type { RecoveryState, RecoveryStatus } from "../../../packages/client-events/notifications";
+
 type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
 type MessageKind = "message" | "trace" | "compaction";
 
-export interface UIContextCompaction {
-  id: string;
-  phase: "started" | "succeeded" | "failed" | "cancelled";
+export interface UIContextCompaction extends ContextCompaction {
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
   announce?: boolean;
 }
@@ -62,16 +63,6 @@ export interface TurnUsage {
 }
 
 export type RoundUsage = TurnUsage;
-
-export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed";
-
-export interface RecoveryState {
-  status: RecoveryStatus;
-  recovery_id: string;
-  reason?: string;
-  attempts?: number;
-  can_continue?: boolean;
-}
 
 export interface UIMessage {
   id: string;
@@ -1373,16 +1364,7 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | ({
-      event: "recovery_state";
-      chat_id: string;
-    } & RecoveryState)
-  | ({
-      event: "context_compaction";
-      chat_id: string;
-      compaction_id: string;
-      phase: UIContextCompaction["phase"];
-    } & InboundTurnMetadata)
+  | (NotificationEvent & InboundTurnMetadata)
   | ({
       event: "file_edit";
       chat_id: string;

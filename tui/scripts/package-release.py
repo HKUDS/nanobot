@@ -43,7 +43,10 @@ def _source_archive(root: Path) -> bytes:
             path = root / relative
             if not path.exists():
                 raise FileNotFoundError(path)
-            archive.add(path, arcname=Path("nanobot-tui-source") / relative)
+            archive.add(path, arcname=Path("nanobot-tui-source/tui") / relative)
+        archive.add(root.parent / "packages/client-events",
+                    arcname="nanobot-tui-source/packages/client-events")
+        archive.add(root.parent / "LICENSE", arcname="nanobot-tui-source/LICENSE")
     return output.getvalue()
 
 

@@ -20,11 +20,7 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
-from nanobot.bus.outbound_events import (
-    ContextCompactionCallback,
-    ContextCompactionEvent,
-    emit_context_compaction,
-)
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
@@ -204,7 +200,7 @@ class ModelRequestState:
     tool_definitions: list[dict[str, Any]] | None = None
     compaction: ContextCompactionState | None = None
     provider_compaction_applied: bool = False
-    compaction_callback: ContextCompactionCallback | None = None
+    events: EventSink = NO_EVENTS
 
 
 class ContextGovernor:
@@ -474,8 +470,7 @@ class ContextGovernor:
             return
 
         compaction_id = uuid4().hex
-        await emit_context_compaction(
-            state.compaction_callback,
+        await state.events.emit(
             ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
         try:
@@ -485,8 +480,7 @@ class ContextGovernor:
                 compaction.active_summary,
             )
         except (Exception, asyncio.CancelledError) as exc:
-            await emit_context_compaction(
-                state.compaction_callback,
+            await state.events.emit(
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
@@ -494,8 +488,7 @@ class ContextGovernor:
             )
             raise
         if not summary:
-            await emit_context_compaction(
-                state.compaction_callback,
+            await state.events.emit(
                 ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
             )
             return
@@ -504,8 +497,7 @@ class ContextGovernor:
             summary=summary,
             transcript_boundary=transcript_boundary,
         )
-        await emit_context_compaction(
-            state.compaction_callback,
+        await state.events.emit(
             ContextCompactionEvent(
                 compaction_id=compaction_id,
                 phase="succeeded",
@@ -524,8 +516,7 @@ class ContextGovernor:
         """Replace accepted history H with a checkpoint while preserving delta."""
         measured, _source = pressure
         compaction_id = uuid4().hex
-        await emit_context_compaction(
-            state.compaction_callback,
+        await state.events.emit(
             ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
         try:
@@ -570,16 +561,14 @@ class ContextGovernor:
                 transcript_boundary=compaction.raw_accepted_boundary,
             )
         except (Exception, asyncio.CancelledError) as exc:
-            await emit_context_compaction(
-                state.compaction_callback,
+            await state.events.emit(
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
                 ),
             )
             raise
-        await emit_context_compaction(
-            state.compaction_callback,
+        await state.events.emit(
             ContextCompactionEvent(
                 compaction_id=compaction_id,
                 phase="succeeded",
@@ -628,8 +617,7 @@ class ContextGovernor:
             )
             if pressure is not None:
                 compaction_id = uuid4().hex
-                await emit_context_compaction(
-                    state.compaction_callback,
+                await state.events.emit(
                     ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
                 )
                 try:
@@ -639,13 +627,11 @@ class ContextGovernor:
                         tool_definitions=tool_definitions,
                     )
                 except Exception:
-                    await emit_context_compaction(
-                        state.compaction_callback,
+                    await state.events.emit(
                         ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
                     )
                     raise
-                await emit_context_compaction(
-                    state.compaction_callback,
+                await state.events.emit(
                     ContextCompactionEvent(compaction_id=compaction_id, phase="succeeded"),
                 )
                 request_was_fitted = True
@@ -681,6 +667,10 @@ class ContextGovernor:
                 context_window_tokens=state.config.context_window_tokens,
             )
         )
+        if state.events.publish is not None:
+            provider_context = replace(
+                provider_context or ProviderCallContext(), events=state.events,
+            )
         state.messages = deepcopy(prepared)
         state.tool_definitions = deepcopy(tool_definitions)
         return prepared, provider_context

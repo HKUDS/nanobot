@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import uuid4
@@ -606,6 +607,15 @@ class WebuiTurnCoordinator:
                 fn()
 
         return _unsubscribe
+
+    @contextmanager
+    def connected(self, runtime_events: RuntimeEventBus) -> Generator[None, None, None]:
+        """Keep connections alive through shutdown, then release the coordinator."""
+        disconnect = self.subscribe(runtime_events)
+        try:
+            yield
+        finally:
+            disconnect()
 
     @staticmethod
     def _ctx_msg(ctx: RuntimeEventContext) -> InboundMessage:

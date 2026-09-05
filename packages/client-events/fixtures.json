@@ -1,0 +1,10 @@
+[
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"c1","phase":"started"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"c1","phase":"succeeded"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"c1","phase":"failed"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"c1","phase":"cancelled"},
+  {"event":"recovery_state","chat_id":"chat","status":"resuming","recovery_id":"r1","attempts":0},
+  {"event":"recovery_state","chat_id":"chat","status":"awaiting_user","recovery_id":"r1","attempts":1,"reason":"tool_state_unknown","can_continue":false},
+  {"event":"recovery_state","chat_id":"chat","status":"recovered","recovery_id":"r1","attempts":1},
+  {"event":"recovery_state","chat_id":"chat","status":"failed","recovery_id":"r1","attempts":2}
+]

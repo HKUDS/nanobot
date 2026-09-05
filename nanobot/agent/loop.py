@@ -51,7 +51,6 @@ from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
-    ContextCompactionCallback,
     StreamedResponseEvent,
 )
 from nanobot.bus.queue import MessageBus
@@ -59,6 +58,7 @@ from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import normalize_command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
@@ -166,7 +166,6 @@ class TurnContext:
     on_stream: Callable[[str], Awaitable[None]] | None = None
     on_stream_end: Callable[..., Awaitable[None]] | None = None
     on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
-    on_retry_wait: Callable[[str], Awaitable[None]] | None = None
 
     pending_queue: asyncio.Queue[InboundMessage] | None = None
     pending_summary: SessionSummary | None = None
@@ -458,7 +457,7 @@ class AgentLoop:
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
-            bind_compaction=self._idle_compaction_callback,
+            bind_events=self._idle_events,
         )
         self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
@@ -919,13 +918,13 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
-    def _idle_compaction_callback(
+    def _idle_events(
         self,
         session_key: str,
-    ) -> ContextCompactionCallback | None:
+    ) -> EventSink:
         """Bind one idle compaction to its current user-facing destination."""
         session = self.sessions.get_or_create(session_key)
-        return self.turn_delivery_factory.session_compaction_callback(
+        return self.turn_delivery_factory.session_events(
             session_key, session.metadata,
         )
 
@@ -957,8 +956,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
-        on_context_compaction: ContextCompactionCallback | None = None,
+        events: EventSink = NO_EVENTS,
         *,
         runtime: LLMRuntime,
         session: Session | None = None,
@@ -1199,7 +1197,6 @@ class AgentLoop:
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
                 provider_retry_mode=self.provider_retry_mode,
-                retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 consolidate_history=(
                     partial(
@@ -1243,7 +1240,7 @@ class AgentLoop:
                     channel=request_ctx.channel,
                     metadata=request_metadata,
                 ),
-                compaction_callback=on_context_compaction,
+                events=events,
             ))
         finally:
             turn_scope_stack.close()
@@ -2027,8 +2024,6 @@ class AgentLoop:
 
         if ctx.on_progress is None:
             ctx.on_progress = ctx.delivery.progress_callback()
-        if ctx.on_retry_wait is None:
-            ctx.on_retry_wait = ctx.delivery.retry_wait_callback()
 
     async def _run_turn(self, ctx: TurnContext) -> None:
         runtime = ctx.require_runtime()
@@ -2043,7 +2038,6 @@ class AgentLoop:
                 on_progress=ctx.on_progress,
                 on_stream=ctx.on_stream,
                 on_stream_end=ctx.on_stream_end,
-                on_retry_wait=ctx.on_retry_wait,
                 session=ctx.session,
                 pending_queue=ctx.pending_queue,
                 ephemeral=ctx.ephemeral,
@@ -2054,7 +2048,7 @@ class AgentLoop:
                 tools=ctx.tools,
                 request_context=ctx.request_context,
                 provider_state=ctx.provider_state,
-                on_context_compaction=ctx.delivery.context_compaction,
+                events=ctx.delivery.events,
             )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages

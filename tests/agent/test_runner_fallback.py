@@ -169,6 +169,28 @@ def test_fallback_models_accept_preset_refs_and_inline_configs() -> None:
     )
 
 
+async def test_fallback_preserves_the_operation_event_sink():
+    from nanobot.events import EventSink
+
+    async def observe(event):
+        pass
+
+    events = EventSink(observe)
+    primary = _FakeProvider("primary", _error_response())
+    fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+    fb = FallbackProvider(
+        primary=primary, fallback_presets=[_fallback("fallback-a")],
+        provider_factory=MagicMock(return_value=fallback),
+    )
+    result = await fb.chat_with_context(
+        messages=[{"role": "user", "content": "hello"}], model="primary",
+        provider_context=ProviderCallContext(events=events),
+    )
+    assert result.content == "fallback ok"
+    assert primary.context_calls[0].events is events
+    assert fallback.context_calls[0].events is events
+
+
 def test_fallback_model_preset_ref_must_exist() -> None:
     from nanobot.config.schema import Config
 
@@ -1047,6 +1069,48 @@ class TestFailoverOnTransientError:
 
 
 class TestRetryBeforeFailover:
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_scoped_retry_events_preserve_fallback_chain_ownership(self, stream):
+        from nanobot.events import EventSink, RetryWaitEvent
+
+        primary = _FakeProvider("primary", _retryable_error("primary unavailable"))
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        provider = FallbackProvider(primary, [_fallback("fallback-a")],
+                                    MagicMock(return_value=fallback))
+        observe = AsyncMock()
+        call = provider.chat_stream_with_retry if stream else provider.chat_with_retry
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+            result = await call(
+                [{"role": "user", "content": "hi"}],
+                provider_context=ProviderCallContext(events=EventSink(observe)),
+            )
+        assert result.content == "fallback ok"
+        events = [call.args[0] for call in observe.await_args_list]
+        assert len(events) == 3
+        assert all(isinstance(event, RetryWaitEvent) for event in events)
+        assert not any("giving up" in event.content for event in events)
+
+    async def test_scoped_persistent_retry_includes_chain_wait_and_one_terminal(self):
+        from nanobot.events import EventSink
+
+        primary = _FakeProvider("primary", _retryable_error("primary unavailable"))
+        fallback = _FakeProvider("fallback", _retryable_error("fallback unavailable"))
+        provider = FallbackProvider(primary, [_fallback("fallback-a")],
+                                    MagicMock(return_value=fallback))
+        provider._PERSISTENT_IDENTICAL_ERROR_LIMIT = 2
+        observe = AsyncMock()
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+            result = await provider.chat_with_retry(
+                [{"role": "user", "content": "hi"}], retry_mode="persistent",
+                provider_context=ProviderCallContext(events=EventSink(observe)),
+            )
+        assert result.finish_reason == "error"
+        notices = [call.args[0].content for call in observe.await_args_list]
+        # Two candidates, three waits each, for two chains, plus one chain wait.
+        assert len(notices) == 14
+        assert sum("Persistent retry stopped" in text for text in notices) == 1
+        assert not any("giving up" in text for text in notices)
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("retry_mode", ["standard", "persistent"])
     async def test_primary_recovers_before_fallback(self, retry_mode: str) -> None:

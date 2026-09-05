@@ -3534,6 +3534,8 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
 
     # Create a real cancelled task
     async def dummy_task():
@@ -3612,6 +3614,8 @@ async def test_stop_all_handles_channel_exception():
     mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
     mgr._dispatch_task = None
 
     # Should not raise even if channel.stop() raises
@@ -3651,6 +3655,8 @@ async def test_stop_all_handles_channel_stop_cancelled_task():
         "next": next_channel,
     }
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
     mgr._dispatch_task = None
 
     await mgr.stop_all()

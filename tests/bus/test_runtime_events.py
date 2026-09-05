@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from nanobot.bus.events import InboundMessage
@@ -13,6 +15,74 @@ from nanobot.bus.runtime_events import (
     TurnRuntimeAdmitted,
 )
 from nanobot.providers.base import LLMUsage
+
+
+async def test_disconnect_skips_a_handler_in_an_existing_dispatch_snapshot():
+    bus = RuntimeEventBus()
+    seen = []
+
+    def first(event):
+        disconnect()
+
+    bus.subscribe(first)
+    disconnect = bus.subscribe(seen.append)
+    await bus.publish(RuntimeModelChanged("model", None))
+    disconnect()
+    assert seen == []
+
+
+async def test_awaited_dispatch_preserves_order_and_propagates_cancellation():
+    bus = RuntimeEventBus()
+    entered, release = asyncio.Event(), asyncio.Event()
+    seen = []
+
+    async def slow(event):
+        entered.set()
+        await release.wait()
+        seen.append("first")
+
+    bus.subscribe(slow)
+    bus.subscribe(lambda event: seen.append("second"))
+    task = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    await entered.wait()
+    assert not task.done()
+    assert seen == []
+    release.set()
+    await task
+    assert seen == ["first", "second"]
+
+    release.clear()
+    entered.clear()
+    task = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert seen == ["first", "second"]
+
+
+async def test_scheduled_dispatch_is_owned_and_can_be_drained():
+    bus = RuntimeEventBus()
+    entered, release = asyncio.Event(), asyncio.Event()
+    seen = []
+
+    async def slow(event):
+        entered.set()
+        await release.wait()
+        seen.append(event.model)
+
+    bus.subscribe(slow, RuntimeModelChanged)
+    task = bus.publish_nowait(RuntimeModelChanged("model", None))
+    assert task is not None
+    assert not entered.is_set()
+    await entered.wait()
+    draining = asyncio.create_task(bus.drain())
+    assert seen == []
+    release.set()
+    await draining
+    assert task.done()
+    assert seen == ["model"]
+    await bus.drain()
 
 
 @pytest.mark.asyncio

@@ -16,8 +16,8 @@ from nanobot.agent.context_governance import (
     ModelRequestState,
 )
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.config.schema import AgentDefaults
+from nanobot.events import ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -74,6 +74,32 @@ def _make_loop(tmp_path):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
+
+
+async def test_provider_can_emit_without_an_event_specific_runner_callback():
+    from nanobot.events import AgentEvent
+
+    event = AgentEvent()
+    received = []
+
+    async def observe(value):
+        received.append(value)
+
+    async def request(*, provider_context, **kwargs):
+        await provider_context.events.emit(event)
+        return LLMResponse(content="done")
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = request
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    await AgentRunner().run(make_run_spec(
+        provider, model="test-model", tools=tools, max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        events=EventSink(observe),
+    ))
+    assert received == [event]
 
 
 async def test_runner_propagates_context_governance_failure():
@@ -394,7 +420,7 @@ async def test_native_compaction_uses_provider_request_boundary(
         max_tokens=100,
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        compaction_callback=observe_compaction,
+        events=EventSink(observe_compaction),
     ))
 
     consolidate.assert_not_awaited()
@@ -534,7 +560,7 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         max_tokens=100,
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        compaction_callback=observe_compaction,
+        events=EventSink(observe_compaction),
     ))
 
     assert consolidate.await_count == 2

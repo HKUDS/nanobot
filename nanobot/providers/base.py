@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import json_repair
 from loguru import logger
 
+from nanobot.events import NO_EVENTS, EventSink, RetryWaitEvent
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -260,6 +261,7 @@ class ProviderCallContext:
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
     context_window_tokens: int | None = None
     session_id: str | None = field(default=None, repr=False)
+    events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1487,13 +1489,16 @@ class LLMProvider(ABC):
             kw["provider_context"] = provider_context
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
+        on_retry_wait, on_retry_exhausted = self._retry_notifications(
+            provider_context, on_retry_wait, on_retry_exhausted,
+        )
         return await self._run_chat_with_retry(
             kw,
             messages,
             stream=True,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
         )
@@ -1535,14 +1540,35 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
+        on_retry_wait, on_retry_exhausted = self._retry_notifications(
+            provider_context, on_retry_wait, on_retry_exhausted,
+        )
         return await self._run_chat_with_retry(
             kw,
             messages,
             stream=False,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted or on_retry_wait,
+            on_retry_exhausted=on_retry_exhausted,
         )
+
+    @staticmethod
+    def _retry_notifications(
+        context: ProviderCallContext | None,
+        on_wait: RetryEventCallback | None,
+        on_exhausted: RetryEventCallback | None,
+    ) -> tuple[RetryEventCallback | None, RetryEventCallback | None]:
+        """Adapt once at the retry-chain boundary, before candidate callbacks.
+
+        Explicit callbacks retain precedence. In particular a fallback candidate
+        exhaustion callback captures its result; it must not also notify the UI.
+        """
+        if on_wait is None and context is not None and context.events.publish is not None:
+            async def publish(content: str) -> None:
+                await context.events.emit(RetryWaitEvent(content))
+
+            on_wait = publish
+        return on_wait, on_exhausted or on_wait
 
     async def _run_chat_with_retry(
         self,
@@ -1737,6 +1763,7 @@ class LLMProvider(ABC):
                                 provider_context.context_window_tokens
                             ),
                             session_id=provider_context.session_id,
+                            events=provider_context.events,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(

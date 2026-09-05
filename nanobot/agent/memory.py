@@ -21,11 +21,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.bus.outbound_events import (
-    ContextCompactionCallback,
-    ContextCompactionEvent,
-    emit_context_compaction,
-)
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
@@ -1192,7 +1188,7 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
         max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
-        on_compaction: ContextCompactionCallback | None = None,
+        events: EventSink = NO_EVENTS,
     ) -> str | None:
         """Archive the full idle tail while keeping recent messages replayable.
 
@@ -1218,8 +1214,7 @@ class Consolidator:
                 return ""
 
             compaction_id = uuid4().hex
-            await emit_context_compaction(
-                on_compaction,
+            await events.emit(
                 ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
             )
             last_active = session.updated_at
@@ -1242,8 +1237,7 @@ class Consolidator:
                     session.last_archived = archive_end
                     self.sessions.save(session)
             except (Exception, asyncio.CancelledError) as exc:
-                await emit_context_compaction(
-                    on_compaction,
+                await events.emit(
                     ContextCompactionEvent(
                         compaction_id=compaction_id,
                         phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
@@ -1251,14 +1245,12 @@ class Consolidator:
                 )
                 raise
             if summary is None:
-                await emit_context_compaction(
-                    on_compaction,
+                await events.emit(
                     ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
                 )
                 return None
 
-            await emit_context_compaction(
-                on_compaction,
+            await events.emit(
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="succeeded",

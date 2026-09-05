@@ -1,3 +1,7 @@
+import { decodeNotification, isCompactionPhase, isRecoveryState } from "../../packages/client-events/notifications"
+import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../packages/client-events/notifications"
+export type { ContextCompaction, RecoveryState, RecoveryStatus } from "../../packages/client-events/notifications"
+
 export type ConnectionStatus =
   | "starting"
   | "connecting"
@@ -76,21 +80,6 @@ export interface RuntimeControls {
   canUseFullAccess: boolean
 }
 
-export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed"
-
-export interface RecoveryState {
-  status: RecoveryStatus
-  recovery_id: string
-  reason?: string
-  attempts?: number
-  can_continue?: boolean
-}
-
-export interface ContextCompaction {
-  id: string
-  phase: "started" | "succeeded" | "failed" | "cancelled"
-}
-
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -156,13 +145,7 @@ export type InboundEvent =
       turn_id?: string
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
-  | ({ event: "recovery_state"; chat_id: string } & RecoveryState)
-  | {
-      event: "context_compaction"
-      chat_id: string
-      compaction_id: string
-      phase: ContextCompaction["phase"]
-    }
+  | NotificationEvent
   | {
       event: "session_updated"
       chat_id: string
@@ -382,10 +365,6 @@ function optional(value: unknown, type: "boolean" | "number" | "string"): boolea
   return value === undefined || typeof value === type
 }
 
-function isCompactionPhase(value: unknown): value is ContextCompaction["phase"] {
-  return value === "started" || value === "succeeded" || value === "failed" || value === "cancelled"
-}
-
 function isToolEvent(value: unknown): value is ToolProgressEvent {
   if (!isRecord(value)) return false
   return optional(value.version, "number")
@@ -454,15 +433,6 @@ function isWorkspaceScope(value: unknown): value is WorkspaceScopePayload {
     && (value.access_mode === "restricted" || value.access_mode === "full")
     && optional(value.project_name, "string")
     && optional(value.restrict_to_workspace, "boolean")
-}
-
-function isRecoveryState(value: unknown): value is RecoveryState {
-  return isRecord(value)
-    && ["resuming", "awaiting_user", "recovered", "failed"].includes(String(value.status))
-    && typeof value.recovery_id === "string"
-    && optional(value.reason, "string")
-    && optional(value.attempts, "number")
-    && optional(value.can_continue, "boolean")
 }
 
 interface WebUIResponseEvent {
@@ -560,13 +530,7 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && !isRecord(record.goal_state)) return null
-  if (name === "recovery_state" && !isRecoveryState(record)) return null
-  if (
-    name === "context_compaction"
-    && (typeof record.compaction_id !== "string"
-      || !record.compaction_id
-      || !isCompactionPhase(record.phase))
-  ) return null
+  if (decodeNotification(record) === null) return null
   if (
     name === "session_updated"
     && (!optional(record.scope, "string")

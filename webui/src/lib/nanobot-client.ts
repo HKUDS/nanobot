@@ -1,3 +1,4 @@
+import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
   ConnectionStatus,
   InboundEvent,
@@ -1072,6 +1073,7 @@ export class NanobotClient {
     let parsed: InboundEvent;
     try {
       parsed = JSON.parse(typeof ev.data === "string" ? ev.data : "") as InboundEvent;
+      if (decodeNotification(parsed) === null) return;
     } catch {
       if (wsInboundDebugEnabled()) {
         const raw = typeof ev.data === "string" ? ev.data : String(ev.data);

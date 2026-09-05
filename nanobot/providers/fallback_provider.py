@@ -185,6 +185,7 @@ class FallbackProvider(LLMProvider):
             conversation_state=provider_context.conversation_state,
             context_window_tokens=context_window_tokens,
             session_id=provider_context.session_id,
+            events=provider_context.events,
         )
 
     def _primary_available(self) -> bool:
@@ -548,6 +549,7 @@ class FallbackProvider(LLMProvider):
                     conversation_state=state,
                     context_window_tokens=context_window_tokens,
                     session_id=provider_context.session_id,
+                    events=provider_context.events,
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)

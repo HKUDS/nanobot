@@ -5,6 +5,7 @@ COPY webui/package.json webui/package-lock.json ./webui/
 WORKDIR /app/webui
 RUN npm ci
 COPY webui/ ./
+COPY packages/client-events/ /app/packages/client-events/
 RUN mkdir -p /app/nanobot/web && npm run build
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim

@@ -12,7 +12,6 @@ from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
-    RecoveryStateEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -29,9 +28,8 @@ from nanobot.webui.metadata import (
 from nanobot.webui.outbound_wire import (
     WebUIWirePayload,
     WebUIWirePersistence,
-    encode_context_compaction,
-    encode_recovery_state,
     encode_turn_end,
+    project_notification,
 )
 from nanobot.webui.session_identity import webui_session_key
 from nanobot.webui.session_projection import WebUISessionProjection
@@ -182,21 +180,17 @@ class WebUIOutboundProjector:
                     provenance=event.provenance,
                 )
             return
-        if isinstance(event, RecoveryStateEvent):
-            if conns:
-                await self._transport.send_payload(
-                    msg.chat_id,
-                    encode_recovery_state(msg.chat_id, event),
-                    persistence="transient",
+        notification = project_notification(msg.chat_id, event)
+        if notification is not None:
+            if conns or notification.deliver_offline:
+                kwargs: dict[str, Any] = (
+                    {"metadata": msg.metadata} if notification.attach_turn_metadata else {}
                 )
-            return
-        if isinstance(event, ContextCompactionEvent):
-            await self._transport.send_payload(
-                msg.chat_id,
-                encode_context_compaction(msg.chat_id, event),
-                persistence="transient" if event.phase == "started" else "turn_activity",
-                metadata=msg.metadata,
-            )
+                await self._transport.send_payload(
+                    msg.chat_id, notification.payload,
+                    persistence=notification.persistence,
+                    **kwargs,
+                )
             return
         if isinstance(event, GoalStateSyncEvent):
             if conns:

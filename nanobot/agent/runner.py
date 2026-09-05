@@ -27,7 +27,7 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.bus.outbound_events import ContextCompactionCallback
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.llm_usage.context import (
     LLMUsageSource,
     bind_llm_usage_source,
@@ -60,7 +60,6 @@ from nanobot.utils.runtime import (
 )
 
 ContinuationCallback = Callable[[], str | None]
-RetryWaitCallback = Callable[[str], Awaitable[None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[..., Awaitable[Iterable[Any] | None]]
 
@@ -105,7 +104,6 @@ class AgentRunSpec:
     workspace: Path | None = None
     session_key: str | None = None
     provider_retry_mode: str = "standard"
-    retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
     consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
@@ -116,7 +114,7 @@ class AgentRunSpec:
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
-    compaction_callback: ContextCompactionCallback | None = None
+    events: EventSink = NO_EVENTS
 
 
 @dataclass(slots=True)
@@ -431,7 +429,7 @@ class AgentRunner:
             config=governance_config,
             conversation=conversation_state,
             compaction=compaction,
-            compaction_callback=spec.compaction_callback,
+            events=spec.events,
         )
 
         for iteration in range(spec.max_iterations):
@@ -853,7 +851,6 @@ class AgentRunner:
             "tools": tools,
             "model": spec.runtime.model,
             "retry_mode": spec.provider_retry_mode,
-            "on_retry_wait": spec.retry_wait_callback,
         }
         generation = spec.runtime.generation
         kwargs["temperature"] = generation.temperature
