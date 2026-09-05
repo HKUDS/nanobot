@@ -1460,6 +1460,13 @@ Older configs may still contain a `label` inside a preset. It is accepted when l
 | `temperature` | Sampling temperature. |
 | `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
 
+The runner derives its input token budget from `contextWindowTokens - maxTokens - 1024`,
+reserving output space and a safety margin. Requests that reach this budget trigger
+context fitting or history compaction; requests that still cannot fit are rejected.
+
+Older configs may contain `agents.defaults.contextBlockLimit` (or `context_block_limit`).
+This override is ignored on load and omitted on save; these configs now use the derived budget.
+
 `default` is reserved and always means the implicit preset built from direct `agents.defaults.*` fields; do not define `modelPresets.default`. Use `/model default` to switch back to those direct fields in an existing config.
 
 Set `agents.defaults.modelPreset` to choose the preset followed by sessions that have no saved model selection. When `modelPreset` is `null` or omitted, such sessions follow the implicit `default` preset from direct `agents.defaults.*` fields. `/model <preset>` saves an override in the current session, so its future turns keep that preset across process restarts while other sessions remain unchanged. The command does not write the selection back to `config.json`.
