@@ -3,6 +3,7 @@ import os
 import socket
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,18 @@ def test_macos_discovery_uses_private_versioned_descriptor(monkeypatch, tmp_path
     assert discover_desktop_target() == DesktopTarget(instance_id, "unix", address)
 
 
+def test_relative_desktop_root_matches_absolute_advertised_address(monkeypatch, tmp_path):
+    instance_id = "0b47107a-cd31-4711-b1ca-3b53dcedf90a"
+    terminal = tmp_path / "terminal"
+    address = str(terminal / "connect-v1.sock")
+    _write_descriptor(terminal, instance_id=instance_id, transport="unix", address=address)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(desktop_target.sys, "platform", "darwin")
+    monkeypatch.setenv("NANOBOT_DESKTOP_ROOT", ".")
+    assert discover_desktop_target() == DesktopTarget(instance_id, "unix", address)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory permissions")
 def test_discovery_rejects_non_private_directory(monkeypatch, tmp_path: Path) -> None:
     instance_id = "0b47107a-cd31-4711-b1ca-3b53dcedf90a"
     terminal = tmp_path / "terminal"
@@ -98,11 +111,13 @@ def test_unix_request_revalidates_instance_identity() -> None:
         server.bind(str(address))
         address.chmod(0o600)
         server.listen(1)
+        server.settimeout(2)
         received: list[dict[str, object]] = []
 
         def serve() -> None:
             client, _ = server.accept()
             with client:
+                client.settimeout(2)
                 request = client.makefile("rb").readline()
                 received.append(json.loads(request))
                 client.sendall(
@@ -273,3 +288,117 @@ def test_disconnect_after_desktop_selection_never_falls_back(monkeypatch, capsys
     assert dispatch_bare_desktop_target(["webui"]) == 3
     assert calls == 2
     assert "No backend was started" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("args", [[], ["webui"]])
+@pytest.mark.parametrize("state", ["busy", "unavailable", "offline", "untrusted"])
+def test_unready_desktop_preserves_python_before_selection(monkeypatch, capsys, args, state):
+    class Target:
+        def request(self, _operation):
+            if state == "offline":
+                raise DesktopTargetError("stale socket")
+            return DesktopReply(state, frozenset({"webui"}))
+
+    def discover():
+        if state == "untrusted":
+            raise DesktopTargetError("unsafe descriptor")
+        return Target()
+
+    monkeypatch.setattr(desktop_target, "_interactive_shell", lambda: True)
+    monkeypatch.setattr(desktop_target, "discover_desktop_target", discover)
+    monkeypatch.setattr(
+        desktop_target, "_choose_target", lambda _: pytest.fail("not a usable Desktop target")
+    )
+    assert dispatch_bare_desktop_target(args) is None
+    output = capsys.readouterr()
+    assert "Using current Python environment:" in output.out
+    assert "No backend was started" not in output.err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX venv executable symlinks")
+def test_python_label_preserves_venv_executable(monkeypatch, tmp_path):
+    interpreter = tmp_path / "python"
+    interpreter.symlink_to(desktop_target.sys.executable)
+    monkeypatch.setattr(desktop_target.sys, "executable", str(interpreter))
+    assert desktop_target._python_target_label() == str(interpreter)
+
+
+@pytest.mark.parametrize("url", [
+    "http://[::1/#/?bootstrapSecret=private",
+    "http://localhost:invalid/#/?bootstrapSecret=private",
+    "http://localhost:99999/",
+    "http://localhost:0/",
+    "http://evil.example\\@localhost/",
+    "http://localhost\\evil.example/",
+    "http://localhost/\n",
+])
+def test_invalid_browser_urls_are_protocol_errors(url):
+    with pytest.raises(DesktopTargetError):
+        _desktop_webui_url(DesktopReply("ready", frozenset({"webui"}), url))
+
+
+def test_browser_failure_does_not_leak_bootstrap_or_fall_back(monkeypatch, capsys):
+    url = "http://localhost:8765/#/?bootstrapSecret=private"
+
+    class Target:
+        def request(self, _operation):
+            return DesktopReply("ready", frozenset({"webui"}), url)
+
+    def fail_browser(_url):
+        raise OSError(f"Could not open {url}")
+
+    monkeypatch.setattr(desktop_target, "_interactive_shell", lambda: True)
+    monkeypatch.setattr(desktop_target, "discover_desktop_target", Target)
+    monkeypatch.setattr(desktop_target, "_choose_target", lambda _: "desktop")
+    monkeypatch.setattr("nanobot.cli.webui_support._launch_browser", fail_browser)
+    assert dispatch_bare_desktop_target(["webui"]) == 3
+    output = capsys.readouterr()
+    assert "bootstrapSecret" not in output.out + output.err
+    assert "Using current Python" not in output.out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX discovery file types")
+@pytest.mark.parametrize("kind", ["fifo", "symlink"])
+def test_discovery_rejects_special_files_without_blocking(monkeypatch, tmp_path, kind):
+    terminal = tmp_path / "terminal"
+    terminal.mkdir(mode=0o700)
+    descriptor = terminal / "instance-v1.json"
+    if kind == "fifo":
+        os.mkfifo(descriptor, mode=0o600)
+    else:
+        other = tmp_path / "other"
+        other.write_text("{}")
+        descriptor.symlink_to(other)
+    monkeypatch.setattr(desktop_target.sys, "platform", "darwin")
+    monkeypatch.setenv("NANOBOT_DESKTOP_ROOT", str(tmp_path))
+    with pytest.raises(DesktopTargetError):
+        discover_desktop_target()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix socketpair")
+def test_socket_response_timeout_is_bounded():
+    client, server = socket.socketpair()
+    with client, server, pytest.raises(TimeoutError):
+        desktop_target._read_socket_line(client, deadline=time.monotonic() + 0.02)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix socketpair")
+@pytest.mark.parametrize("reply", [b"{}", b"x" * 17])
+def test_socket_rejects_truncated_or_oversized_reply(monkeypatch, reply):
+    monkeypatch.setattr(desktop_target, "_MAX_MESSAGE_BYTES", 16)
+    client, server = socket.socketpair()
+    with client, server:
+        server.sendall(reply)
+        server.shutdown(socket.SHUT_WR)
+        with pytest.raises(DesktopTargetError):
+            desktop_target._read_socket_line(client, deadline=time.monotonic() + 1)
+
+
+@pytest.mark.parametrize("args", [[], ["webui"]])
+def test_completion_never_discovers_desktop(monkeypatch, args):
+    monkeypatch.setenv("_NANOBOT_COMPLETE", "complete_bash")
+    monkeypatch.setattr(desktop_target, "_interactive_shell", lambda: True)
+    monkeypatch.setattr(
+        desktop_target, "discover_desktop_target", lambda: pytest.fail("completion must bypass")
+    )
+    assert dispatch_bare_desktop_target(args) is None

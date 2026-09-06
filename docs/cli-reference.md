@@ -38,15 +38,19 @@ python -m nanobot --version
 The Python package and Nanobot Desktop keep separate runtimes, configuration,
 workspaces, and state. When a running Desktop release publishes its private
 terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui`
-asks which installation to use for that invocation. With no running Desktop
-target, the command reports the current Python executable and continues normally.
+asks which installation to use after authenticating a ready Desktop target.
+If Desktop is absent, busy, unavailable, or cannot be authenticated, the command
+reports the current Python executable and continues normally. A virtual
+environment's executable is shown without resolving it to its base interpreter.
 
 Choosing Desktop for `nanobot webui` opens its already-running browser workbench
 and exits; closing the browser never stops the Desktop gateway. The current
-Desktop discovery protocol does not yet advertise attach-only terminal chat, so
+Python client and Desktop discovery protocol do not yet support attach-only terminal chat, so
 choosing Desktop for bare `nanobot` fails explicitly without starting, restarting,
 or replacing a backend. Use explicit `nanobot agent` for the Python terminal UI
 until the Desktop TUI attachment protocol is available.
+After Desktop is selected, a disconnect or incompatible reply ends that invocation
+with an error; it never silently switches to Python or launches a replacement.
 
 Any explicit subcommand or option—including `nanobot agent`,
 `nanobot webui --no-open`, config/workspace selectors, help, version, completion,

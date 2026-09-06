@@ -11,6 +11,7 @@ import struct
 import sys
 import time
 import uuid
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -61,7 +62,7 @@ class DesktopTarget:
             return _parse_reply(raw, expected_instance_id=self.instance_id)
         except DesktopTargetError:
             raise
-        except Exception as exc:
+        except OSError as exc:
             raise DesktopTargetError("Desktop connection unavailable") from exc
 
 
@@ -89,17 +90,19 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
     environment. An integer means the invocation was handled here and should
     exit with that status.
     """
-    if args not in ([], ["webui"]) or not _interactive_shell():
+    if (
+        args not in ([], ["webui"])
+        or os.environ.get("_NANOBOT_COMPLETE")
+        or not _interactive_shell()
+    ):
         return None
 
     try:
         target = discover_desktop_target()
     except DesktopTargetError:
-        _print_desktop_error(
-            "Nanobot Desktop discovery could not be authenticated. Restart Desktop, "
-            "or run `nanobot agent` to use this Python environment explicitly."
-        )
-        return 3
+        print("Nanobot Desktop discovery could not be authenticated.", file=sys.stderr)
+        _print_python_target()
+        return None
 
     if target is None:
         _print_python_target()
@@ -108,12 +111,17 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
     try:
         status = target.request("status")
     except DesktopTargetError:
-        _print_desktop_error(
-            "Nanobot Desktop was discovered but did not accept an authenticated "
-            "connection. Restart Desktop, or run `nanobot agent` to use this Python "
-            "environment explicitly."
-        )
-        return 3
+        print("Nanobot Desktop is unavailable.", file=sys.stderr)
+        _print_python_target()
+        return None
+
+    if status.state != "ready":
+        print(f"Nanobot Desktop is not ready ({status.state}).", file=sys.stderr)
+        _print_python_target()
+        return None
+
+    if not args:
+        print("Desktop terminal chat attachment is not supported by this Python client yet.")
 
     if _choose_target(status) == "python":
         _print_python_target()
@@ -131,7 +139,7 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
             _print_desktop_error(f"Nanobot Desktop is not ready ({current.state}).")
             return 3
         _print_desktop_error(
-            "This Desktop version does not yet provide attach-only terminal chat. "
+            "This Python client does not yet provide attach-only terminal chat. "
             "Run `nanobot agent` to use this Python environment."
         )
         return 4
@@ -139,12 +147,17 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
     try:
         reply = target.request("webui")
         url = _desktop_webui_url(reply)
-        from nanobot.cli.webui_support import _launch_browser
-
-        opened = _launch_browser(url)
     except DesktopTargetError:
         _print_desktop_error("Nanobot Desktop disconnected or returned an incompatible WebUI.")
         return 3
+    from nanobot.cli.webui_support import _launch_browser
+
+    try:
+        opened = _launch_browser(url)
+    except (OSError, ValueError, webbrowser.Error):
+        # Browser exceptions can embed the credential-bearing URL. Report only
+        # the failure, never the exception, and never fall back to Python.
+        opened = False
     if not opened:
         _print_desktop_error("The default browser could not open Nanobot Desktop.")
         return 3
@@ -160,7 +173,8 @@ def _interactive_shell() -> bool:
 
 
 def _python_target_label() -> str:
-    return str(Path(sys.executable).resolve(strict=False))
+    # Resolving a venv's symlink points at the base interpreter, losing identity.
+    return os.path.abspath(sys.executable)
 
 
 def _print_python_target() -> None:
@@ -193,7 +207,7 @@ def _desktop_terminal_directory() -> Path | None:
     if sys.platform == "darwin":
         root = os.environ.get("NANOBOT_DESKTOP_ROOT", "").strip()
         base = Path(root).expanduser() if root else Path.home() / "Library/Application Support/Nanobot"
-        return base / "terminal"
+        return base.absolute() / "terminal"
     if sys.platform == "win32":
         override = os.environ.get("NANOBOT_DESKTOP_DATA_DIR", "").strip()
         local_app_data = override or os.environ.get("LOCALAPPDATA", "").strip()
@@ -202,7 +216,7 @@ def _desktop_terminal_directory() -> Path | None:
         base = Path(os.path.expandvars(local_app_data)).expanduser()
         if not override:
             base /= "Nanobot"
-        return base / "terminal"
+        return base.absolute() / "terminal"
     return None
 
 
@@ -217,7 +231,10 @@ def _read_private_descriptor(directory: Path, descriptor: Path) -> bytes:
             raise DesktopTargetError("Desktop descriptor could not be read") from exc
     else:
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = (
+            os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
         try:
             directory_fd = os.open(directory, directory_flags)
         except OSError as exc:
@@ -339,16 +356,21 @@ def _desktop_webui_url(reply: DesktopReply) -> str:
         raise DesktopTargetError(f"Desktop is not ready ({reply.state})")
     if "webui" not in reply.capabilities or not reply.webui_url:
         raise DesktopTargetError("Desktop does not advertise WebUI attachment")
-    if reply.webui_url != reply.webui_url.strip() or any(
+    if "\\" in reply.webui_url or reply.webui_url != reply.webui_url.strip() or any(
         ord(character) < 0x20 or ord(character) == 0x7F for character in reply.webui_url
     ):
         raise DesktopTargetError("Desktop returned an invalid WebUI URL")
-    parsed = urlsplit(reply.webui_url)
+    try:
+        parsed = urlsplit(reply.webui_url)
+        port = parsed.port  # Validate invalid/out-of-range ports before browser handoff.
+    except ValueError as exc:
+        raise DesktopTargetError("Desktop returned an invalid WebUI URL") from exc
     if (
         parsed.scheme != "http"
         or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
         or parsed.username is not None
         or parsed.password is not None
+        or port == 0
     ):
         raise DesktopTargetError("Desktop returned a non-loopback WebUI URL")
     return reply.webui_url
@@ -367,13 +389,15 @@ def _unix_exchange(address: str, payload: bytes) -> bytes:
         raise DesktopTargetError("Desktop socket is not private to the current user")
 
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.settimeout(_PROTOCOL_TIMEOUT_S)
+    deadline = time.monotonic() + _PROTOCOL_TIMEOUT_S
     try:
+        client.settimeout(_remaining_seconds(deadline))
         client.connect(address)
         if not _peer_is_current_user(client):
             raise DesktopTargetError("Desktop socket peer identity did not match")
+        client.settimeout(_remaining_seconds(deadline))
         client.sendall(payload)
-        return _read_socket_line(client)
+        return _read_socket_line(client, deadline=deadline)
     finally:
         client.close()
 
@@ -395,14 +419,17 @@ def _peer_is_current_user(client: socket.socket) -> bool:
     return uid == os.geteuid()
 
 
-def _read_socket_line(client: socket.socket) -> bytes:
+def _remaining_seconds(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise DesktopTargetError("Desktop response timed out")
+    return remaining
+
+
+def _read_socket_line(client: socket.socket, *, deadline: float) -> bytes:
     data = bytearray()
-    deadline = time.monotonic() + _PROTOCOL_TIMEOUT_S
     while len(data) <= _MAX_MESSAGE_BYTES:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise DesktopTargetError("Desktop response timed out")
-        client.settimeout(remaining)
+        client.settimeout(_remaining_seconds(deadline))
         chunk = client.recv(min(1024, _MAX_MESSAGE_BYTES + 1 - len(data)))
         if not chunk:
             break
@@ -486,13 +513,16 @@ def _windows_pipe_request(address: str, payload: bytes) -> bytes:
     generic_write = 0x40000000
     open_existing = 3
     file_flag_overlapped = 0x40000000
+    # Permit identity checks, but never let the pipe server impersonate us.
+    security_identification = 0x00010000
+    security_sqos_present = 0x00100000
     error_io_pending = 997
     wait_object_0 = 0
     invalid_handle = ctypes.c_void_p(-1).value
     pipe_name = rf"\\.\pipe\{address}"
     deadline = time.monotonic() + _PROTOCOL_TIMEOUT_S
 
-    remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+    remaining_ms = max(1, int(_remaining_seconds(deadline) * 1000))
     if not kernel32.WaitNamedPipeW(pipe_name, remaining_ms):
         raise DesktopTargetError("Desktop named pipe is unavailable")
     handle = kernel32.CreateFileW(
@@ -501,20 +531,22 @@ def _windows_pipe_request(address: str, payload: bytes) -> bytes:
         0,
         None,
         open_existing,
-        file_flag_overlapped,
+        file_flag_overlapped | security_sqos_present | security_identification,
         None,
     )
     if handle == invalid_handle:
         raise DesktopTargetError("Desktop named pipe could not be opened")
 
     def transfer(function: Any, buffer: Any, size: int) -> int:
+        _remaining_seconds(deadline)
         event = kernel32.CreateEventW(None, True, False, None)
         if not event:
             raise DesktopTargetError("Desktop named pipe event could not be created")
+        overlapped = Overlapped()
+        overlapped.hEvent = event
+        transferred = wintypes.DWORD()
+        pending = False
         try:
-            overlapped = Overlapped()
-            overlapped.hEvent = event
-            transferred = wintypes.DWORD()
             complete = function(
                 handle,
                 buffer,
@@ -525,19 +557,28 @@ def _windows_pipe_request(address: str, payload: bytes) -> bytes:
             if not complete and ctypes.get_last_error() != error_io_pending:
                 raise DesktopTargetError("Desktop named pipe I/O failed")
             if not complete:
-                wait_ms = max(1, int((deadline - time.monotonic()) * 1000))
+                pending = True
+                wait_ms = max(1, int(_remaining_seconds(deadline) * 1000))
                 if kernel32.WaitForSingleObject(event, wait_ms) != wait_object_0:
-                    kernel32.CancelIoEx(handle, ctypes.byref(overlapped))
                     raise DesktopTargetError("Desktop named pipe response timed out")
                 if not kernel32.GetOverlappedResult(
                     handle, ctypes.byref(overlapped), ctypes.byref(transferred), False
                 ):
                     raise DesktopTargetError("Desktop named pipe I/O failed")
+                pending = False
             return int(transferred.value)
         finally:
+            if pending:
+                # CancelIoEx only requests cancellation. The OS still owns these
+                # buffers and OVERLAPPED until completion (also on Ctrl+C).
+                kernel32.CancelIoEx(handle, ctypes.byref(overlapped))
+                kernel32.GetOverlappedResult(
+                    handle, ctypes.byref(overlapped), ctypes.byref(transferred), True
+                )
             kernel32.CloseHandle(event)
 
     try:
+        _verify_windows_pipe_owner(handle, kernel32=kernel32)
         outgoing = ctypes.create_string_buffer(payload)
         if transfer(kernel32.WriteFile, outgoing, len(payload)) != len(payload):
             raise DesktopTargetError("Desktop named pipe write was incomplete")
@@ -558,3 +599,72 @@ def _windows_pipe_request(address: str, payload: bytes) -> bytes:
     finally:
         kernel32.CloseHandle(handle)
     raise DesktopTargetError("Desktop disconnected or returned an oversized reply")
+
+
+def _verify_windows_pipe_owner(handle: Any, *, kernel32: Any) -> None:
+    """Authenticate the opened pipe, not its spoofable discovery filename.
+
+    Match the process token's owner SID, as .NET CurrentUserOnly does (including
+    elevation). No request or bootstrap URL is exchanged before verification.
+    """
+    from ctypes import wintypes
+
+    loader = getattr(ctypes, "WinDLL")
+    advapi32: Any = loader("advapi32", use_last_error=True)
+    pointer = ctypes.POINTER(wintypes.LPVOID)
+    advapi32.GetSecurityInfo.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.DWORD,
+        pointer, pointer, pointer, pointer, pointer,
+    ]
+    advapi32.GetSecurityInfo.restype = wintypes.DWORD
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.EqualSid.argtypes = [wintypes.LPVOID, wintypes.LPVOID]
+    advapi32.EqualSid.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.LocalFree.argtypes = [wintypes.LPVOID]
+    kernel32.LocalFree.restype = wintypes.LPVOID
+
+    owner = wintypes.LPVOID()
+    security_descriptor = wintypes.LPVOID()
+    token = wintypes.HANDLE()
+    se_kernel_object = 6
+    owner_security_information = 1
+    token_query = 0x0008
+    token_owner = 4
+    try:
+        if advapi32.GetSecurityInfo(
+            handle, se_kernel_object, owner_security_information,
+            ctypes.byref(owner), None, None, None, ctypes.byref(security_descriptor),
+        ) != 0 or not owner.value:
+            raise DesktopTargetError("Desktop named pipe owner could not be verified")
+        if not advapi32.OpenProcessToken(
+            kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)
+        ):
+            raise DesktopTargetError("Current Windows user could not be verified")
+        required = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, token_owner, None, 0, ctypes.byref(required))
+        if not 0 < required.value <= 65536:
+            raise DesktopTargetError("Current Windows user could not be verified")
+        owner_info = ctypes.create_string_buffer(required.value)
+        if not advapi32.GetTokenInformation(
+            token, token_owner, owner_info, len(owner_info), ctypes.byref(required)
+        ):
+            raise DesktopTargetError("Current Windows user could not be verified")
+        # TOKEN_OWNER contains one PSID backed by this token-information buffer.
+        current_owner = ctypes.cast(owner_info, pointer).contents
+        if not current_owner.value or not advapi32.EqualSid(owner, current_owner):
+            raise DesktopTargetError("Desktop named pipe owner is not the current user")
+    finally:
+        if token.value:
+            kernel32.CloseHandle(token)
+        if security_descriptor.value:
+            kernel32.LocalFree(security_descriptor)
