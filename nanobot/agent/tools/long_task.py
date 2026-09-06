@@ -70,7 +70,7 @@ class _GoalToolsMixin:
         key = request_ctx.session_key
         if not key:
             return None
-        return await session_io.get_or_create(self._sessions, key)
+        return await session_io.call(self._sessions.get_or_create, key)
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
@@ -94,7 +94,7 @@ class _GoalToolsMixin:
             if reset_continuation:
                 reset_goal_continuation_rounds(sess.metadata)
             try:
-                await session_io.save(self._sessions, sess)
+                await session_io.call(self._sessions.save, sess)
             except BaseException:
                 sess.metadata.clear()
                 sess.metadata.update(previous_metadata)
@@ -193,7 +193,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     ) -> RuntimeContextBlock | None:
         if not request.session_key:
             return None
-        session = await session_io.get_or_create(self._sessions, request.session_key)
+        session = await session_io.call(self._sessions.get_or_create, request.session_key)
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(session.metadata)
         if not goal_start_requested and not goal_active:
