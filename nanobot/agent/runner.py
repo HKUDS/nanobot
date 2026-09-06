@@ -41,6 +41,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.session.summary import SessionSummaryCheckpoint
 from nanobot.utils.helpers import (
     build_assistant_message,
@@ -1010,7 +1011,7 @@ class AgentRunner:
         try:
             response = (
                 await coro if outer_timeout_s is None
-                else await asyncio.wait_for(coro, timeout=outer_timeout_s)
+                else await self._await_provider_request(spec, coro, outer_timeout_s)
             )
         except asyncio.CancelledError:
             _pause_generation()
@@ -1270,7 +1271,7 @@ class AgentRunner:
             response = (
                 await coro
                 if timeout_s is None
-                else await asyncio.wait_for(coro, timeout=timeout_s)
+                else await self._await_provider_request(spec, coro, timeout_s)
             )
         except asyncio.TimeoutError:
             response = LLMResponse(
@@ -1285,6 +1286,15 @@ class AgentRunner:
         )
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
+
+    @staticmethod
+    async def _await_provider_request(
+        spec: AgentRunSpec, request: Awaitable[LLMResponse], timeout_s: float,
+    ) -> LLMResponse:
+        provider = spec.runtime.provider
+        if isinstance(provider, FallbackProvider):
+            return await provider.run_with_timeout(request, timeout_s)
+        return await asyncio.wait_for(request, timeout=timeout_s)
 
     @staticmethod
     def _resolve_llm_timeout_s(spec: AgentRunSpec) -> float | None:

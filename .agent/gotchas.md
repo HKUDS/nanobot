@@ -38,3 +38,13 @@ Built-in skills live in `nanobot/skills/` (markdown + YAML frontmatter format). 
 ## Atomic Session Writes
 
 `agent/memory.py` writes `history.jsonl` atomically (temp file + fsync + rename + directory fsync). This guarantees durability across crashes. Do not replace this with a plain `open(..., "w")` write.
+
+## Model Request Deadlines and Fallback
+
+Runner wall-clock deadlines apply to each configured fallback candidate, including its
+internal retry work. A fallback chain is additionally bounded by the deadline times
+the number of configured models, so persistent retries cannot hold a session forever.
+Do not wrap the whole chain in a single candidate deadline: that cancels the primary
+before its timeout can advance to a fallback. The timeout scope must remain local to
+the request because a provider instance can serve concurrent turns. Explicit user
+cancellation still stops the chain; disabling the runner timeout still opts out.

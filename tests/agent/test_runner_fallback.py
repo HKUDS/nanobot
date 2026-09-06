@@ -1804,3 +1804,142 @@ class TestGenerationForwarded:
         )
         assert fb.generation.temperature == 0.5
         assert fb.generation.max_tokens == 1024
+
+
+class _HangingProvider(_FakeProvider):
+    async def chat(self, **kwargs: Any) -> LLMResponse:
+        self.chat_calls.append(dict(kwargs))
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+@pytest.mark.asyncio
+async def test_runner_deadline_allows_configured_fallback() -> None:
+    from agent.runner_helpers import make_run_spec
+    from nanobot.agent.runner import AgentRunner
+
+    primary = _HangingProvider()
+    fallback = _FakeProvider(response=_make_response("recovered"))
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    result = await AgentRunner().run(make_run_spec(
+        provider, model="primary", initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools, max_iterations=1, max_tool_result_chars=16000, llm_timeout_s=0.02,
+    ))
+    assert result.final_content == "recovered"
+    assert result.error is None
+    assert len(primary.chat_calls) == len(fallback.chat_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_deadline_bounds_all_hanging_candidates() -> None:
+    primary = _HangingProvider()
+    fallback = _HangingProvider()
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    result = await asyncio.wait_for(provider.run_with_timeout(
+        provider.chat_with_retry(messages=[], model="primary"), 0.02,
+    ), timeout=1)
+    assert result.error_kind == "timeout"
+    assert result.content == "Error calling LLM: timed out after 0.04s"
+    assert len(primary.chat_calls) == len(fallback.chat_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_deadline_does_not_convert_user_cancellation_to_failover() -> None:
+    primary = _HangingProvider()
+    fallback = _FakeProvider()
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    task = asyncio.create_task(provider.run_with_timeout(
+        provider.chat_with_retry(messages=[], model="primary"), 1,
+    ))
+    while not primary.chat_calls:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert fallback.chat_calls == []
+    assert provider._request_timeout.get() is None
+
+
+@pytest.mark.asyncio
+async def test_candidate_deadline_recovers_stream_after_partial_output() -> None:
+    class PartialProvider(_FakeProvider):
+        async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+            await kwargs["on_content_delta"]("partial")
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    primary = PartialProvider()
+    fallback = _FakeProvider(response=_make_response("recovered"))
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    events: list[str] = []
+
+    async def delta(text: str) -> None:
+        events.append(text)
+
+    async def recover() -> None:
+        events.append("recover")
+
+    result = await provider.run_with_timeout(provider.chat_stream_with_retry(
+        messages=[], on_content_delta=delta, on_stream_recover=recover,
+    ), 0.02)
+    assert result.content == "recovered"
+    assert events == ["partial", "recover", "recovered"]
+
+
+@pytest.mark.asyncio
+async def test_candidate_deadlines_are_isolated_between_concurrent_requests() -> None:
+    release = asyncio.Event()
+
+    class WaitingProvider(_FakeProvider):
+        async def chat(self, **kwargs: Any) -> LLMResponse:
+            self.chat_calls.append(kwargs)
+            await release.wait()
+            return _make_response("primary")
+
+    primary = WaitingProvider()
+    fallback = _FakeProvider(response=_make_response("backup"))
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    long_request = asyncio.create_task(provider.run_with_timeout(
+        provider.chat_with_retry(messages=[]), 1,
+    ))
+    short_request = asyncio.create_task(provider.run_with_timeout(
+        provider.chat_with_retry(messages=[]), 0.02,
+    ))
+    assert (await short_request).content == "backup"
+    assert not long_request.done()
+    release.set()
+    assert (await long_request).content == "primary"
+    assert provider._request_timeout.get() is None
+
+
+@pytest.mark.asyncio
+async def test_finalization_request_can_fail_over_after_deadline() -> None:
+    from agent.runner_helpers import make_run_spec
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.providers.base import ToolCallRequest
+
+    class ToolThenHang(_HangingProvider):
+        async def chat(self, **kwargs: Any) -> LLMResponse:
+            if not self.chat_calls:
+                self.chat_calls.append(kwargs)
+                return LLMResponse(content="", tool_calls=[
+                    ToolCallRequest(id="probe", name="probe", arguments={}),
+                ], finish_reason="tool_calls")
+            return await super().chat(**kwargs)
+
+    primary = ToolThenHang()
+    fallback = _FakeProvider(response=_make_response("finalized"))
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="done")
+    result = await AgentRunner().run(make_run_spec(
+        provider, model="primary", initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools, max_iterations=1, max_tool_result_chars=16000, llm_timeout_s=0.02,
+        max_iterations_message="budget reached",
+    ))
+    assert result.final_content == "finalized"
+    assert len(fallback.chat_calls) == 1
+    assert fallback.chat_calls[0]["tools"] is None

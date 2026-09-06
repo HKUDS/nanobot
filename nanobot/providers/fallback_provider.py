@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
@@ -138,6 +139,9 @@ class FallbackProvider(LLMProvider):
         self._fallback_model_observer = fallback_model_observer
         self._primary_context_window_tokens = primary_context_window_tokens
         self._has_fallbacks = bool(fallback_presets)
+        self._request_timeout: ContextVar[float | None] = ContextVar(
+            "fallback_request_timeout", default=None
+        )
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
 
@@ -198,6 +202,29 @@ class FallbackProvider(LLMProvider):
             # Half-open: allow one probe attempt.
             return True
         return False
+
+    async def run_with_timeout(
+        self, request: Awaitable[LLMResponse], timeout_s: float,
+    ) -> LLMResponse:
+        """Give each candidate a deadline without cancelling failover itself.
+
+        The outer bound also limits persistent retries of the whole chain.
+        Context-local state keeps concurrent requests on this provider isolated.
+        """
+        token = self._request_timeout.set(timeout_s)
+        chain_timeout_s = timeout_s * (1 + len(self._fallback_presets))
+        try:
+            return await asyncio.wait_for(
+                request, timeout=chain_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=f"Error calling LLM: timed out after {chain_timeout_s:g}s",
+                finish_reason="error",
+                error_kind="timeout",
+            )
+        finally:
+            self._request_timeout.reset(token)
 
     async def chat(self, **kwargs: Any) -> LLMResponse:
         if not self._has_fallbacks:
@@ -459,7 +486,7 @@ class FallbackProvider(LLMProvider):
         if self._primary_available():
             primary_was_attempted = True
             response, primary_exception = await self._call_provider(
-                call, self._primary, kwargs
+                call, self._primary, kwargs, timeout_s=self._request_timeout.get()
             )
             if primary_exception is not None:
                 logger.warning(
@@ -585,7 +612,7 @@ class FallbackProvider(LLMProvider):
             else:
                 fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
             fallback_response, fallback_exception = await self._call_provider(
-                call, fallback_provider, fallback_kwargs
+                call, fallback_provider, fallback_kwargs, timeout_s=self._request_timeout.get()
             )
             if fallback_exception is not None:
                 logger.warning(
@@ -645,10 +672,17 @@ class FallbackProvider(LLMProvider):
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
         provider: LLMProvider,
         kwargs: dict[str, Any],
+        *,
+        timeout_s: float | None = None,
     ) -> tuple[LLMResponse, Exception | None]:
         """Turn provider exceptions into error responses without swallowing cancellation."""
         try:
-            return await call(provider, kwargs), None
+            request = call(provider, kwargs)
+            response = (
+                await request if timeout_s is None
+                else await asyncio.wait_for(request, timeout=timeout_s)
+            )
+            return response, None
         except asyncio.CancelledError:
             raise
         except Exception as exc:
