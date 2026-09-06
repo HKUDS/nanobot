@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from collections.abc import Awaitable, Callable, Generator
@@ -210,12 +211,12 @@ async def maybe_generate_webui_title(
     so pass ``target_session_key`` to project the title onto that per-chat
     session instead of storing it on the shared one.
     """
-    routed_session = await session_io.get_or_create(sessions, session_key)
+    routed_session = await session_io.call(sessions.get_or_create, session_key)
     target_is_routed = target_session_key is None or target_session_key == session_key
     if target_is_routed or target_session_key is None:
         target_session = routed_session
     else:
-        target_session = await session_io.get_or_create(sessions, target_session_key)
+        target_session = await session_io.call(sessions.get_or_create, target_session_key)
     if (
         routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
         and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
@@ -229,7 +230,7 @@ async def maybe_generate_webui_title(
         if cleaned_current_title:
             if cleaned_current_title != current_title:
                 target_session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                await session_io.save(sessions, target_session)
+                await session_io.call(sessions.save, target_session)
             return False
         target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
@@ -288,7 +289,7 @@ async def maybe_generate_webui_title(
         )
         return False
     target_session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    await session_io.save(sessions, target_session)
+    await session_io.call(sessions.save, target_session)
     return True
 
 
@@ -633,7 +634,7 @@ class WebuiTurnCoordinator:
             or not is_webui_session_key(session_key)
         ):
             return
-        persisted = await session_io.read_session_metadata(self.sessions, session_key)
+        persisted = await asyncio.to_thread(self.sessions.read_session_metadata, session_key)
         metadata_value: object = persisted.get("metadata") if persisted is not None else None
         metadata = (
             cast(dict[str, Any], metadata_value)
@@ -759,7 +760,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = await session_io.get_or_create(self.sessions, session_key)
+        session = await session_io.call(self.sessions.get_or_create, session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

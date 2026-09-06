@@ -268,7 +268,7 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
-    session = ctx.session or await session_io.get_or_create(loop.sessions, ctx.key)
+    session = ctx.session or await session_io.call(loop.sessions.get_or_create, ctx.key)
     runtime = ctx.runtime or await loop.runtime_for_session_async(session)
     ctx_est = 0
     with suppress(Exception):
@@ -317,7 +317,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     loop.discard_session_file_state(ctx.key)
-    session = ctx.session or await session_io.get_or_create(loop.sessions, ctx.key)
+    session = ctx.session or await session_io.call(loop.sessions.get_or_create, ctx.key)
     snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
@@ -331,7 +331,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         )
     async def reset_and_schedule_archive() -> None:
         session.clear()
-        await session_io.save(loop.sessions, session)
+        await session_io.call(loop.sessions.save, session)
         await session_io.call(loop.sessions.invalidate, session.key)
         if archive_snapshot is not None and runtime is not None:
             loop.schedule_background(
@@ -414,7 +414,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
     if not args:
-        session = ctx.session or await session_io.get_or_create(loop.sessions, ctx.key)
+        session = ctx.session or await session_io.call(loop.sessions.get_or_create, ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
@@ -885,7 +885,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
                 metadata=dict(ctx.msg.metadata or {}),
             )
 
-    session = ctx.session or await session_io.get_or_create(ctx.loop.sessions, ctx.key)
+    session = ctx.session or await session_io.call(ctx.loop.sessions.get_or_create, ctx.key)
     history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
