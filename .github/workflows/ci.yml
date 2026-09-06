@@ -146,19 +146,21 @@ jobs:
             os: ubuntu-latest
             python-version: "3.11"
             coverage: false
-            pytest_args: "-n auto --dist loadfile"
+            # CLI command tests assert exact Rich terminal output; run them
+            # serially below so xdist cannot change terminal-width rendering.
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py"
           - name: latest, 3.14 + coverage
             os: ubuntu-latest
             python-version: "3.14"
             coverage: true
-            pytest_args: "-n auto --dist loadfile"
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py"
           - name: Windows, 3.14
             os: windows-latest
             python-version: "3.14"
             coverage: false
             # Real PowerShell/process-tree tests run serially below. Keep
             # them out of xdist so workers never share a Windows console.
-            pytest_args: "-n 2 --dist loadfile --ignore=tests/tools/test_exec_platform.py"
+            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -202,11 +204,26 @@ jobs:
           --cov=nanobot --cov-report=term-missing:skip-covered
           --durations=25 --durations-min=1.0
 
+      - name: Run serial CLI command tests with coverage
+        if: matrix.coverage
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/cli/test_commands.py
+          --cov=nanobot --cov-append --cov-report=term-missing:skip-covered
+          --durations=25 --durations-min=1.0
+
       - name: Run compatibility tests
         if: ${{ !matrix.coverage }}
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          --durations=25 --durations-min=1.0
+
+      - name: Run serial CLI command compatibility tests
+        if: ${{ !matrix.coverage }}
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/cli/test_commands.py
           --durations=25 --durations-min=1.0
 
       - name: Run Windows process compatibility tests
