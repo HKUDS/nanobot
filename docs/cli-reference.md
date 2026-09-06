@@ -51,6 +51,9 @@ or replacing a backend. Use explicit `nanobot agent` for the Python terminal UI
 until the Desktop TUI attachment protocol is available.
 After Desktop is selected, a disconnect or incompatible reply ends that invocation
 with an error; it never silently switches to Python or launches a replacement.
+On macOS, browser URLs are delivered through native Launch Services rather than
+command-line arguments. A failed native handoff does not fall back to `open` or
+a `BROWSER` command, keeping bootstrap credentials out of launcher arguments.
 
 Any explicit subcommand or option—including `nanobot agent`,
 `nanobot webui --no-open`, config/workspace selectors, help, version, completion,
