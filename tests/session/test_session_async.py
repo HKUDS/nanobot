@@ -54,10 +54,10 @@ async def test_concurrent_first_async_gets_share_cached_identity(
         assert release_load.wait(timeout=1)
 
     monkeypatch.setattr(manager, "_load", delayed_load)
-    first_task = asyncio.create_task(session_io.get_or_create(manager, key))
+    first_task = asyncio.create_task(session_io.call(manager.get_or_create, key))
     try:
         assert await asyncio.to_thread(load_started.wait, 1)
-        second_task = asyncio.create_task(session_io.get_or_create(manager, key))
+        second_task = asyncio.create_task(session_io.call(manager.get_or_create, key))
         await asyncio.sleep(0)
         assert not second_task.done()
     finally:
@@ -68,7 +68,7 @@ async def test_concurrent_first_async_gets_share_cached_identity(
     assert load_calls == 1
     assert first is second
     assert manager.get_cached(key) is first
-    assert await session_io.get_or_create(manager, key) is first
+    assert await session_io.call(manager.get_or_create, key) is first
 
 
 async def test_cancelled_load_settles_before_next_load(
@@ -91,10 +91,10 @@ async def test_cancelled_load_settles_before_next_load(
         return loaded
 
     monkeypatch.setattr(manager, "_load", blocked_load)
-    cancelled = asyncio.create_task(session_io.get_or_create(manager, key))
+    cancelled = asyncio.create_task(session_io.call(manager.get_or_create, key))
     assert await asyncio.to_thread(started.wait, 1)
     cancelled.cancel()
-    follower = asyncio.create_task(session_io.get_or_create(manager, key))
+    follower = asyncio.create_task(session_io.call(manager.get_or_create, key))
     await asyncio.sleep(0)
     assert not cancelled.done()
     assert not follower.done()
@@ -129,9 +129,9 @@ async def test_async_methods_offload_third_party_store_and_keep_contract(
     store.load.side_effect = load
     store.save.side_effect = save
 
-    assert await session_io.get_or_create(manager, session.key) is session
-    await session_io.save(manager, session, fsync=True)
-    await session_io.save_runtime_checkpoint(manager, session)
+    assert await session_io.call(manager.get_or_create, session.key) is session
+    await session_io.call(manager.save, session, fsync=True)
+    await session_io.call(manager.save_runtime_checkpoint, session)
 
     store.load.assert_called_once_with(session.key)
     assert store.save.call_args_list[0].kwargs == {"fsync": True}
@@ -160,7 +160,7 @@ async def test_save_async_cancellation_settles_disk_and_cache(
         original_save(target, fsync=fsync)
 
     monkeypatch.setattr(manager._store, "save", blocked_save)
-    task = asyncio.create_task(session_io.save(manager, session))
+    task = asyncio.create_task(session_io.call(manager.save, session))
 
     await _cancel_blocked_mutation(task, started=started, release=release)
 
@@ -197,7 +197,7 @@ async def test_checkpoint_async_cancellation_settles_disk_and_cache(
         "save_runtime_checkpoint",
         blocked_checkpoint,
     )
-    task = asyncio.create_task(session_io.save_runtime_checkpoint(manager, session))
+    task = asyncio.create_task(session_io.call(manager.save_runtime_checkpoint, session))
 
     await _cancel_blocked_mutation(task, started=started, release=release)
 
@@ -230,10 +230,10 @@ async def test_same_session_mutations_run_in_submission_order(
 
     monkeypatch.setattr(manager._store, "save", blocked_save)
     monkeypatch.setattr(manager._jsonl_store, "save_runtime_checkpoint", observed_checkpoint)
-    save_task = asyncio.create_task(session_io.save(manager, session))
+    save_task = asyncio.create_task(session_io.call(manager.save, session))
     assert await asyncio.to_thread(save_started.wait, 1)
     checkpoint_task = asyncio.create_task(
-        session_io.save_runtime_checkpoint(manager, session)
+        session_io.call(manager.save_runtime_checkpoint, session)
     )
     await asyncio.sleep(0.01)
     assert not checkpoint_started.is_set()
@@ -254,14 +254,14 @@ async def test_session_lock_contention_keeps_event_loop_responsive(
     assert lock.timeout == 5
     blocker = FileLock(lock.lock_file, timeout=1)
     blocker.acquire()
-    save_task = asyncio.create_task(session_io.save(manager, first))
+    save_task = asyncio.create_task(session_io.call(manager.save, first))
     ticks = 0
     try:
         for _ in range(3):
             await asyncio.sleep(0.01)
             ticks += 1
         assert not save_task.done()
-        assert await session_io.get_or_create(manager, second.key) is second
+        assert await session_io.call(manager.get_or_create, second.key) is second
     finally:
         blocker.release()
 
@@ -289,7 +289,7 @@ async def test_local_store_contention_does_not_consume_file_lock_timeout(
     save = None
     try:
         assert await asyncio.to_thread(started.wait, 1)
-        save = asyncio.create_task(session_io.save(manager, session))
+        save = asyncio.create_task(session_io.call(manager.save, session))
         await asyncio.sleep(0.2)
         assert not save.done(), "local work must queue instead of timing out on its own store"
     finally:
@@ -312,7 +312,7 @@ async def test_external_file_lock_timeout_still_propagates(
     session.add_message("user", "not saved")
     with FileLock(str(manager.sessions_dir / ".session-files.lock")):
         with pytest.raises(Timeout):
-            await session_io.save(manager, session)
+            await session_io.call(manager.save, session)
     assert manager.read_session_file(session.key) is None
 
 
