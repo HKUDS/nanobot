@@ -44,11 +44,11 @@ reports the current Python executable and continues normally. A virtual
 environment's executable is shown without resolving it to its base interpreter.
 
 Choosing Desktop for `nanobot webui` opens its already-running browser workbench
-and exits; closing the browser never stops the Desktop gateway. The current
-Python client and Desktop discovery protocol do not yet support attach-only terminal chat, so
-choosing Desktop for bare `nanobot` fails explicitly without starting, restarting,
-or replacing a backend. Use explicit `nanobot agent` for the Python terminal UI
-until the Desktop TUI attachment protocol is available.
+and exits; closing the browser never stops the Desktop gateway. Choosing Desktop
+for bare `nanobot` opens the terminal UI against that same running backend when
+the Desktop host, gateway and terminal client support terminal protocol 1. Older
+versions fail explicitly with update guidance. Use explicit `nanobot agent` for
+the original Python terminal UI.
 After Desktop is selected, a disconnect or incompatible reply ends that invocation
 with an error; it never silently switches to Python or launches a replacement.
 On macOS, browser URLs are delivered through native Launch Services rather than
@@ -76,6 +76,21 @@ Any explicit subcommand or option—including `nanobot agent`,
 and gateway lifecycle commands—keeps its existing Python meaning and never opens
 the Desktop picker. Target choices are not remembered, and Desktop settings are
 not copied into the Python installation.
+
+Desktop terminal credentials are short-lived WebSocket/API tokens obtained through
+the authenticated current-user rendezvous. The TUI receives them through a bounded
+anonymous pipe, not command arguments, environment variables or temporary files.
+Its environment contains only a trusted resolver command and public instance IDs.
+The resolver verifies the selected Desktop and gateway again for every credential
+refresh. The gateway identity is also checked before any WebSocket mutation. This
+mode does not acquire a gateway lifecycle lease: client exit leaves Desktop running,
+and disconnect never automatically reconnects or replays an uncertain task.
+
+Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside
+their existing private runtime; it is not a replacement for the full Python CLI.
+They must ship this engine entrypoint and a matching terminal client together.
+The client cache can be kept inside Desktop's data root without reading or writing
+the separate Python installation's config. No additional system Python is needed.
 
 ## Common Patterns
 

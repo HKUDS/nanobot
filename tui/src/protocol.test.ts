@@ -50,6 +50,72 @@ async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<voi
   if (!predicate()) throw new Error(`condition was not met within ${timeout}ms`)
 }
 
+describe("Desktop attach-only protocol", () => {
+  const gatewayId = "4d7d6bea-6d4b-4da1-975f-3d835c986c50"
+  async function fixture(run: (client: NanobotClient, socket: FakeSocket, statuses: ConnectionStatus[], attempts: () => number) => Promise<void>) {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    let attempts = 0
+    const statuses: ConnectionStatus[] = []
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket { constructor() { super(); socket = this } },
+    })
+    const client = new NanobotClient({
+      expectedGatewayId: gatewayId, reconnect: false, reconnectDelayMs: 1,
+      resolveConnection: async () => {
+        attempts++
+        return { wsUrl: "ws://127.0.0.1:8765/ws", apiUrl: "http://127.0.0.1:8765", apiToken: "fixture" }
+      },
+      onEvent: () => {}, onStatus: (status) => statuses.push(status),
+    })
+    try {
+      client.connect()
+      await waitUntil(() => !!socket)
+      socket!.emit("open")
+      await run(client, socket!, statuses, () => attempts)
+    } finally {
+      client.close()
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  }
+  for (const terminal of [undefined, { protocolVersion: 2, gatewayId }, { protocolVersion: 1, gatewayId: "other" }]) {
+    test(`rejects missing or changed handshake before any mutation: ${JSON.stringify(terminal)}`, async () => {
+      await fixture(async (client, socket, statuses, attempts) => {
+        expect(() => client.newChat()).toThrow("Desktop identity not verified")
+        await expect(client.updateRecovery("continue", "chat", "recovery")).rejects.toThrow("Desktop identity not verified")
+        socket.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "", client_id: "test", terminal }) })
+        await Bun.sleep(20)
+        expect(socket.sent).toHaveLength(0)
+        expect(socket.readyState).toBe(3)
+        expect(statuses.at(-1)).toBe("error")
+        expect(attempts()).toBe(1)
+      })
+    })
+  }
+  test("connects once, never replays a task and never reconnects after a disconnect", async () => {
+    await fixture(async (client, socket, statuses, attempts) => {
+      socket.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "", client_id: "test", terminal: { protocolVersion: 1, gatewayId } }) })
+      expect(socket.sent.map((frame) => JSON.parse(frame).type)).toEqual(["new_chat"])
+      socket.emit("message", { data: JSON.stringify({ event: "attached", chat_id: "desktop-chat" }) })
+      client.send("one task")
+      socket.emit("close")
+      await Bun.sleep(20)
+      expect(attempts()).toBe(1)
+      expect(socket.sent.map((frame) => JSON.parse(frame).type)).toEqual(["new_chat", "message"])
+      expect(() => client.send("another task")).toThrow()
+      expect(statuses.at(-1)).toBe("error")
+    })
+  })
+  test("explicit client exit sends no lifecycle command", async () => {
+    await fixture(async (client, socket) => {
+      client.close()
+      expect(socket.sent).toHaveLength(0)
+      expect(socket.readyState).toBe(3)
+    })
+  })
+})
+
 describe("gateway protocol", () => {
   test("bootstraps fresh websocket and API credentials", async () => {
     const original = globalThis.fetch

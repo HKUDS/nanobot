@@ -187,6 +187,8 @@ type OutboundEvent =
     }
 
 export interface ClientOptions {
+  expectedGatewayId?: string
+  reconnect?: boolean
   url?: string
   resolveConnection?: () => Promise<GatewayConnection>
   checkHealth?: () => Promise<GatewayHealthStatus>
@@ -1057,6 +1059,8 @@ export function sanitizeConnectionFailure(error: unknown): string {
 }
 
 export class NanobotClient {
+  private identityVerified = false
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null
   private socket: WebSocket | null = null
   private chatId = ""
   private workspaceScope?: WorkspaceScopePayload
@@ -1100,6 +1104,7 @@ export class NanobotClient {
   private async open(): Promise<void> {
     if (this.socket || this.opening || this.closedByClient) return
     this.opening = true
+    this.identityVerified = !this.options.expectedGatewayId
     this.nextRetryAt = 0
     this.connectionAttempt += 1
     this.reportConnectionProgress()
@@ -1139,6 +1144,9 @@ export class NanobotClient {
     }
     let opened = false
     this.socket = socket
+    if (this.options.expectedGatewayId) {
+      this.handshakeTimer = setTimeout(() => this.desktopFailure(), 8_000)
+    }
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return
       opened = true
@@ -1157,6 +1165,7 @@ export class NanobotClient {
     })
     socket.addEventListener("error", () => {
       if (this.socket !== socket) return
+      if (this.options.reconnect === false) { this.desktopFailure(); return }
       this.lastFailure = "connection failed"
       this.reportRetryState()
     })
@@ -1168,6 +1177,7 @@ export class NanobotClient {
         this.options.onStatus("closed")
         return
       }
+      if (this.options.reconnect === false) { this.desktopFailure(); return }
       if (opened) {
         this.connectionAttempt = 0
         this.reconnectAttempt = 0
@@ -1180,6 +1190,8 @@ export class NanobotClient {
   }
 
   close(): void {
+    if (this.handshakeTimer) clearTimeout(this.handshakeTimer)
+    this.handshakeTimer = null
     this.closedByClient = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
@@ -1256,6 +1268,9 @@ export class NanobotClient {
     payload: Record<string, unknown> = {},
     timeoutMs = 20_000,
   ): Promise<T> {
+    if (this.options.expectedGatewayId && !this.identityVerified) {
+      return Promise.reject(new Error("Desktop identity not verified"))
+    }
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("gateway connection is not open"))
     }
@@ -1299,10 +1314,21 @@ export class NanobotClient {
     try {
       value = JSON.parse(raw) as unknown
     } catch {
+      if (!this.identityVerified && this.options.expectedGatewayId) { this.desktopFailure(); return }
       this.options.onStatus("error", "gateway sent invalid JSON")
       return
     }
     const response = decodeWebUIResponse(value)
+    if (!this.identityVerified) {
+      if (!isRecord(value) || value.event !== "ready" || !isRecord(value.terminal)
+        || value.terminal.protocolVersion !== 1 || value.terminal.gatewayId !== this.options.expectedGatewayId) {
+        this.desktopFailure()
+        return
+      }
+      this.identityVerified = true
+      if (this.handshakeTimer) clearTimeout(this.handshakeTimer)
+      this.handshakeTimer = null
+    }
     if (response === null) {
       this.options.onStatus("error", "gateway sent an invalid event")
       return
@@ -1356,6 +1382,7 @@ export class NanobotClient {
   }
 
   private async checkHealthAndScheduleReconnect(): Promise<void> {
+    if (this.options.reconnect === false) { this.desktopFailure(); return }
     if (this.options.checkHealth) {
       try {
         this.healthStatus = await this.options.checkHealth()
@@ -1376,6 +1403,11 @@ export class NanobotClient {
         : {}),
       ...(this.healthStatus ? { health: this.healthStatus } : {}),
     }
+  }
+
+  private desktopFailure(): void {
+    this.close()
+    this.options.onStatus("error", "Desktop disconnected or is incompatible; reconnect from the terminal", this.connectionInfo())
   }
 
   private reportConnectionProgress(): void {
@@ -1414,6 +1446,7 @@ export class NanobotClient {
   }
 
   private write(event: OutboundEvent): void {
+    if (this.options.expectedGatewayId && !this.identityVerified) throw new Error("Desktop identity not verified")
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error("gateway connection is not open")
     }

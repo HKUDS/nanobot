@@ -18,7 +18,7 @@ from nanobot.cli.tui_launcher import (
     _initial_tui_chat_id,
     _initial_tui_workspace,
     _resolve_source_tui_command,
-    _resolve_tui_command,
+    resolve_tui_command,
     _websocket_chat_id,
     launch_tui,
 )
@@ -103,7 +103,7 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
             assert wait_for_stop is False
             released.append(True)
 
-    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     def ensure_gateway(*args: object, **kwargs: object) -> SimpleNamespace:
         assert events == ["spawned"]
         assert kwargs["wait_until_ready"] is False
@@ -173,7 +173,7 @@ def test_launcher_terminates_the_tui_when_gateway_start_fails(
     def fail_gateway(*args: object, **kwargs: object) -> None:
         raise RuntimeError("gateway failed")
 
-    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher.subprocess.Popen",
         lambda *args, **kwargs: FakeProcess(),
@@ -227,7 +227,7 @@ def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
             return 0
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
-    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher.subprocess.Popen",
         lambda *args, **kwargs: FakeProcess(),
@@ -286,7 +286,7 @@ def test_launcher_promotes_the_gateway_when_the_tui_detaches(
             events.append("waited")
             return tui_launcher._TUI_DETACH_EXIT_CODE
 
-    monkeypatch.setattr("nanobot.cli.tui_launcher._resolve_tui_command", lambda: ["nanobot-tui"])
+    monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     def popen(command: list[str], *, env: dict[str, str]) -> FakeProcess:
         assert command == ["nanobot-tui"]
         captured.update(env)
@@ -325,7 +325,7 @@ def test_explicit_tui_binary_must_exist(
     missing = tmp_path / "missing"
     monkeypatch.setenv("NANOBOT_TUI_BIN", str(missing))
     with pytest.raises(TuiUnavailableError, match="does not exist"):
-        _resolve_tui_command()
+        resolve_tui_command()
 
 
 def test_windows_arm64_fails_instead_of_using_the_classic_prompt(
@@ -336,7 +336,7 @@ def test_windows_arm64_fails_instead_of_using_the_classic_prompt(
     monkeypatch.setattr("nanobot.cli.tui_launcher.platform.machine", lambda: "ARM64")
 
     with pytest.raises(TuiUnavailableError, match="Windows ARM64"):
-        _resolve_tui_command()
+        resolve_tui_command()
 
 
 def test_source_checkout_does_not_fall_back_to_a_release_tui_without_bun(
@@ -357,7 +357,7 @@ def test_source_checkout_does_not_fall_back_to_a_release_tui_without_bun(
     )
 
     with pytest.raises(TuiUnavailableError, match="source checkout requires Bun"):
-        _resolve_tui_command()
+        resolve_tui_command()
 
 
 def test_source_checkout_requires_project_and_tui_markers(

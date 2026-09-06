@@ -34,6 +34,7 @@ class DesktopReply:
     state: str
     capabilities: frozenset[str]
     webui_url: str | None = None
+    tui: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class DesktopTarget:
     transport: Literal["unix", "namedPipe"]
     address: str
 
-    def request(self, operation: Literal["status", "webui"]) -> DesktopReply:
+    def request(self, operation: Literal["status", "webui", "tui"]) -> DesktopReply:
         """Perform one bounded, side-effect-free Desktop rendezvous request."""
         payload = json.dumps(
             {
@@ -120,9 +121,6 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
         _print_python_target()
         return None
 
-    if not args:
-        print("Desktop terminal chat attachment is not supported by this Python client yet.")
-
     if _choose_target(status) == "python":
         _print_python_target()
         return None
@@ -130,19 +128,13 @@ def dispatch_bare_desktop_target(args: list[str]) -> int | None:
     # Revalidate after selection. A status probe is never treated as authority
     # to reuse stale bootstrap data or silently choose another backend.
     if not args:
+        from nanobot.cli.desktop_tui import launch_desktop_tui
+
         try:
-            current = target.request("status")
+            return launch_desktop_tui(target)
         except DesktopTargetError:
-            _print_desktop_error("Nanobot Desktop disconnected after it was selected.")
+            _print_desktop_error("Desktop terminal attachment is unavailable or incompatible. Update Desktop and nanobot, then try again.")
             return 3
-        if current.state != "ready":
-            _print_desktop_error(f"Nanobot Desktop is not ready ({current.state}).")
-            return 3
-        _print_desktop_error(
-            "This Python client does not yet provide attach-only terminal chat. "
-            "Run `nanobot agent` to use this Python environment."
-        )
-        return 4
 
     try:
         reply = target.request("webui")
@@ -348,7 +340,13 @@ def _parse_reply(raw: bytes, *, expected_instance_id: str) -> DesktopReply:
     if any(not isinstance(item, str) for item in capability_values):
         raise DesktopTargetError("Desktop reply is incompatible")
     capabilities = frozenset(cast(list[str], capability_values))
-    return DesktopReply(state=state_value, capabilities=capabilities, webui_url=webui_url)
+    tui = fields.get("tui")
+    if tui is not None and not isinstance(tui, dict):
+        raise DesktopTargetError("Desktop terminal connection is incompatible")
+    return DesktopReply(
+        state=state_value, capabilities=capabilities, webui_url=webui_url,
+        tui=cast(dict[str, object] | None, tui),
+    )
 
 
 def _desktop_webui_url(reply: DesktopReply) -> str:

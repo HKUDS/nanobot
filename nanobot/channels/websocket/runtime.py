@@ -809,6 +809,9 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"terminal": {
+                            "protocolVersion": 1, "gatewayId": self.gateway.tokens.instance_id,
+                        }} if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,
                 )

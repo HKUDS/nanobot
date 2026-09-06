@@ -108,6 +108,7 @@ dev = [
 
 [project.scripts]
 nanobot = "nanobot.cli.entry:main"
+nanobot-desktop-tui = "nanobot.cli.desktop_tui:main"
 
 # Third-party tool plugins register here.  Built-in tools are discovered
 # automatically via pkgutil scanning in ToolLoader.discover().

@@ -263,10 +263,10 @@ def test_desktop_tui_selection_fails_without_fallback(monkeypatch, capsys) -> No
     monkeypatch.setattr(desktop_target, "discover_desktop_target", Target)
     monkeypatch.setattr(desktop_target, "_choose_target", lambda _status: "desktop")
 
-    assert dispatch_bare_desktop_target([]) == 4
-    assert calls == ["status", "status"]
+    assert dispatch_bare_desktop_target([]) == 3
+    assert calls == ["status", "tui"]
     error = capsys.readouterr().err
-    assert "does not yet provide attach-only terminal chat" in error
+    assert "unavailable or incompatible" in error
     assert "No backend was started" in error
 
 
