@@ -158,9 +158,9 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests run serially below. Keep
-            # them out of xdist so workers never share a Windows console.
-            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
+            # Real PowerShell/process-tree tests run serially in a separate
+            # job. Keep them out of xdist so workers never share a console.
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -172,6 +172,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -226,8 +228,36 @@ jobs:
           tests/cli/test_commands.py
           --durations=25 --durations-min=1.0
 
+  windows_process:
+    name: Python (Windows process compatibility)
+    needs: changes
+    if: needs.changes.outputs.python_required == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Install channel dependencies
+        run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
+
+      - name: Verify dependency consistency
+        run: uv pip check
+
       - name: Run Windows process compatibility tests
-        if: runner.os == 'Windows'
         run: >-
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py

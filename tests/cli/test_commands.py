@@ -2580,6 +2580,10 @@ def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_
         "nanobot.cli.webui_support._gateway_health_ready",
         lambda *_args, **_kwargs: True,
     )
+    monkeypatch.setattr(
+        "nanobot.cli.webui._prepare_webui_bundle_for_gateway",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr("nanobot.cli.webui._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         "nanobot.cli.webui._open_webui_browser",
