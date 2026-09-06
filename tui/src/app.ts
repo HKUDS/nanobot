@@ -1915,7 +1915,7 @@ export class NanobotTui {
     if (mode === "ready") {
       this.meta.content = footerTelemetry(
         this.lastUsage,
-        this.renderer.width,
+        this.contextWindowTokens,
         footerHintTheme(this.palette),
       )
       return
