@@ -193,7 +193,11 @@ def test_equivalent_workspace_paths_share_one_store(tmp_path: Path) -> None:
     real_workspace = tmp_path / "real_ws"
     real_workspace.mkdir()
     link_workspace = tmp_path / "link_ws"
-    link_workspace.symlink_to(real_workspace, target_is_directory=True)
+    try:
+        link_workspace.symlink_to(real_workspace, target_is_directory=True)
+    except OSError as exc:
+        # Creating directory symlinks needs admin/developer mode on Windows.
+        pytest.skip(f"directory symlink unavailable: {exc}")
 
     # Save via the real path, then read via a symlink to the same directory.
     manager = SessionManager(workspace=real_workspace)

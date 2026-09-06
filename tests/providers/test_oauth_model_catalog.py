@@ -387,10 +387,16 @@ def test_catalog_bounds_failure_only_keys() -> None:
         calls += 1
         raise httpx.ConnectError("offline")
 
+    # Real monotonic time can serve identical timestamps to all three
+    # lookups, making the eviction victim in _reserve() depend on set
+    # iteration order (hash-seeded). A synthetic strictly-increasing clock
+    # pins the oldest entry deterministically.
+    ticks = iter(range(10_000))
     catalog = OAuthModelCatalog(
         fallback_models=(_fallback_model(),),
         fetch=fetch,
         max_entries=2,
+        monotonic=lambda: float(next(ticks)),
     )
 
     for key in ("one", "two", "three"):
