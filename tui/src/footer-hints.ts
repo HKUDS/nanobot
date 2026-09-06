@@ -1,7 +1,5 @@
 import { RGBA, StyledText, TextAttributes, type TextChunk } from "@opentui/core"
 
-import type { TokenUsage } from "./protocol"
-
 export interface FooterHint {
   key: string
   label: string
@@ -39,11 +37,10 @@ export function contextualFooterHints(
 
 /** Latest measured request's context-window occupancy. */
 export function footerTelemetry(
-  usage: TokenUsage | null,
+  contextTokens: number | null,
   contextWindowTokens: number | null,
   theme: FooterHintTheme,
 ): StyledText {
-  const contextTokens = usage?.context_tokens
   if (
     typeof contextTokens !== "number"
     || !Number.isFinite(contextTokens)
@@ -52,19 +49,10 @@ export function footerTelemetry(
     || !Number.isFinite(contextWindowTokens)
     || contextWindowTokens <= 0
   ) return new StyledText([])
-  const percentage = Math.min(100, Math.max(0, Math.round(
+  const percentage = Math.min(100, Math.round(
     contextTokens * 100 / contextWindowTokens,
-  )))
-  return footerMetrics([`${percentage}% context`], theme)
-}
-
-function footerMetrics(parts: readonly string[], theme: FooterHintTheme): StyledText {
-  const chunks: TextChunk[] = []
-  parts.forEach((text, index) => {
-    if (index) chunks.push(chunk(" · ", theme.separator))
-    chunks.push(chunk(text, index === 0 ? theme.accent : theme.muted, index === 0))
-  })
-  return new StyledText(chunks)
+  ))
+  return new StyledText([chunk(`${percentage}% context`, theme.accent, true)])
 }
 
 /** Give shortcuts visual hierarchy without turning the footer into a toolbar. */

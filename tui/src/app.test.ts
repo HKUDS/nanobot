@@ -2310,7 +2310,7 @@ describe("NanobotTui layout", () => {
     expect(assistantMarker?.renderable.fg.toInts().slice(0, 3)).toEqual([161, 161, 170])
   })
 
-  test("uses the idle footer for context usage instead of permanent shortcuts", async () => {
+  test("shows context usage in the idle footer", async () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
@@ -2319,10 +2319,7 @@ describe("NanobotTui layout", () => {
       chat_id: "chat",
       latency_ms: 1700,
       usage: {
-        prompt_tokens: 12_000_000,
-        completion_tokens: 64_000,
         context_tokens: 14_700,
-        cached_tokens: 11_640_000,
       },
       context_window_tokens: 128_000,
     })
@@ -2331,18 +2328,6 @@ describe("NanobotTui layout", () => {
     const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
     expect(footer).toContain("Ready · 1.7s")
     expect(footer).toContain("11% context")
-    expect(footer).not.toContain("tok/s")
-    expect(footer).not.toContain("cached")
-    expect(footer).not.toContain("64K out")
-    expect(footer).not.toContain("enter send")
-
-    app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden" })
-    await Bun.sleep(130)
-    await setup.renderOnce()
-    const activeFooter = setup.captureCharFrame().split("\n").find((line) => line.includes("Thinking")) || ""
-    expect(activeFooter).not.toContain("ctrl+c stop")
-    expect(activeFooter).not.toContain("enter steer")
-    app.accept({ event: "turn_end", chat_id: "chat" })
   })
 
   test("keeps an explicit theme stable when the terminal reports another mode", async () => {

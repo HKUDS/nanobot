@@ -30,12 +30,7 @@ describe("footerHints", () => {
   })
 
   test("shows the measured request's context-window percentage", () => {
-    const result = footerTelemetry({
-      prompt_tokens: 12_000_000,
-      completion_tokens: 64_000,
-      context_tokens: 14_700,
-      cached_tokens: 11_640_000,
-    }, 128_000, theme)
+    const result = footerTelemetry(14_700, 128_000, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
       .toBe("11% context")
@@ -43,18 +38,16 @@ describe("footerHints", () => {
   })
 
   test("clamps usage above the configured window", () => {
-    const result = footerTelemetry({
-      context_tokens: 220_000,
-    }, 200_000, theme)
+    const result = footerTelemetry(220_000, 200_000, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
       .toBe("100% context")
   })
 
   test("does not guess without measured context or a valid window", () => {
-    const missingContext = footerTelemetry({ prompt_tokens: 1000 }, 128_000, theme)
-    const missingWindow = footerTelemetry({ context_tokens: 1000 }, null, theme)
-    const invalidWindow = footerTelemetry({ context_tokens: 1000 }, 0, theme)
+    const missingContext = footerTelemetry(null, 128_000, theme)
+    const missingWindow = footerTelemetry(1000, null, theme)
+    const invalidWindow = footerTelemetry(1000, 0, theme)
 
     expect(missingContext.chunks).toHaveLength(0)
     expect(missingWindow.chunks).toHaveLength(0)
