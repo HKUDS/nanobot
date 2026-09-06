@@ -100,11 +100,11 @@ jobs:
                 tests/test_docker.sh)
                   docker_required=true
                   ;;
-                scripts/install_channel_dependencies.py)
+                pyproject.toml|hatch_build.py|scripts/install_channel_dependencies.py)
                   python_required=true
                   docker_required=true
                   ;;
-                tests/*|conftest.py|pyproject.toml|uv.lock|hatch_build.py|scripts/*)
+                tests/*|conftest.py|uv.lock|scripts/*)
                   python_required=true
                   ;;
                 Dockerfile|Dockerfile.*|.dockerignore|docker-compose*.yml|entrypoint.sh|render-config.json|README.md|LICENSE|THIRD_PARTY_NOTICES.md)
