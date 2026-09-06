@@ -68,6 +68,10 @@ def _launch_browser(url: str) -> bool:
     """Open *url* and request a foreground browser window."""
     if sys.platform == "darwin":
         return _launch_macos_browser(url)
+    if sys.platform == "win32":
+        from nanobot.cli.windows_browser import launch_browser
+
+        return launch_browser(url)
     return bool(webbrowser.open(url, new=2, autoraise=True))
 
 

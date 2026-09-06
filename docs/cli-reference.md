@@ -55,6 +55,22 @@ On macOS, browser URLs are delivered through native Launch Services rather than
 command-line arguments. A failed native handoff does not fall back to `open` or
 a `BROWSER` command, keeping bootstrap credentials out of launcher arguments.
 
+On Windows, the shared browser launcher uses a private HTML redirect rather than
+passing a credential-bearing URL to a browser command. A short-lived, windowless
+Python helper receives the URL over an anonymous pipe, opens the redirect through
+the system's HTTP association, and attempts file cleanup after two minutes. The calling
+CLI can exit immediately after the launch acknowledgement; this helper does not
+start, stop, or keep a gateway alive. It does not honor `BROWSER` overrides.
+Redirects are stored in the current user's Windows Local AppData known folder,
+under `NanobotBrowserHandoff-v1`, with an explicit current-user-only protected ACL.
+An ACL-enforcing local filesystem and a non-reparse storage path are required;
+unsafe existing storage or failed browser handoff fails without raw-URL fallback.
+Abnormal termination can leave a private redirect behind. Later invocations retry
+cleanup of verified redirect files older than ten minutes, excluding active files;
+cleanup is not a guarantee of physical erasure or secrecy from same-user programs
+or administrators. No Python/Desktop settings, credentials, or history are imported
+between installations.
+
 Any explicit subcommand or option—including `nanobot agent`,
 `nanobot webui --no-open`, config/workspace selectors, help, version, completion,
 and gateway lifecycle commands—keeps its existing Python meaning and never opens
