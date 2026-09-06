@@ -33,6 +33,27 @@ python -m nanobot --version
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
 
+### Coexisting with Nanobot Desktop
+
+The Python package and Nanobot Desktop keep separate runtimes, configuration,
+workspaces, and state. When a running Desktop release publishes its private
+terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui`
+asks which installation to use for that invocation. With no running Desktop
+target, the command reports the current Python executable and continues normally.
+
+Choosing Desktop for `nanobot webui` opens its already-running browser workbench
+and exits; closing the browser never stops the Desktop gateway. The current
+Desktop discovery protocol does not yet advertise attach-only terminal chat, so
+choosing Desktop for bare `nanobot` fails explicitly without starting, restarting,
+or replacing a backend. Use explicit `nanobot agent` for the Python terminal UI
+until the Desktop TUI attachment protocol is available.
+
+Any explicit subcommand or option—including `nanobot agent`,
+`nanobot webui --no-open`, config/workspace selectors, help, version, completion,
+and gateway lifecycle commands—keeps its existing Python meaning and never opens
+the Desktop picker. Target choices are not remembered, and Desktop settings are
+not copied into the Python installation.
+
 ## Common Patterns
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:

@@ -79,6 +79,14 @@ def main() -> None:
     dispatch_args = ["agent", *agent_args] if agent_args is not None else raw_args
     set_cli_process_identity(dispatch_args)
     _configure_windows_console()
+    if not shell_completion:
+        from nanobot.cli.desktop_target import dispatch_bare_desktop_target
+
+        desktop_exit = dispatch_bare_desktop_target(raw_args)
+        if desktop_exit is not None:
+            if desktop_exit:
+                raise SystemExit(desktop_exit)
+            return
     root_agent_alias = agent_args is not None and raw_args[:1] != ["agent"]
     if agent_args is not None and (
         root_agent_alias or _native_tui_candidate(dispatch_args)

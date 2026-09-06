@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from nanobot.cli import entry
 from nanobot.cli.entry import _agent_invocation_args, _native_tui_candidate
 
@@ -80,6 +82,22 @@ def test_root_alias_dispatches_the_shared_agent_command(monkeypatch) -> None:
         "args": ["-m", "hello"],
         "prog_name": "nanobot",
     }
+
+
+def test_desktop_handled_bare_invocation_does_not_start_python(monkeypatch) -> None:
+    from nanobot.cli import desktop_target
+
+    monkeypatch.setattr(entry.sys, "argv", ["nanobot", "webui"])
+    monkeypatch.setattr(entry, "set_cli_process_identity", lambda _args: None)
+    monkeypatch.setattr(entry, "_configure_windows_console", lambda: None)
+    monkeypatch.setattr(desktop_target, "dispatch_bare_desktop_target", lambda _args: 0)
+    monkeypatch.setattr(
+        entry,
+        "_run_agent",
+        lambda *_args, **_kwargs: pytest.fail("Python agent must not start"),
+    )
+
+    entry.main()
 
 
 def test_native_agent_invocations_use_the_lightweight_entrypoint() -> None:
