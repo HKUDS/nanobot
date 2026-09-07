@@ -36,6 +36,7 @@ from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayInstance
 from nanobot.security.network import is_loopback_host
+from nanobot.session import io as session_io
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
@@ -540,12 +541,12 @@ def _run_gateway(
             and hasattr(session_manager, "save")
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
-            session = session_manager.get_or_create(key)
+            session = await session_io.call(session_manager.get_or_create, key)
             extra: dict[str, Any] = {"_channel_delivery": True}
             if msg.media:
                 extra["media"] = list(msg.media)
             session.add_message("assistant", msg.content, **extra)
-            session_manager.save(session)
+            await session_io.call(session_manager.save, session)
         await bus.publish_outbound(msg)
 
     message_tool = agent.tools.get("message")

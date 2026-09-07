@@ -1114,13 +1114,15 @@ class TestToolEventProgress:
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
+        # Title completion remains gated by release_title; this is only a watchdog
+        # for dispatch, including session I/O and worker startup on Windows.
         await asyncio.wait_for(loop._dispatch(InboundMessage(
             channel="websocket",
             sender_id="u1",
             chat_id="chat1",
             content="say hello",
             metadata={"webui": True},
-        )), timeout=0.5)
+        )), timeout=5)
 
         outbound: list = []
         for _ in range(12):

@@ -317,7 +317,7 @@ class TestCmdNewUnifiedSession:
             consolidator=SimpleNamespace(archive_session=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=MagicMock(),
-            runtime_for_session=MagicMock(return_value=MagicMock()),
+            runtime_for_session_async=AsyncMock(return_value=MagicMock()),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
 

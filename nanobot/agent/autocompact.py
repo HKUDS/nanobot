@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+import asyncio
+from collections.abc import Awaitable, Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
+from nanobot.session import io as session_io
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
 from nanobot.session.summary import SessionSummary, session_summary_from_metadata
 
@@ -23,9 +25,13 @@ class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = MIN_COMPACTED_REPLAY_MESSAGES
     _INTERNAL_SESSION_PREFIXES = ("dream:",)
 
-    def __init__(self, sessions: SessionManager, consolidator: Consolidator,
-                 session_ttl_minutes: int = 0,
-                 bind_events: SessionEventFactory | None = None):
+    def __init__(
+        self,
+        sessions: SessionManager,
+        consolidator: Consolidator,
+        session_ttl_minutes: int = 0,
+        bind_events: SessionEventFactory | None = None,
+    ):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
@@ -51,8 +57,8 @@ class AutoCompact:
             return False
         return idle_seconds >= self._ttl * 60
 
-    def _has_unarchived_messages(self, key: str) -> bool:
-        session = self.sessions.get_or_create(key)
+    @staticmethod
+    def _session_has_unarchived_messages(session: Session) -> bool:
         return any(
             not message.get("_command")
             for message in session.messages[session.last_archived:]
@@ -62,36 +68,38 @@ class AutoCompact:
     def _is_internal_session(cls, key: str) -> bool:
         return key.startswith(cls._INTERNAL_SESSION_PREFIXES)
 
-    def check_expired(
+    async def check_expired(
         self,
         schedule_background: Callable[[Coroutine[Any, Any, None]], None],
-        resolve_runtime: Callable[[Session], LLMRuntime],
+        resolve_runtime: Callable[[Session], Awaitable[LLMRuntime]],
         active_session_keys: Collection[str] = (),
     ) -> None:
-        """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
+        """Schedule idle archival without blocking the event loop."""
         now = datetime.now()
-        for info in self.sessions.list_sessions():
+        active_keys = set(active_session_keys)
+        for info in await asyncio.to_thread(self.sessions.list_sessions):
             key = info.get("key", "")
             if not key or self._is_internal_session(key) or key in self._archiving:
                 continue
-            if key in active_session_keys:
+            if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
-            updated_at = info.get("updated_at")
-            if self._is_expired(updated_at, now) and self._has_unarchived_messages(key):
-                session = self.sessions.get_or_create(key)
-                try:
-                    runtime = resolve_runtime(session)
-                except (KeyError, ValueError):
-                    # Invalid session selections remain recoverable through /model.
-                    continue
-                self._archiving.add(key)
-                schedule_background(self._archive(key, runtime=runtime))
+            session = await session_io.call(self.sessions.get_or_create, key)
+            if not self._session_has_unarchived_messages(session):
+                continue
+            try:
+                runtime = await resolve_runtime(session)
+            except (KeyError, ValueError):
+                continue
+            self._archiving.add(key)
+            schedule_background(self._archive(key, runtime=runtime))
 
     async def _archive(self, key: str, *, runtime: LLMRuntime) -> None:
         if self._is_internal_session(key):
             self._archiving.discard(key)
             return
         try:
+            # Keep the session live while the synchronous callback binds its route.
+            session = await session_io.call(self.sessions.get_or_create, key)
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,
@@ -99,7 +107,7 @@ class AutoCompact:
                 events=self._bind_events(key) if self._bind_events else NO_EVENTS,
             )
             if summary and summary != "(nothing)":
-                session = self.sessions.get_or_create(key)
+                session = await session_io.call(self.sessions.get_or_create, key)
                 stored = session_summary_from_metadata(
                     session.metadata,
                     fallback_last_active=session.updated_at,
@@ -111,14 +119,19 @@ class AutoCompact:
         finally:
             self._archiving.discard(key)
 
-    def prepare_session(self, session: Session, key: str) -> tuple[Session, SessionSummary | None]:
+    async def prepare_session(
+        self,
+        session: Session,
+        key: str,
+    ) -> tuple[Session, SessionSummary | None]:
+        """Prepare a session without blocking on a reload."""
         if self._is_internal_session(key):
             self._archiving.discard(key)
             self._summaries.pop(key, None)
             return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
-            session = self.sessions.get_or_create(key)
+            session = await session_io.call(self.sessions.get_or_create, key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:

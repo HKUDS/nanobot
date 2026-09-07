@@ -5,6 +5,7 @@ import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime
 from pathlib import Path
 
@@ -205,11 +206,9 @@ def test_webui_session_scan_does_not_overlap_session_save(
     reader_open = threading.Event()
     release_reader = threading.Event()
     save_started = threading.Event()
-    save_lock_attempted = threading.Event()
     write_entered = threading.Event()
     original_open = open
     store = manager._jsonl_store
-    original_acquire = store._session_files_lock.acquire
     original_save_unlocked = store._save_unlocked
 
     class BlockingReader:
@@ -235,18 +234,12 @@ def test_webui_session_scan_does_not_overlap_session_save(
             return BlockingReader(file)
         return file
 
-    def observed_acquire(*args, **kwargs):
-        if save_started.is_set():
-            save_lock_attempted.set()
-        return original_acquire(*args, **kwargs)
-
     def observed_save_unlocked(session, *, fsync=False):
         write_entered.set()
         assert not reader_open.is_set(), "save entered while the canonical file was open"
         return original_save_unlocked(session, fsync=fsync)
 
     monkeypatch.setattr(session_list_index, "open", blocking_open, raising=False)
-    monkeypatch.setattr(store._session_files_lock, "acquire", observed_acquire)
     monkeypatch.setattr(store, "_save_unlocked", observed_save_unlocked)
 
     def save_session() -> None:
@@ -258,7 +251,9 @@ def test_webui_session_scan_does_not_overlap_session_save(
         try:
             assert reader_open.wait(5)
             save_future = executor.submit(save_session)
-            assert save_lock_attempted.wait(5)
+            assert save_started.wait(5)
+            with pytest.raises(FutureTimeout):
+                save_future.result(timeout=0.05)
             assert not write_entered.is_set()
         finally:
             release_reader.set()

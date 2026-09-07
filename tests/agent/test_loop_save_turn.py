@@ -158,12 +158,12 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
     assert runtime.model == "next-model"
 
 
-def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
+async def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
     prompt_ref = {"id": "cron.agent_turn.reminder", "version": 1, "sha256": "abc"}
 
-    persisted = loop._persist_user_message_early(
+    persisted = await loop._persist_user_message_early(
         InboundMessage(
             channel="websocket",
             sender_id="cron",
@@ -200,7 +200,7 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert message["cron_prompt_ref"] == prompt_ref
 
 
-def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> None:
+async def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:chat")
     session.metadata[PENDING_FOLLOWUPS_KEY] = [
@@ -214,7 +214,7 @@ def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> N
         }
     ]
 
-    persisted = loop._persist_user_message_early(
+    persisted = await loop._persist_user_message_early(
         InboundMessage(
             channel="websocket",
             sender_id="user",
@@ -229,11 +229,11 @@ def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> N
     assert PENDING_FOLLOWUPS_KEY not in session.metadata
 
 
-def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
+async def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
 
-    persisted = loop._persist_user_message_early(
+    persisted = await loop._persist_user_message_early(
         InboundMessage(
             channel="websocket",
             sender_id="trigger",
@@ -1816,7 +1816,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
 
     async def interrupted_run_agent_loop(_transcript_input, *, session=None, **_kwargs):
         assert session is not None
-        loop._set_runtime_checkpoint(
+        await loop._set_runtime_checkpoint(
             session,
             {
                 "assistant_message": {

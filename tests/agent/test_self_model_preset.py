@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -242,19 +242,19 @@ def test_self_tool_inspect_shows_model_preset(tmp_path) -> None:
     assert "model_preset: 'fast'" in output
 
 
-def test_self_tool_set_model_preset_via_modify(tmp_path) -> None:
+async def test_self_tool_set_model_preset_via_modify(tmp_path) -> None:
     presets = {
         "fast": ModelPresetConfig(model="openai/gpt-4.1"),
     }
     loop = _make_loop(tmp_path, presets=presets)
     tool = _my_tool(loop)
-    result = tool._modify("model_preset", "fast")
+    result = await tool._modify("model_preset", "fast")
     assert "Error" not in result
     assert loop.model_preset == "fast"
     assert loop.model == "openai/gpt-4.1"
 
 
-def test_self_tool_set_model_preset_switches_back_to_default(tmp_path) -> None:
+async def test_self_tool_set_model_preset_switches_back_to_default(tmp_path) -> None:
     presets = {
         "default": ModelPresetConfig(model="base-model", context_window_tokens=1000),
         "fast": ModelPresetConfig(model="openai/gpt-4.1", context_window_tokens=32_768),
@@ -262,7 +262,7 @@ def test_self_tool_set_model_preset_switches_back_to_default(tmp_path) -> None:
     loop = _make_loop(tmp_path, presets=presets, active_preset="fast")
     tool = _my_tool(loop)
 
-    result = tool._modify("model_preset", "default")
+    result = await tool._modify("model_preset", "default")
 
     assert "Error" not in result
     assert "model is now 'base-model'" in result
@@ -271,7 +271,7 @@ def test_self_tool_set_model_preset_switches_back_to_default(tmp_path) -> None:
     assert loop.context_window_tokens == 1000
 
 
-def test_self_tool_set_model_preset_unknown_lists_available(tmp_path) -> None:
+async def test_self_tool_set_model_preset_unknown_lists_available(tmp_path) -> None:
     presets = {
         "default": ModelPresetConfig(model="base-model"),
         "fast": ModelPresetConfig(model="openai/gpt-4.1"),
@@ -279,14 +279,14 @@ def test_self_tool_set_model_preset_unknown_lists_available(tmp_path) -> None:
     loop = _make_loop(tmp_path, presets=presets)
     tool = _my_tool(loop)
 
-    result = tool._modify("model_preset", "missing")
+    result = await tool._modify("model_preset", "missing")
 
     assert result == "Error: model_preset 'missing' not found. Available: default, fast."
     assert loop.model_preset is None
     assert loop.model == "base-model"
 
 
-def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None:
+async def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None:
     presets = {
         "default": ModelPresetConfig(model="base-model"),
         "fast": ModelPresetConfig(model="openai/gpt-4.1"),
@@ -300,7 +300,7 @@ def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None:
         session_key="cli:one",
         metadata={"source": "self-tool"},
     )):
-        result = tool._modify("model_preset", "fast")
+        result = await tool._modify("model_preset", "fast")
 
     assert "for the next turn" in result
     assert model_preset_from_metadata(
@@ -310,9 +310,9 @@ def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None:
     assert loop.model == "base-model"
 
 
-def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path) -> None:
+async def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-    loop.set_session_model_preset = MagicMock(
+    loop.set_session_model_preset_async = AsyncMock(
         side_effect=ValueError("No API key configured for provider 'openai'.")
     )
     tool = _my_tool(loop)
@@ -322,7 +322,7 @@ def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path)
         chat_id="one",
         session_key="cli:one",
     )):
-        result = tool._modify("model_preset", "broken")
+        result = await tool._modify("model_preset", "broken")
 
     assert result == "Error: No API key configured for provider 'openai'."
 
@@ -334,7 +334,7 @@ def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path)
         ("context_window_tokens", 8_192),
     ],
 )
-def test_self_tool_rejects_instance_runtime_changes_in_session(
+async def test_self_tool_rejects_instance_runtime_changes_in_session(
     tmp_path,
     key: str,
     value: object,
@@ -349,7 +349,7 @@ def test_self_tool_rejects_instance_runtime_changes_in_session(
         session_key=session.key,
         runtime=loop.runtime_for_session(session),
     )):
-        result = tool._modify(key, value)
+        result = await tool._modify(key, value)
 
     other_runtime = loop.runtime_for_session(loop.sessions.get_or_create("cli:two"))
     assert "instance-wide and disabled" in result
@@ -358,13 +358,13 @@ def test_self_tool_rejects_instance_runtime_changes_in_session(
     assert other_runtime.context_window_tokens == 1000
 
 
-def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
+async def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
     presets = {
         "fast": ModelPresetConfig(model="openai/gpt-4.1"),
     }
     loop = _make_loop(tmp_path, presets=presets, active_preset="fast")
     tool = _my_tool(loop)
-    result = tool._modify("model", "anthropic/claude-opus-4-5")
+    result = await tool._modify("model", "anthropic/claude-opus-4-5")
     assert "Error" not in result
     assert loop.model_preset is None
     assert loop.model == "anthropic/claude-opus-4-5"
