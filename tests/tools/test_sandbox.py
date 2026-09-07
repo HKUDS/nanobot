@@ -254,7 +254,7 @@ class TestSeatbeltBackend:
         result = wrap_command("seatbelt", "echo hi", ws, ws)
         tokens = _parse(result)
 
-        assert tokens[0] == "sandbox-exec"
+        assert tokens[0] == "/usr/bin/sandbox-exec"
         assert tokens[1] == "-p"
         assert tokens[-3] == "sh"
         assert tokens[-2] == "-c"
@@ -323,15 +323,21 @@ class TestSeatbeltBackend:
         assert f"(allow file-read* (subpath {self._quote(ws.parent)}))" not in profile
         assert f"(allow file-read* file-write* (subpath {self._quote(ws.parent)}))" not in profile
 
-    def test_scratch_space_covers_the_tmp_symlink_spelling(self, tmp_path):
-        """`/tmp` and `/var` are symlinks; commands spell scratch paths both ways."""
+    def test_host_scratch_directories_are_not_shared(self, tmp_path):
         profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
 
-        write_rule = next(
-            line for line in profile.splitlines() if line.startswith("(allow file-write* ")
-        )
-        for expected in ('(subpath "/tmp")', '(subpath "/private/tmp")'):
-            assert expected in write_rule
+        for path in ("/tmp", "/private/tmp", "/var", "/private/var", "/var/folders",
+                     "/private/var/folders", "/Library", "/etc", "/private/etc"):
+            assert f'(subpath "{path}")' not in profile
+
+    def test_home_and_tmpdir_use_workspace(self, tmp_path):
+        ws = tmp_path.resolve()
+        tokens = _parse(wrap_command("seatbelt", "mktemp", str(ws), str(ws)))
+        assert tokens[3:6] == ["/usr/bin/env", f"HOME={ws}", f"TMPDIR={ws}"]
+
+    def test_network_matches_bwrap_policy(self, tmp_path):
+        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+        assert "(allow network*)" in profile
 
     def test_media_dir_read_only(self, tmp_path, monkeypatch):
         fake_media = (tmp_path / "media").resolve()
@@ -344,7 +350,7 @@ class TestSeatbeltBackend:
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
         assert f"(allow file-read* (subpath {self._quote(fake_media)}))" in profile
-        assert f"file-write* (subpath {self._quote(fake_media)})" not in profile
+        assert f"(deny file-write* (subpath {self._quote(fake_media)}))" in profile
 
     def test_cwd_inside_workspace(self, tmp_path):
         ws = (tmp_path / "project").resolve()
@@ -372,7 +378,17 @@ class TestSeatbeltBackend:
         )
 
         assert f"(allow file-read* (subpath {self._quote(tool_bin)}))" in profile
-        assert f"file-write* (subpath {self._quote(tool_bin)})" not in profile
+        assert f"(deny file-write* (subpath {self._quote(tool_bin)}))" in profile
+
+    def test_read_only_bind_overrides_workspace_write(self, tmp_path):
+        ws = tmp_path.resolve()
+        ro = ws / "readonly"
+        profile = self._profile(wrap_command(
+            "seatbelt", "ls", str(ws), str(ws), sandbox_ro_binds=[str(ro)],
+        ))
+        assert profile.index(f"(allow file-read* file-write* (subpath {self._quote(ws)}))") < (
+            profile.index(f"(deny file-write* (subpath {self._quote(ro)}))")
+        )
 
     def test_custom_read_write_binds(self, tmp_path):
         ws = (tmp_path / "project").resolve()

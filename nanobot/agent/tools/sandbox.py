@@ -101,28 +101,34 @@ def _bwrap(
     return shlex.join(args)
 
 
-# Directories every command needs to read for the dynamic linker, system
-# binaries, certificates and device nodes.  Seatbelt evaluates resolved paths,
-# so the /private-prefixed form is what actually matches on macOS; the bare
-# symlink form is listed too because commands spell paths both ways.
+# System code and certificates needed by command-line tools. Do not grant
+# /var, /tmp, /Library or /etc wholesale: those contain host application data,
+# not an isolated scratch filesystem as in bwrap. Seatbelt matches real paths.
 _SEATBELT_SYSTEM_READ_SUBPATHS = (
     "/usr",
     "/bin",
     "/sbin",
-    "/etc",
     "/dev",
     "/System",
-    "/Library",
-    "/private/etc",
-    "/var",
-    "/private/var",
-    "/tmp",
-    "/private/tmp",
+    "/Library/Developer/CommandLineTools",
+    "/private/etc/ssl",
+    "/private/var/db/dyld",
+    "/private/var/db/timezone",
 )
 
-# Writable scratch space.  /private/var/folders holds $TMPDIR, which build tools
-# and test runners rely on; /tmp is its symlink spelling.
-_SEATBELT_SCRATCH_SUBPATHS = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
+_SEATBELT_SYSTEM_READ_LITERALS = (
+    "/private/etc/hosts",
+    "/private/etc/services",
+    "/private/etc/protocols",
+    "/private/etc/gitconfig",
+    "/etc/gitconfig",
+    "/private/var/run/resolv.conf",
+    "/private/var/select/sh",
+    "/private/var/select/developer_dir",
+    "/private/var/db/xcode_select_link",
+    "/var/select/developer_dir",
+    "/var/db/xcode_select_link",
+)
 
 # Ancestors that must stay searchable but are not covered by any allowed
 # subpath.  Resolving "/private/var/..." stats "/private", and
@@ -171,9 +177,10 @@ def _seatbelt(
 ) -> str:
     """Wrap command in a macOS Seatbelt sandbox (requires sandbox-exec(1)).
 
-    Mirrors the ``bwrap`` policy: the workspace is read-write, the media
-    directory is read-only, and the workspace's parent (which holds
-    ``config.json``) is unreadable so API keys stay hidden.
+    The workspace is read-write and media is read-only. The workspace's parent
+    (the config directory in the default layout) is denied. Host temporary and
+    application-data directories are not shared; TMPDIR and HOME use the
+    workspace instead. Additional tool installations need explicit read binds.
 
     Seatbelt has no mount namespace, so masking the parent is expressed as a
     deny rule placed *before* the workspace allow — the last matching rule
@@ -205,12 +212,16 @@ def _seatbelt(
         "(allow sysctl-read)",
         "(allow mach*)",
         "(allow ipc*)",
+        "(allow network*)",
         # sh(1) reads the root directory while resolving a path, and
         # (subpath "/usr") does not cover "/" itself.  Without this rule the
         # shell aborts during startup.
         '(allow file-read* (literal "/"))',
         f"(allow file-read* {subpaths(_SEATBELT_SYSTEM_READ_SUBPATHS)})",
-        f"(allow file-write* {subpaths(_SEATBELT_SCRATCH_SUBPATHS)})",
+        "(allow file-read* "
+        + " ".join(f"(literal {_sbpl_quote(p)})" for p in _SEATBELT_SYSTEM_READ_LITERALS)
+        + ")",
+        '(allow file-write* (literal "/dev/null") (literal "/dev/zero"))',
     ]
 
     # Mask the config directory.  The workspace allow below re-exposes the
@@ -222,7 +233,9 @@ def _seatbelt(
     # Keep every ancestor of an allowed path searchable, including the masked
     # parent: metadata only, so it cannot be listed or read.
     traversable = _seatbelt_ancestors(
-        ws, media, *(Path(p) for p in ro_binds), *(Path(p) for p in rw_binds)
+        ws, media, *(Path(p) for p in ro_binds), *(Path(p) for p in rw_binds),
+        *(Path(p) for p in _SEATBELT_SYSTEM_READ_SUBPATHS),
+        *(Path(p) for p in _SEATBELT_SYSTEM_READ_LITERALS),
     )
     literals = [
         *(p for p in _SEATBELT_TRAVERSABLE_LITERALS if p not in traversable),
@@ -236,18 +249,25 @@ def _seatbelt(
 
     rules.append(f"(allow file-read* file-write* (subpath {_sbpl_quote(str(ws))}))")
     rules.append(f"(allow file-read* (subpath {_sbpl_quote(str(media))}))")
+    rules.append(f"(deny file-write* (subpath {_sbpl_quote(str(media))}))")
 
     for p in ro_binds:
         rules.append(f"(allow file-read* (subpath {_sbpl_quote(p)}))")
+        # A read allow does not revoke a broader write grant (e.g. workspace).
+        rules.append(f"(deny file-write* (subpath {_sbpl_quote(p)}))")
     for p in rw_binds:
         rules.append(f"(allow file-read* file-write* (subpath {_sbpl_quote(p)}))")
 
     # sandbox-exec(1) has no --chdir, so the working directory is entered by
     # the wrapped shell.  `&&` keeps the command from running if cd is denied.
     args = [
-        "sandbox-exec",
+        # Resolve the security boundary before consulting operator tool PATHs.
+        "/usr/bin/sandbox-exec",
         "-p",
         "\n".join(rules),
+        "/usr/bin/env",
+        f"HOME={ws}",
+        f"TMPDIR={ws}",
         "sh",
         "-c",
         f"cd {shlex.quote(sandbox_cwd)} && {command}",

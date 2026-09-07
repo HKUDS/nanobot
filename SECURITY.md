@@ -79,13 +79,13 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 
 **Exec sandbox (bwrap on Linux, seatbelt on macOS):**
 
-Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both backends enforce the same policy:
+Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both backends restrict filesystem access:
 
 - Workspace directory → **read-write** (agent works normally)
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
-- Config files and API keys (`~/.nanobot/config.json`) → **hidden**
-- Everything else, including `~/.ssh` → **denied**
+- The workspace's parent, which holds `~/.nanobot/config.json` in the default layout → **denied**, except for explicitly exposed roots
+- Unlisted paths, including `~/.ssh` in the default layout → **denied**
 
 | Backend | Value | Platform | Requires |
 |---------|-------|----------|----------|
@@ -94,7 +94,9 @@ Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both ba
 
 **Windows has no backend**: nanobot logs a warning and runs the command unsandboxed.
 
-The backends hide the config directory differently. `bwrap` masks the workspace's parent with a tmpfs, so it disappears from directory listings. Seatbelt has no mount namespace, so it denies the parent instead — the directory still appears in listings, but its contents are unreadable.
+The backends protect the workspace's parent differently. `bwrap` masks it with a tmpfs and re-exposes the workspace and allowed binds. Seatbelt has no mount namespace: it denies the parent, re-allows traversal metadata, and exposes the workspace and allowed roots. Keep configuration and credentials outside the workspace and extra binds; choosing an overly broad workspace or explicitly exposing secret-bearing paths defeats that separation.
+
+Seatbelt does **not** expose the host's shared `/tmp`, `/var/folders`, `/Library`, or `/etc` trees. It allows system code, device reads and selected system configuration/certificate paths. `HOME` and `TMPDIR` point to the workspace. Tools must use that scratch location; on macOS use an explicit template such as `mktemp "$TMPDIR/job.XXXXXX"`, since bare `mktemp` may prefer the host's system temp directory. Tools that require other installations or caches need narrow `sandboxRoBinds` / `sandboxRwBinds`. Read-only binds revoke workspace writes beneath them; explicit read-write binds are applied last, matching bwrap's operator-controlled precedence. This is filesystem containment, not a VM or separate user identity.
 
 Neither backend restricts network access.
 
