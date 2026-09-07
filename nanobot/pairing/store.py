@@ -115,19 +115,24 @@ def generate_code(
     sender_id: str,
     ttl: int = _TTL_DEFAULT_S,
 ) -> str:
-    """Create a new pairing code for *sender_id* on *channel*.
+    """Return an active pairing code for *sender_id* on *channel*.
 
     Returns the code (e.g. ``"ABCD-EFGH"``).
     """
     with _LOCK:
         data = _load()
         _gc_pending(data)
+        sender = str(sender_id)
+        for code, info in data.get("pending", {}).items():
+            if info["channel"] == channel and str(info["sender_id"]) == sender:
+                return code
+
         raw = "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
         code = f"{raw[:4]}-{raw[4:]}"
 
         data.setdefault("pending", {})[code] = {
             "channel": channel,
-            "sender_id": str(sender_id),
+            "sender_id": sender,
             "created_at": time.time(),
             "expires_at": time.time() + ttl,
         }

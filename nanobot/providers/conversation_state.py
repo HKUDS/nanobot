@@ -101,6 +101,12 @@ class ProviderConversationStateController:
         )
         return context_tokens + max(0, delta_tokens)
 
+    def replace_transcript(self, messages: list[dict[str, Any]]) -> None:
+        """Discard append-only provider state after a transcript rewrite."""
+        self._state = None
+        self._boundary = len(messages)
+        self._request_messages = []
+
     def prepare_request(
         self,
         messages: list[dict[str, Any]],

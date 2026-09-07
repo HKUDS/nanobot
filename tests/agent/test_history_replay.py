@@ -12,6 +12,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
 def _make_loop(tmp_path: Path, context_window_tokens: int = 200_000) -> AgentLoop:
@@ -66,13 +67,12 @@ def test_explicit_message_limit_still_starts_at_user_turn() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_message_replays_with_token_budget_only(tmp_path: Path) -> None:
+async def test_process_message_hands_complete_replay_to_runner(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path, context_window_tokens=32_768)
     loop.provider.chat_with_retry = AsyncMock(
         return_value=LLMResponse(content="ok", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     with patch.object(session, "get_history", wraps=session.get_history) as get_history:
@@ -81,20 +81,16 @@ async def test_process_message_replays_with_token_budget_only(tmp_path: Path) ->
         )
 
     assert result is not None
-    assert get_history.call_args.kwargs == {
-        "max_tokens": loop._replay_token_budget(loop.llm_runtime()),
-        "extend_to_user": False,
-    }
+    assert get_history.call_args.kwargs == {"extend_to_user": False}
 
 
 @pytest.mark.asyncio
-async def test_token_budget_keeps_current_user_as_replay_boundary(tmp_path: Path) -> None:
+async def test_runner_checkpoint_keeps_current_user_as_replay_boundary(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path, context_window_tokens=8_000)
     loop.provider.chat_with_retry = AsyncMock(
         return_value=LLMResponse(content="ok", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.add_message("user", "old")
@@ -117,4 +113,6 @@ async def test_token_budget_keeps_current_user_as_replay_boundary(tmp_path: Path
     sent_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
     sent_text = "\n".join(str(message.get("content")) for message in sent_messages)
     assert "new question" in sent_text
-    assert "long older turn" not in sent_text
+    assert [message["role"] for message in sent_messages] == ["system", "user", "user"]
+    assert sent_messages[1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert any(message.get("content") == "long older turn" for message in session.messages)

@@ -49,6 +49,16 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_pairing_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep channel pairing tests out of the user's active pairing store."""
+    pairing_path = tmp_path / "pairing.json"
+    monkeypatch.setattr(
+        "nanobot.pairing.store._store_path",
+        lambda: pairing_path,
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _use_windows_system_ca_for_default_http_clients() -> Iterator[None]:
     """Avoid reparsing certifi's CA bundle for every offline HTTP client.

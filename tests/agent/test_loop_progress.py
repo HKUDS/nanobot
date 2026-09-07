@@ -25,10 +25,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
-from nanobot.utils.progress_events import (
-    invoke_file_edit_progress,
-    on_progress_accepts_file_edit_events,
-)
+from nanobot.utils.progress_events import output_events
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
@@ -55,7 +52,7 @@ def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
         sessions=loop.sessions,
         schedule_background=lambda coro: loop.schedule_background(coro),
     )
-    coordinator.subscribe(loop.runtime_events)
+    coordinator.subscribe()
 
 
 class TestToolEventProgress:
@@ -87,7 +84,7 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"
@@ -160,7 +157,7 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"
@@ -232,7 +229,7 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"
@@ -272,7 +269,7 @@ class TestToolEventProgress:
         await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert file_events == []
@@ -368,10 +365,8 @@ class TestToolEventProgress:
             chat_id="chat1",
             content="edit",
         )
-        progress = loop.turn_delivery_factory.create(msg, msg.session_key).progress_callback()
-        assert progress is not None
-        assert on_progress_accepts_file_edit_events(progress) is True
-        await invoke_file_edit_progress(progress, edit_events)
+        events = loop.turn_delivery_factory.create(msg, msg.session_key).events
+        await events.emit(ProgressEvent(file_edit_events=edit_events))
         outbound = await bus.consume_outbound()
         assert outbound.channel == "telegram"
         assert isinstance(outbound.event, ProgressEvent)
@@ -425,7 +420,6 @@ class TestToolEventProgress:
                 None,
             ),
         )
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -473,7 +467,6 @@ class TestToolEventProgress:
         provider.chat_stream_with_retry = AsyncMock()
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="whatsapp",
@@ -512,7 +505,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -566,7 +558,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -611,7 +602,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -655,7 +645,6 @@ class TestToolEventProgress:
         _attach_webui_runtime_events(loop, bus)
         loop.max_iterations = 1
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -691,14 +680,12 @@ class TestToolEventProgress:
         async def cancel_after_merge(
             _msg: InboundMessage,
             *,
-            on_stream,
-            on_stream_end,
+            delivery,
             **_kwargs,
         ):
-            assert on_stream is not None
-            assert on_stream_end is not None
-            await on_stream("partial")
-            await on_stream_end(resuming=True, merge_next=True)
+            assert delivery.streaming
+            await delivery.events.emit(StreamDeltaEvent(content="partial"))
+            await delivery.events.emit(StreamEndEvent(resuming=True, merge_next=True))
             raise asyncio.CancelledError
 
         loop._process_message = cancel_after_merge  # type: ignore[method-assign]
@@ -747,7 +734,6 @@ class TestToolEventProgress:
         )
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -815,9 +801,6 @@ class TestToolEventProgress:
             return "ok"
 
         loop.tools.execute = execute_tool
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]
-            return_value=False
-        )
 
         session_key = "websocket:chat-a"
         session = loop.sessions.get_or_create(session_key)
@@ -949,7 +932,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -1030,8 +1012,8 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
-            on_stream=on_stream,
+            events=output_events(on_progress=on_progress, on_stream=on_stream),
+            streaming=True,
         )
 
         assert result.final_content == "Done"
@@ -1048,7 +1030,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -1132,7 +1113,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await asyncio.wait_for(loop._dispatch(InboundMessage(
             channel="websocket",
@@ -1181,7 +1161,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         captured: dict[str, object] = {}
 
@@ -1268,7 +1247,6 @@ class TestToolEventProgress:
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="slack",

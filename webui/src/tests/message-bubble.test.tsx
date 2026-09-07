@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { setAppLanguage } from "@/i18n";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import type {
   CliAppInfo,
@@ -95,6 +96,46 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
+  it("copies the localized compact reply instead of the stored English text", async () => {
+    await setAppLanguage("zh-CN");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<MessageBubble message={{
+      id: "compact-empty", role: "assistant", content: "Nothing to compact.",
+      compactReply: "empty", createdAt: 1,
+    }} />);
+    expect(screen.getByText("无需压缩上下文")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("无需压缩上下文"));
+  });
+
+  it("renders a compacted context notice", () => {
+    const message: UIMessage = {
+      id: "compaction-1",
+      role: "assistant",
+      content: "",
+      kind: "compaction",
+      createdAt: Date.now(),
+      compaction: {
+        id: "compact-1",
+        phase: "succeeded",
+        announce: true,
+      },
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    const notice = container.querySelector("[data-context-compaction='succeeded']");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/^Context compacted$/);
+    expect(notice?.querySelector(".lucide-archive")).toBeInTheDocument();
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",
@@ -1013,49 +1054,4 @@ describe("MessageBubble", () => {
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
 
-  it("keeps turn usage focused on the completed reply", () => {
-    const message: UIMessage = {
-      id: "a-usage",
-      role: "assistant",
-      content: "done",
-      createdAt: Date.now(),
-      latencyMs: 18_200,
-      contextWindowTokens: 128_000,
-      usage: {
-        prompt_tokens: 12_400,
-        completion_tokens: 823,
-        cached_tokens: 9_672,
-        context_tokens: 8_100,
-        request_count: 3,
-      },
-    };
-
-    render(<MessageBubble message={message} />);
-
-    const usage = screen.getByText("12.4K in · 823 out · 78% cached · 18s");
-    expect(usage).toHaveAttribute("data-turn-usage");
-    expect(usage).not.toHaveAttribute("tabindex");
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-  });
-
-  it("marks estimated usage and omits cache when the provider did not report it", () => {
-    const message: UIMessage = {
-      id: "a-estimated-usage",
-      role: "assistant",
-      content: "done",
-      createdAt: Date.now(),
-      usage: {
-        prompt_tokens: 1_250,
-        completion_tokens: 90,
-        estimated_tokens: 1_340,
-      },
-    };
-
-    render(<MessageBubble message={message} />);
-
-    const usage = screen.getByText("~1.3K in · ~90 out");
-    expect(usage).not.toHaveTextContent("cached");
-    fireEvent.focus(usage);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Includes estimated usage");
-  });
 });

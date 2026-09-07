@@ -10,9 +10,11 @@ import socket
 import ssl
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
+from weakref import WeakSet
 
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
@@ -47,19 +49,26 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
+from nanobot.webui.outbound_wire import WebUIWirePayload, WebUIWirePersistence
 from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
 
 if TYPE_CHECKING:
-    from nanobot.bus.outbound_events import ProgressEvent, RecoveryStateEvent
-    from nanobot.providers.base import LLMUsage
+    from nanobot.bus.outbound_events import ProgressEvent
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
 _LISTENER_CHECK_INTERVAL_S = 0.5
 _LISTENER_STABLE_AFTER_S = 30.0
 _LISTENER_RESTART_BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+
+# Outbound delivery is isolated per connection.  A bounded queue keeps a slow
+# or suspended terminal from retaining an unbounded stream in server memory.
+_OUTBOUND_QUEUE_MAX_FRAMES = 256
+_OUTBOUND_QUEUE_MAX_BYTES = 8 * 1024 * 1024
+_OUTBOUND_SEND_TIMEOUT_S = 10.0
+_OUTBOUND_CLOSE_TIMEOUT_S = 1.0
 
 # A bind conflict or invalid address needs operator action and must not be
 # retried forever. These errors can be caused by a transient local network
@@ -332,6 +341,21 @@ class _ListenerUnavailableError(OSError):
     """Raised when a previously bound listener loses its serving socket."""
 
 
+@dataclass(slots=True)
+class _OutboundFrame:
+    raw: str
+    utf8_bytes: int
+    label: str
+
+
+@dataclass(slots=True)
+class _ConnectionOutbound:
+    queue: asyncio.Queue[_OutboundFrame]
+    buffered_bytes: int = 0
+    writer: asyncio.Task[None] | None = None
+    closing: bool = False
+
+
 class WebSocketChannel(BaseChannel):
     """Run a local WebSocket server; forward text/JSON messages to the message bus."""
 
@@ -360,6 +384,9 @@ class WebSocketChannel(BaseChannel):
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
         self._server: Server | None = None
+        self._connection_outbound: dict[ServerConnection, _ConnectionOutbound] = {}
+        self._outbound_retire_tasks: set[asyncio.Task[None]] = set()
+        self._retired_connections: WeakSet[ServerConnection] = WeakSet()
 
         self.gateway = gateway
         self._media = gateway.media
@@ -441,8 +468,19 @@ class WebSocketChannel(BaseChannel):
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:
         """Idempotently subscribe *connection* to *chat_id*."""
+        if not self._register_connection_outbound(connection):
+            return
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
+
+    def _register_connection_outbound(self, connection: ServerConnection) -> bool:
+        if connection in self._retired_connections:
+            return False
+        self._connection_outbound.setdefault(
+            connection,
+            _ConnectionOutbound(asyncio.Queue(maxsize=_OUTBOUND_QUEUE_MAX_FRAMES)),
+        )
+        return True
 
     def _detach(self, connection: ServerConnection, chat_id: str) -> None:
         chats = self._conn_chats.get(connection)
@@ -466,7 +504,20 @@ class WebSocketChannel(BaseChannel):
 
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
-        await self._commands.cleanup_connection(connection)
+        self._retired_connections.add(connection)
+        state = self._connection_outbound.get(connection)
+        if state is not None:
+            state.closing = True
+            await self._stop_connection_writer(state)
+        try:
+            await self._commands.cleanup_connection(connection)
+        finally:
+            for chat_id in tuple(self._conn_chats.get(connection, ())):
+                self._detach(connection, chat_id)
+            self._conn_default.pop(connection, None)
+            self.gateway.endpoint.discard_connection(connection)
+            if self._connection_outbound.get(connection) is state:
+                self._connection_outbound.pop(connection, None)
 
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
         """Replay persisted or actively running per-chat state after subscribe."""
@@ -482,19 +533,11 @@ class WebSocketChannel(BaseChannel):
         payload: dict[str, Any] = {"event": event}
         payload.update(fields)
         raw = json.dumps(payload, ensure_ascii=False)
-        try:
-            await connection.send(raw)
-        except ConnectionClosed:
-            await self._cleanup_connection(connection)
-        except Exception as e:
-            self.logger.warning("failed to send {} event: {}", event, e)
+        await self._safe_send_to(connection, raw, label=f" {event} ")
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
-
-    def _expected_path(self) -> str:
-        return _normalize_config_path(self.config.path)
 
     def _build_ssl_context(self) -> ssl.SSLContext | None:
         cert = self.config.ssl_certfile.strip()
@@ -532,9 +575,6 @@ class WebSocketChannel(BaseChannel):
             query,
             headers,
         )
-
-    def _consume_issued_token(self, connection: ServerConnection, token: str) -> bool:
-        return self.gateway.endpoint.consume_issued_token(connection, token)
 
     # -- Server lifecycle and connection ingress ---------------------------
 
@@ -748,6 +788,7 @@ class WebSocketChannel(BaseChannel):
                 self._server_task = None
 
     async def _connection_loop(self, connection: ServerConnection) -> None:
+        self._retired_connections.discard(connection)
         request = connection.request
         path_part = request.path if request else "/"
         _, query = _parse_request_path(path_part)
@@ -817,6 +858,16 @@ class WebSocketChannel(BaseChannel):
         envelope: dict[str, Any],
     ) -> None:
         """Delegate one typed envelope to the WebUI application router."""
+        await self._dispatch_active_envelope(connection, client_id, envelope)
+
+    async def _dispatch_active_envelope(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        if not self._register_connection_outbound(connection):
+            return
         await self._commands.dispatch(connection, client_id, envelope)
 
     def _prune_webui_request_operations(self) -> None:
@@ -827,11 +878,18 @@ class WebSocketChannel(BaseChannel):
 
     async def stop(self) -> None:
         server_task = self._server_task
-        if not self._running and server_task is None:
+        if (
+            not self._running
+            and server_task is None
+            and not self._connection_outbound
+            and not self._outbound_retire_tasks
+        ):
             return
         self._running = False
         if self._stop_event:
             self._stop_event.set()
+        for connection in tuple(self._connection_outbound):
+            await self._cleanup_connection(connection)
         if server_task:
             try:
                 await server_task
@@ -844,10 +902,145 @@ class WebSocketChannel(BaseChannel):
                 self.logger.warning("server task error during shutdown: {}", e)
             if self._server_task is server_task:
                 self._server_task = None
+        retire_tasks = tuple(self._outbound_retire_tasks)
+        if retire_tasks:
+            await asyncio.gather(*retire_tasks, return_exceptions=True)
         await self._commands.close()
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
+
+    @staticmethod
+    async def _stop_connection_writer(state: _ConnectionOutbound) -> None:
+        task = state.writer
+        current = asyncio.current_task()
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        while True:
+            try:
+                state.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        state.buffered_bytes = 0
+
+    def _start_connection_writer(
+        self,
+        connection: ServerConnection,
+        state: _ConnectionOutbound,
+    ) -> None:
+        if state.closing or (state.writer is not None and not state.writer.done()):
+            return
+        state.writer = asyncio.create_task(
+            self._drain_connection_outbound(connection, state),
+            name=f"websocket-outbound-{id(connection):x}",
+        )
+
+    async def _drain_connection_outbound(
+        self,
+        connection: ServerConnection,
+        state: _ConnectionOutbound,
+    ) -> None:
+        current = asyncio.current_task()
+        try:
+            while not state.closing:
+                try:
+                    frame = state.queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    async with asyncio.timeout(_OUTBOUND_SEND_TIMEOUT_S):
+                        await connection.send(frame.raw)
+                except asyncio.CancelledError:
+                    raise
+                except TimeoutError:
+                    self.logger.warning("connection send timed out{}", frame.label)
+                    self._schedule_connection_retirement(
+                        connection,
+                        state,
+                        close_connection=True,
+                        close_code=1013,
+                        close_reason="outbound send timeout",
+                    )
+                    return
+                except ConnectionClosed:
+                    self.logger.warning("connection gone{}", frame.label)
+                    self._schedule_connection_retirement(
+                        connection,
+                        state,
+                        close_connection=False,
+                    )
+                    return
+                except Exception:
+                    self.logger.exception("send failed{}", frame.label)
+                    self._schedule_connection_retirement(
+                        connection,
+                        state,
+                        close_connection=True,
+                        close_code=1011,
+                        close_reason="outbound send failed",
+                    )
+                    return
+                finally:
+                    state.buffered_bytes = max(0, state.buffered_bytes - frame.utf8_bytes)
+        finally:
+            if state.writer is current:
+                state.writer = None
+            if not state.closing and not state.queue.empty():
+                self._start_connection_writer(connection, state)
+
+    def _schedule_connection_retirement(
+        self,
+        connection: ServerConnection,
+        state: _ConnectionOutbound,
+        *,
+        close_connection: bool,
+        close_code: int = 1000,
+        close_reason: str = "",
+    ) -> None:
+        if state.closing:
+            return
+        state.closing = True
+        task = asyncio.create_task(
+            self._retire_connection(
+                connection,
+                close_connection=close_connection,
+                close_code=close_code,
+                close_reason=close_reason,
+            ),
+            name=f"websocket-retire-{id(connection):x}",
+        )
+        self._outbound_retire_tasks.add(task)
+        task.add_done_callback(self._outbound_retire_tasks.discard)
+
+    async def _retire_connection(
+        self,
+        connection: ServerConnection,
+        *,
+        close_connection: bool,
+        close_code: int,
+        close_reason: str,
+    ) -> None:
+        try:
+            if close_connection:
+                try:
+                    async with asyncio.timeout(_OUTBOUND_CLOSE_TIMEOUT_S):
+                        await connection.close(code=close_code, reason=close_reason)
+                except TimeoutError:
+                    self.logger.warning("timed out closing slow WebSocket connection")
+                    with suppress(Exception):
+                        connection.transport.abort()
+                except ConnectionClosed:
+                    pass
+                except Exception:
+                    self.logger.exception("failed to close WebSocket connection")
+                    with suppress(Exception):
+                        connection.transport.abort()
+        finally:
+            try:
+                await self._cleanup_connection(connection)
+            except Exception:
+                self.logger.exception("failed to clean up WebSocket connection")
 
     async def _safe_send_to(
         self,
@@ -856,15 +1049,43 @@ class WebSocketChannel(BaseChannel):
         *,
         label: str = "",
     ) -> None:
-        """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
+        """Queue one frame without letting this connection block other clients."""
+        state = self._connection_outbound.get(connection)
+        if state is None or state.closing:
+            return
+        utf8_bytes = len(raw.encode("utf-8"))
+        if state.queue.full() or state.buffered_bytes + utf8_bytes > _OUTBOUND_QUEUE_MAX_BYTES:
+            self.logger.warning(
+                "disconnecting slow WebSocket connection: outbound queue full "
+                "({} frames, {} bytes)",
+                state.queue.qsize(),
+                state.buffered_bytes,
+            )
+            self._schedule_connection_retirement(
+                connection,
+                state,
+                close_connection=True,
+                close_code=1013,
+                close_reason="outbound queue full",
+            )
+            await asyncio.sleep(0)
+            return
         try:
-            await connection.send(raw)
-        except ConnectionClosed:
-            await self._cleanup_connection(connection)
-            self.logger.warning("connection gone{}", label)
-        except Exception:
-            self.logger.exception("send failed{}", label)
-            raise
+            state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label))
+        except asyncio.QueueFull:
+            self._schedule_connection_retirement(
+                connection,
+                state,
+                close_connection=True,
+                close_code=1013,
+                close_reason="outbound queue full",
+            )
+            await asyncio.sleep(0)
+            return
+        state.buffered_bytes += utf8_bytes
+        self._start_connection_writer(connection, state)
+        # Give an idle writer a chance to start without waiting for physical I/O.
+        await asyncio.sleep(0)
 
     def _persist_turn_transcript_event(
         self,
@@ -1149,79 +1370,53 @@ class WebSocketChannel(BaseChannel):
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
-    async def send_turn_end(
+    async def send_payload(
         self,
         chat_id: str,
-        latency_ms: int | None = None,
+        payload: WebUIWirePayload,
         *,
-        goal_state: dict[str, Any] | None = None,
-        usage: LLMUsage | None = None,
-        context_window_tokens: int | None = None,
+        persistence: WebUIWirePersistence,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
     ) -> None:
-        """Signal that the agent has fully finished processing the current turn."""
+        """Persist as requested, frame, and fan out one encoded WebUI payload."""
         conns = list(self._subs.get(chat_id, ()))
-        body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
-        turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
-        if isinstance(turn_id, str) and turn_id:
-            body["turn_id"] = turn_id
-        if latency_ms is not None:
-            body["latency_ms"] = int(latency_ms)
-        if goal_state is not None:
-            body["goal_state"] = goal_state
-        if usage is not None:
-            body["usage"] = usage.to_turn_dict()
-        if context_window_tokens is not None:
-            body["context_window_tokens"] = int(context_window_tokens)
-        canonical_webui_turn = (metadata or {}).get("webui") is True
-        prior_persistence_failure = (
-            canonical_webui_turn
-            and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
-        )
-        persisted = self._persist_turn_transcript_event(
-            chat_id,
-            body,
-            metadata=metadata,
-            phase="complete",
-            transcript_overrides=(
-                {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
-                if prior_persistence_failure
-                else None
-            ),
-        )
-        if persisted:
-            # A successful completion either has a complete transcript or now
-            # carries a durable incomplete marker. The HTTP replay path can
-            # recover the latter from session history after a gateway restart.
-            clear_websocket_turn_if_current(chat_id, turn_owner)
-        self._clear_stream_buffers(chat_id)
+        body: dict[str, Any] = dict(payload)
+        if persistence == "turn_activity":
+            self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="activity",
+            )
+        elif persistence == "turn_complete":
+            canonical_webui_turn = (metadata or {}).get("webui") is True
+            prior_persistence_failure = (
+                canonical_webui_turn
+                and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
+            )
+            persisted = self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="complete",
+                transcript_overrides=(
+                    {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
+                    if prior_persistence_failure
+                    else None
+                ),
+            )
+            if persisted:
+                # A successful completion either has a complete transcript or now
+                # carries a durable incomplete marker. The HTTP replay path can
+                # recover the latter from session history after a gateway restart.
+                clear_websocket_turn_if_current(chat_id, turn_owner)
+            self._clear_stream_buffers(chat_id)
         raw = json.dumps(body, ensure_ascii=False)
         if not conns:
             return
         for connection in conns:
-            await self._safe_send_to(connection, raw, label=" turn_end ")
-
-    async def send_recovery_state(
-        self,
-        chat_id: str,
-        event: RecoveryStateEvent,
-    ) -> None:
-        """Publish one structured recovery transition without chat pollution."""
-        body: dict[str, Any] = {
-            "event": "recovery_state",
-            "chat_id": chat_id,
-            "status": event.status,
-            "recovery_id": event.recovery_id,
-            "attempts": event.attempts,
-        }
-        if event.reason:
-            body["reason"] = event.reason
-        if event.can_continue is not None:
-            body["can_continue"] = event.can_continue
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in list(self._subs.get(chat_id, ())):
-            await self._safe_send_to(connection, raw, label=" recovery_state ")
+            await self._safe_send_to(connection, raw, label=f" {body['event']} ")
 
     async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
         """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""

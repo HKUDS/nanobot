@@ -1678,4 +1678,32 @@ describe("ThreadMessages", () => {
       ["a3", true],
     ]);
   });
+
+  it("keeps compaction notices out of assistant fork selection", () => {
+    const units = buildDisplayUnits([
+      { id: "u1", role: "user", content: "one", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer", createdAt: 2 },
+      {
+        id: "compaction-1",
+        role: "assistant",
+        content: "",
+        kind: "compaction",
+        createdAt: 3,
+        compaction: {
+          id: "compact-1",
+          phase: "succeeded",
+        },
+      },
+    ]);
+
+    const flags = assistantForkFlags(units);
+    expect(units.map((unit, index) => [
+      unit.type === "message" ? unit.message.id : "activity",
+      flags[index],
+    ])).toEqual([
+      ["u1", true],
+      ["a1", true],
+      ["compaction-1", false],
+    ]);
+  });
 });

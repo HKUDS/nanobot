@@ -24,10 +24,13 @@ from nanobot.bus.events import (
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
     RecoveryStateEvent,
+    RetryStatusEvent,
+    RetryWaitEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -141,6 +144,14 @@ async def _connect_when_ready(url: str) -> Any:
             return await websockets.connect(url)
         except OSError:
             await asyncio.sleep(0.02)
+
+
+async def _wait_for_connection_cleanup(
+    channel: WebSocketChannel,
+    connection: Any,
+) -> None:
+    while connection in channel._conn_chats:
+        await asyncio.sleep(0)
 
 
 async def _webui_mutate(
@@ -1392,6 +1403,7 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     source.request = SimpleNamespace(headers=Headers())
     other_device = AsyncMock()
     channel._webui_connections.update({source, other_device})
+    channel._register_connection_outbound(other_device)
     request_id = "sidebar-workbench-state"
 
     await channel._dispatch_envelope(
@@ -2243,6 +2255,7 @@ async def test_send_removes_connection_on_connection_closed() -> None:
 
     msg = OutboundMessage(channel="websocket", chat_id="chat-1", content="hello")
     await channel.send(msg)
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
     assert "chat-1" not in channel._subs
     assert mock_ws not in channel._conn_chats
@@ -2384,6 +2397,7 @@ async def test_send_delta_removes_connection_on_connection_closed() -> None:
     channel._attach(mock_ws, "chat-1")
 
     await channel.send_delta("chat-1", "chunk", stream_id="s1")
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
     assert "chat-1" not in channel._subs
     assert mock_ws not in channel._conn_chats
@@ -2795,6 +2809,168 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retry_status_is_transient_and_turn_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.outbound_wire.time.time", lambda: 120.0)
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-1"},
+        event=RetryStatusEvent(
+            state="waiting",
+            attempt=2,
+            max_attempts=4,
+            error_kind="connection",
+            next_retry_at=123.5,
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "retry_status",
+        "chat_id": "chat-1",
+        "turn_id": "turn-1",
+        "state": "waiting",
+        "attempt": 2,
+        "max_attempts": 4,
+        "error_kind": "connection",
+        "retry_after_s": 3.5,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_legacy_retry_wait_is_not_sent_or_persisted() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="Model request failed, retry in 2s (attempt 1).",
+        event=RetryWaitEvent(
+            content="Model request failed, retry in 2s (attempt 1).",
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == []
+    channel._persist_turn_transcript_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        event=TurnEndEvent(
+            outcome="failed",
+            failure_kind="model",
+            failure_error_kind="connection",
+            failure_attempts=4,
+            failure_message="Model provider request failed.",
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws)[0] == {
+        "event": "turn_end",
+        "chat_id": "chat-1",
+        "outcome": "failed",
+        "failure_kind": "model",
+        "failure_error_kind": "connection",
+        "failure_attempts": 4,
+        "failure_message": "Model provider request failed.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_context_compaction_started_is_live_only() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-compaction-started")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-compaction-started",
+        content="Compressing context…",
+        event=ContextCompactionEvent(
+            compaction_id="compact-started",
+            phase="started",
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "context_compaction",
+        "chat_id": "chat-compaction-started",
+        "compaction_id": "compact-started",
+        "phase": "started",
+    }]
+    assert read_transcript_lines("websocket:chat-compaction-started") == []
+
+
+@pytest.mark.asyncio
+async def test_context_compaction_is_structured_persisted_and_summary_free() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-compaction")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-compaction",
+        content="Context compacted · LLM summary",
+        event=ContextCompactionEvent(
+            compaction_id="compact-1",
+            phase="succeeded",
+        ),
+    ))
+
+    expected = {
+        "event": "context_compaction",
+        "chat_id": "chat-compaction",
+        "compaction_id": "compact-1",
+        "phase": "succeeded",
+    }
+    assert _sent_ws_payloads(mock_ws) == [expected]
+    [persisted] = read_transcript_lines("websocket:chat-compaction")
+    assert {key: persisted[key] for key in expected} == expected
+
+
+@pytest.mark.asyncio
 async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
@@ -2804,6 +2980,7 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -2825,6 +3002,7 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None
         "reason": "tool_state_unknown",
         "attempts": 1,
     }]
+    channel._persist_turn_transcript_event.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2872,7 +3050,7 @@ async def test_system_command_turn_end_only_refreshes_session_metadata() -> None
         ("owner-new", "owner-old", False),
     ],
 )
-async def test_turn_end_persists_and_conditionally_clears_when_fanout_fails(
+async def test_turn_end_persists_and_conditionally_clears_when_delivery_fails(
     active_owner: str,
     event_owner: str,
     expected_cleared: bool,
@@ -2891,14 +3069,14 @@ async def test_turn_end_persists_and_conditionally_clears_when_fanout_fails(
     wth._WEBSOCKET_TURN_OWNERS[chat_id] = active_owner
 
     try:
-        with pytest.raises(RuntimeError, match="fanout failed"):
-            await channel.send(OutboundMessage(
-                channel="websocket",
-                chat_id=chat_id,
-                content="",
-                metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: event_owner},
-                event=TurnEndEvent(),
-            ))
+        await channel.send(OutboundMessage(
+            channel="websocket",
+            chat_id=chat_id,
+            content="",
+            metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: event_owner},
+            event=TurnEndEvent(),
+        ))
+        await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
         assert read_transcript_lines(f"websocket:{chat_id}")[-1]["event"] == "turn_end"
         assert (wth.websocket_turn_wall_started_at(chat_id) is None) is expected_cleared
@@ -3264,7 +3442,7 @@ async def test_non_webui_transcript_failure_does_not_block_idle_cleanup(
 
 
 @pytest.mark.asyncio
-async def test_idle_clears_matching_owner_when_fanout_fails() -> None:
+async def test_idle_clears_matching_owner_when_delivery_fails() -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3279,14 +3457,14 @@ async def test_idle_clears_matching_owner_when_fanout_fails() -> None:
     wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
     wth._WEBSOCKET_TURN_OWNERS[chat_id] = owner
 
-    with pytest.raises(RuntimeError, match="fanout failed"):
-        await channel.send(OutboundMessage(
-            channel="websocket",
-            chat_id=chat_id,
-            content="",
-            metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: owner},
-            event=GoalStatusEvent(status="idle"),
-        ))
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id=chat_id,
+        content="",
+        metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: owner},
+        event=GoalStatusEvent(status="idle"),
+    ))
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
     assert wth.websocket_turn_wall_started_at(chat_id) is None
     assert chat_id not in wth._WEBSOCKET_TURN_OWNERS
@@ -3311,6 +3489,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         event=TurnEndEvent(
             latency_ms=1500,
             usage=usage,
+            round_usages=(usage,),
             context_window_tokens=128_000,
         ),
     ))
@@ -3333,6 +3512,21 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
                 "ttft_ms": 125,
                 "timed_requests": 1,
             },
+            "round_usages": [
+                {
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "total_tokens": 100,
+                    "context_tokens": 80,
+                    "cached_tokens": 40,
+                    "request_count": 1,
+                    "estimated_tokens": 0,
+                    "generation_ms": 500,
+                    "measured_completion_tokens": 20,
+                    "ttft_ms": 125,
+                    "timed_requests": 1,
+                }
+            ],
             "context_window_tokens": 128_000,
         },
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
@@ -3604,7 +3798,7 @@ async def test_send_session_updated_includes_scope_when_present() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_non_connection_closed_exception_is_raised() -> None:
+async def test_send_non_connection_closed_exception_is_isolated() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
@@ -3612,8 +3806,11 @@ async def test_send_non_connection_closed_exception_is_raised() -> None:
     channel._attach(mock_ws, "chat-1")
 
     msg = OutboundMessage(channel="websocket", chat_id="chat-1", content="hello")
-    with pytest.raises(RuntimeError, match="unexpected"):
-        await channel.send(msg)
+    await channel.send(msg)
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
+
+    mock_ws.close.assert_awaited_once_with(code=1011, reason="outbound send failed")
+    assert "chat-1" not in channel._subs
 
 
 @pytest.mark.asyncio

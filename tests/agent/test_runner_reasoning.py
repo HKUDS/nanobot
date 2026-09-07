@@ -20,6 +20,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
+from nanobot.utils.progress_events import output_events
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -324,7 +325,7 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
     async def _stream(_content: str) -> None:
         pass
 
-    hook = AgentProgressHook(on_progress=_progress, on_stream=_stream)
+    hook = AgentProgressHook(output_events(on_progress=_progress, on_stream=_stream), streaming=True)
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "question"}],

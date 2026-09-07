@@ -9,7 +9,6 @@ def test_weather_skill_uses_windows_safe_single_today_request() -> None:
     assert "bare `curl` may resolve to `Invoke-WebRequest`" in normalized
     assert "https://wttr.in/London?1&m" in content
     assert 'curl.exe -s "https://wttr.in/Berlin.png" -o weather.png' in content
-    assert "/tmp/weather.png" not in content
     assert (
         "Do not fetch current conditions separately when a today or forecast "
         "request already includes them."

@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TypedDict, cast
 
+SUMMARY_CONTINUATION_TEXT = (
+    "Continue the active task from the working-memory checkpoint above."
+)
 
 class SessionSummary(TypedDict):
     text: str
     last_active: str
+
+
+@dataclass(frozen=True, slots=True)
+class SessionSummaryCheckpoint:
+    """A replacement summary and the raw transcript boundary it covers."""
+
+    summary: str
+    transcript_boundary: int
 
 
 def session_summary_from_metadata(

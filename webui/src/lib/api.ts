@@ -27,7 +27,6 @@ import type {
   SessionHandle,
   SessionAutomationsPayload,
   SettingsPayload,
-  SettingsUpdate,
   SidebarStatePayload,
   SkillDetail,
   SkillActionPayload,
@@ -880,26 +879,6 @@ export async function updateSidebarState(
   state: SidebarStatePayload,
 ): Promise<SidebarStatePayload> {
   return mutation<SidebarStatePayload>(transport, "sidebar.update", { state });
-}
-
-export async function updateSettings(
-  transport: WebUIMutationTransport,
-  update: SettingsUpdate,
-): Promise<SettingsPayload> {
-  const payload: Record<string, unknown> = {};
-  if (update.modelPreset !== undefined) {
-    payload.model_preset = update.modelPreset ?? "default";
-  }
-  if (update.model !== undefined) payload.model = update.model;
-  if (update.provider !== undefined) payload.provider = update.provider;
-  if (update.contextWindowTokens !== undefined) {
-    payload.context_window_tokens = update.contextWindowTokens;
-  }
-  if (update.timezone !== undefined) payload.timezone = update.timezone;
-  if (update.toolHintMaxLength !== undefined) {
-    payload.tool_hint_max_length = update.toolHintMaxLength;
-  }
-  return mutation<SettingsPayload>(transport, "settings.agent.update", payload);
 }
 
 function modelGenerationSettingsPayload(

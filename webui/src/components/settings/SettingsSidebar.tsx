@@ -76,13 +76,16 @@ export function SettingsSidebar({
     <aside
       className={cn(
         "flex w-full shrink-0 flex-col bg-settings-surface px-3 pb-2 lg:w-[17rem] lg:px-3 lg:pb-4",
-        hostChromeInset ? "pt-[4.25rem] lg:pt-[4.25rem]" : "pt-4 lg:pt-4",
+        hostChromeInset ? "pt-10 lg:pt-10" : "pt-4 lg:pt-4",
       )}
     >
       <button
         type="button"
         onClick={onBackToChat}
-        className="touch-target mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3"
+        className={cn(
+          "touch-target mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3",
+          hostChromeInset && "-ml-1",
+        )}
       >
         <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
         {t("settings.backToChat")}

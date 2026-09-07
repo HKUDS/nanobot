@@ -382,7 +382,7 @@ nanobot plugins enable matrix
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
-| `sasVerification` | Auto-complete SAS device verification requests from allowed users (default `false`). Useful for Element X, which does not expose manual trust for third-party devices. |
+| `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
 
 

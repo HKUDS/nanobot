@@ -127,7 +127,10 @@ export function useSessions(): {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
+  createChat: (
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
   deleteChat: (
     key: string,
@@ -204,7 +207,10 @@ export function useSessions(): {
     };
   }, [client, refresh]);
 
-  const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
+  const createChat = useCallback(async (
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ): Promise<string> => {
     const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
@@ -219,6 +225,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
+        modelPreset: modelPreset ?? null,
         workspaceScope: workspaceScope ?? null,
       },
       ...prev.filter((s) => s.key !== key),
@@ -257,11 +264,14 @@ export function useSessions(): {
 
   const deleteChat = useCallback(
     async (key: string, options?: { deleteAutomations?: boolean }) => {
+      const optimistic = optimisticKeysRef.current.has(key);
       const result = await apiDeleteSession(client, key, options);
-      if (!result.deleted) return result;
+      if (result.blocked_by_automations || (!result.deleted && !optimistic)) return result;
       optimisticKeysRef.current.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
-      return result;
+      // The gateway may have restarted and forgotten an unpersisted chat's
+      // draft scope, but removing that optimistic session is still a deletion.
+      return result.deleted ? result : { ...result, deleted: true };
     },
     [client],
   );

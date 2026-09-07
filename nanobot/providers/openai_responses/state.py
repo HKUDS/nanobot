@@ -108,6 +108,28 @@ def build_responses_state(
     )
 
 
+def build_responses_compaction_state(
+    *,
+    provider: str,
+    model: str,
+    output_items: list[dict[str, Any]],
+) -> ProviderConversationState | None:
+    """Return the state at the latest native compaction output boundary."""
+    latest = None
+    for index, item in enumerate(output_items):
+        if item.get("type") in _COMPACTION_ITEM_TYPES:
+            latest = index
+    if latest is None:
+        return None
+    return ProviderConversationState(
+        kind=RESPONSES_STATE_KIND,
+        provider=provider,
+        model=model,
+        version=RESPONSES_STATE_VERSION,
+        payload={_ITEMS_KEY: [deepcopy(output_items[latest])]},
+    )
+
+
 def responses_state_items(
     state: ProviderConversationState,
 ) -> list[dict[str, Any]] | None:

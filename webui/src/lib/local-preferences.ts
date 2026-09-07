@@ -13,12 +13,17 @@ export interface LocalPreferences {
 
 export const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
 export const LOCAL_PREFS_CHANGED_EVENT = "nanobot-webui.local-preferences-changed";
+const LOCAL_PREFS_SCHEMA_VERSION = 1;
+
+type PersistedLocalPreferences = Partial<LocalPreferences> & {
+  schemaVersion?: number;
+};
 
 export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
-  brandLogos: false,
+  brandLogos: true,
   browserNotifications: false,
   fileEditDisplayMode: "summary",
 };
@@ -31,12 +36,14 @@ export function readLocalPreferences(): LocalPreferences {
   try {
     const raw = window.localStorage.getItem(LOCAL_PREFS_STORAGE_KEY);
     if (!raw) return DEFAULT_LOCAL_PREFS;
-    const parsed = JSON.parse(raw) as Partial<LocalPreferences>;
+    const parsed = JSON.parse(raw) as PersistedLocalPreferences;
     return {
       density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos === true,
+      brandLogos: parsed.schemaVersion === LOCAL_PREFS_SCHEMA_VERSION
+        ? parsed.brandLogos !== false
+        : true,
       browserNotifications: parsed.browserNotifications === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
     };
@@ -47,7 +54,10 @@ export function readLocalPreferences(): LocalPreferences {
 
 export function writeLocalPreferences(preferences: LocalPreferences): void {
   try {
-    window.localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(preferences));
+    window.localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({
+      schemaVersion: LOCAL_PREFS_SCHEMA_VERSION,
+      ...preferences,
+    }));
   } catch {
     // Browser-only preferences should never block settings.
   }

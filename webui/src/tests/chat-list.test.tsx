@@ -983,6 +983,7 @@ describe("ChatList", () => {
       session({
         chatId: "alpha",
         title: "Alpha task",
+        handle: { id: "handle_alpha", name: "mira" },
         updatedAt: "2026-05-20T11:00:00Z",
         workspaceScope: {
           project_path: "/Users/me/nanobot",
@@ -1030,6 +1031,12 @@ describe("ChatList", () => {
       "border-sidebar-foreground/10",
     );
     expect(within(nanobotSection).getByText("Alpha task")).toBeInTheDocument();
+    expect(
+      within(nanobotSection)
+        .getByText("@mira")
+        .closest("[data-sidebar-session-handle]")
+        ?.parentElement,
+    ).toHaveClass("items-center");
     expect(within(nanobotSection).getByText("Zeta task")).toBeInTheDocument();
     expect(nanobotText.indexOf("Alpha task")).toBeLessThan(nanobotText.indexOf("Zeta task"));
     expect(within(nanobotSection).getByLabelText("Agent running")).toBeInTheDocument();

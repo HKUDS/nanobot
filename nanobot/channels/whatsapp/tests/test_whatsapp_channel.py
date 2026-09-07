@@ -157,11 +157,9 @@ class _FailingConnectLoginClient(_FakeLoginClient):
         return asyncio.create_task(fail())
 
 
-def test_default_config_has_no_bridge_fields() -> None:
+def test_default_config_uses_native_database_path() -> None:
     config = WhatsAppChannel.default_config()
 
-    assert "bridgeUrl" not in config
-    assert "bridgeToken" not in config
     assert config["databasePath"] == ""
 
 

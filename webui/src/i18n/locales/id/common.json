@@ -423,7 +423,7 @@
       "presetName": "Nama prasetel",
       "presetNameHelp": "Digunakan di antarmuka dan perintah /model. Nama harus unik.",
       "presetNameDuplicate": "Preset dengan nama ini sudah ada.",
-      "presetNamePlaceholder": "Menulis cepat",
+      "presetNamePlaceholder": "mis. Menulis cepat",
       "advancedOptions": "Opsi lanjutan",
       "advancedSummary": "Konteks {{context}} · Maks. {{max}} token",
       "maxTokens": "Maks. token keluaran",
@@ -1069,6 +1069,13 @@
     "error": "Kesalahan koneksi"
   },
   "thread": {
+    "compaction": {
+      "cancelled": "Pemadatan konteks dibatalkan",
+      "empty": "Tidak ada konteks yang perlu dipadatkan.",
+      "started": "Memadatkan konteks…",
+      "failed": "Pemadatan konteks gagal",
+      "succeeded": "Konteks dipadatkan"
+    },
     "loadingConversation": "Memuat percakapan…",
     "empty": {
       "greetings": {
@@ -1181,11 +1188,20 @@
       "removeQuotedContext": "Hapus konteks kutipan",
       "modelNotConfigured": "Model belum dikonfigurasi",
       "configureModel": "Konfigurasi model",
+      "chooseAI": "Pilih AI Anda",
       "switchModel": "Ganti model untuk percakapan ini",
       "manageModels": "Kelola model",
       "context": {
-        "tooltip": "Konteks · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. {{percent}}% digunakan."
+        "tooltip": "Konteks {{percent}}%",
+        "detailsLabel": "Buka penggunaan konteks",
+        "panelTitle": "Penggunaan konteks",
+        "contextTitle": "Konteks",
+        "recentRounds": "Putaran terbaru",
+        "inputTrend": "Token masukan",
+        "input": "Token masukan",
+        "cacheHitRate": "Rasio hit KV cache",
+        "output": "Token keluaran",
+        "duration": "Waktu pembuatan"
       },
       "queued": {
         "label": "Panduan antrean",
@@ -1243,6 +1259,10 @@
           "new": {
             "title": "Obrolan baru",
             "description": "Reset chat ini dan mulai percakapan baru."
+          },
+          "compact": {
+            "title": "Ringkas konteks",
+            "description": "Ringkas konteks chat ini, lalu lanjutkan percakapan."
           },
           "stop": {
             "title": "Hentikan tugas saat ini",
@@ -1414,6 +1434,13 @@
     "activityWorkingFor": "Memproses selama {{duration}}",
     "activityWorked": "Selesai memproses",
     "activityWorkedFor": "Diproses selama {{duration}}",
+    "retryConnection": "Koneksi gagal",
+    "retryTimeout": "Waktu respons model habis",
+    "retryRateLimit": "Batas permintaan tercapai",
+    "retryServer": "Model tidak tersedia",
+    "retryUnknown": "Permintaan model gagal",
+    "retryWaiting": "{{error}} · mencoba lagi dalam {{seconds}} dtk · percobaan {{attempt}}",
+    "retryExhausted": "{{error}} · mengakhiri giliran",
     "cliActivityRunningOne": "Menggunakan {{name}}",
     "cliActivityRanOne": "Menggunakan {{name}} selesai",
     "cliActivityFailedOne": "{{name}} gagal",
@@ -1512,6 +1539,17 @@
     "turnRejected": {
       "title": "Pesan tidak terkirim",
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Kuota penyedia model tidak tersedia",
+      "billingBody": "Tambahkan kredit atau periksa tagihan akun penyedia, lalu coba lagi.",
+      "connectionTitle": "Tidak dapat terhubung ke penyedia model",
+      "timeoutTitle": "Permintaan ke penyedia model kehabisan waktu",
+      "rateLimitTitle": "Batas permintaan penyedia model tercapai",
+      "serverTitle": "Kesalahan layanan penyedia model",
+      "unknownTitle": "Permintaan ke penyedia model gagal",
+      "bodyWithAttempt": "Permintaan masih gagal pada percobaan ke-{{attempts}}, sehingga percobaan ulang dihentikan. Periksa konfigurasi atau status layanan penyedia, lalu coba lagi.",
+      "body": "Periksa konfigurasi atau status layanan penyedia, lalu coba lagi."
     }
   },
   "workspace": {

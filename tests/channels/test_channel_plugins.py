@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tomllib
+from collections import OrderedDict
 from dataclasses import replace
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
@@ -32,7 +33,7 @@ from nanobot.channels.contracts import (
     SetupRequirement,
     channel_default_config,
 )
-from nanobot.channels.manager import ChannelManager
+from nanobot.channels.manager import ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE, ChannelManager
 from nanobot.channels.plugin import ChannelPlugin, load_channel_package
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import ChannelsConfig, Config
@@ -264,10 +265,8 @@ def test_channels_config_getattr_returns_extra():
     assert section["enabled"] is True
 
 
-def test_channels_config_has_no_per_channel_fields():
-    """After decoupling, ChannelsConfig has no explicit channel fields."""
+def test_channels_config_keeps_shared_delivery_defaults():
     cfg = ChannelsConfig()
-    assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is True
     assert cfg.extract_document_text is True
@@ -2697,7 +2696,7 @@ def test_optional_dependency_metadata_for_enable():
             "socksio>=1.0.0,<2.0.0",
             "python-socks[asyncio]>=2.8.0,<3.0.0; sys_platform != 'win32'",
         ),
-        "wecom": ("wecom-aibot-sdk-python>=0.1.5",),
+        "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
             "neonize>=0.3.18.post0,<0.4.0",
@@ -3179,7 +3178,7 @@ def test_outbound_duplicate_suppression_is_scoped_to_origin_message() -> None:
     mgr.bus = MessageBus()
     mgr.channels = {}
     mgr._dispatch_task = None
-    mgr._origin_reply_fingerprints = {}
+    mgr._origin_reply_fingerprints = OrderedDict()
 
     first = OutboundMessage(
         channel="feishu",
@@ -3210,6 +3209,39 @@ def test_outbound_duplicate_suppression_is_scoped_to_origin_message() -> None:
     assert mgr._should_suppress_outbound(duplicate) is True
     assert mgr._should_suppress_outbound(separate_turn) is False
     assert mgr._should_suppress_outbound(new_origin_content) is False
+
+
+def test_outbound_duplicate_suppression_cache_is_bounded() -> None:
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr._origin_reply_fingerprints = OrderedDict()
+
+    for index in range(ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE):
+        msg = OutboundMessage(
+            channel="feishu",
+            chat_id="chat123",
+            content="Done",
+            metadata={"message_id": f"msg-{index}"},
+        )
+        assert mgr._should_suppress_outbound(msg) is False
+
+    duplicate = OutboundMessage(
+        channel="feishu",
+        chat_id="chat123",
+        content="Done",
+        metadata={"origin_message_id": "msg-0"},
+    )
+    newest = OutboundMessage(
+        channel="feishu",
+        chat_id="chat123",
+        content="Done",
+        metadata={"message_id": f"msg-{ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE}"},
+    )
+
+    assert mgr._should_suppress_outbound(duplicate) is True
+    assert mgr._should_suppress_outbound(newest) is False
+    assert len(mgr._origin_reply_fingerprints) == ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE
+    assert ("feishu", "chat123", "msg-0") in mgr._origin_reply_fingerprints
+    assert ("feishu", "chat123", "msg-1") not in mgr._origin_reply_fingerprints
 
 
 @pytest.mark.asyncio
@@ -3502,6 +3534,8 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
 
     # Create a real cancelled task
     async def dummy_task():
@@ -3580,6 +3614,8 @@ async def test_stop_all_handles_channel_exception():
     mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
     mgr._dispatch_task = None
 
     # Should not raise even if channel.stop() raises
@@ -3619,6 +3655,8 @@ async def test_stop_all_handles_channel_stop_cancelled_task():
         "next": next_channel,
     }
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
     mgr._dispatch_task = None
 
     await mgr.stop_all()

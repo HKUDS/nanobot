@@ -9,10 +9,11 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import {
-  ThreadComposer,
-  type ComposerContextUsage,
-} from "@/components/thread/ThreadComposer";
+import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import type {
+  ComposerContextUsage,
+  ComposerRoundUsage,
+} from "@/components/thread/ComposerUsagePopover";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -41,6 +42,7 @@ import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
+  RoundUsage,
   SettingsPayload,
   SlashCommand,
   SkillSummary,
@@ -109,6 +111,60 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
     };
   }
   return null;
+}
+
+function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
+  const recent: ComposerRoundUsage[] = [];
+  const seenTurns = new Set<string>();
+  for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
+    const message = messages[index];
+    const turnKey = message.turnId || message.id;
+    if (
+      message.role !== "assistant"
+      || message.kind === "trace"
+      || message.isStreaming
+      || seenTurns.has(turnKey)
+    ) {
+      continue;
+    }
+
+    seenTurns.add(turnKey);
+    const rounds: RoundUsage[] = message.roundUsages ?? [];
+    for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
+      const round = rounds[roundIndex];
+      const inputTokens = round.prompt_tokens;
+      if (
+        recent.length >= 8
+        || typeof inputTokens !== "number"
+        || !Number.isFinite(inputTokens)
+        || inputTokens <= 0
+      ) {
+        continue;
+      }
+      const outputTokens = round.completion_tokens;
+      const cachedTokens = round.cached_tokens;
+      const estimatedTokens = round.estimated_tokens;
+      const generationMs = round.generation_ms;
+      recent.push({
+        id: `${turnKey}:${roundIndex}`,
+        timestamp: message.completedAt ?? message.createdAt,
+        inputTokens,
+        ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
+          ? { outputTokens }
+          : {}),
+        ...(typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
+          ? { cachedTokens }
+          : {}),
+        ...(typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens)
+          ? { estimatedTokens }
+          : {}),
+        ...(typeof generationMs === "number" && Number.isFinite(generationMs)
+          ? { generationMs }
+          : {}),
+      });
+    }
+  }
+  return recent.reverse();
 }
 
 function snapshotPreservesMessage(
@@ -336,6 +392,7 @@ interface ThreadShellProps {
   onCreateChat?: (
     workspaceScope?: WorkspaceScopePayload | null,
     initialMessage?: string,
+    modelPreset?: string | null,
   ) => Promise<string | null>;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
@@ -343,7 +400,6 @@ interface ThreadShellProps {
   onToggleTheme?: () => void;
   hideSidebarToggleForHostChrome?: boolean;
   hideSidebarToggle?: boolean;
-  hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   hideHeaderTitle?: boolean;
   inlineHandle?: boolean;
@@ -643,7 +699,6 @@ export function ThreadShell({
   onToggleTheme = () => {},
   hideSidebarToggleForHostChrome = false,
   hideSidebarToggle = false,
-  hostChromeTitleInset = false,
   hideThemeButton = false,
   hideHeaderTitle = false,
   inlineHandle = false,
@@ -765,6 +820,7 @@ export function ThreadShell({
     messagesReady,
     isStreaming,
     runStartedAt,
+    retryStatus,
     goalState,
     recoveryState,
     continueRecovery,
@@ -838,6 +894,10 @@ export function ThreadShell({
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const composerContextUsage = useMemo(
     () => latestComposerContextUsage(displayMessages),
+    [displayMessages],
+  );
+  const composerRoundUsage = useMemo(
+    () => recentComposerRoundUsage(displayMessages),
     [displayMessages],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
@@ -961,7 +1021,7 @@ export function ThreadShell({
     [activeModelPreset, modelName, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
-    ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })
+    ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
@@ -1350,7 +1410,7 @@ export function ThreadShell({
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope, content);
+      const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       if (!newId) {
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);
@@ -1521,6 +1581,7 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
+          recentRoundUsage={composerRoundUsage}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1570,6 +1631,7 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
+          recentRoundUsage={composerRoundUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1624,7 +1686,6 @@ export function ThreadShell({
       onToggleTheme={onToggleTheme}
       hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
       hideSidebarToggle={hideSidebarToggle}
-      hostChromeTitleInset={hostChromeTitleInset}
       hideThemeButton={hideThemeButton}
       hideTitle={hideHeaderTitle}
       actions={headerActions}
@@ -1666,6 +1727,7 @@ export function ThreadShell({
             temporary={temporary}
             isStreaming={turnActive}
             runStartedAt={currentRunStartedAt}
+            retryStatus={retryStatus}
             emptyState={emptyState}
             composer={composerPortalTarget === undefined ? composer : null}
             activeTurnId={viewportTurnId}

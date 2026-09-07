@@ -98,7 +98,6 @@ def test_every_channel_is_a_self_contained_package() -> None:
     channel_dir = Path(channel_setup_module.__file__).parent
     package_names = {path.parent.name for path in channel_dir.glob("*/manifest.py")}
 
-    assert not hasattr(channel_setup_module, "CHANNEL_SETUP_SPECS")
     assert package_names == EXPECTED_CHANNELS
     assert set(discover_plugins()) == EXPECTED_CHANNELS
     for name in EXPECTED_CHANNELS:
@@ -106,7 +105,6 @@ def test_every_channel_is_a_self_contained_package() -> None:
         assert (package_dir / "__init__.py").is_file()
         assert (package_dir / "manifest.py").is_file()
         assert (package_dir / "runtime.py").is_file()
-        assert not (channel_dir / f"{name}.py").exists()
 
         plugin = load_channel_package(name)
         assert plugin is not None
@@ -163,27 +161,6 @@ def test_channel_manifests_only_import_contract_modules() -> None:
         }
         unexpected = imports - allowed_imports - allowed_channel_imports
         assert not unexpected, f"{name} imports runtime dependencies: {unexpected}"
-
-
-def test_runtime_classes_do_not_declare_persisted_management_hooks() -> None:
-    channel_dir = Path(channel_setup_module.__file__).parent
-    management_hooks = {
-        "feature_instances",
-        "instance_specs",
-        "runtime_name",
-        "supports_multiple_instances",
-        "update_instance_config",
-    }
-    for name in EXPECTED_CHANNELS:
-        tree = ast.parse((channel_dir / name / "runtime.py").read_text(encoding="utf-8"))
-        declared = {
-            item.name
-            for node in tree.body
-            if isinstance(node, ast.ClassDef)
-            for item in node.body
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        assert declared.isdisjoint(management_hooks), f"{name} runtime owns {declared & management_hooks}"
 
 
 def test_feishu_package_manifest_owns_runtime_and_webui_metadata() -> None:

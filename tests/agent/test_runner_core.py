@@ -61,7 +61,10 @@ def test_initial_transcript_is_built_from_structured_turn_input() -> None:
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
 
-    assert AgentRunner._initial_transcript(spec) == expected
+    messages, compaction = AgentRunner._initial_transcript_and_compaction(spec)
+
+    assert messages == expected
+    assert compaction is None
     transcript_builder.assert_called_once_with(transcript_input)
 
 
@@ -420,8 +423,7 @@ async def test_runner_preserves_tool_result_before_rejecting_unfit_followup():
             ],
             tools=tools,
             model="gpt-5.6",
-            context_window_tokens=3_000,
-            context_block_limit=200,
+            context_window_tokens=2_224,
             max_tokens=1_000,
             max_iterations=3,
             max_tool_result_chars=10_000,
@@ -626,6 +628,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
                         arguments={"path": "."},
                     )
                 ],
+                usage=LLMUsage.reported(input_tokens=1, output_tokens=1),
             )
         return LLMResponse(
             content="Read the directory twice. More investigation remains.",
@@ -657,6 +660,14 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     assert calls[-1]["tools"] is None
     assert "tool-call budget" in calls[-1]["messages"][-1]["content"]
     assert tools.execute.await_count == 2
+    assert result.usage is not None
+    assert result.usage.input_tokens == 12
+    assert result.usage.output_tokens == 9
+    assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [
+        (1, 1),
+        (1, 1),
+        (10, 7),
+    ]
 
 
 @pytest.mark.asyncio
@@ -911,6 +922,11 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     assert result.usage is not None
     assert result.usage.input_tokens == 13
     assert result.usage.output_tokens == 9
+    assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [
+        (5, 1),
+        (5, 1),
+        (3, 7),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1255,12 +1271,20 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
     assert result.usage.cache_read_tokens == 230  # 80 + 150
     assert result.usage.context_tokens == 200
     assert result.usage.request_count == 2
+    assert [
+        (item.input_tokens, item.cache_read_tokens)
+        for item in result.round_usages
+    ] == [
+        (100, 80),
+        (200, 150),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_runner_binds_on_retry_wait_callback():
-    """Provider retry heartbeats use the explicitly supplied callback."""
+async def test_runner_carries_retry_notifications_in_provider_context():
+    """The runner carries a generic scope, not an event-specific callback."""
     from nanobot.agent.runner import AgentRunner
+    from nanobot.events import EventSink, RetryWaitEvent
 
     captured: dict = {}
 
@@ -1285,10 +1309,13 @@ async def test_runner_binds_on_retry_wait_callback():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        retry_wait_callback=retry_wait_cb,
+        events=EventSink(retry_wait_cb),
     ))
 
-    assert captured["on_retry_wait"] is retry_wait_cb
+    assert "on_retry_wait" not in captured
+    event = RetryWaitEvent("waiting")
+    await captured["provider_context"].events.emit(event)
+    retry_wait_cb.assert_awaited_once_with(event)
 
 
 # ---------------------------------------------------------------------------

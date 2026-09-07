@@ -26,7 +26,7 @@ import {
   promptTop,
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 export interface ThreadViewportHandle {
   jumpToUserPrompt: (promptId: string) => void;
@@ -39,6 +39,7 @@ interface ThreadViewportProps {
   isStreaming: boolean;
   /** Optimistic or canonical start time for the active turn, in unix seconds. */
   runStartedAt?: number | null;
+  retryStatus?: RetryStatus | null;
   composer?: ReactNode;
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
@@ -221,6 +222,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   temporary = false,
   isStreaming,
   runStartedAt = null,
+  retryStatus = null,
   composer,
   emptyState,
   scrollToBottomSignal = 0,
@@ -878,6 +880,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   isStreaming={isStreaming}
                   activeTurnId={activeTurnId}
                   runStartedAt={runStartedAt}
+                  retryStatus={retryStatus}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}

@@ -993,7 +993,7 @@ export const ChatList = memo(function ChatList({
                               ) : null}
                                 <span className="min-w-0 flex-1 overflow-hidden">
                                   {projectMode ? (
-                                    <span className="relative flex w-full min-w-0 items-baseline gap-2">
+                                    <span className="relative flex w-full min-w-0 items-center gap-2">
                                       <SidebarSessionHandle handle={s.handle} />
                                       <span className="min-w-0 flex-1 truncate font-medium leading-5">
                                         {title}

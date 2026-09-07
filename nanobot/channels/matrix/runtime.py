@@ -47,6 +47,8 @@ try:
         SyncError,
         SyncResponse,
         ToDeviceError,
+        ToDeviceMessage,
+        UnknownToDeviceEvent,
         UploadError,
     )
     from nio.crypto.attachments import decrypt_attachment
@@ -75,6 +77,10 @@ _ATTACH_FAILED = "[attachment: {} - download failed]"
 _ATTACH_UPLOAD_FAILED = "[attachment: {} - upload failed]"
 _DEFAULT_ATTACH_NAME = "attachment"
 _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.file": "file"}
+_SAS_METHOD = "m.sas.v1"
+_SAS_REQUEST_MAX_AGE_MS = 10 * 60 * 1000
+_SAS_REQUEST_MAX_FUTURE_MS = 5 * 60 * 1000
+_SAS_REQUEST_MAX_PENDING = 256
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
 MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
@@ -200,6 +206,15 @@ class _StreamBuf:
     event_id: str | None = None
     last_edit: float = 0.0
 
+
+@dataclass(frozen=True)
+class _SasVerificationRequest:
+    """An allowed Element verification request awaiting SAS completion."""
+
+    sender: str
+    device_id: str
+    timestamp_ms: int
+
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
     try:
@@ -321,6 +336,7 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
         self._stream_bufs: dict[str, _StreamBuf] = {}
+        self._sas_verification_requests: dict[str, _SasVerificationRequest] = {}
         self._started_at_ms: int = 0
         self._media_download_semaphore = asyncio.Semaphore(
             max(1, int(self.config.max_concurrent_media_downloads))
@@ -642,7 +658,7 @@ class MatrixChannel(BaseChannel):
             stream_end = False
         if stream_end:
             stream_key = _matrix_stream_key(chat_id, stream_id)
-            buf = self._stream_bufs.pop(stream_key, None)
+            buf = self._stream_bufs.get(stream_key)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -653,14 +669,19 @@ class MatrixChannel(BaseChannel):
                 buf.event_id,
                 thread_relates_to=relates_to,
             )
-            await self._send_room_content(chat_id, content)
+            response = await self._send_room_content(chat_id, content)
+            if isinstance(response, RoomSendError):
+                raise RuntimeError(f"Matrix stream was not delivered: {response}")
+            self._stream_bufs.pop(stream_key, None)
             return
 
         stream_key = _matrix_stream_key(chat_id, stream_id)
         buf = self._stream_bufs.get(stream_key)
+        created_buf = buf is None
         if buf is None:
             buf = _StreamBuf()
             self._stream_bufs[stream_key] = buf
+        previous_text = buf.text
         buf.text += delta
 
         if not buf.text.strip():
@@ -676,13 +697,19 @@ class MatrixChannel(BaseChannel):
                     thread_relates_to=relates_to,
                 )
                 response = await self._send_room_content(chat_id, content)
+                if isinstance(response, RoomSendError):
+                    raise RuntimeError(f"Matrix stream was not delivered: {response}")
                 buf.last_edit = now
                 if not buf.event_id:
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = cast(RoomSendResponse, response).event_id
             except Exception:
+                buf.text = previous_text
+                if created_buf:
+                    self._stream_bufs.pop(stream_key, None)
                 self.logger.error("Stream send/edit failed for chat_id={}", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
+                raise
 
 
     def _register_event_callbacks(self) -> None:
@@ -696,7 +723,7 @@ class MatrixChannel(BaseChannel):
             client = self._callback_registrar()
             client.add_to_device_callback(
                 self._on_key_verification_event,
-                (KeyVerificationEvent,),
+                (KeyVerificationEvent, UnknownToDeviceEvent),
             )
 
     def _register_response_callbacks(self) -> None:
@@ -709,7 +736,10 @@ class MatrixChannel(BaseChannel):
     def _is_sas_sender_allowed(self, sender: str) -> bool:
         return bool(sender and self.is_allowed(sender))
 
-    async def _on_key_verification_event(self, event: KeyVerificationEvent) -> None:
+    async def _on_key_verification_event(
+        self,
+        event: KeyVerificationEvent | UnknownToDeviceEvent,
+    ) -> None:
         try:
             await self._handle_key_verification_event(event)
         except asyncio.CancelledError:
@@ -717,18 +747,173 @@ class MatrixChannel(BaseChannel):
         except Exception:
             self.logger.exception("Matrix SAS verification handling failed")
 
-    async def _handle_key_verification_event(self, event: KeyVerificationEvent) -> None:
+    @staticmethod
+    def _unknown_verification_content(
+        event: UnknownToDeviceEvent,
+    ) -> tuple[str, dict[str, object]] | None:
+        event_type = event.type
+        source = event.source
+        content = source.get("content")
+        if not isinstance(content, dict):
+            return None
+        return event_type, cast(dict[str, object], content)
+
+    @staticmethod
+    def _content_string(content: dict[str, object], key: str) -> str:
+        value = content.get(key)
+        return value if isinstance(value, str) else ""
+
+    def _prune_sas_verification_requests(self, now_ms: int) -> None:
+        oldest_allowed = now_ms - _SAS_REQUEST_MAX_AGE_MS
+        self._sas_verification_requests = {
+            transaction_id: request
+            for transaction_id, request in self._sas_verification_requests.items()
+            if request.timestamp_ms >= oldest_allowed
+        }
+
+    def _remember_sas_verification_request(
+        self,
+        transaction_id: str,
+        request: _SasVerificationRequest,
+    ) -> None:
+        self._sas_verification_requests[transaction_id] = request
+        while len(self._sas_verification_requests) > _SAS_REQUEST_MAX_PENDING:
+            oldest_transaction_id = next(iter(self._sas_verification_requests))
+            self._sas_verification_requests.pop(oldest_transaction_id)
+
+    async def _send_sas_control_message(
+        self,
+        *,
+        event_type: str,
+        sender: str,
+        device_id: str,
+        content: dict[str, object],
+    ) -> bool:
+        if not self.client:
+            return False
+        response = await self.client.to_device(
+            ToDeviceMessage(
+                type=event_type,
+                recipient=sender,
+                recipient_device=device_id,
+                content=content,
+            )
+        )
+        if isinstance(response, ToDeviceError):
+            self.logger.warning("Matrix SAS {} failed for {}: {}", event_type, sender, response)
+            return False
+        return True
+
+    async def _handle_unknown_verification_event(
+        self,
+        event: UnknownToDeviceEvent,
+        sender: str,
+    ) -> None:
+        parsed = self._unknown_verification_content(event)
+        if parsed is None:
+            return
+        event_type, content = parsed
+        if event_type not in {
+            "m.key.verification.request",
+            "m.key.verification.ready",
+            "m.key.verification.done",
+        }:
+            return
+
+        transaction_id = self._content_string(content, "transaction_id")
+        if not transaction_id:
+            return
+
+        if event_type == "m.key.verification.request":
+            from_device = self._content_string(content, "from_device")
+            methods = content.get("methods")
+            timestamp = content.get("timestamp")
+            if (
+                not from_device
+                or not isinstance(methods, list)
+                or _SAS_METHOD not in methods
+                or isinstance(timestamp, bool)
+                or not isinstance(timestamp, int)
+            ):
+                return
+
+            now_ms = int(time.time() * 1000)
+            if not (
+                now_ms - _SAS_REQUEST_MAX_AGE_MS
+                <= timestamp
+                <= now_ms + _SAS_REQUEST_MAX_FUTURE_MS
+            ):
+                self.logger.info("Ignoring expired Matrix SAS request from {}", sender)
+                return
+
+            self._prune_sas_verification_requests(now_ms)
+            request = _SasVerificationRequest(sender, from_device, timestamp)
+            existing = self._sas_verification_requests.get(transaction_id)
+            if existing is not None and existing != request:
+                self.logger.warning(
+                    "Ignoring conflicting Matrix SAS transaction {} from {}",
+                    transaction_id,
+                    sender,
+                )
+                return
+
+            own_device = str(self.client.device_id or "") if self.client else ""
+            if not own_device:
+                return
+            sent = await self._send_sas_control_message(
+                event_type="m.key.verification.ready",
+                sender=sender,
+                device_id=from_device,
+                content={
+                    "from_device": own_device,
+                    "methods": [_SAS_METHOD],
+                    "transaction_id": transaction_id,
+                },
+            )
+            if sent:
+                self._remember_sas_verification_request(transaction_id, request)
+            return
+
+        if event_type == "m.key.verification.done":
+            request = self._sas_verification_requests.get(transaction_id)
+            if request is not None and request.sender == sender:
+                self._sas_verification_requests.pop(transaction_id, None)
+                self.logger.info("Matrix SAS verification finished with {}", sender)
+
+        # Ready is deliberately ignored: this channel does not initiate verification.
+
+    async def _handle_key_verification_event(
+        self,
+        event: KeyVerificationEvent | UnknownToDeviceEvent,
+    ) -> None:
         if not (self.config.e2ee_enabled and self.config.sas_verification):
             return
         if not self.client:
             return
 
         sender = str(getattr(event, "sender", "") or "")
+        if not self._is_sas_sender_allowed(sender):
+            return
+
+        if isinstance(event, UnknownToDeviceEvent):
+            await self._handle_unknown_verification_event(event, sender)
+            return
+
         transaction_id = str(getattr(event, "transaction_id", "") or "")
-        if not transaction_id or not self._is_sas_sender_allowed(sender):
+        if not transaction_id:
             return
 
         if isinstance(event, KeyVerificationStart):
+            request = self._sas_verification_requests.get(transaction_id)
+            from_device = str(getattr(event, "from_device", "") or "")
+            if request is not None and (
+                request.sender != sender or request.device_id != from_device
+            ):
+                self.logger.warning(
+                    "Ignoring Matrix SAS start for transaction {} from unexpected device",
+                    transaction_id,
+                )
+                return
             if "emoji" not in (getattr(event, "short_authentication_string", None) or []):
                 self.logger.info(
                     "Ignoring Matrix SAS verification from {} without emoji support",
@@ -756,9 +941,27 @@ class MatrixChannel(BaseChannel):
             sas = getattr(self.client, "key_verifications", {}).get(transaction_id)
             if sas is not None and getattr(sas, "verified", False):
                 self.logger.info("Matrix SAS verification completed for {}", sender)
+                request = self._sas_verification_requests.get(transaction_id)
+                other_device = str(getattr(getattr(sas, "other_olm_device", None), "id", ""))
+                if (
+                    request is not None
+                    and request.sender == sender
+                    and request.device_id == other_device
+                ):
+                    sent = await self._send_sas_control_message(
+                        event_type="m.key.verification.done",
+                        sender=sender,
+                        device_id=request.device_id,
+                        content={"transaction_id": transaction_id},
+                    )
+                    if sent:
+                        self._sas_verification_requests.pop(transaction_id, None)
             return
 
         if isinstance(event, KeyVerificationCancel):
+            request = self._sas_verification_requests.get(transaction_id)
+            if request is not None and request.sender == sender:
+                self._sas_verification_requests.pop(transaction_id, None)
             self.logger.info(
                 "Matrix SAS verification cancelled by {}: {}",
                 sender,

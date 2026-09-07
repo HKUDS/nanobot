@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { Check, CircleHelp, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Check, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -90,6 +90,7 @@ interface ModelPresetBadgeProps {
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
+  attentionRequest?: number;
   fallbackModelName?: string | null;
   isHero: boolean;
   onClick?: () => void;
@@ -106,6 +107,7 @@ export function ModelPresetBadge({
   provider,
   providerLabel,
   needsSetup = false,
+  attentionRequest = 0,
   fallbackModelName,
   isHero,
   onClick,
@@ -272,11 +274,13 @@ export function ModelPresetBadge({
 
   const pill = (
     <PresetPill
+      key={needsSetup ? attentionRequest : undefined}
       label={displayLabel}
       modelDetail={displayModelDetail}
       provider={displayProvider}
       providerLabel={fallbackModelName ? null : providerLabel}
       needsSetup={needsSetup}
+      needsAttention={needsSetup && attentionRequest > 0}
       fallbackModelName={fallbackModelName}
       fallbackFromLabel={fallbackModelName ? label : null}
       isHero={isHero}
@@ -493,6 +497,7 @@ function PresetPill({
   provider,
   providerLabel,
   needsSetup = false,
+  needsAttention = false,
   fallbackModelName,
   fallbackFromLabel,
   isHero,
@@ -504,6 +509,7 @@ function PresetPill({
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
+  needsAttention?: boolean;
   fallbackModelName?: string | null;
   fallbackFromLabel?: string | null;
   isHero: boolean;
@@ -533,14 +539,16 @@ function PresetPill({
   return (
     <span
       data-fallback={fallbackModelName ? "true" : undefined}
+      data-needs-setup={needsSetup ? "true" : undefined}
       data-preset-offset={offset}
       title={fallbackTitle || undefined}
       className={cn(
         "composer-model-badge composer-model-pill inline-flex h-full max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/70",
         "w-fit",
         "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible:ring-2 group-focus-visible:ring-ring/45",
-        needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
         isHero ? "gap-1.5 px-2.5 text-[12px]" : "gap-2 px-3 text-[12.5px]",
+        needsSetup && "composer-model-pill-setup",
+        needsAttention && "composer-model-pill-setup-attention",
         offset !== undefined && "composer-model-pill-dock",
       )}
       style={scale === undefined ? undefined : {
@@ -549,14 +557,15 @@ function PresetPill({
         zIndex: Math.round(scale * 100),
       }}
     >
-      <PresetProviderIcon
-        label={label}
-        modelDetail={modelDetail}
-        provider={inferredProvider}
-        needsSetup={needsSetup}
-        testId={needsSetup ? "composer-model-setup-icon" : `composer-model-logo${inferredProvider ? `-${inferredProvider}` : ""}`}
-        isHero={isHero}
-      />
+      {!needsSetup ? (
+        <PresetProviderIcon
+          label={label}
+          modelDetail={modelDetail}
+          provider={inferredProvider}
+          testId={`composer-model-logo${inferredProvider ? `-${inferredProvider}` : ""}`}
+          isHero={isHero}
+        />
+      ) : null}
       <span
         ref={labelRef}
         className={cn(
@@ -564,7 +573,26 @@ function PresetPill({
           labelOverflows && "thread-composer-model-label-fade",
         )}
       >
-        {label}
+        {needsSetup ? <SetupPromptLabel label={label} /> : label}
+      </span>
+    </span>
+  );
+}
+
+function SetupPromptLabel({ label }: { label: string }) {
+  const separator = label.indexOf(" ");
+  if (separator < 0) {
+    return <span className="text-foreground/80">{label}</span>;
+  }
+
+  return (
+    <span data-testid="composer-model-setup-label">
+      <span className="text-muted-foreground/90 transition-colors duration-150 group-hover:text-muted-foreground motion-reduce:transition-none">
+        {label.slice(0, separator)}
+      </span>
+      {" "}
+      <span className="text-foreground/80 transition-colors duration-150 group-hover:text-foreground/90 motion-reduce:transition-none">
+        {label.slice(separator + 1)}
       </span>
     </span>
   );
@@ -574,20 +602,16 @@ function PresetProviderIcon({
   label,
   modelDetail,
   provider,
-  needsSetup = false,
   testId,
   isHero,
 }: {
   label: string;
   modelDetail?: string | null;
   provider?: string | null;
-  needsSetup?: boolean;
   testId?: string;
   isHero: boolean;
 }) {
-  const inferredProvider = needsSetup
-    ? null
-    : provider || inferProviderFromModelName(modelDetail || label);
+  const inferredProvider = provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   return (
@@ -595,14 +619,11 @@ function PresetProviderIcon({
       data-testid={testId}
       className={cn(
         "grid shrink-0 place-items-center",
-        needsSetup && "text-amber-800 dark:text-amber-200",
         isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
       )}
       aria-hidden
     >
-      {needsSetup ? (
-        <CircleHelp className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
-      ) : logoUrl ? (
+      {logoUrl ? (
         <img
           src={logoUrl}
           alt=""

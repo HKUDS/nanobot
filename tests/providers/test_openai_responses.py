@@ -712,6 +712,45 @@ class TestParseResponseOutput:
         assert result.provider_state is not None
         assert responses_state_items(result.provider_state) == [*input_items, *output]
 
+    def test_marks_only_a_new_response_compaction(self):
+        compacted = parse_response_output(
+            {
+                "output": [
+                    {"type": "compaction", "encrypted_content": "opaque"},
+                    {"type": "message", "role": "assistant", "content": "done"},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "old"}],
+        )
+        replayed = parse_response_output(
+            {
+                "output": [
+                    {"type": "message", "role": "assistant", "content": "continued"},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[
+                {"type": "compaction", "encrypted_content": "opaque"},
+            ],
+        )
+
+        assert compacted.provider_compaction_applied is True
+        assert compacted.provider_compaction_state is not None
+        assert compacted.provider_compaction_scope == "current_request"
+        assert responses_state_items(compacted.provider_compaction_state) == [
+            {"type": "compaction", "encrypted_content": "opaque"},
+        ]
+        assert replayed.provider_compaction_applied is False
+        assert replayed.provider_compaction_state is None
+        assert replayed.provider_compaction_scope is None
+
 
 class TestResponsesConversationState:
     def test_server_compaction_prunes_superseded_prefix(self):

@@ -2,8 +2,6 @@
 """WeCom (Enterprise WeChat) channel implementation using wecom_aibot_sdk."""
 
 import asyncio
-import base64
-import hashlib
 import importlib.util
 import os
 import re
@@ -23,8 +21,8 @@ from nanobot.config.schema import Base
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 
-# Upload safety limits (matching QQ channel defaults)
-WECOM_UPLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
+# Inbound media safety limit (matching QQ channel defaults)
+WECOM_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
 
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
@@ -39,22 +37,6 @@ def _sanitize_filename(name: str, fallback: str = "unnamed") -> str:
 
     return _clean(name) or _clean(fallback) or "unnamed"
 
-
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-_VIDEO_EXTS = {".mp4", ".avi", ".mov"}
-_AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg"}
-
-
-def _guess_wecom_media_type(filename: str) -> str:
-    """Classify file extension as WeCom media_type string."""
-    ext = Path(filename).suffix.lower()
-    if ext in _IMAGE_EXTS:
-        return "image"
-    if ext in _VIDEO_EXTS:
-        return "video"
-    if ext in _AUDIO_EXTS:
-        return "voice"
-    return "file"
 
 class WecomConfig(Base):
     """WeCom (Enterprise WeChat) AI Bot channel configuration."""
@@ -392,11 +374,11 @@ class WecomChannel(BaseChannel):
                 self.logger.warning("Failed to download media")
                 return None
 
-            if len(data) > WECOM_UPLOAD_MAX_BYTES:
+            if len(data) > WECOM_DOWNLOAD_MAX_BYTES:
                 self.logger.warning(
                     "inbound media too large: {} bytes (max {})",
                     len(data),
-                    WECOM_UPLOAD_MAX_BYTES,
+                    WECOM_DOWNLOAD_MAX_BYTES,
                 )
                 return None
 
@@ -412,102 +394,6 @@ class WecomChannel(BaseChannel):
         except Exception:
             self.logger.exception("Error downloading media")
             return None
-
-    async def _upload_media_ws(
-        self,
-        client: Any,
-        file_path: str,
-    ) -> tuple[str, str] | tuple[None, None]:
-        """Upload a local file to WeCom via WebSocket 3-step protocol (base64).
-
-        Uses the WeCom WebSocket upload commands directly via
-        ``client._ws_manager.send_reply()``:
-
-          ``aibot_upload_media_init``   → upload_id
-          ``aibot_upload_media_chunk`` × N  (≤512 KB raw per chunk, base64)
-          ``aibot_upload_media_finish`` → media_id
-
-        Returns (media_id, media_type) on success, (None, None) on failure.
-        """
-        from wecom_aibot_sdk.utils import generate_req_id as _gen_req_id
-
-        try:
-            fname = os.path.basename(file_path)
-            media_type = _guess_wecom_media_type(fname)
-
-            # Read file size and data in a thread to avoid blocking the event loop
-            def _read_file() -> tuple[int, bytes]:
-                file_size = os.path.getsize(file_path)
-                if file_size > WECOM_UPLOAD_MAX_BYTES:
-                    raise ValueError(
-                        f"File too large: {file_size} bytes (max {WECOM_UPLOAD_MAX_BYTES})"
-                    )
-                with open(file_path, "rb") as f:
-                    return file_size, f.read()
-
-            file_size, data = await asyncio.to_thread(_read_file)
-            # MD5 is used for file integrity only, not cryptographic security
-            md5_hash = hashlib.md5(data).hexdigest()
-
-            chunk_size = 512 * 1024  # 512 KB raw (before base64)
-            mv = memoryview(data)
-            chunk_list = [bytes(mv[i : i + chunk_size]) for i in range(0, file_size, chunk_size)]
-            n_chunks = len(chunk_list)
-            del mv, data
-
-            # Step 1: init
-            req_id = _gen_req_id("upload_init")
-            resp = await client._ws_manager.send_reply(req_id, {
-                "type": media_type,
-                "filename": fname,
-                "total_size": file_size,
-                "total_chunks": n_chunks,
-                "md5": md5_hash,
-            }, "aibot_upload_media_init")
-            if resp.errcode != 0:
-                self.logger.warning("upload init failed ({}): {}", resp.errcode, resp.errmsg)
-                return None, None
-            upload_id = resp.body.get("upload_id") if resp.body else None
-            if not upload_id:
-                self.logger.warning("upload init: no upload_id in response")
-                return None, None
-
-            # Step 2: send chunks
-            for i, chunk in enumerate(chunk_list):
-                req_id = _gen_req_id("upload_chunk")
-                resp = await client._ws_manager.send_reply(req_id, {
-                    "upload_id": upload_id,
-                    "chunk_index": i,
-                    "base64_data": base64.b64encode(chunk).decode(),
-                }, "aibot_upload_media_chunk")
-                if resp.errcode != 0:
-                    self.logger.warning("upload chunk {} failed ({}): {}", i, resp.errcode, resp.errmsg)
-                    return None, None
-
-            # Step 3: finish
-            req_id = _gen_req_id("upload_finish")
-            resp = await client._ws_manager.send_reply(req_id, {
-                "upload_id": upload_id,
-            }, "aibot_upload_media_finish")
-            if resp.errcode != 0:
-                self.logger.warning("upload finish failed ({}): {}", resp.errcode, resp.errmsg)
-                return None, None
-
-            media_id = resp.body.get("media_id") if resp.body else None
-            if not media_id:
-                self.logger.warning("upload finish: no media_id in response body={}", resp.body)
-                return None, None
-
-            suffix = "..." if len(media_id) > 16 else ""
-            self.logger.debug("uploaded {} ({}) → media_id={}", fname, media_type, media_id[:16] + suffix)
-            return media_id, media_type
-
-        except ValueError as e:
-            self.logger.warning("upload skipped for {}: {}", file_path, e)
-            return None, None
-        except Exception:
-            self.logger.exception("_upload_media_ws error for {}", file_path)
-            return None, None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
@@ -526,29 +412,29 @@ class WecomChannel(BaseChannel):
                 if not os.path.isfile(file_path):
                     self.logger.warning("media file not found: {}", file_path)
                     continue
-                media_id, media_type = await self._upload_media_ws(self._client, file_path)
-                if media_id:
-                    if frame:
-                        await self._client.reply(frame, {
-                            "msgtype": media_type,
-                            media_type: {"media_id": media_id},
-                        })
-                    else:
-                        await self._client.send_message(msg.chat_id, {
-                            "msgtype": media_type,
-                            media_type: {"media_id": media_id},
-                        })
-                    self.logger.debug("sent {} → {}", media_type, msg.chat_id)
-                else:
+                try:
+                    upload = await self._client.upload_media(file_path)
+                except Exception:
+                    self.logger.exception("media upload failed for {}", file_path)
                     content += f"\n[file upload failed: {os.path.basename(file_path)}]"
+                    continue
+
+                media_type = upload.media_type
+                media_body = {
+                    "msgtype": media_type,
+                    media_type: {"media_id": upload.media_id},
+                }
+                if frame:
+                    await self._client.reply(frame, media_body)
+                else:
+                    await self._client.send_message(msg.chat_id, media_body)
+                self.logger.debug("sent {} → {}", media_type, msg.chat_id)
 
             if not content:
                 return
 
             if frame:
-                # Both progress and final messages must use reply_stream (cmd="aibot_respond_msg").
-                # The plain reply() uses cmd="reply" which does not support "text" msgtype
-                # and causes errcode=40008 from WeCom API.
+                # Keep progress and final updates on the SDK's serialized streaming reply path.
                 generate_req_id = self._generate_req_id
                 if generate_req_id is None:
                     raise RuntimeError("WeCom request-id generator is not initialized")

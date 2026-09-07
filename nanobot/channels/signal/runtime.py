@@ -269,19 +269,18 @@ def _partition_styles(
     if not text_styles:
         return [[] for _ in chunks]
 
-    # Locate each chunk's UTF-16 start in plain_text. split_message lstrips at
-    # boundaries (but not before the first chunk), so we skip whitespace
-    # between chunks to mirror that.
+    # Locate each chunk in the original text. This accounts for delimiters
+    # removed at split points while retaining indentation inside a chunk.
     chunk_ranges: list[tuple[int, int]] = []
     cursor = 0  # Python codepoint cursor in plain_text
-    for i, chunk in enumerate(chunks):
-        if i > 0:
-            while cursor < len(plain_text) and plain_text[cursor].isspace():
-                cursor += 1
-        utf16_start = _utf16_len(plain_text[:cursor])
+    for chunk in chunks:
+        chunk_start = plain_text.find(chunk, cursor)
+        if chunk_start < 0:
+            chunk_start = cursor
+        utf16_start = _utf16_len(plain_text[:chunk_start])
         utf16_end = utf16_start + _utf16_len(chunk)
         chunk_ranges.append((utf16_start, utf16_end))
-        cursor += len(chunk)
+        cursor = chunk_start + len(chunk)
 
     result: list[list[str]] = [[] for _ in chunks]
     for entry in text_styles:
@@ -862,6 +861,7 @@ class SignalChannel(BaseChannel):
                 return False, chat_id
             if (
                 self.config.group.policy == "allowlist"
+                and "*" not in self.config.group.allow_from
                 and chat_id not in self.config.group.allow_from
             ):
                 self.logger.info(
@@ -1061,6 +1061,9 @@ class SignalChannel(BaseChannel):
     def _sender_matches_allowlist(cls, sender_id: str, allow_list: list[str]) -> bool:
         """Return True if any normalized variant of sender_id is on allow_list.
 
+        A ``"*"`` entry allows every sender, matching the channel-wide
+        allowlist contract.
+
         Both ``sender_id`` and each allow_list entry can be a single
         identifier or a pipe-joined composite of several (e.g.
         ``"+1234567890|uuid-abc"``); both sides are split on ``|`` and each
@@ -1070,6 +1073,8 @@ class SignalChannel(BaseChannel):
         """
         if not allow_list:
             return False
+        if "*" in allow_list:
+            return True
         sender_variants: set[str] = set()
         for part in str(sender_id).split("|"):
             sender_variants.update(cls._normalize_signal_id(part))

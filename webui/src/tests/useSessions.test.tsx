@@ -124,6 +124,59 @@ describe("useSessions", () => {
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
   });
 
+  it("removes an optimistic chat when the gateway no longer has its draft", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    vi.mocked(api.deleteSession).mockResolvedValue({ deleted: false });
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-empty");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.createChat();
+    });
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-empty"]);
+
+    let deleteResult: Awaited<ReturnType<typeof result.current.deleteChat>> | undefined;
+    await act(async () => {
+      deleteResult = await result.current.deleteChat("websocket:chat-empty");
+    });
+
+    expect(deleteResult?.deleted).toBe(true);
+    expect(result.current.sessions).toEqual([]);
+  });
+
+  it("keeps an optimistic chat when delete is blocked by bound automations", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    vi.mocked(api.deleteSession).mockResolvedValue({
+      deleted: false,
+      blocked_by_automations: true,
+      automations: [],
+    });
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-empty");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.createChat();
+    });
+
+    let deleteResult: Awaited<ReturnType<typeof result.current.deleteChat>> | undefined;
+    await act(async () => {
+      deleteResult = await result.current.deleteChat("websocket:chat-empty");
+    });
+
+    expect(deleteResult?.blocked_by_automations).toBe(true);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-empty"]);
+  });
+
   it("keeps a session when delete is blocked by bound automations", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {
@@ -335,6 +388,23 @@ describe("useSessions", () => {
 
     expect(client.newChat).toHaveBeenCalledWith(60_000, workspaceScope);
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
+  });
+
+  it("stores an optimistic model preset when creating a chat", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-fast");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.createChat(null, "fast");
+    });
+
+    expect(result.current.sessions[0]?.modelPreset).toBe("fast");
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {

@@ -1,8 +1,16 @@
+import type { ContextCompaction, NotificationEvent, RecoveryState, RetryStatus as WireRetryStatus } from "../../../packages/client-events/notifications";
+export type { RecoveryState, RecoveryStatus } from "../../../packages/client-events/notifications";
+
 type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-type MessageKind = "message" | "trace";
+type MessageKind = "message" | "trace" | "compaction";
+
+export interface UIContextCompaction extends ContextCompaction {
+  /** Live wire transitions announce; hydrated transcript rows stay silent. */
+  announce?: boolean;
+}
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
@@ -42,23 +50,24 @@ interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string;
 export interface TurnUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
+  total_tokens?: number;
   cached_tokens?: number;
+  cache_write_tokens?: number;
   context_tokens?: number;
   request_count?: number;
   estimated_tokens?: number;
-  [key: string]: number | undefined;
+  generation_ms?: number;
+  measured_completion_tokens?: number;
+  ttft_ms?: number;
+  timed_requests?: number;
 }
 
-export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed";
+export type RoundUsage = TurnUsage;
 
-export interface RecoveryState {
-  status: RecoveryStatus;
-  recovery_id: string;
-  reason?: string;
-  attempts?: number;
-  can_continue?: boolean;
+export interface RetryStatus extends WireRetryStatus {
+  next_retry_at?: number;
+  turn_id?: string;
 }
-
 export interface UIMessage {
   id: string;
   role: Role;
@@ -79,6 +88,10 @@ export interface UIMessage {
   /** Internal projection marker for assistant text emitted before a later tool.
    * It is not a wire message and is rendered as a compact activity row. */
   activityKind?: "model";
+  /** Context-compaction lifecycle rendered as a standalone channel notice. */
+  compaction?: UIContextCompaction;
+  /** Display-only localization marker for fixed /compact command replies. */
+  compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
@@ -102,6 +115,8 @@ export interface UIMessage {
   completedAt?: number;
   /** Additive model usage for this turn; context_tokens is the final request only. */
   usage?: TurnUsage;
+  /** Logical model rounds in display order; runner-level recovery calls are aggregated. */
+  roundUsages?: RoundUsage[];
   /** Configured context-window capacity for the model used by this turn. */
   contextWindowTokens?: number;
   /** Lightweight provenance for proactive assistant messages. */
@@ -595,6 +610,8 @@ export interface SettingsPayload {
   }>;
   model_call_order: string[];
   model_call_order_editable: boolean;
+  /** Whether an actual legacy model configuration is available to convert. */
+  model_configuration_migratable?: boolean;
   created_model_preset?: string;
   created_provider?: string;
   providers: Array<{
@@ -712,7 +729,6 @@ export interface SettingsPayload {
     heartbeat: {
       enabled: boolean;
       interval_s: number;
-      keep_recent_messages: number;
     };
     dream: {
       schedule: string;
@@ -1183,15 +1199,6 @@ export interface ChannelConfigurePayload {
   nanobot_features?: NanobotFeaturesPayload;
 }
 
-export interface SettingsUpdate {
-  model?: string;
-  provider?: string;
-  modelPreset?: string | null;
-  contextWindowTokens?: number;
-  timezone?: string;
-  toolHintMaxLength?: number;
-}
-
 export interface ModelConfigurationCreate {
   name: string;
   provider: string;
@@ -1361,10 +1368,7 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | ({
-      event: "recovery_state";
-      chat_id: string;
-    } & RecoveryState)
+  | (NotificationEvent & InboundTurnMetadata)
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1418,9 +1422,15 @@ export type InboundEvent =
       chat_id: string;
       latency_ms?: number;
       usage?: TurnUsage;
+      round_usages?: RoundUsage[];
       context_window_tokens?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted";
+      failure_kind?: string;
+      failure_error_kind?: string;
+      failure_attempts?: number;
+      failure_message?: string;
     } & InboundTurnMetadata)
   | ({
       event: "goal_status";

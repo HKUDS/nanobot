@@ -39,6 +39,7 @@ import {
   type MentionCandidate,
   type MessageOptions,
   type RecoveryState,
+  type RetryStatus,
   type SkillCandidate,
   type SlashCommand,
   type SessionSummary,
@@ -402,6 +403,45 @@ function connectionStatusText(
   return "Session ended"
 }
 
+function retryFailureLabel(errorKind: string): string {
+  if (errorKind === "billing") return "Model provider quota is unavailable"
+  if (errorKind === "connection") return "Could not connect to the model provider"
+  if (errorKind === "timeout") return "Model provider request timed out"
+  if (errorKind === "rate_limit") return "Model provider rate limit reached"
+  if (errorKind === "server") return "Model provider service error"
+  return "Model provider request failed"
+}
+
+export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
+  const reason = retryFailureLabel(errorKind || "unknown")
+  if (errorKind === "billing") {
+    return `${reason}. Add credit or check billing for the provider account, then try again.`
+  }
+  const retryResult = typeof attempts === "number" && Number.isInteger(attempts) && attempts > 0
+    ? ` The request still failed on attempt ${attempts}, so retries stopped.`
+    : ""
+  return `${reason}.${retryResult} Check the provider configuration or service status, then try again.`
+}
+
+interface RenderedRetryStatus extends RetryStatus {
+  nextRetryAtMs?: number
+}
+
+export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
+  const label = retryFailureLabel(status.error_kind)
+  if (status.state === "exhausted") return `${label} · ending turn`
+  if (status.state === "recovered") return "Connection restored"
+  if (status.state === "cleared") return "Retry status cleared"
+  const remaining = Math.max(
+    0,
+    Math.ceil(((status.nextRetryAtMs ?? nowMs) - nowMs) / 1000),
+  )
+  const attempt = status.max_attempts
+    ? `${status.attempt}/${status.max_attempts}`
+    : String(status.attempt)
+  return `${label} · retrying in ${remaining}s · attempt ${attempt}`
+}
+
 export function sessionExitMessage(chatId: string): string {
   const sessionId = `websocket:${chatId}`
   return `Resume with: nanobot agent --session ${sessionId}\n`
@@ -457,6 +497,7 @@ export class NanobotTui {
   private activeTurn = false
   private activeTurnId: string | null = null
   private activeLabel = "Thinking"
+  private retryStatus: RenderedRetryStatus | null = null
   private activeStartedAt = 0
   private finalMessage = ""
   private turnHadAnswer = false
@@ -999,6 +1040,7 @@ export class NanobotTui {
     this.finalMessage = ""
     this.turnHadAnswer = false
     this.activeLabel = "Thinking"
+    this.retryStatus = null
     this.currentFileEdits = []
     this.setActive(true, startedAt)
   }
@@ -1063,6 +1105,9 @@ export class NanobotTui {
     }
 
     switch (event.event) {
+      case "context_compaction":
+        this.transcript.compaction({ id: event.compaction_id, phase: event.phase })
+        return
       case "message_accepted":
         this.reconcileTurnOwnership(event)
         return
@@ -1079,6 +1124,7 @@ export class NanobotTui {
         return
       }
       case "delta":
+        this.retryStatus = null
         this.setActive(true)
         this.activeLabel = "Writing"
         this.turnHadAnswer = true
@@ -1099,6 +1145,7 @@ export class NanobotTui {
           }
         }
         if (event.kind) {
+          this.retryStatus = null
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
@@ -1107,6 +1154,7 @@ export class NanobotTui {
         }
         return
       case "file_edit":
+        this.retryStatus = null
         this.activeLabel = "Editing"
         this.currentFileEdits = mergeFileEdits(this.currentFileEdits, event.edits)
         if (this.diffViewer.visible) this.diffViewer.update(this.currentFileEdits)
@@ -1114,6 +1162,7 @@ export class NanobotTui {
         this.setActive(true)
         return
       case "reasoning_delta":
+        this.retryStatus = null
         this.activeLabel = "Thinking"
         this.setActive(true)
         return
@@ -1127,19 +1176,50 @@ export class NanobotTui {
           this.transcript.finishStream(event.text || "")
         }
         return
+      case "retry_status":
+        if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
+        if (event.state === "recovered" || event.state === "cleared") {
+          this.retryStatus = null
+          if (this.activeTurn) this.renderActiveStatus()
+          return
+        }
+        const retryAfterSeconds = typeof event.retry_after_s === "number"
+          && Number.isFinite(event.retry_after_s)
+          && event.retry_after_s >= 0
+          ? event.retry_after_s
+          : undefined
+        this.retryStatus = {
+          ...event,
+          ...(retryAfterSeconds !== undefined
+            ? { nextRetryAtMs: Date.now() + retryAfterSeconds * 1000 }
+            : {}),
+        }
+        this.setActive(true)
+        this.renderActiveStatus()
+        return
       case "turn_end":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
         if (event.turn_id) {
           this.commandTurns.delete(event.turn_id)
           this.modelCommandTurns.delete(event.turn_id)
         }
-        this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
+        const failed = event.outcome === "failed"
+        this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
+        if (failed) {
+          this.transcript.notice(
+            event.failure_kind === "model"
+              ? terminalModelFailureLine(event.failure_error_kind, event.failure_attempts)
+              : event.failure_message || "This turn failed and has ended.",
+            true,
+          )
+        }
         this.transcript.finishActivity()
         if (this.currentFileEdits.length) this.lastFileEdits = this.currentFileEdits
         this.currentFileEdits = []
         if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
         this.finalMessage = ""
         this.turnHadAnswer = false
+        this.retryStatus = null
         this.activeTurnId = null
         if (event.usage) this.lastUsage = event.usage
         if (typeof event.context_window_tokens === "number") {
@@ -1150,7 +1230,7 @@ export class NanobotTui {
         // A synthetic/rehydrated turn may already be idle, in which case
         // setActive(false) intentionally does not repaint the footer.
         this.updateMeta()
-        this.readyDetail = typeof event.latency_ms === "number"
+        this.readyDetail = !failed && typeof event.latency_ms === "number"
           ? `${(event.latency_ms / 1000).toFixed(1)}s`
           : ""
         this.status.content = this.readyStatus()
@@ -1447,11 +1527,18 @@ export class NanobotTui {
     }
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.shimmerTimer = null
+    this.retryStatus = null
     this.status.content = this.readyStatus()
   }
 
   private renderActiveStatus(): void {
     if (this.sessionLoading || this.sessionMenu.visible) return
+    if (this.retryStatus) {
+      const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
+      const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
+      this.status.content = `${retryStatusLine(this.retryStatus)}${queued}${navigation}`
+      return
+    }
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
     const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
     const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
@@ -1738,16 +1825,30 @@ export class NanobotTui {
       key.preventDefault()
       return
     }
-    if (!key.ctrl && !key.meta && !key.shift && (key.name === "left" || key.name === "right")) {
+    if (!key.ctrl && !key.meta && (key.name === "left" || key.name === "right")) {
       const direction = key.name === "left" ? -1 : 1
+      const cursor = this.composerStringCursor()
       const target = this.draft.moveImageCursor(
         this.composer.plainText,
-        this.composerStringCursor(),
+        cursor,
         direction,
       )
       if (target !== null) {
         this.composerCursor = target
-        this.setComposerStringCursor(this.composer.plainText, target)
+        if (key.shift) {
+          const cursorOffset = this.composerOffsetForStringIndex(this.composer.plainText, cursor)
+          const targetOffset = this.composerOffsetForStringIndex(this.composer.plainText, target)
+          this.composer.setSelection(
+            Math.min(cursorOffset, targetOffset),
+            Math.max(cursorOffset, targetOffset),
+          )
+          // OpenTUI 0.5.10 clears the selection through the public cursor
+          // setter. Move the native edit cursor directly so the placeholder
+          // remains one selected, replaceable unit.
+          this.composer.editBuffer.setCursorByOffset(targetOffset)
+        } else {
+          this.setComposerStringCursor(this.composer.plainText, target)
+        }
         key.preventDefault()
         return
       }
@@ -1897,8 +1998,8 @@ export class NanobotTui {
       : "ready"
     if (mode === "ready") {
       this.meta.content = footerTelemetry(
-        this.lastUsage,
-        this.renderer.width,
+        this.lastUsage?.context_tokens ?? null,
+        this.contextWindowTokens,
         footerHintTheme(this.palette),
       )
       return

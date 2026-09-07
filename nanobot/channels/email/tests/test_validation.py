@@ -4,7 +4,7 @@ import pytest
 
 from nanobot.channels.email import validation as email_validation
 from nanobot.channels.validation import validate_channel_config
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
 
 
@@ -14,6 +14,7 @@ def test_validate_email_presets_are_checked_without_saving(
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
+    original_config = config_path.read_bytes()
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(email_validation, "probe_tcp", lambda *_args, **_kwargs: None)
 
@@ -32,7 +33,7 @@ def test_validate_email_presets_are_checked_without_saving(
 
     assert result["status"] == "connected"
     assert result["can_enable"] is True
-    assert not hasattr(load_config(config_path).channels, "email")
+    assert config_path.read_bytes() == original_config
 
 
 def test_validate_email_blocks_private_targets_when_local_access_is_disabled(

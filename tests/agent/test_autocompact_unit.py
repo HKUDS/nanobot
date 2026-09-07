@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -268,6 +269,7 @@ class TestCheckExpired:
             "cli:old",
             runtime=admitted,
             max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -443,7 +445,38 @@ class TestArchiveDelegates:
             "cli:test",
             runtime=runtime,
             max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
+
+    @pytest.mark.asyncio
+    async def test_forwards_timeout_compaction_events_with_session_key(self):
+        sessions = MagicMock(spec=SessionManager)
+        consolidator = MagicMock()
+        observed: list[tuple[str, ContextCompactionEvent]] = []
+
+        def bind(key: str):
+            async def publish(event: ContextCompactionEvent) -> None:
+                observed.append((key, event))
+            return EventSink(publish)
+
+        async def compact(key: str, **kwargs):
+            event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+            await kwargs["events"].emit(event)
+            return "Summary."
+
+        consolidator.compact_idle_session = AsyncMock(side_effect=compact)
+        ac = AutoCompact(
+            sessions=sessions,
+            consolidator=consolidator,
+            session_ttl_minutes=15,
+            bind_events=bind,
+        )
+
+        await ac._archive("cli:test", runtime=_runtime())
+
+        assert len(observed) == 1
+        assert observed[0][0] == "cli:test"
+        assert observed[0][1].phase == "started"
 
     @pytest.mark.asyncio
     async def test_dream_session_is_ignored(self):

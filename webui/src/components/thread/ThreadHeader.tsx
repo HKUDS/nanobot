@@ -21,7 +21,6 @@ interface ThreadHeaderProps {
   onToggleTheme: () => void;
   hideSidebarToggleForHostChrome?: boolean;
   hideSidebarToggle?: boolean;
-  hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   hideTitle?: boolean;
   actions?: ReactNode;
@@ -41,7 +40,6 @@ export function ThreadHeader({
   onToggleTheme,
   hideSidebarToggleForHostChrome = false,
   hideSidebarToggle = false,
-  hostChromeTitleInset = false,
   hideThemeButton = false,
   hideTitle = false,
   actions,
@@ -60,7 +58,6 @@ export function ThreadHeader({
       className={cn(
         "relative z-30 flex items-center justify-between gap-3 px-3 py-1",
         minimal && "h-11",
-        !minimal && hostChromeTitleInset && "lg:pl-[128px]",
       )}
     >
       <div className="relative flex min-w-0 items-center gap-2">

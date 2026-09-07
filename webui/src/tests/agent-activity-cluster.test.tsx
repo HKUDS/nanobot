@@ -140,6 +140,27 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("shows model retries in the existing live activity header", () => {
+    render(
+      <AgentActivityCluster
+        messages={[]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        retryStatus={{
+          state: "waiting",
+          attempt: 1,
+          max_attempts: 4,
+          error_kind: "connection",
+          next_retry_at: Date.now() / 1000 + 5,
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("Connection failed · retrying in 5s · attempt 1/4"),
+    ).toBeInTheDocument();
+  });
+
   it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
     await act(async () => {
       await preloadMarkdownText();

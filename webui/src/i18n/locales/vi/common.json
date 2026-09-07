@@ -423,7 +423,7 @@
       "presetName": "Tên cấu hình đặt trước",
       "presetNameHelp": "Dùng trong giao diện và lệnh /model. Tên phải là duy nhất.",
       "presetNameDuplicate": "Đã có một cấu hình sẵn với tên này.",
-      "presetNamePlaceholder": "Viết nhanh",
+      "presetNamePlaceholder": "ví dụ: Viết nhanh",
       "advancedOptions": "Tùy chọn nâng cao",
       "advancedSummary": "Ngữ cảnh {{context}} · Tối đa {{max}} token",
       "maxTokens": "Token đầu ra tối đa",
@@ -1069,6 +1069,13 @@
     "error": "Lỗi kết nối"
   },
   "thread": {
+    "compaction": {
+      "cancelled": "Đã hủy nén ngữ cảnh",
+      "empty": "Không có ngữ cảnh cần nén.",
+      "started": "Đang nén ngữ cảnh…",
+      "failed": "Nén ngữ cảnh không thành công",
+      "succeeded": "Đã nén ngữ cảnh"
+    },
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
       "greetings": {
@@ -1181,11 +1188,20 @@
       "removeQuotedContext": "Xóa ngữ cảnh được trích dẫn",
       "modelNotConfigured": "Chưa cấu hình mô hình",
       "configureModel": "Cấu hình mô hình",
+      "chooseAI": "Chọn AI của bạn",
       "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
       "manageModels": "Quản lý mô hình",
       "context": {
-        "tooltip": "Ngữ cảnh · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. Đã dùng {{percent}}%."
+        "tooltip": "Ngữ cảnh {{percent}}%",
+        "detailsLabel": "Mở mức sử dụng ngữ cảnh",
+        "panelTitle": "Mức sử dụng ngữ cảnh",
+        "contextTitle": "Ngữ cảnh",
+        "recentRounds": "Các lượt gần đây",
+        "inputTrend": "Token đầu vào",
+        "input": "Token đầu vào",
+        "cacheHitRate": "Tỷ lệ hit KV cache",
+        "output": "Token đầu ra",
+        "duration": "Thời gian tạo"
       },
       "queued": {
         "label": "Hướng dẫn đang chờ",
@@ -1243,6 +1259,10 @@
           "new": {
             "title": "Cuộc trò chuyện mới",
             "description": "Đặt lại cuộc trò chuyện này và bắt đầu một cuộc trò chuyện mới."
+          },
+          "compact": {
+            "title": "Nén ngữ cảnh",
+            "description": "Nén ngữ cảnh của cuộc trò chuyện này và tiếp tục hội thoại."
           },
           "stop": {
             "title": "Dừng tác vụ hiện tại",
@@ -1414,6 +1434,13 @@
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "retryConnection": "Kết nối thất bại",
+    "retryTimeout": "Mô hình đã hết thời gian chờ",
+    "retryRateLimit": "Đã đạt giới hạn yêu cầu",
+    "retryServer": "Mô hình không khả dụng",
+    "retryUnknown": "Yêu cầu mô hình thất bại",
+    "retryWaiting": "{{error}} · thử lại sau {{seconds}} giây · lần thử {{attempt}}",
+    "retryExhausted": "{{error}} · đang kết thúc lượt",
     "cliActivityRunningOne": "Đang dùng {{name}}",
     "cliActivityRanOne": "Đã dùng {{name}}",
     "cliActivityFailedOne": "{{name}} thất bại",
@@ -1512,6 +1539,17 @@
     "turnRejected": {
       "title": "Tin nhắn chưa được gửi",
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Hạn mức của nhà cung cấp mô hình không khả dụng",
+      "billingBody": "Hãy nạp thêm tín dụng hoặc kiểm tra thanh toán của tài khoản nhà cung cấp rồi thử lại.",
+      "connectionTitle": "Không thể kết nối với nhà cung cấp mô hình",
+      "timeoutTitle": "Yêu cầu tới nhà cung cấp mô hình đã hết thời gian chờ",
+      "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
+      "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",
+      "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
+      "bodyWithAttempt": "Yêu cầu vẫn thất bại ở lần thử {{attempts}}, nên hệ thống đã dừng thử lại. Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại.",
+      "body": "Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại."
     }
   },
   "workspace": {

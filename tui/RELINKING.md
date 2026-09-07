@@ -8,7 +8,7 @@ LGPL 2.1 license texts.
 
 Corresponding upstream source:
 
-- nanobot TUI: the `tui/` directory in the GitHub release tag that contains this archive
+- nanobot TUI: the `tui/` and `packages/client-events/` directories in the GitHub release tag that contains this archive
 - Bun 1.3.13 (`bf2e2cecf27e800962b1e7f03d66278f9d5d2e79`):
   <https://github.com/oven-sh/bun/tree/bun-v1.3.13>
 - Bun's patched WebKit (`4d5e75ebd84a14edbc7ae264245dcd77fe597c10`):
@@ -21,7 +21,7 @@ build instructions. Then unpack
 `nanobot-tui-source.tar.gz` from the release archive and run the resulting Bun executable:
 
 ```bash
-cd nanobot-tui-source
+cd nanobot-tui-source/tui
 /path/to/modified/bun install --frozen-lockfile
 /path/to/modified/bun run build -- <target>
 ```

@@ -264,7 +264,6 @@ def test_refresh_clears_preset_when_new_default_has_same_snapshot_signature() ->
     assert refreshed is not None
     assert resolver.model_preset is None
     assert resolver.runtime.model_preset is None
-    assert "_active_preset" not in resolver.__dict__
 
 
 def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:

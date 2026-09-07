@@ -423,7 +423,7 @@
       "presetName": "Nom du préréglage",
       "presetNameHelp": "Utilisé dans l’interface et avec /model. Les noms doivent être uniques.",
       "presetNameDuplicate": "Un préréglage portant ce nom existe déjà.",
-      "presetNamePlaceholder": "Rédaction rapide",
+      "presetNamePlaceholder": "p. ex. Rédaction rapide",
       "advancedOptions": "Options avancées",
       "advancedSummary": "Contexte {{context}} · Max. {{max}} tokens",
       "maxTokens": "Tokens de sortie max.",
@@ -1069,6 +1069,13 @@
     "error": "Erreur de connexion"
   },
   "thread": {
+    "compaction": {
+      "cancelled": "Compression du contexte annulée",
+      "empty": "Aucun contexte à compresser.",
+      "started": "Compression du contexte…",
+      "failed": "Échec de la compression du contexte",
+      "succeeded": "Contexte compressé"
+    },
     "loadingConversation": "Chargement de la conversation…",
     "empty": {
       "greetings": {
@@ -1181,11 +1188,20 @@
       "removeQuotedContext": "Supprimer le contexte cité",
       "modelNotConfigured": "Modèle non configuré",
       "configureModel": "Configurer le modèle",
+      "chooseAI": "Choisissez votre IA",
       "switchModel": "Changer le modèle de cette conversation",
       "manageModels": "Gérer les modèles",
       "context": {
-        "tooltip": "Contexte · {{tokens}}{{capacity}}",
-        "meterDescription": "{{context}}. {{percent}} % utilisé."
+        "tooltip": "Contexte {{percent}} %",
+        "detailsLabel": "Ouvrir l’utilisation du contexte",
+        "panelTitle": "Utilisation du contexte",
+        "contextTitle": "Contexte",
+        "recentRounds": "Tours récents",
+        "inputTrend": "Jetons d’entrée",
+        "input": "Jetons d’entrée",
+        "cacheHitRate": "Taux de succès du cache KV",
+        "output": "Jetons de sortie",
+        "duration": "Temps de génération"
       },
       "queued": {
         "label": "Guidage en attente",
@@ -1243,6 +1259,10 @@
           "new": {
             "title": "Nouvelle discussion",
             "description": "Réinitialiser cette discussion et démarrer une nouvelle conversation."
+          },
+          "compact": {
+            "title": "Compacter le contexte",
+            "description": "Compacter le contexte de cette discussion et poursuivre la conversation."
           },
           "stop": {
             "title": "Arrêter la tâche en cours",
@@ -1414,6 +1434,13 @@
     "activityWorkingFor": "Travail en cours depuis {{duration}}",
     "activityWorked": "Travail terminé",
     "activityWorkedFor": "Travail terminé en {{duration}}",
+    "retryConnection": "Échec de la connexion",
+    "retryTimeout": "Délai d’attente du modèle dépassé",
+    "retryRateLimit": "Limite de requêtes atteinte",
+    "retryServer": "Modèle indisponible",
+    "retryUnknown": "Échec de la requête au modèle",
+    "retryWaiting": "{{error}} · nouvelle tentative dans {{seconds}} s · tentative {{attempt}}",
+    "retryExhausted": "{{error}} · fin du tour",
     "cliActivityRunningOne": "Utilisation de {{name}}",
     "cliActivityRanOne": "{{name}} utilisé",
     "cliActivityFailedOne": "Échec de {{name}}",
@@ -1512,6 +1539,17 @@
     "turnRejected": {
       "title": "Le message n’a pas été envoyé",
       "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Quota du fournisseur du modèle indisponible",
+      "billingBody": "Ajoutez du crédit ou vérifiez la facturation du compte fournisseur, puis réessayez.",
+      "connectionTitle": "Impossible de se connecter au fournisseur du modèle",
+      "timeoutTitle": "La requête au fournisseur du modèle a expiré",
+      "rateLimitTitle": "Limite de requêtes du fournisseur du modèle atteinte",
+      "serverTitle": "Erreur du service du fournisseur du modèle",
+      "unknownTitle": "Échec de la requête au fournisseur du modèle",
+      "bodyWithAttempt": "La requête a encore échoué à la tentative {{attempts}} ; les nouvelles tentatives ont donc été arrêtées. Vérifiez la configuration ou l’état du fournisseur, puis réessayez.",
+      "body": "Vérifiez la configuration ou l’état du fournisseur, puis réessayez."
     }
   },
   "workspace": {

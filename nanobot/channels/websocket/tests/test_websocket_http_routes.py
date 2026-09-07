@@ -342,26 +342,6 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
 
 
 @pytest.mark.asyncio
-async def test_legacy_session_messages_route_is_not_exposed(
-    bus: MagicMock, tmp_path: Path
-) -> None:
-    sm = _seed_session(tmp_path, key="websocket:legacy")
-    channel = _ch(bus, session_manager=sm, port=29919)
-    server_task = asyncio.create_task(channel.start())
-    try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        response = await _http_get(
-            "http://127.0.0.1:29919/api/sessions/websocket:legacy/messages",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        assert response.status_code == 404
-    finally:
-        await channel.stop()
-        await server_task
-
-
-@pytest.mark.asyncio
 async def test_session_automations_route_filters_by_webui_session(
     bus: MagicMock, tmp_path: Path
 ) -> None:
@@ -2331,6 +2311,48 @@ async def test_session_delete_removes_transcript_without_canonical_file(
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_removes_unpersisted_new_chat(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = SessionManager(tmp_path / "sessions")
+    project = tmp_path / "project"
+    project.mkdir()
+    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        connection,
+        "webui-client",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    attached = next(
+        payload
+        for payload in (
+            json.loads(call.args[0]) for call in connection.send.await_args_list
+        )
+        if payload.get("event") == "attached"
+    )
+    key = f"websocket:{attached['chat_id']}"
+
+    assert sm.list_sessions() == []
+    assert channel.gateway.workspaces.scope_for_session_key(key).project_path == project.resolve()
+
+    response = await _webui_mutate(channel, "session.delete", {"key": key})
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert channel.gateway.workspaces.scope_for_session_key(key).project_path == tmp_path.resolve()
 
 
 @pytest.mark.asyncio

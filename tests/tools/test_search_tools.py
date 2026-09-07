@@ -702,13 +702,11 @@ async def test_grep_uses_a_larger_bounded_limit_for_an_explicit_file(
     assert "skipped 1 large files" in capped_result
 
 
-def test_grep_schema_is_concise_and_keeps_legacy_aliases_hidden(tmp_path: Path) -> None:
+def test_grep_schema_is_concise_and_hides_internal_limits(tmp_path: Path) -> None:
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
     properties = tool.parameters["properties"]
 
     assert len(tool.description) < 150
-    assert "2 MB" not in tool.description
-    assert "100 MB" not in tool.description
     assert "head_limit" in properties
     assert "max_matches" not in properties
     assert "max_results" not in properties

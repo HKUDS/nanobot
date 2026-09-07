@@ -608,7 +608,7 @@ describe("Settings models", () => {
     expect(
       screen.queryByText("Complete the preset before saving."),
     ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Fast writing"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
       target: { value: "Writer" },
     });
     await openPopover(screen.getByRole("button", { name: "Select model" }));
@@ -690,6 +690,7 @@ describe("Settings models", () => {
       model_presets: [defaultPreset],
       model_call_order: [],
       model_call_order_editable: false,
+      model_configuration_migratable: true,
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -723,6 +724,48 @@ describe("Settings models", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
+  });
+
+  it("starts fresh users with an empty preset list instead of legacy conversion", async () => {
+    const base = settingsPayload();
+    const freshPayload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "anthropic/claude-opus-4-5",
+        provider: "auto",
+        resolved_provider: null,
+        has_api_key: false,
+        model_preset: "default",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          name: "default",
+          label: "Default",
+          active: true,
+          is_default: true,
+          model: "anthropic/claude-opus-4-5",
+          provider: "auto",
+          resolved_provider: null,
+        },
+      ],
+      model_call_order: [],
+      model_call_order_editable: false,
+      model_configuration_migratable: false,
+      providers: [],
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({ initialSection: "models", initialSettings: freshPayload });
+
+    expect(
+      await screen.findByRole("button", { name: "New model preset" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Convert to presets" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("claude-opus-4-5")).not.toBeInTheDocument();
   });
 
   it("does not expose the synthetic default configuration as a WebUI preset", async () => {
@@ -1378,11 +1421,13 @@ describe("Settings models", () => {
   });
 
   it("creates presets in the inline editor and can cancel without opening a dialog", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings") return jsonResponse(payload);
         if (url === "/api/settings/cli-apps") {
           return jsonResponse({ apps: [], installed_count: 0 });
         }
@@ -1395,10 +1440,13 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
+    const createButton = await screen.findByRole("button", { name: "New model preset" });
+    expect(createButton).toHaveClass("w-full");
+    fireEvent.click(createButton);
 
     expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Fast writing")).toHaveValue("");
+    expect(screen.getByTestId("model-preset-editor")).toHaveClass("mt-3", "mb-3");
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("");
     expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByText("Temperature")).toBeInTheDocument();
@@ -1409,7 +1457,28 @@ describe("Settings models", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
 
     fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(await screen.findByPlaceholderText("Fast writing")).toHaveValue("");
+    const nameInput = await screen.findByRole("textbox", { name: "Preset name" });
+    expect(nameInput).toHaveValue("");
+    expect(nameInput).toHaveAttribute("placeholder", "e.g. Fast writing");
+
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    const modelSearch = await screen.findByRole("combobox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(modelSearch, { target: { value: "openai/gpt-4o-mini" } });
+    fireEvent.keyDown(modelSearch, { key: "Enter" });
+
+    expect(nameInput).toHaveValue("gpt-4o-mini");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    fireEvent.change(nameInput, { target: { value: "Writer" } });
+    await openPopover(screen.getByRole("button", { name: /openai\/gpt-4o-mini/ }));
+    const nextModelSearch = await screen.findByRole("combobox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(nextModelSearch, { target: { value: "openai/gpt-4.1-mini" } });
+    fireEvent.keyDown(nextModelSearch, { key: "Enter" });
+    expect(nameInput).toHaveValue("Writer");
   });
 
   it("loads provider models and lets users choose one without typing the id manually", async () => {

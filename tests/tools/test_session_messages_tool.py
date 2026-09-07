@@ -2,6 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Callable
+from unittest.mock import patch
 
 import pytest
 
@@ -275,6 +276,45 @@ async def test_reply_timeout_injects_a_user_input_back_into_the_source(
     assert timeout.chat_id == "websocket:source"
     assert timeout.is_user_input
     assert timeout.content == f"No reply from @{target.name} after 5 seconds."
+
+
+@pytest.mark.asyncio
+async def test_reply_timeout_observes_background_delivery_failure(
+    tmp_path: Path,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    _persist(sessions, "websocket:source", "websocket:target")
+    bus = MessageBus()
+    scheduler = _Scheduler()
+    tool = SendSessionMessageTool(
+        sessions=sessions,
+        bus=bus,
+        schedule_later=scheduler,
+    )
+    target = _handle(sessions, "websocket:target")
+
+    await tool.enqueue(
+        source_session_key="websocket:source",
+        target_handle=target.name,
+        content="Question",
+        expect_reply=True,
+        reply_timeout_seconds=5,
+    )
+    await bus.consume_inbound()
+
+    async def fail_publish(_message) -> None:
+        raise RuntimeError("queue unavailable")
+
+    bus.publish_inbound = fail_publish
+    with patch("nanobot.agent.tools.session_messages.logger") as logger:
+        scheduler.calls[0][1].fire()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert tool._expiry_tasks == set()
+    logger.exception.assert_called_once_with(
+        "Session reply timeout delivery failed",
+    )
 
 
 @pytest.mark.asyncio

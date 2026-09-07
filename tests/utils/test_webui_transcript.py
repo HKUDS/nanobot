@@ -548,6 +548,26 @@ def test_replay_turn_end_preserves_usage_semantics(tmp_path, monkeypatch) -> Non
                 "context_tokens": 8_200,
                 "request_count": 3,
             },
+            "round_usages": [
+                {
+                    "prompt_tokens": 4_000,
+                    "completion_tokens": 200,
+                    "cached_tokens": 2_000,
+                    "request_count": 1,
+                },
+                {
+                    "prompt_tokens": 4_200,
+                    "completion_tokens": 300,
+                    "cached_tokens": 3_672,
+                    "request_count": 1,
+                },
+                {
+                    "prompt_tokens": 4_200,
+                    "completion_tokens": 323,
+                    "cached_tokens": 4_000,
+                    "request_count": 1,
+                },
+            ],
             "context_window_tokens": 128_000,
         },
     ):
@@ -562,6 +582,11 @@ def test_replay_turn_end_preserves_usage_semantics(tmp_path, monkeypatch) -> Non
         "context_tokens": 8_200,
         "request_count": 3,
     }
+    assert [item["prompt_tokens"] for item in messages[-1]["roundUsages"]] == [
+        4_000,
+        4_200,
+        4_200,
+    ]
     assert messages[-1]["contextWindowTokens"] == 128_000
     assert messages[-1]["latencyMs"] == 18_200
 

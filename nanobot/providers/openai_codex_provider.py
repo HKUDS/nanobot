@@ -31,6 +31,7 @@ from nanobot.providers.oauth_model_catalog import (
 )
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
+    build_responses_compaction_state,
     build_responses_state,
     consume_sse_with_reasoning,
     convert_tools,
@@ -110,6 +111,7 @@ class OpenAICodexProvider(LLMProvider):
             model=_strip_model_prefix(model),
         )
         session_id = provider_context.session_id if provider_context is not None else None
+        session_routing_key = _prompt_cache_key(session_id) if session_id else None
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -121,8 +123,8 @@ class OpenAICodexProvider(LLMProvider):
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
-        if session_id:
-            body["prompt_cache_key"] = _prompt_cache_key(session_id)
+        if session_routing_key:
+            body["prompt_cache_key"] = session_routing_key
         body["include"] = ["reasoning.encrypted_content"]
         reasoning_options = _build_reasoning_options(reasoning_effort)
         if replayed and "gpt-5.6" in _strip_model_prefix(model).lower():
@@ -135,11 +137,20 @@ class OpenAICodexProvider(LLMProvider):
         if self._extra_body:
             # Apply explicit provider overrides last, matching other provider backends.
             body.update(self._extra_body)
+        effective_cache_key = body.get("prompt_cache_key")
 
         stage = "oauth_token"
+        native_compaction_applied = False
+        native_compaction_state: ProviderConversationState | None = None
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
-            headers = _build_headers(cast(str, token.account_id), token.access)
+            headers = _build_headers(
+                cast(str, token.account_id),
+                token.access,
+                session_routing_key=(
+                    effective_cache_key if isinstance(effective_cache_key, str) else None
+                ),
+            )
 
             async def _send(
                 request_body: dict[str, Any],
@@ -187,9 +198,11 @@ class OpenAICodexProvider(LLMProvider):
                 and responses_state_context_tokens(sanitized_state) >= compact_threshold
             ):
                 stage = "codex_compaction"
+                history_items = responses_state_items(sanitized_state) or []
+                delta_items = input_items[len(history_items):]
                 compact_body = {
                     **body,
-                    "input": [*input_items, {"type": "compaction_trigger"}],
+                    "input": [*history_items, {"type": "compaction_trigger"}],
                 }
                 try:
                     compact_result = await _send(compact_body, emit_deltas=False)
@@ -205,9 +218,16 @@ class OpenAICodexProvider(LLMProvider):
                     }:
                         raise RuntimeError("Codex compaction returned no compaction item")
                     body["input"] = [
-                        *_retained_compaction_messages(input_items),
+                        *_retained_compaction_messages(history_items),
                         *compact_items,
+                        *delta_items,
                     ]
+                    native_compaction_state = build_responses_compaction_state(
+                        provider=self._responses_state_provider(),
+                        model=_strip_model_prefix(model),
+                        output_items=compact_items,
+                    )
+                    native_compaction_applied = True
                 except Exception as compact_error:
                     if is_compaction_compatibility_error(compact_error):
                         self._native_compaction_available = False
@@ -220,7 +240,14 @@ class OpenAICodexProvider(LLMProvider):
                     )
 
             stage = "codex_request"
-            return await _send(body, emit_deltas=True)
+            result = await _send(body, emit_deltas=True)
+            result.provider_compaction_applied = (
+                result.provider_compaction_applied or native_compaction_applied
+            )
+            if native_compaction_state is not None:
+                result.provider_compaction_state = native_compaction_state
+                result.provider_compaction_scope = "prior_context"
+            return result
         except Exception as e:
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
@@ -397,8 +424,13 @@ def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | N
     return options
 
 
-def _build_headers(account_id: str, token: str) -> dict[str, str]:
-    return {
+def _build_headers(
+    account_id: str,
+    token: str,
+    *,
+    session_routing_key: str | None = None,
+) -> dict[str, str]:
+    headers = {
         "Authorization": f"Bearer {token}",
         "chatgpt-account-id": account_id,
         "OpenAI-Beta": "responses=experimental",
@@ -407,6 +439,9 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
         "accept": "text/event-stream",
         "content-type": "application/json",
     }
+    if session_routing_key:
+        headers["session-id"] = session_routing_key
+    return headers
 
 
 class _CodexHTTPError(RuntimeError):

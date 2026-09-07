@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import uuid4
@@ -13,7 +14,6 @@ from loguru import logger
 
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.turn_delivery import TurnRoute
-from nanobot.bus import progress as bus_progress
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
@@ -28,7 +28,6 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
     GoalStateChanged,
-    RuntimeEventBus,
     RuntimeEventContext,
     RuntimeModelChanged,
     SessionTurnStarted,
@@ -417,14 +416,6 @@ def clear_websocket_turns(chat_id: str) -> None:
     _sync_websocket_turn_projection(chat_id)
 
 
-def build_bus_progress_callback(
-    bus: MessageBus,
-    msg: InboundMessage,
-) -> Callable[..., Awaitable[None]]:
-    """Compatibility wrapper for the generic bus progress callback."""
-    return bus_progress.build_bus_progress_callback(bus, msg)
-
-
 async def publish_turn_run_status(
     bus: MessageBus,
     msg: InboundMessage,
@@ -567,35 +558,34 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     recovery: RecoveryCoordinator | None = None
-
-    def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
+    def subscribe(self) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
         unsubscribe = [
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_user_input_accepted,
                 UserInputAccepted,
             ),
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_session_turn_started,
                 SessionTurnStarted,
             ),
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_run_status_changed,
                 TurnRunStatusChanged,
             ),
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_turn_runtime_admitted,
                 TurnRuntimeAdmitted,
             ),
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_turn_completed_event,
                 TurnCompleted,
             ),
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_goal_state_changed,
                 GoalStateChanged,
             ),
-            runtime_events.subscribe(
+            self.bus.subscribe(
                 self._handle_runtime_model_changed,
                 RuntimeModelChanged,
             ),
@@ -606,6 +596,15 @@ class WebuiTurnCoordinator:
                 fn()
 
         return _unsubscribe
+
+    @contextmanager
+    def connected(self) -> Generator[None, None, None]:
+        """Keep connections alive through shutdown, then release the coordinator."""
+        disconnect = self.subscribe()
+        try:
+            yield
+        finally:
+            disconnect()
 
     @staticmethod
     def _ctx_msg(ctx: RuntimeEventContext) -> InboundMessage:
@@ -706,9 +705,14 @@ class WebuiTurnCoordinator:
             session_key=event.context.session_key,
             latency_ms=event.latency_ms,
             usage=event.usage,
+            round_usages=event.round_usages,
             context_window_tokens=(
                 event.runtime.context_window_tokens if event.runtime is not None else None
             ),
+            outcome=event.outcome,
+            failure_kind=event.failure_kind,
+            failure_error_kind=event.failure_error_kind,
+            failure_attempts=event.failure_attempts,
         )
         if self.recovery is not None:
             await self.recovery.turn_completed(event.context.session_key)
@@ -750,7 +754,12 @@ class WebuiTurnCoordinator:
         session_key: str,
         latency_ms: int | None,
         usage: LLMUsage | None = None,
+        round_usages: tuple[LLMUsage, ...] = (),
         context_window_tokens: int | None = None,
+        outcome: str = "completed",
+        failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
     ) -> None:
         if msg.channel != "websocket":
             return
@@ -764,7 +773,20 @@ class WebuiTurnCoordinator:
                     latency_ms=latency_ms,
                     goal_state=goal_state_ws_blob(session.metadata),
                     usage=usage,
+                    round_usages=round_usages,
                     context_window_tokens=context_window_tokens,
+                    outcome=outcome,
+                    failure_kind=failure_kind,
+                    failure_error_kind=failure_error_kind,
+                    failure_attempts=failure_attempts,
+                    failure_message=(
+                        "Model provider request failed. Check the provider configuration or "
+                        "service status, then try again."
+                        if failure_kind == "model"
+                        else "This turn failed and has ended."
+                        if outcome == "failed"
+                        else None
+                    ),
                 ),
                 metadata=msg.metadata,
             )

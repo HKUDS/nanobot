@@ -503,7 +503,6 @@ class TelegramChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self._app: TelegramApplication | None = None
-        self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict[str, Any]] = {}
         self._media_group_tasks: dict[str, asyncio.Task[None]] = {}
@@ -1722,9 +1721,6 @@ class TelegramChannel(BaseChannel):
             await self._send_pairing_code_if_private(sender_id, message, user)
             return
         self._remember_thread_context(message)
-
-        # Store chat_id for replies
-        self._chat_ids[sender_id] = chat_id
 
         if not await self._is_group_message_for_bot(message):
             return

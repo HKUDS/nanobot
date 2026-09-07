@@ -27,7 +27,9 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -262,12 +264,6 @@ def _metadata_title(metadata: object) -> str:
     return strip_think(title)
 
 
-@dataclass
-class RetentionResult:
-    dropped: list[dict[str, Any]]
-    already_consolidated_count: int
-
-
 @dataclass(frozen=True)
 class SessionPolicy:
     """Runtime rules that do not belong in durable session data."""
@@ -286,9 +282,7 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    # Legacy storage name for the Memory ingestion watermark. New code should
-    # use ``last_archived`` so this progress is not confused with model-context
-    # compaction. Keep the field while persisted sessions and SDK callers migrate.
+    # Keep the legacy storage name while persisted sessions and SDK callers migrate.
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
@@ -309,7 +303,7 @@ class Session:
 
     @property
     def last_archived(self) -> int:
-        """Number of transcript messages already written to the Memory journal."""
+        """End of the latest committed Memory checkpoint."""
         return self.last_consolidated
 
     @last_archived.setter
@@ -337,14 +331,17 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        A positive ``max_messages`` applies an explicit caller-owned count
-        limit. The normal model path relies on ``max_tokens`` instead.
+        A committed in-turn checkpoint replaces its old prefix with the stored
+        summary and resumes replay at a hidden continuation marker. A positive
+        ``max_messages`` applies an additional caller-owned count limit.
         """
         replay_start = self.last_archived
-        if replay_start:
-            # ``last_archived`` is archive progress, not a replay boundary.
-            # Keep a small raw suffix for continuity, extending back to the user
-            # that started an assistant/tool sequence when necessary.
+        resumes_from_checkpoint = (
+            replay_start < len(self.messages)
+            and is_hidden_history_message(self.messages[replay_start])
+            and self.messages[replay_start].get("content") == SUMMARY_CONTINUATION_TEXT
+        )
+        if replay_start and not resumes_from_checkpoint:
             recent_start = recent_message_start_index(
                 self.messages,
                 MIN_COMPACTED_REPLAY_MESSAGES,
@@ -484,110 +481,6 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
-
-    def retain_recent_legal_suffix(
-        self,
-        max_messages: int,
-        *,
-        extend_to_user: bool = False,
-    ) -> RetentionResult:
-        """Keep a legal recent suffix, optionally extending it back to a user turn.
-
-        Returns a RetentionResult with dropped messages and how many of those
-        were in the already-consolidated prefix. This method mutates
-        self.messages and self.last_archived in place.
-        """
-        if max_messages <= 0:
-            dropped = list(self.messages)
-            lc = self.last_archived
-            self.clear()
-            return RetentionResult(
-                dropped=dropped,
-                already_consolidated_count=min(lc, len(dropped)),
-            )
-        if len(self.messages) <= max_messages:
-            return RetentionResult(
-                dropped=[],
-                already_consolidated_count=0,
-            )
-
-        original = list(self.messages)
-        before_lc = self.last_archived
-
-        start_idx = max(0, len(self.messages) - max_messages)
-        if extend_to_user:
-            recovered_user = next(
-                (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if recovered_user is not None:
-                start_idx = recovered_user
-                if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
-                    start_idx -= 1
-
-        retained = self.messages[start_idx:]
-
-        # Prefer starting at a user turn (or its preceding _channel_delivery) when one exists within the retained window.
-        first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
-        if first_user is not None:
-            if first_user > 0 and retained[first_user - 1].get("_channel_delivery"):
-                retained = retained[first_user - 1:]
-            else:
-                retained = retained[first_user:]
-        elif not extend_to_user:
-            # If the hard-capped tail is assistant/tool-only, anchor to the
-            # latest user in the full session and take a capped forward window.
-            latest_user = next(
-                (i for i in range(len(self.messages) - 1, -1, -1)
-                 if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if latest_user is not None:
-                retained = self.messages[latest_user: latest_user + max_messages]
-
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = find_legal_message_start(retained)
-        if start:
-            retained = retained[start:]
-
-        # Hard-cap guarantee unless the caller requested user-turn extension.
-        if not extend_to_user and len(retained) > max_messages:
-            retained = retained[-max_messages:]
-            start = find_legal_message_start(retained)
-            if start:
-                retained = retained[start:]
-
-        # Compute actually-dropped messages using identity comparison so that
-        # even when retained is a non-contiguous slice of original (the else
-        # branch above), we never duplicate or lose messages.
-        retained_ids = set(id(m) for m in retained)
-        dropped = [m for m in original if id(m) not in retained_ids]
-
-        # Count how many dropped messages were in the already-consolidated
-        # prefix of the original list.  This cannot be a simple min() because
-        # dropped may include messages from *after* the consolidated prefix
-        # (e.g. in the else branch).
-        already_consolidated = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) not in retained_ids
-        )
-
-        # New last_archived = count of retained messages that were inside
-        # the old consolidated prefix.
-        new_lc = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) in retained_ids
-        )
-
-        self.messages = retained
-        self.last_archived = new_lc
-        if dropped:
-            self.provider_state = None
-        self.updated_at = datetime.now()
-        return RetentionResult(
-            dropped=dropped,
-            already_consolidated_count=already_consolidated,
-        )
 
 class SessionPayload(TypedDict):
     key: str
@@ -2010,7 +1903,7 @@ class SessionManager:
         user_index = 0
         found_target = False
         for message in source.messages:
-            if message.get("role") == "user":
+            if message.get("role") == "user" and not is_hidden_history_message(message):
                 if user_index == before_user_index:
                     found_target = True
                     break

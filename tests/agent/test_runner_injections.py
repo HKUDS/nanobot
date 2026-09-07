@@ -750,25 +750,27 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         ),
     ]
 
-    injected = [message for message in result.messages if message.get("role") == "user"][-1]
-    assert "follow-up from the second speaker" in str(injected["content"])
+    injected = [message for message in result.messages if message.get("role") == "user"][-2:]
+    assert str(injected[0]["content"]).startswith("follow-up from the second speaker\n\n")
+    assert str(injected[1]["content"]).startswith("another follow-up\n\n")
     model_messages = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
     assert "telegram | group-1 | user-b | message-2" in str(model_messages)
     assert "Bob | topic-7" in str(model_messages)
     assert "telegram | group-1 | user-c | message-3" in str(model_messages)
     assert "Carol | topic-7" in str(model_messages)
-    assert injected["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == [
-        "identity",
-        "identity",
-    ]
+    assert all(
+        message["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["identity"]
+        for message in injected
+    )
 
     loop._save_turn(session, result.messages, skip=1)
-    persisted = [message for message in session.messages if message.get("role") == "user"][-1]
-    assert "telegram | group-1 | user-b | message-2" in str(persisted["content"])
-    assert "telegram | group-1 | user-c | message-3" in str(persisted["content"])
-    assert public_history_message(persisted)["content"] == (
-        "follow-up from the second speaker\n\nanother follow-up"
-    )
+    persisted = [message for message in session.messages if message.get("role") == "user"][-2:]
+    assert "telegram | group-1 | user-b | message-2" in str(persisted[0]["content"])
+    assert "telegram | group-1 | user-c | message-3" in str(persisted[1]["content"])
+    assert [public_history_message(message)["content"] for message in persisted] == [
+        "follow-up from the second speaker",
+        "another follow-up",
+    ]
 
 
 @pytest.mark.asyncio
@@ -835,8 +837,8 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_runner_merges_multiple_injected_user_messages_without_losing_media():
-    """Multiple injected follow-ups should not create lossy consecutive user messages."""
+async def test_model_request_merges_injected_user_messages_without_losing_media():
+    """The model copy may merge follow-ups while the raw transcript keeps each event."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -895,10 +897,17 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
         for block in injected["content"]
         if isinstance(block, dict)
     )
+    assert [message["content"] for message in result.messages[-3:-1]] == [
+        [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+            {"type": "text", "text": "look at this"},
+        ],
+        "and answer briefly",
+    ]
 
 
-def test_runner_merge_keeps_all_recovery_followup_ids() -> None:
-    """Merged follow-ups stay acknowledged together after a later save."""
+def test_runner_append_keeps_recovery_followups_separate() -> None:
+    """Each raw follow-up keeps its own recovery identity."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
 
@@ -908,10 +917,12 @@ def test_runner_merge_keeps_all_recovery_followup_ids() -> None:
         [{"role": "user", "content": "second", PENDING_FOLLOWUP_ID_KEY: "two"}],
     )
 
-    assert messages[-1][PENDING_FOLLOWUP_ID_KEY] == ["one", "two"]
+    assert [message["content"] for message in messages] == ["first", "second"]
+    assert [message[PENDING_FOLLOWUP_ID_KEY] for message in messages] == ["one", "two"]
 
 
-def test_runner_merge_preserves_runtime_markers_with_media() -> None:
+def test_model_request_merge_preserves_runtime_markers_with_media() -> None:
+    from nanobot.agent.context_governance import ContextGovernor
     from nanobot.agent.runner import AgentRunner
     from nanobot.runtime_context import (
         RUNTIME_CONTEXT_HISTORY_META,
@@ -948,8 +959,9 @@ def test_runner_merge_preserves_runtime_markers_with_media() -> None:
         },
     ])
 
-    assert len(messages) == 1
-    merged = messages[0]
+    assert len(messages) == 2
+    merged = ContextGovernor._merge_adjacent_user_messages_for_model(messages)[0]
+    assert len(messages) == 2
     assert "private first" in str(merged["content"])
     assert "private second" in str(merged["content"])
     persisted = {
@@ -1681,15 +1693,17 @@ async def test_drain_injections_after_recoverable_tool_error():
 
 @pytest.mark.asyncio
 async def test_drain_injections_on_llm_error():
-    """Pending injections should be drained when the LLM returns an error finish_reason."""
+    """A follow-up after an error stays raw and reaches the next model request."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
     call_count = {"n": 0}
+    requests: list[list[dict]] = []
 
     async def chat_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
+        requests.append(messages)
         if call_count["n"] == 1:
             return LLMResponse(
                 content=None,
@@ -1713,11 +1727,20 @@ async def test_drain_injections_on_llm_error():
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
-        initial_messages=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "previous response"},
-            {"role": "user", "content": "trigger error"},
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=[
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "previous response"},
+                {"role": "user", "content": "trigger error"},
+            ],
+            current_message=None,
+        ),
+        transcript_builder=lambda transcript: [
+            {"role": "system", "content": "system"},
+            *transcript.history,
         ],
+        consolidate_history=AsyncMock(return_value=None),
         tools=tools,
         model="test-model",
         max_iterations=5,
@@ -1727,11 +1750,15 @@ async def test_drain_injections_on_llm_error():
 
     assert result.had_injections is True
     assert result.final_content == "recovered answer"
-    injected = [
-        m for m in result.messages
-        if m.get("role") == "user" and "follow-up after LLM error" in str(m.get("content", ""))
+    assert "follow-up after LLM error" in str(requests[1])
+    assert [
+        message["content"]
+        for message in result.messages
+        if message.get("role") == "user"
+    ][-2:] == [
+        "trigger error",
+        "follow-up after LLM error",
     ]
-    assert len(injected) == 1
 
 
 @pytest.mark.asyncio
