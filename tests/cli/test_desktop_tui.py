@@ -71,7 +71,13 @@ def test_launcher_has_no_gateway_ownership_and_no_credentials_in_child_env(monke
     process = MagicMock()
     process.wait.return_value = 90
     process.poll.return_value = 90
-    monkeypatch.setattr(desktop_tui.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, b"1\n", b""))
+    def probe(args, **kw):
+        assert args == ["terminal-client", "--desktop-protocol"]
+        assert kw["stdin"] == subprocess.DEVNULL
+        assert not any(key.startswith("NANOBOT_TUI_") for key in kw["env"])
+        assert "unrelated-bootstrap" not in json.dumps((args, kw))
+        return subprocess.CompletedProcess(args, 0, b"1\n", b"")
+    monkeypatch.setattr(desktop_tui.subprocess, "run", probe)
     def start(args, **kw):
         calls.append((args, kw))
         return process
@@ -90,6 +96,30 @@ def test_launcher_has_no_gateway_ownership_and_no_credentials_in_child_env(monke
     assert resolver[:3] == [sys.executable, "-I", "-S"]
     assert resolver[-1] == "--resolve"
     process.terminate.assert_not_called()
+
+
+def test_protocol_probe_is_isolated_in_a_real_child(monkeypatch):
+    # Older clients ignore --desktop-protocol and consume normal connection env.
+    # Probe them without credentials or terminal input, before allowing launch.
+    command = [sys.executable, "-I", "-S", "-c", """
+import os, sys
+keys = {key for key in os.environ if key.startswith('NANOBOT_TUI_')}
+if sys.argv[-1] == '--desktop-protocol':
+    if keys:
+        sys.exit(7)
+    if sys.stdin.buffer.read(1):
+        sys.exit(8)
+    print(1)
+else:
+    assert keys == {'NANOBOT_TUI_DESKTOP_TARGET', 'NANOBOT_TUI_DESKTOP_RESOLVER'}
+    sys.exit(90)
+"""]
+    monkeypatch.setattr(tui_launcher, "resolve_tui_command", lambda: command)
+    monkeypatch.delenv("NANOBOT_DESKTOP_CLIENT_CACHE", raising=False)
+    monkeypatch.setenv("NANOBOT_TUI_BOOTSTRAP_URL", "http://127.0.0.1:1/webui/bootstrap")
+    monkeypatch.setenv("NANOBOT_TUI_BOOTSTRAP_SECRET", "unrelated-bootstrap")
+    monkeypatch.setenv("NANOBOT_TUI_DESKTOP_RESOLVER", "unrelated-resolver")
+    assert desktop_tui.launch_desktop_tui(target()) == 0
 
 
 def test_unsupported_desktop_does_not_install_or_launch_a_client(monkeypatch):

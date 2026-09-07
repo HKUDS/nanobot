@@ -18,9 +18,9 @@ from nanobot.cli.tui_launcher import (
     _initial_tui_chat_id,
     _initial_tui_workspace,
     _resolve_source_tui_command,
-    resolve_tui_command,
     _websocket_chat_id,
     launch_tui,
+    resolve_tui_command,
 )
 from nanobot.config.schema import Config, ModelPresetConfig
 
@@ -228,9 +228,15 @@ def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
     monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
+    # Stub only this launcher's child; lease cleanup still needs real subprocess
+    # calls to check live process state (including ps on macOS/Linux).
     monkeypatch.setattr(
-        "nanobot.cli.tui_launcher.subprocess.Popen",
-        lambda *args, **kwargs: FakeProcess(),
+        tui_launcher,
+        "subprocess",
+        SimpleNamespace(
+            Popen=lambda *args, **kwargs: FakeProcess(),
+            TimeoutExpired=subprocess.TimeoutExpired,
+        ),
     )
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._webui_endpoint_reachable",

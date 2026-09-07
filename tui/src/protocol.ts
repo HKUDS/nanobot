@@ -1320,7 +1320,9 @@ export class NanobotClient {
     }
     const response = decodeWebUIResponse(value)
     if (!this.identityVerified) {
-      if (!isRecord(value) || value.event !== "ready" || !isRecord(value.terminal)
+      // Matching metadata is insufficient: an invalid ready frame must not
+      // unlock mutations or cancel the bounded compatibility handshake.
+      if (!isRecord(value) || decodeInboundEvent(value)?.event !== "ready" || !isRecord(value.terminal)
         || value.terminal.protocolVersion !== 1 || value.terminal.gatewayId !== this.options.expectedGatewayId) {
         this.desktopFailure()
         return

@@ -110,12 +110,15 @@ def launch_desktop_tui(target: DesktopTarget) -> int:
         if cache is not None and not Path(cache).is_absolute():
             raise DesktopTargetError("Desktop client cache must be absolute")
         command = resolve_tui_command(data_dir=Path(cache)) if cache else resolve_tui_command()
+        # An old client may ignore the probe flag. It must not consume terminal
+        # input or connect using credentials inherited from another TUI session.
+        env = {key: value for key, value in os.environ.items() if not key.startswith("NANOBOT_TUI_")}
         probe = subprocess.run(
             [*command, "--desktop-protocol"], capture_output=True, timeout=15, check=False,
+            stdin=subprocess.DEVNULL, env=env,
         )
         if probe.returncode != 0 or probe.stdout.strip() != b"1":
             raise DesktopTargetError("The terminal client does not support Desktop attachment")
-        env = {key: value for key, value in os.environ.items() if not key.startswith("NANOBOT_TUI_")}
         env["NANOBOT_TUI_DESKTOP_RESOLVER"] = json.dumps([
             sys.executable, "-I", "-S", str(Path(__file__).resolve()), "--resolve",
         ])

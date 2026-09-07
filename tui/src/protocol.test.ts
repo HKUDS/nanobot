@@ -107,6 +107,20 @@ describe("Desktop attach-only protocol", () => {
       expect(statuses.at(-1)).toBe("error")
     })
   })
+  for (const fields of [{}, { chat_id: "" }, { chat_id: 1, client_id: "test" }, { chat_id: "", client_id: null }]) {
+    test(`rejects an incomplete ready frame even with matching identity: ${JSON.stringify(fields)}`, async () => {
+      await fixture(async (client, socket, statuses, attempts) => {
+        socket.emit("message", { data: JSON.stringify({ event: "ready", terminal: { protocolVersion: 1, gatewayId }, ...fields }) })
+        expect(() => client.newChat()).toThrow("Desktop identity not verified")
+        await expect(client.updateRecovery("continue", "chat", "recovery")).rejects.toThrow("Desktop identity not verified")
+        await Bun.sleep(20)
+        expect(socket.sent).toHaveLength(0)
+        expect(socket.readyState).toBe(3)
+        expect(statuses.at(-1)).toBe("error")
+        expect(attempts()).toBe(1)
+      })
+    })
+  }
   test("explicit client exit sends no lifecycle command", async () => {
     await fixture(async (client, socket) => {
       client.close()
