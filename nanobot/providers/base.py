@@ -1451,6 +1451,7 @@ class LLMProvider(ABC):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
+        request_timeout_s: float | None = None,
         on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
         on_retry_exhausted: RetryEventCallback | None = None,
@@ -1504,6 +1505,7 @@ class LLMProvider(ABC):
             on_retry_status=on_retry_status,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
+            request_timeout_s=request_timeout_s,
         )
 
     async def chat_with_retry(
@@ -1516,6 +1518,7 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
+        request_timeout_s: float | None = None,
         on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
         on_retry_exhausted: RetryEventCallback | None = None,
@@ -1555,6 +1558,7 @@ class LLMProvider(ABC):
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
             on_retry_status=on_retry_status,
+            request_timeout_s=request_timeout_s,
         )
 
     @staticmethod
@@ -1593,10 +1597,11 @@ class LLMProvider(ABC):
         on_retry_status: RetryStatusCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        request_timeout_s: float | None = None,
     ) -> LLMResponse:
         """Run one chat entry point through this provider's retry policy."""
         call = self._safe_chat_stream if stream else self._safe_chat
-        return await self._run_with_retry(
+        request = self._run_with_retry(
             call,
             kw,
             original_messages,
@@ -1607,6 +1612,22 @@ class LLMProvider(ABC):
             should_retry_guard=should_retry_guard,
             on_stream_recover=on_stream_recover,
         )
+        return await self._await_request_timeout(request, request_timeout_s)
+
+    @staticmethod
+    async def _await_request_timeout(
+        request: Awaitable[LLMResponse], timeout_s: float | None,
+    ) -> LLMResponse:
+        if timeout_s is None:
+            return await request
+        try:
+            return await asyncio.wait_for(request, timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                finish_reason="error",
+                error_kind="timeout",
+            )
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:

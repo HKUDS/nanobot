@@ -674,12 +674,18 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
 async def test_runner_times_out_hung_llm_request():
     from nanobot.agent.runner import AgentRunner
 
-    provider = MagicMock(spec=LLMProvider)
+    class HangingProvider(LLMProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_name="test")
 
-    async def chat_with_retry(**kwargs):
-        await asyncio.sleep(3600)
+        def get_default_model(self) -> str:
+            return "test-model"
 
-    provider.chat_with_retry = chat_with_retry
+        async def chat(self, **kwargs) -> LLMResponse:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+    provider = HangingProvider()
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -703,27 +709,32 @@ async def test_runner_times_out_hung_llm_request():
 async def test_runner_times_out_hung_max_iteration_finalization():
     from nanobot.agent.runner import AgentRunner
 
-    provider = MagicMock()
-    calls = 0
+    class ToolThenHangProvider(LLMProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_name="test")
+            self.calls = 0
 
-    async def chat_with_retry(**kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return LLMResponse(
-                content="",
-                tool_calls=[
-                    ToolCallRequest(
-                        id="call_1",
-                        name="probe",
-                        arguments={},
-                    )
-                ],
-                finish_reason="tool_calls",
-            )
-        await asyncio.Event().wait()
+        def get_default_model(self) -> str:
+            return "test-model"
 
-    provider.chat_with_retry = chat_with_retry
+        async def chat(self, **kwargs) -> LLMResponse:
+            self.calls += 1
+            if self.calls == 1:
+                return LLMResponse(
+                    content="",
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            name="probe",
+                            arguments={},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                )
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    provider = ToolThenHangProvider()
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="ok")
@@ -742,29 +753,37 @@ async def test_runner_times_out_hung_max_iteration_finalization():
         timeout=1.0,
     )
 
-    assert calls == 2
+    assert provider.calls == 2
     assert result.stop_reason == "max_iterations"
     assert result.error is None
     assert result.final_content == "fallback after 1 iteration"
 
 
 @pytest.mark.asyncio
-async def test_runner_applies_outer_wall_timeout_to_streaming_requests():
+async def test_runner_applies_wall_timeout_to_streaming_provider_request():
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
 
-    provider = MagicMock(spec=LLMProvider)
     streamed: list[str] = []
 
-    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await asyncio.sleep(0)
-        await on_content_delta("still ")
-        await asyncio.sleep(0)
-        await on_content_delta("alive")
-        return LLMResponse(content="still alive", tool_calls=[])
+    class StreamingProvider(LLMProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_name="test")
 
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
+        def get_default_model(self) -> str:
+            return "test-model"
+
+        async def chat(self, **kwargs) -> LLMResponse:
+            raise AssertionError("non-streaming path should not run")
+
+        async def chat_stream(self, *, on_content_delta, **kwargs) -> LLMResponse:
+            await asyncio.sleep(0)
+            await on_content_delta("still ")
+            await asyncio.sleep(0)
+            await on_content_delta("alive")
+            return LLMResponse(content="still alive", tool_calls=[])
+
+    provider = StreamingProvider()
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -782,7 +801,7 @@ async def test_runner_applies_outer_wall_timeout_to_streaming_requests():
         wait_for_calls.append(timeout)
         return await coro
 
-    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
+    with patch("nanobot.providers.base.asyncio.wait_for", fake_wait_for):
         result = await runner.run(make_run_spec(provider,
             initial_messages=[{"role": "user", "content": "think for a while"}],
             tools=tools,
@@ -796,7 +815,6 @@ async def test_runner_applies_outer_wall_timeout_to_streaming_requests():
     assert result.stop_reason == "completed"
     assert result.final_content == "still alive"
     assert streamed == ["still ", "alive"]
-    provider.chat_with_retry.assert_not_awaited()
     assert wait_for_calls == [300.0]
 
 
@@ -805,13 +823,21 @@ async def test_runner_times_out_never_ending_streaming_request():
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
 
-    provider = MagicMock(spec=LLMProvider)
+    class HangingStreamingProvider(LLMProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_name="test")
 
-    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await asyncio.sleep(3600)
+        def get_default_model(self) -> str:
+            return "test-model"
 
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
+        async def chat(self, **kwargs) -> LLMResponse:
+            raise AssertionError("non-streaming path should not run")
+
+        async def chat_stream(self, **kwargs) -> LLMResponse:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+    provider = HangingStreamingProvider()
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -824,7 +850,7 @@ async def test_runner_times_out_never_ending_streaming_request():
         raise asyncio.TimeoutError
 
     runner = AgentRunner()
-    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
+    with patch("nanobot.providers.base.asyncio.wait_for", fake_wait_for):
         result = await runner.run(make_run_spec(provider,
             initial_messages=[{"role": "user", "content": "think forever"}],
             tools=tools,
@@ -837,7 +863,6 @@ async def test_runner_times_out_never_ending_streaming_request():
 
     assert result.stop_reason == "error"
     assert result.final_content == "Error calling LLM: timed out after 400s"
-    provider.chat_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio

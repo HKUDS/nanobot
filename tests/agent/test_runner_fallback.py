@@ -1837,8 +1837,8 @@ async def test_deadline_bounds_all_hanging_candidates() -> None:
     primary = _HangingProvider()
     fallback = _HangingProvider()
     provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
-    result = await asyncio.wait_for(provider.run_with_timeout(
-        provider.chat_with_retry(messages=[], model="primary"), 0.02,
+    result = await asyncio.wait_for(provider.chat_with_retry(
+        messages=[], model="primary", request_timeout_s=0.02,
     ), timeout=1)
     assert result.error_kind == "timeout"
     assert result.content == "Error calling LLM: timed out after 0.04s"
@@ -1850,8 +1850,8 @@ async def test_deadline_does_not_convert_user_cancellation_to_failover() -> None
     primary = _HangingProvider()
     fallback = _FakeProvider()
     provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
-    task = asyncio.create_task(provider.run_with_timeout(
-        provider.chat_with_retry(messages=[], model="primary"), 1,
+    task = asyncio.create_task(provider.chat_with_retry(
+        messages=[], model="primary", request_timeout_s=1,
     ))
     while not primary.chat_calls:
         await asyncio.sleep(0)
@@ -1859,7 +1859,6 @@ async def test_deadline_does_not_convert_user_cancellation_to_failover() -> None
     with pytest.raises(asyncio.CancelledError):
         await task
     assert fallback.chat_calls == []
-    assert provider._request_timeout.get() is None
 
 
 @pytest.mark.asyncio
@@ -1881,11 +1880,74 @@ async def test_candidate_deadline_recovers_stream_after_partial_output() -> None
     async def recover() -> None:
         events.append("recover")
 
-    result = await provider.run_with_timeout(provider.chat_stream_with_retry(
+    result = await provider.chat_stream_with_retry(
         messages=[], on_content_delta=delta, on_stream_recover=recover,
-    ), 0.02)
+        request_timeout_s=0.02,
+    )
     assert result.content == "recovered"
     assert events == ["partial", "recover", "recovered"]
+
+
+@pytest.mark.asyncio
+async def test_successful_fallback_closes_abandoned_hosted_tool() -> None:
+    from agent.runner_helpers import make_run_spec
+    from nanobot.agent.progress_hook import AgentProgressHook
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.utils.progress_events import output_events
+
+    class HostedToolTimeoutProvider(_FakeProvider):
+        _CHAT_RETRY_DELAYS = ()
+
+        async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+            await kwargs["on_tool_call_delta"]({
+                "kind": "hosted_tool",
+                "phase": "start",
+                "call_id": "search-1",
+                "name": "x_search",
+                "arguments": {"query": "nanobot"},
+                "result": None,
+            })
+            return LLMResponse(
+                content="primary timed out",
+                finish_reason="error",
+                error_kind="timeout",
+            )
+
+    primary = HostedToolTimeoutProvider("primary")
+    fallback = _FakeProvider("fallback", _make_response("recovered"))
+    provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    progress_events: list[dict[str, Any]] = []
+
+    async def progress_cb(_content, *, tool_events=None, **_kwargs):
+        progress_events.extend(tool_events or [])
+
+    async def stream_cb(_content: str) -> None:
+        pass
+
+    hook = AgentProgressHook(
+        output_events(on_progress=progress_cb, on_stream=stream_cb),
+        streaming=True,
+    )
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        model="primary",
+        initial_messages=[{"role": "user", "content": "search"}],
+        tools=tools,
+        max_iterations=1,
+        max_tool_result_chars=16000,
+        hook=hook,
+    ))
+
+    assert result.final_content == "recovered"
+    assert [(event["phase"], event["call_id"]) for event in progress_events] == [
+        ("start", "search-1"),
+        ("error", "search-1"),
+    ]
+    assert progress_events[-1]["error"] == (
+        "Provider-hosted tool did not report completion before the model request finished."
+    )
 
 
 @pytest.mark.asyncio
@@ -1901,17 +1963,16 @@ async def test_candidate_deadlines_are_isolated_between_concurrent_requests() ->
     primary = WaitingProvider()
     fallback = _FakeProvider(response=_make_response("backup"))
     provider = FallbackProvider(primary, [_fallback("backup")], lambda _: fallback)
-    long_request = asyncio.create_task(provider.run_with_timeout(
-        provider.chat_with_retry(messages=[]), 1,
+    long_request = asyncio.create_task(provider.chat_with_retry(
+        messages=[], request_timeout_s=1,
     ))
-    short_request = asyncio.create_task(provider.run_with_timeout(
-        provider.chat_with_retry(messages=[]), 0.02,
+    short_request = asyncio.create_task(provider.chat_with_retry(
+        messages=[], request_timeout_s=0.02,
     ))
     assert (await short_request).content == "backup"
     assert not long_request.done()
     release.set()
     assert (await long_request).content == "primary"
-    assert provider._request_timeout.get() is None
 
 
 @pytest.mark.asyncio

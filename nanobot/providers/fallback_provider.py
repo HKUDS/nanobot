@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
@@ -139,9 +138,6 @@ class FallbackProvider(LLMProvider):
         self._fallback_model_observer = fallback_model_observer
         self._primary_context_window_tokens = primary_context_window_tokens
         self._has_fallbacks = bool(fallback_presets)
-        self._request_timeout: ContextVar[float | None] = ContextVar(
-            "fallback_request_timeout", default=None
-        )
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
 
@@ -203,29 +199,6 @@ class FallbackProvider(LLMProvider):
             return True
         return False
 
-    async def run_with_timeout(
-        self, request: Awaitable[LLMResponse], timeout_s: float,
-    ) -> LLMResponse:
-        """Give each candidate a deadline without cancelling failover itself.
-
-        The outer bound also limits persistent retries of the whole chain.
-        Context-local state keeps concurrent requests on this provider isolated.
-        """
-        token = self._request_timeout.set(timeout_s)
-        chain_timeout_s = timeout_s * (1 + len(self._fallback_presets))
-        try:
-            return await asyncio.wait_for(
-                request, timeout=chain_timeout_s,
-            )
-        except asyncio.TimeoutError:
-            return LLMResponse(
-                content=f"Error calling LLM: timed out after {chain_timeout_s:g}s",
-                finish_reason="error",
-                error_kind="timeout",
-            )
-        finally:
-            self._request_timeout.reset(token)
-
     async def chat(self, **kwargs: Any) -> LLMResponse:
         if not self._has_fallbacks:
             return await self._primary.chat(**kwargs)
@@ -245,6 +218,7 @@ class FallbackProvider(LLMProvider):
         on_retry_status: RetryStatusCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        request_timeout_s: float | None = None,
     ) -> LLMResponse:
         """Retry each provider before advancing through the fallback chain."""
         call_kwargs = dict(kw)
@@ -262,8 +236,12 @@ class FallbackProvider(LLMProvider):
                 "on_retry_status": on_retry_status,
             })
             if stream:
-                return await self._primary.chat_stream_with_retry(**call_kwargs)
-            return await self._primary.chat_with_retry(**call_kwargs)
+                return await self._primary.chat_stream_with_retry(
+                    **call_kwargs, request_timeout_s=request_timeout_s,
+                )
+            return await self._primary.chat_with_retry(
+                **call_kwargs, request_timeout_s=request_timeout_s,
+            )
 
         has_streamed: list[bool] | None = None
         recover_stream = on_stream_recover
@@ -294,10 +272,14 @@ class FallbackProvider(LLMProvider):
             provider_kwargs: dict[str, Any],
         ) -> LLMResponse:
             if stream:
-                return await provider.chat_stream_with_retry(**provider_kwargs)
-            return await provider.chat_with_retry(**provider_kwargs)
+                return await provider.chat_stream_with_retry(
+                    **provider_kwargs, request_timeout_s=request_timeout_s,
+                )
+            return await provider.chat_with_retry(
+                **provider_kwargs, request_timeout_s=request_timeout_s,
+            )
 
-        return await self._retry_with_fallback(
+        request = self._retry_with_fallback(
             _call_provider,
             call_kwargs,
             original_messages,
@@ -309,6 +291,12 @@ class FallbackProvider(LLMProvider):
             on_stream_recover=recover_stream,
             persistent_retry_guard=should_retry_guard,
         )
+        chain_timeout_s = (
+            request_timeout_s * (1 + len(self._fallback_presets))
+            if request_timeout_s is not None
+            else None
+        )
+        return await self._await_request_timeout(request, chain_timeout_s)
 
     async def chat_with_context(
         self,
@@ -486,7 +474,7 @@ class FallbackProvider(LLMProvider):
         if self._primary_available():
             primary_was_attempted = True
             response, primary_exception = await self._call_provider(
-                call, self._primary, kwargs, timeout_s=self._request_timeout.get()
+                call, self._primary, kwargs
             )
             if primary_exception is not None:
                 logger.warning(
@@ -612,7 +600,7 @@ class FallbackProvider(LLMProvider):
             else:
                 fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
             fallback_response, fallback_exception = await self._call_provider(
-                call, fallback_provider, fallback_kwargs, timeout_s=self._request_timeout.get()
+                call, fallback_provider, fallback_kwargs
             )
             if fallback_exception is not None:
                 logger.warning(
@@ -672,17 +660,10 @@ class FallbackProvider(LLMProvider):
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
         provider: LLMProvider,
         kwargs: dict[str, Any],
-        *,
-        timeout_s: float | None = None,
     ) -> tuple[LLMResponse, Exception | None]:
         """Turn provider exceptions into error responses without swallowing cancellation."""
         try:
-            request = call(provider, kwargs)
-            response = (
-                await request if timeout_s is None
-                else await asyncio.wait_for(request, timeout=timeout_s)
-            )
-            return response, None
+            return await call(provider, kwargs), None
         except asyncio.CancelledError:
             raise
         except Exception as exc:

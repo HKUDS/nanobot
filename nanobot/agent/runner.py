@@ -41,7 +41,6 @@ from nanobot.providers.base import (
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
-from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.session.summary import SessionSummaryCheckpoint
 from nanobot.utils.helpers import (
     build_assistant_message,
@@ -954,6 +953,17 @@ class AgentRunner:
             elif event.get("phase") in {"end", "error"}:
                 active_hosted_tools.pop(call_id, None)
 
+        # Streaming requests also have provider-level idle timeouts
+        # (NANOBOT_STREAM_IDLE_TIMEOUT_S), but a stream that keeps producing
+        # very slow deltas can still run forever. Use a more generous wall-clock
+        # timeout for streaming while preserving NANOBOT_LLM_TIMEOUT_S=0 as an
+        # opt-out for all LLM wall-clock timeouts.
+        request_timeout_s = (
+            max(300.0, timeout_s * 2)
+            if wants_streaming and timeout_s is not None
+            else timeout_s
+        )
+
         if wants_streaming:
             thinking_buf = ""
 
@@ -990,46 +1000,22 @@ class AgentRunner:
                 on_thinking_delta=_thinking,
                 on_tool_call_delta=_provider_tool_event,
                 on_stream_recover=_stream_recover,
+                request_timeout_s=request_timeout_s,
             )
         else:
             coro = spec.runtime.provider.chat_with_retry(
                 **kwargs,
                 provider_context=provider_context,
+                request_timeout_s=request_timeout_s,
             )
 
-        # Streaming requests also have provider-level idle timeouts
-        # (NANOBOT_STREAM_IDLE_TIMEOUT_S), but a stream that keeps producing
-        # very slow deltas can still run forever. Use a more generous wall-clock
-        # timeout for streaming while preserving NANOBOT_LLM_TIMEOUT_S=0 as an
-        # opt-out for all LLM wall-clock timeouts.
-        outer_timeout_s = (
-            max(300.0, timeout_s * 2)
-            if wants_streaming and timeout_s is not None
-            else timeout_s
-        )
         request_started_at = time.perf_counter()
         try:
-            response = (
-                await coro if outer_timeout_s is None
-                else await self._await_provider_request(spec, coro, outer_timeout_s)
-            )
+            response = await coro
         except asyncio.CancelledError:
             _pause_generation()
             await _close_native_reasoning()
             raise
-        except asyncio.TimeoutError:
-            if outer_timeout_s is None:
-                response = LLMResponse(
-                    content="Error calling LLM: stream stalled",
-                    finish_reason="error",
-                    error_kind="timeout",
-                )
-            else:
-                response = LLMResponse(
-                    content=f"Error calling LLM: timed out after {outer_timeout_s:g}s",
-                    finish_reason="error",
-                    error_kind="timeout",
-                )
         _pause_generation()
         await _close_native_reasoning()
         if first_output_at is not None:
@@ -1043,16 +1029,19 @@ class AgentRunner:
         )
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         round_usage = self._record_request_usage(spec, request_state, response)
-        # chat_stream_with_retry may recover internally, so only fail unfinished
-        # hosted calls after the provider returns its final error response.
-        if response.finish_reason == "error":
+        if active_hosted_tools:
+            unfinished_error = (
+                "Provider-hosted tool did not report completion before "
+                "the model request finished."
+            )
+            if response.finish_reason == "error" and response.content:
+                unfinished_error = response.content
             for event in list(active_hosted_tools.values()):
                 await _provider_tool_event({
                     **event,
                     "phase": "error",
                     "result": None,
-                    "error": response.content
-                    or "Model request failed before the provider-hosted tool completed.",
+                    "error": unfinished_error,
                 })
         dropped, all_dropped, original_finish_reason = (
             self._drop_malformed_tool_calls(response)
@@ -1262,23 +1251,12 @@ class AgentRunner:
             messages,
             tools=None,
         )
-        coro = spec.runtime.provider.chat_with_retry(
+        timeout_s = self._resolve_llm_timeout_s(spec)
+        response = await spec.runtime.provider.chat_with_retry(
             **kwargs,
             provider_context=provider_context,
+            request_timeout_s=timeout_s,
         )
-        timeout_s = self._resolve_llm_timeout_s(spec)
-        try:
-            response = (
-                await coro
-                if timeout_s is None
-                else await self._await_provider_request(spec, coro, timeout_s)
-            )
-        except asyncio.TimeoutError:
-            response = LLMResponse(
-                content=f"Error calling LLM: timed out after {timeout_s:g}s",
-                finish_reason="error",
-                error_kind="timeout",
-            )
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
@@ -1286,15 +1264,6 @@ class AgentRunner:
         )
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
-
-    @staticmethod
-    async def _await_provider_request(
-        spec: AgentRunSpec, request: Awaitable[LLMResponse], timeout_s: float,
-    ) -> LLMResponse:
-        provider = spec.runtime.provider
-        if isinstance(provider, FallbackProvider):
-            return await provider.run_with_timeout(request, timeout_s)
-        return await asyncio.wait_for(request, timeout=timeout_s)
 
     @staticmethod
     def _resolve_llm_timeout_s(spec: AgentRunSpec) -> float | None:
