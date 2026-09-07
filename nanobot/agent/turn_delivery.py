@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.notification_delivery import notification_is_deliverable
 from nanobot.bus.outbound_events import (
+    RetryStatusEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
@@ -59,6 +60,14 @@ def _bind_events(
         )
 
     return EventSink(publish, accepts)
+
+
+def _turn_outcome(stop_reason: object) -> tuple[str, str | None]:
+    if stop_reason == "error":
+        return "failed", "model"
+    if stop_reason == "tool_error":
+        return "failed", "tool"
+    return "completed", None
 
 
 class TurnDeliveryFactory:
@@ -182,6 +191,9 @@ class TurnDelivery:
     _stream_open: bool = field(init=False, default=False)
     events: EventSink = field(init=False)
     _routed_events: EventSink = field(init=False)
+    _stop_reason: str | None = field(init=False, default=None)
+    _failure_error_kind: str | None = field(init=False, default=None)
+    _retry_status: RetryStatusEvent | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self._routed_events = _bind_events(self.bus, self.route)
@@ -244,6 +256,15 @@ class TurnDelivery:
     def record_usage(self, round_usages: list[LLMUsage]) -> None:
         self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages)
 
+    def record_stop_reason(
+        self,
+        stop_reason: str,
+        *,
+        failure_error_kind: str | None = None,
+    ) -> None:
+        self._stop_reason = stop_reason
+        self._failure_error_kind = failure_error_kind
+
     def background_response(
         self,
         content: str | None,
@@ -276,12 +297,16 @@ class TurnDelivery:
         *,
         publish_completion: bool,
     ) -> None:
+        stop_reason = self._stop_reason
+        if stop_reason is None and response is not None:
+            stop_reason = cast(str | None, response.metadata.get("_stop_reason"))
         completed_channel = self.lifecycle_message.channel
         completed_chat_id = self.lifecycle_message.chat_id
         if response is not None:
-            await self.bus.publish_outbound(response)
             completed_channel = response.channel
             completed_chat_id = response.chat_id
+            if response.channel != "websocket" or stop_reason != "error":
+                await self.bus.publish_outbound(response)
         elif self.lifecycle_message.channel == "cli":
             await self.bus.publish_outbound(
                 OutboundMessage(
@@ -292,11 +317,20 @@ class TurnDelivery:
                 )
             )
         if publish_completion:
+            outcome, failure_kind = _turn_outcome(stop_reason)
             await self.runtime_event_publisher.turn_completed(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=(self._failure_error_kind or (
+                    self._retry_status.error_kind if failure_kind == "model" and self._retry_status else None
+                )),
+                failure_attempts=(
+                    self._retry_status.attempt if failure_kind == "model" and self._retry_status else None
+                ),
             )
 
     async def fail(self, *, publish_completion: bool) -> None:
@@ -314,6 +348,8 @@ class TurnDelivery:
                 chat_id=self.lifecycle_message.chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
+                outcome="failed",
+                failure_kind="internal",
             )
 
     async def idle(self) -> None:
@@ -329,6 +365,8 @@ class TurnDelivery:
         return f"{self._stream_base_id}:{self._stream_segment}"
 
     async def _publish_event(self, event: AgentEvent) -> None:
+        if isinstance(event, RetryStatusEvent):
+            self._retry_status = event if event.state == "exhausted" else None
         if isinstance(event, StreamDeltaEvent | StreamEndEvent):
             if not self.streaming:
                 return

@@ -10,9 +10,17 @@ import pytest
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.tools.context import RequestContext
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
+from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.events import RetryStatusEvent
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+)
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -43,6 +51,52 @@ def _make_loop(tmp_path):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
+
+
+@pytest.mark.asyncio
+async def test_loop_uses_structured_retry_status_without_legacy_text(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    captured: dict[str, object] = {}
+
+    async def chat_with_retry(**kwargs):
+        captured.update(kwargs)
+        retry_status = kwargs["provider_context"].events.emit
+        assert retry_status is not None
+        await retry_status(RetryStatusEvent(
+            state="waiting",
+            attempt=1,
+            max_attempts=4,
+            error_kind="connection",
+            next_retry_at=123.5,
+        ))
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat-a",
+            content="hello",
+        ),
+        ephemeral=True,
+    )
+
+    assert result is not None
+    assert captured["provider_context"].events.accepts(RetryStatusEvent)
+    assert bus.outbound_size == 1
+    outbound = bus.outbound.get_nowait()
+    assert isinstance(outbound.event, RetryStatusEvent)
+    assert outbound.event.state == "waiting"
+    assert outbound.chat_id == "chat-a"
 
 
 @pytest.mark.asyncio

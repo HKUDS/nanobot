@@ -545,7 +545,7 @@ class TestCompactIdleSession:
         assert len(reloaded.messages) == 40
         assert reloaded.messages[0]["content"] == "user msg 0"
         assert reloaded.last_archived == 40
-        assert reloaded.provider_state == _provider_state()
+        assert reloaded.provider_state is None
         visible = reloaded.get_history(max_messages=40)
         assert len(visible) == 8
         assert visible[0]["content"] == "user msg 16"
@@ -637,6 +637,7 @@ class TestCompactIdleSession:
     ):
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:archived-idle")
+        session.provider_state = _provider_state()
         session.add_message("user", "already archived")
         session.add_message("assistant", "old answer")
         session.last_archived = 2
@@ -653,7 +654,66 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:archived-idle")
         assert reloaded.last_archived == 2
         assert "_last_summary" not in reloaded.metadata
+        assert reloaded.provider_state == _provider_state()
         assert store.read_unprocessed_history(since_cursor=0) == []
+
+    @pytest.mark.asyncio
+    async def test_next_turn_rebuilds_context_after_idle_compaction(
+        self, loop_factory, mock_provider,
+    ):
+        mock_provider.can_resume_conversation_state.return_value = True
+        mock_provider.estimate_prompt_tokens.return_value = (100, "test")
+        mock_provider.chat_with_retry.return_value = LLMResponse(
+            content="Archived conversation summary.", finish_reason="stop",
+        )
+        loop = loop_factory(provider=mock_provider)
+        try:
+            session = loop.sessions.get_or_create("cli:idle-resume")
+            for i in range(10):
+                session.add_message("user", f"question-{i}")
+                session.add_message("assistant", f"answer-{i}")
+            session.provider_state = _provider_state()
+            loop.sessions.save(session)
+            await loop.consolidator.compact_idle_session(
+                session.key, runtime=loop.llm_runtime(),
+            )
+            loop.sessions.invalidate(session.key)
+            mock_provider.chat_with_retry.reset_mock()
+            mock_provider.chat_with_retry.return_value = LLMResponse(
+                content="Next answer.", finish_reason="stop",
+            )
+
+            response = await loop.process_direct("Next question", session_key=session.key)
+
+            assert response is not None
+            assert response.content == "Next answer."
+            sent = mock_provider.chat_with_retry.call_args.kwargs
+            assert sent["provider_context"].conversation_state is None
+            contents = [message.get("content", "") for message in sent["messages"]]
+            assert "Archived conversation summary." in contents[0]
+            assert "question-0" not in contents
+            assert "question-9" in contents
+            assert "Next question" in contents[-1]
+        finally:
+            await loop.aclose()
+
+    @pytest.mark.asyncio
+    async def test_archive_failure_preserves_provider_state(self, real_consolidator, runtime):
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:failed-archive")
+        session.add_message("user", "Keep this context")
+        session.provider_state = _provider_state()
+        sessions.save(session)
+        real_consolidator.archive_session = AsyncMock(side_effect=OSError("disk full"))
+
+        with pytest.raises(OSError, match="disk full"):
+            await real_consolidator.compact_idle_session(session.key, runtime=runtime)
+
+        sessions.invalidate(session.key)
+        reloaded = sessions.get_or_create(session.key)
+        assert reloaded.provider_state == _provider_state()
+        assert reloaded.last_archived == 0
+        assert "_last_summary" not in reloaded.metadata
 
     @pytest.mark.asyncio
     async def test_new_messages_advance_existing_archive_progress(
@@ -786,6 +846,7 @@ class TestCompactIdleSession:
     ):
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:concurrent")
+        session.provider_state = _provider_state()
         session.add_message("user", "captured user")
         session.add_message("assistant", "captured assistant")
         sessions.save(session)
@@ -800,9 +861,12 @@ class TestCompactIdleSession:
 
         await real_consolidator.compact_idle_session("cli:concurrent", runtime=runtime)
 
+        sessions.invalidate("cli:concurrent")
         reloaded = sessions.get_or_create("cli:concurrent")
         assert len(reloaded.messages) == 4
         assert reloaded.last_archived == 2
+        assert reloaded.provider_state is None
+        assert reloaded.get_history()[-1]["content"] == "late assistant"
 
     @pytest.mark.asyncio
     async def test_summarizes_retained_suffix_not_just_dropped_prefix(
@@ -862,7 +926,7 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:rawdrop")
         assert len(reloaded.messages) == 38
         assert reloaded.messages[-1]["content"] == "RETAINED_SUFFIX_marker"
-        assert reloaded.provider_state == _provider_state()
+        assert reloaded.provider_state is None
 
     @pytest.mark.asyncio
     async def test_idle_compact_writes_session_key_to_history(

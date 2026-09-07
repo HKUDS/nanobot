@@ -1235,6 +1235,8 @@ class Consolidator:
                     # A turn can append while the provider call is in flight. Advance only
                     # through the captured batch so new messages remain eligible next time.
                     session.last_archived = archive_end
+                    # Resume from the summary and retained transcript, not the old provider history.
+                    session.provider_state = None
                     self.sessions.save(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(

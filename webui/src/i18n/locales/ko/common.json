@@ -1434,6 +1434,13 @@
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",
+    "retryConnection": "연결 실패",
+    "retryTimeout": "모델 응답 시간 초과",
+    "retryRateLimit": "요청 한도 초과",
+    "retryServer": "모델을 사용할 수 없음",
+    "retryUnknown": "모델 요청 실패",
+    "retryWaiting": "{{error}} · {{seconds}}초 후 재시도 · 시도 {{attempt}}",
+    "retryExhausted": "{{error}} · 턴 종료 중",
     "cliActivityRunningOne": "{{name}} 사용 중",
     "cliActivityRanOne": "{{name}} 사용함",
     "cliActivityFailedOne": "{{name}} 실패",
@@ -1532,6 +1539,17 @@
     "turnRejected": {
       "title": "메시지가 전송되지 않았습니다",
       "body": "게이트웨이가 이 메시지를 거부했습니다. 텍스트나 첨부 파일을 확인한 후 다시 시도하세요."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "모델 제공업체 할당량을 사용할 수 없음",
+      "billingBody": "제공업체 계정에 크레딧을 추가하거나 결제 상태를 확인한 후 다시 시도하세요.",
+      "connectionTitle": "모델 제공업체에 연결할 수 없음",
+      "timeoutTitle": "모델 제공업체 요청 시간 초과",
+      "rateLimitTitle": "모델 제공업체 요청 한도 초과",
+      "serverTitle": "모델 제공업체 서비스 오류",
+      "unknownTitle": "모델 제공업체 요청 실패",
+      "bodyWithAttempt": "{{attempts}}번째 시도에서도 요청이 실패하여 재시도를 중지했습니다. 제공업체 설정 또는 서비스 상태를 확인한 후 다시 시도하세요.",
+      "body": "제공업체 설정 또는 서비스 상태를 확인한 후 다시 시도하세요."
     }
   },
   "workspace": {

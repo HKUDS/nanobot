@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import json_repair
 from loguru import logger
 
-from nanobot.events import NO_EVENTS, EventSink, RetryWaitEvent
+from nanobot.events import NO_EVENTS, EventSink, RetryStatusEvent, RetryWaitEvent
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -33,6 +33,7 @@ RETRY_AFTER_BUFFER = 1
 RetryEventCallback = Callable[[str], Awaitable[None]]
 LLMCallObserver = Callable[["LLMCallRecord"], None]
 ProviderCompactionScope = Literal["prior_context", "current_request"]
+RetryStatusCallback = Callable[[RetryStatusEvent], Awaitable[None]]
 
 
 def resolve_stream_idle_timeout_s(
@@ -1453,6 +1454,7 @@ class LLMProvider(ABC):
         on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
         on_retry_exhausted: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -1489,8 +1491,8 @@ class LLMProvider(ABC):
             kw["provider_context"] = provider_context
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
-        on_retry_wait, on_retry_exhausted = self._retry_notifications(
-            provider_context, on_retry_wait, on_retry_exhausted,
+        on_retry_wait, on_retry_exhausted, on_retry_status = await self._retry_notifications(
+            provider_context, on_retry_wait, on_retry_exhausted, on_retry_status,
         )
         return await self._run_chat_with_retry(
             kw,
@@ -1499,6 +1501,7 @@ class LLMProvider(ABC):
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
         )
@@ -1516,6 +1519,7 @@ class LLMProvider(ABC):
         on_retry_wait: RetryEventCallback | None = None,
         provider_context: ProviderCallContext | None = None,
         on_retry_exhausted: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -1540,8 +1544,8 @@ class LLMProvider(ABC):
         )
         if provider_context is not None:
             kw["provider_context"] = provider_context
-        on_retry_wait, on_retry_exhausted = self._retry_notifications(
-            provider_context, on_retry_wait, on_retry_exhausted,
+        on_retry_wait, on_retry_exhausted, on_retry_status = await self._retry_notifications(
+            provider_context, on_retry_wait, on_retry_exhausted, on_retry_status,
         )
         return await self._run_chat_with_retry(
             kw,
@@ -1550,14 +1554,16 @@ class LLMProvider(ABC):
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
         )
 
     @staticmethod
-    def _retry_notifications(
+    async def _retry_notifications(
         context: ProviderCallContext | None,
         on_wait: RetryEventCallback | None,
         on_exhausted: RetryEventCallback | None,
-    ) -> tuple[RetryEventCallback | None, RetryEventCallback | None]:
+        on_status: RetryStatusCallback | None,
+    ) -> tuple[RetryEventCallback | None, RetryEventCallback | None, RetryStatusCallback | None]:
         """Adapt once at the retry-chain boundary, before candidate callbacks.
 
         Explicit callbacks retain precedence. In particular a fallback candidate
@@ -1568,7 +1574,12 @@ class LLMProvider(ABC):
                 await context.events.emit(RetryWaitEvent(content))
 
             on_wait = publish
-        return on_wait, on_exhausted or on_wait
+        if on_status is None and context is not None and context.events.accepts(RetryStatusEvent):
+            on_status = context.events.emit
+            # A turn may continue after an exhausted request; the new chain owns
+            # its own retry state, including when its first attempt is terminal.
+            await on_status(RetryStatusEvent("cleared", 1, None, "unknown"))
+        return on_wait, on_exhausted or on_wait, on_status
 
     async def _run_chat_with_retry(
         self,
@@ -1579,6 +1590,7 @@ class LLMProvider(ABC):
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
         on_retry_exhausted: RetryEventCallback | None,
+        on_retry_status: RetryStatusCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -1591,6 +1603,7 @@ class LLMProvider(ABC):
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
             should_retry_guard=should_retry_guard,
             on_stream_recover=on_stream_recover,
         )
@@ -1676,8 +1689,12 @@ class LLMProvider(ABC):
         *,
         attempt: int,
         persistent: bool,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        error_kind: str,
+        max_attempts: int | None,
+        on_retry_wait: RetryEventCallback | None = None,
+        on_retry_status: RetryStatusCallback | None = None,
     ) -> None:
+        next_retry_at = time.time() + max(0.0, delay)
         remaining = max(0.0, delay)
         while remaining > 0:
             if on_retry_wait:
@@ -1686,9 +1703,33 @@ class LLMProvider(ABC):
                     f"Model request failed, {kind} in {max(1, int(round(remaining)))}s "
                     f"(attempt {attempt})."
                 )
+            if on_retry_status:
+                await on_retry_status(
+                    RetryStatusEvent(
+                        state="waiting",
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        error_kind=error_kind,
+                        next_retry_at=next_retry_at,
+                    )
+                )
             chunk = min(remaining, self._RETRY_HEARTBEAT_CHUNK)
             await asyncio.sleep(chunk)
             remaining -= chunk
+
+    @classmethod
+    def public_error_kind(cls, response: LLMResponse) -> str:
+        """Return a stable public category without exposing provider details."""
+        if cls.is_arrearage_response(response):
+            return "billing"
+        kind = (response.error_kind or "").strip().lower()
+        if kind in {"connection", "timeout"}:
+            return kind
+        if response.error_status_code == 429:
+            return "rate_limit"
+        if response.error_status_code is not None and response.error_status_code >= 500:
+            return "server"
+        return "unknown"
 
     async def _run_with_retry(
         self,
@@ -1699,6 +1740,7 @@ class LLMProvider(ABC):
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
         on_retry_exhausted: RetryEventCallback | None,
+        on_retry_status: RetryStatusCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -1708,10 +1750,26 @@ class LLMProvider(ABC):
         last_response: LLMResponse | None = None
         last_error_key: str | None = None
         identical_error_count = 0
+
+        async def _finish_retry_status(
+            state: Literal["recovered", "cleared"],
+            response: LLMResponse,
+        ) -> None:
+            if attempt > 1 and on_retry_status:
+                await on_retry_status(
+                    RetryStatusEvent(
+                        state=state,
+                        attempt=attempt,
+                        max_attempts=None if persistent else len(delays) + 1,
+                        error_kind=self.public_error_kind(response),
+                    )
+                )
+
         while True:
             attempt += 1
             response = await call(**kw)
             if response.finish_reason != "error":
+                await _finish_retry_status("recovered", response)
                 return response
             last_response = response
             if should_retry_guard is not None and not should_retry_guard():
@@ -1737,6 +1795,7 @@ class LLMProvider(ABC):
                     logger.warning(
                         "LLM stream failed after content was emitted; skipping retry"
                     )
+                    await _finish_retry_status("cleared", response)
                     return response
             error_key = ((response.content or "").strip().lower() or None)
             if error_key and error_key == last_error_key:
@@ -1779,7 +1838,12 @@ class LLMProvider(ABC):
                     # subsequent iterations do not repeat the error-retry cycle.
                     if result.finish_reason != "error":
                         self._strip_image_content_inplace(original_messages)
+                    await _finish_retry_status(
+                        "recovered" if result.finish_reason != "error" else "cleared",
+                        result,
+                    )
                     return result
+                await _finish_retry_status("cleared", response)
                 return response
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
@@ -1792,6 +1856,15 @@ class LLMProvider(ABC):
                     await on_retry_exhausted(
                         f"Persistent retry stopped after {identical_error_count} identical errors."
                     )
+                if on_retry_status:
+                    await on_retry_status(
+                        RetryStatusEvent(
+                            state="exhausted",
+                            attempt=attempt,
+                            max_attempts=None,
+                            error_kind=self.public_error_kind(response),
+                        )
+                    )
                 return response
 
             if not persistent and attempt > len(delays):
@@ -1803,6 +1876,15 @@ class LLMProvider(ABC):
                 if on_retry_exhausted:
                     await on_retry_exhausted(
                         f"Model request failed after {attempt} attempts, giving up."
+                    )
+                if on_retry_status:
+                    await on_retry_status(
+                        RetryStatusEvent(
+                            state="exhausted",
+                            attempt=attempt,
+                            max_attempts=len(delays) + 1,
+                            error_kind=self.public_error_kind(response),
+                        )
                     )
                 break
 
@@ -1823,7 +1905,10 @@ class LLMProvider(ABC):
                 delay,
                 attempt=attempt,
                 persistent=persistent,
+                error_kind=self.public_error_kind(response),
+                max_attempts=None if persistent else len(delays) + 1,
                 on_retry_wait=on_retry_wait,
+                on_retry_status=on_retry_status,
             )
 
         return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]

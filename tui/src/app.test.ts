@@ -14,7 +14,12 @@ import {
   type TestRendererSetup,
 } from "@opentui/core/testing"
 
-import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
+import {
+  NanobotTui,
+  sessionExitMessage,
+  terminalModelFailureLine,
+  type AppOptions,
+} from "./app"
 import type {
   MessageOptions,
   RecoveryState,
@@ -60,6 +65,16 @@ test("formats a reusable session ID after exit", () => {
   )
 })
 
+test("formats actionable terminal model failures without inventing retries", () => {
+  expect(terminalModelFailureLine("billing")).toBe(
+    "Model provider quota is unavailable. "
+      + "Add credit or check billing for the provider account, then try again.",
+  )
+  expect(terminalModelFailureLine("unknown")).toBe(
+    "Model provider request failed. "
+      + "Check the provider configuration or service status, then try again.",
+  )
+})
 function contrastRatio(foreground: string, background: string): number {
   const luminance = (color: string) => {
     const channel = (offset: number) => {
@@ -2600,6 +2615,77 @@ describe("NanobotTui layout", () => {
     app.accept({ event: "turn_end", chat_id: "chat" })
     await setup.flush()
     expect(ui.composer.placeholder).toBe("Ask nanobot anything")
+  })
+
+  test("updates retry state in place and ends failed turns explicitly", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({
+      event: "goal_status",
+      chat_id: "chat",
+      status: "running",
+      turn_id: "turn-1",
+    })
+    const ui = app as unknown as { status: { plainText: string } }
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "waiting",
+      attempt: 1,
+      max_attempts: 4,
+      error_kind: "connection",
+      retry_after_s: 5,
+    })
+    expect(ui.status.plainText).toMatch(
+      /^Could not connect to the model provider · retrying in [45]s · attempt 1\/4/u,
+    )
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "waiting",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+      retry_after_s: 3,
+    })
+    expect(ui.status.plainText).toContain("attempt 2/4")
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "cleared",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+    })
+    expect(ui.status.plainText).not.toContain("retrying")
+
+    app.accept({
+      event: "turn_end",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      outcome: "failed",
+      failure_kind: "model",
+      failure_error_kind: "connection",
+      failure_attempts: 4,
+      failure_message: "Unlocalized server failure",
+    })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    const terminalFailure = "Could not connect to the model provider. The request still failed "
+      + "on attempt 4, so retries stopped. Check the provider configuration or service status, "
+      + "then try again."
+    expect(frame).toContain("Could not connect to the model provider.")
+    expect(frame.replace(/\s+/gu, " ")).toContain(terminalFailure)
+    expect(frame).not.toContain("Unlocalized server failure")
+    expect(frame).not.toContain("Last turn failed")
+    expect(ui.status.plainText).toBe("Ready")
   })
 
   test("folds long tool traces without discarding their details", async () => {

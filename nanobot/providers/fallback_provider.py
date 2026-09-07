@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.events import RetryStatusEvent
 from nanobot.providers.base import (
     GenerationSettings,
     LLMCallObserver,
@@ -20,6 +21,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
     RetryEventCallback,
+    RetryStatusCallback,
 )
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
@@ -213,6 +215,7 @@ class FallbackProvider(LLMProvider):
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
         on_retry_exhausted: RetryEventCallback | None,
+        on_retry_status: RetryStatusCallback | None,
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -229,6 +232,7 @@ class FallbackProvider(LLMProvider):
                 "retry_mode": retry_mode,
                 "on_retry_wait": on_retry_wait,
                 "on_retry_exhausted": on_retry_exhausted,
+                "on_retry_status": on_retry_status,
             })
             if stream:
                 return await self._primary.chat_stream_with_retry(**call_kwargs)
@@ -273,6 +277,7 @@ class FallbackProvider(LLMProvider):
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
             has_streamed=has_streamed,
             on_stream_recover=recover_stream,
             persistent_retry_guard=should_retry_guard,
@@ -328,6 +333,7 @@ class FallbackProvider(LLMProvider):
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
         on_retry_exhausted: RetryEventCallback | None,
+        on_retry_status: RetryStatusCallback | None,
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None,
         persistent_retry_guard: Callable[[], bool] | None,
@@ -336,22 +342,42 @@ class FallbackProvider(LLMProvider):
 
         async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
             last_exhausted_message: str | None = None
+            last_exhausted_status: RetryStatusEvent | None = None
 
             async def _capture_exhaustion(message: str) -> None:
                 nonlocal last_exhausted_message
                 last_exhausted_message = message
 
+            async def _capture_status(status: RetryStatusEvent) -> None:
+                nonlocal last_exhausted_status
+                if status.state == "exhausted":
+                    last_exhausted_status = status
+                elif on_retry_status:
+                    await on_retry_status(status)
+
+            async def _clear_status_for_fallback() -> None:
+                if last_exhausted_status is not None and on_retry_status is not None:
+                    await on_retry_status(
+                        replace(
+                            last_exhausted_status,
+                            state="cleared",
+                            next_retry_at=None,
+                        )
+                    )
+
             async def _call_candidate(
                 provider: LLMProvider,
                 candidate_kwargs: dict[str, Any],
             ) -> LLMResponse:
-                nonlocal last_exhausted_message
+                nonlocal last_exhausted_message, last_exhausted_status
                 last_exhausted_message = None
+                last_exhausted_status = None
                 return await call(provider, {
                     **candidate_kwargs,
                     "retry_mode": "standard",
                     "on_retry_wait": on_retry_wait,
                     "on_retry_exhausted": _capture_exhaustion,
+                    "on_retry_status": _capture_status,
                 })
 
             response = await self._try_with_fallback(
@@ -359,14 +385,13 @@ class FallbackProvider(LLMProvider):
                 chain_kwargs,
                 has_streamed=has_streamed,
                 on_stream_recover=on_stream_recover,
+                on_fallback_attempt=_clear_status_for_fallback,
             )
-            if (
-                retry_mode != "persistent"
-                and response.finish_reason == "error"
-                and last_exhausted_message
-                and on_retry_exhausted
-            ):
-                await on_retry_exhausted(last_exhausted_message)
+            if retry_mode != "persistent" and response.finish_reason == "error":
+                if last_exhausted_message and on_retry_exhausted:
+                    await on_retry_exhausted(last_exhausted_message)
+                if last_exhausted_status and on_retry_status:
+                    await on_retry_status(last_exhausted_status)
             return response
 
         if retry_mode != "persistent":
@@ -378,6 +403,7 @@ class FallbackProvider(LLMProvider):
             retry_mode="persistent",
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
+            on_retry_status=on_retry_status,
             should_retry_guard=persistent_retry_guard,
             on_stream_recover=on_stream_recover,
         )
@@ -420,6 +446,7 @@ class FallbackProvider(LLMProvider):
         kwargs: dict[str, Any],
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        on_fallback_attempt: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
@@ -517,6 +544,8 @@ class FallbackProvider(LLMProvider):
                     "Fallback '{}' also failed, trying next fallback '{}'",
                     self._fallback_presets[idx - 1].model, fallback_model,
                 )
+            if on_fallback_attempt is not None:
+                await on_fallback_attempt()
             try:
                 fallback_provider = self._provider_factory(fallback)
                 fallback_provider.set_llm_call_observer(self._llm_call_observer)

@@ -1421,6 +1421,13 @@
     "activityWorkingFor": "Trabalhando por {{duration}}",
     "activityWorked": "Trabalhou",
     "activityWorkedFor": "Trabalhou por {{duration}}",
+    "retryConnection": "Falha na conexão",
+    "retryTimeout": "O modelo excedeu o tempo limite",
+    "retryRateLimit": "Limite de solicitações atingido",
+    "retryServer": "Modelo indisponível",
+    "retryUnknown": "Falha na solicitação ao modelo",
+    "retryWaiting": "{{error}} · tentando novamente em {{seconds}} s · tentativa {{attempt}}",
+    "retryExhausted": "{{error}} · encerrando o turno",
     "cliActivityRunningOne": "Usando {{name}}",
     "cliActivityRanOne": "Usou {{name}}",
     "cliActivityFailedOne": "Falhou em {{name}}",
@@ -1546,6 +1553,17 @@
     "turnRejected": {
       "title": "A mensagem não foi enviada",
       "body": "O gateway rejeitou esta mensagem. Revise o texto ou os anexos e tente novamente."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "A cota do provedor do modelo está indisponível",
+      "billingBody": "Adicione créditos ou verifique o faturamento da conta do provedor e tente novamente.",
+      "connectionTitle": "Não foi possível conectar ao provedor do modelo",
+      "timeoutTitle": "A solicitação ao provedor do modelo expirou",
+      "rateLimitTitle": "Limite de solicitações do provedor do modelo atingido",
+      "serverTitle": "Erro no serviço do provedor do modelo",
+      "unknownTitle": "Falha na solicitação ao provedor do modelo",
+      "bodyWithAttempt": "A solicitação ainda falhou na tentativa {{attempts}}, então as novas tentativas foram interrompidas. Verifique a configuração ou o status do provedor e tente novamente.",
+      "body": "Verifique a configuração ou o status do provedor e tente novamente."
     }
   },
   "workspace": {

@@ -5,8 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent, UserInputEvent
+from nanobot.bus.outbound_events import (
+    GoalStatusEvent,
+    RetryStatusEvent,
+    TurnEndEvent,
+    TurnModelUpdatedEvent,
+    UserInputEvent,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
     RuntimeEventContext,
@@ -240,6 +247,42 @@ async def test_admitted_runtime_publishes_chat_scoped_model_and_preset(tmp_path)
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "openai-codex/gpt-5.6"
     assert outbound.event.model_preset == "Codex"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("states", "terminal_kind", "expected_kind", "attempts"), [
+    (("exhausted",), None, "connection", 4),
+    (("waiting", "recovered"), None, None, None),
+    (("waiting",), "billing", "billing", None),
+    (("exhausted", "cleared"), "billing", "billing", None),
+])
+async def test_turn_retry_cause_survives_only_actual_exhaustion(
+    tmp_path, states, terminal_kind, expected_kind, attempts,
+) -> None:
+    bus = MessageBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus, sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: coro.close(),
+    )
+    with coordinator.connected():
+        msg = InboundMessage(
+            channel="websocket", sender_id="user", chat_id="chat-retry", content="hello",
+            metadata={"webui": True, "webui_turn_id": "turn-1"},
+        )
+        delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+        for state in states:
+            await delivery.events.emit(RetryStatusEvent(
+                state=state, attempt=4, max_attempts=4, error_kind="connection",
+            ))
+        delivery.record_stop_reason("error", failure_error_kind=terminal_kind)
+        await delivery.complete(None, publish_completion=True)
+
+    outbounds = [bus.outbound.get_nowait() for _ in range(bus.outbound_size)]
+    retry_events = [out.event for out in outbounds if isinstance(out.event, RetryStatusEvent)]
+    assert [event.state for event in retry_events] == list(states)
+    completed = next(out.event for out in outbounds if isinstance(out.event, TurnEndEvent))
+    assert completed.failure_error_kind == expected_kind
+    assert completed.failure_attempts == attempts
 
 
 @pytest.mark.asyncio

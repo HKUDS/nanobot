@@ -1434,6 +1434,13 @@
     "activityWorkingFor": "Memproses selama {{duration}}",
     "activityWorked": "Selesai memproses",
     "activityWorkedFor": "Diproses selama {{duration}}",
+    "retryConnection": "Koneksi gagal",
+    "retryTimeout": "Waktu respons model habis",
+    "retryRateLimit": "Batas permintaan tercapai",
+    "retryServer": "Model tidak tersedia",
+    "retryUnknown": "Permintaan model gagal",
+    "retryWaiting": "{{error}} · mencoba lagi dalam {{seconds}} dtk · percobaan {{attempt}}",
+    "retryExhausted": "{{error}} · mengakhiri giliran",
     "cliActivityRunningOne": "Menggunakan {{name}}",
     "cliActivityRanOne": "Menggunakan {{name}} selesai",
     "cliActivityFailedOne": "{{name}} gagal",
@@ -1532,6 +1539,17 @@
     "turnRejected": {
       "title": "Pesan tidak terkirim",
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Kuota penyedia model tidak tersedia",
+      "billingBody": "Tambahkan kredit atau periksa tagihan akun penyedia, lalu coba lagi.",
+      "connectionTitle": "Tidak dapat terhubung ke penyedia model",
+      "timeoutTitle": "Permintaan ke penyedia model kehabisan waktu",
+      "rateLimitTitle": "Batas permintaan penyedia model tercapai",
+      "serverTitle": "Kesalahan layanan penyedia model",
+      "unknownTitle": "Permintaan ke penyedia model gagal",
+      "bodyWithAttempt": "Permintaan masih gagal pada percobaan ke-{{attempts}}, sehingga percobaan ulang dihentikan. Periksa konfigurasi atau status layanan penyedia, lalu coba lagi.",
+      "body": "Periksa konfigurasi atau status layanan penyedia, lalu coba lagi."
     }
   },
   "workspace": {

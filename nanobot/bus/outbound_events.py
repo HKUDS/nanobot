@@ -15,6 +15,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.events import AgentEvent
 from nanobot.events import ContextCompactionEvent as ContextCompactionEvent
 from nanobot.events import RecoveryStateEvent as RecoveryStateEvent
+from nanobot.events import RetryStatusEvent as RetryStatusEvent
 from nanobot.events import RetryWaitEvent as RetryWaitEvent
 from nanobot.providers.base import LLMUsage
 
@@ -62,6 +63,11 @@ class TurnEndEvent(AgentEvent):
     usage: LLMUsage | None = None
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
+    outcome: str = "completed"
+    failure_kind: str | None = None
+    failure_error_kind: str | None = None
+    failure_attempts: int | None = None
+    failure_message: str | None = None
 
 
 @dataclass(frozen=True)

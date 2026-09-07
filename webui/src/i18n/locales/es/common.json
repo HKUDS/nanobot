@@ -1435,6 +1435,13 @@
     "activityWorkingFor": "Trabajando durante {{duration}}",
     "activityWorked": "Trabajo completado",
     "activityWorkedFor": "Trabajó durante {{duration}}",
+    "retryConnection": "Error de conexión",
+    "retryTimeout": "Se agotó el tiempo de espera del modelo",
+    "retryRateLimit": "Límite de solicitudes alcanzado",
+    "retryServer": "Modelo no disponible",
+    "retryUnknown": "La solicitud al modelo falló",
+    "retryWaiting": "{{error}} · reintentando en {{seconds}} s · intento {{attempt}}",
+    "retryExhausted": "{{error}} · finalizando el turno",
     "cliActivityRunningOne": "Usando {{name}}",
     "cliActivityRanOne": "Usó {{name}}",
     "cliActivityFailedOne": "Falló {{name}}",
@@ -1533,6 +1540,17 @@
     "turnRejected": {
       "title": "El mensaje no se envió",
       "body": "El gateway rechazó este mensaje. Revisa el texto o los archivos adjuntos e inténtalo de nuevo."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "La cuota del proveedor del modelo no está disponible",
+      "billingBody": "Añade crédito o revisa la facturación de la cuenta del proveedor y vuelve a intentarlo.",
+      "connectionTitle": "No se pudo conectar con el proveedor del modelo",
+      "timeoutTitle": "La solicitud al proveedor del modelo agotó el tiempo de espera",
+      "rateLimitTitle": "Se alcanzó el límite de solicitudes del proveedor del modelo",
+      "serverTitle": "Error del servicio del proveedor del modelo",
+      "unknownTitle": "La solicitud al proveedor del modelo falló",
+      "bodyWithAttempt": "La solicitud siguió fallando en el intento {{attempts}}, por lo que se detuvieron los reintentos. Revisa la configuración o el estado del proveedor y vuelve a intentarlo.",
+      "body": "Revisa la configuración o el estado del proveedor y vuelve a intentarlo."
     }
   },
   "workspace": {

@@ -558,7 +558,6 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     recovery: RecoveryCoordinator | None = None
-
     def subscribe(self) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
         unsubscribe = [
@@ -710,6 +709,10 @@ class WebuiTurnCoordinator:
             context_window_tokens=(
                 event.runtime.context_window_tokens if event.runtime is not None else None
             ),
+            outcome=event.outcome,
+            failure_kind=event.failure_kind,
+            failure_error_kind=event.failure_error_kind,
+            failure_attempts=event.failure_attempts,
         )
         if self.recovery is not None:
             await self.recovery.turn_completed(event.context.session_key)
@@ -753,6 +756,10 @@ class WebuiTurnCoordinator:
         usage: LLMUsage | None = None,
         round_usages: tuple[LLMUsage, ...] = (),
         context_window_tokens: int | None = None,
+        outcome: str = "completed",
+        failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
     ) -> None:
         if msg.channel != "websocket":
             return
@@ -768,6 +775,18 @@ class WebuiTurnCoordinator:
                     usage=usage,
                     round_usages=round_usages,
                     context_window_tokens=context_window_tokens,
+                    outcome=outcome,
+                    failure_kind=failure_kind,
+                    failure_error_kind=failure_error_kind,
+                    failure_attempts=failure_attempts,
+                    failure_message=(
+                        "Model provider request failed. Check the provider configuration or "
+                        "service status, then try again."
+                        if failure_kind == "model"
+                        else "This turn failed and has ended."
+                        if outcome == "failed"
+                        else None
+                    ),
                 ),
                 metadata=msg.metadata,
             )

@@ -25,6 +25,17 @@ class RetryWaitEvent(AgentEvent):
 
 
 @dataclass(frozen=True)
+class RetryStatusEvent(AgentEvent):
+    """Sanitized retry lifecycle for one model request chain."""
+
+    state: Literal["waiting", "recovered", "cleared", "exhausted"]
+    attempt: int
+    max_attempts: int | None
+    error_kind: str
+    next_retry_at: float | None = None
+
+
+@dataclass(frozen=True)
 class RecoveryStateEvent(AgentEvent):
     status: str
     recovery_id: str

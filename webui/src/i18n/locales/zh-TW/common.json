@@ -1433,6 +1433,13 @@
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",
+    "retryConnection": "連線失敗",
+    "retryTimeout": "模型回應逾時",
+    "retryRateLimit": "請求頻率受限",
+    "retryServer": "模型服務無法使用",
+    "retryUnknown": "模型請求失敗",
+    "retryWaiting": "{{error}} · {{seconds}} 秒後重試 · 第 {{attempt}} 次",
+    "retryExhausted": "{{error}} · 正在結束本輪",
     "cliActivityRunningOne": "正在使用 @{{name}}",
     "cliActivityRanOne": "已使用 @{{name}}",
     "cliActivityFailedOne": "使用 @{{name}} 失敗",
@@ -1532,6 +1539,17 @@
     "turnRejected": {
       "title": "訊息未傳送",
       "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
+    },
+    "modelRequestFailed": {
+      "billingTitle": "模型供應商帳戶額度不足",
+      "billingBody": "請為供應商帳戶儲值或檢查帳單狀態後再試。",
+      "connectionTitle": "無法連線至模型供應商",
+      "timeoutTitle": "模型供應商請求逾時",
+      "rateLimitTitle": "模型供應商請求受到限制",
+      "serverTitle": "模型供應商服務發生錯誤",
+      "unknownTitle": "模型供應商請求失敗",
+      "bodyWithAttempt": "模型供應商請求在第 {{attempts}} 次嘗試後仍然失敗，已停止重試。請檢查供應商設定或服務狀態後再試。",
+      "body": "請檢查供應商設定或服務狀態後再試。"
     }
   },
   "workspace": {

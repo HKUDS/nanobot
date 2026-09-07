@@ -5,6 +5,7 @@ from typing import Literal
 from nanobot.bus.outbound_events import (
     FileEditEvent,
     ProgressEvent,
+    RetryStatusEvent,
     StreamDeltaEvent,
     StreamEndEvent,
 )
@@ -20,6 +21,7 @@ NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
     ContextCompactionEvent: "channel",
     RetryWaitEvent: "lifecycle",
     RecoveryStateEvent: "interactive",
+    RetryStatusEvent: "interactive",
 }
 
 
@@ -33,5 +35,7 @@ def notification_is_deliverable(
     if audience == "lifecycle":
         return publish_lifecycle
     if audience == "interactive":
-        return channel == "websocket"
+        return channel == "websocket" and (
+            event_type is not RetryStatusEvent or publish_lifecycle
+        )
     return True

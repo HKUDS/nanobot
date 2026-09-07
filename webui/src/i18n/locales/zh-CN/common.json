@@ -1421,6 +1421,13 @@
     "activityWorkingFor": "处理中 {{duration}}",
     "activityWorked": "已处理",
     "activityWorkedFor": "处理了 {{duration}}",
+    "retryConnection": "连接失败",
+    "retryTimeout": "模型响应超时",
+    "retryRateLimit": "请求频率受限",
+    "retryServer": "模型服务不可用",
+    "retryUnknown": "模型请求失败",
+    "retryWaiting": "{{error}} · {{seconds}} 秒后重试 · 第 {{attempt}} 次",
+    "retryExhausted": "{{error}} · 正在结束本次任务",
     "cliActivityRunningOne": "正在使用 {{name}}",
     "cliActivityRanOne": "已使用 {{name}}",
     "cliActivityFailedOne": "使用 {{name}} 失败",
@@ -1546,6 +1553,17 @@
     "turnRejected": {
       "title": "消息未发送",
       "body": "网关拒绝了这条消息。请检查消息内容或附件后重试。"
+    },
+    "modelRequestFailed": {
+      "billingTitle": "模型提供商账户额度不足",
+      "billingBody": "请为提供商账户充值或检查账单状态后重试。",
+      "connectionTitle": "无法连接模型提供商",
+      "timeoutTitle": "模型提供商请求超时",
+      "rateLimitTitle": "模型提供商请求受限",
+      "serverTitle": "模型提供商服务异常",
+      "unknownTitle": "模型提供商请求失败",
+      "bodyWithAttempt": "模型提供商请求在第 {{attempts}} 次尝试后仍然失败，已停止重试。请检查提供商配置或服务状态后重试。",
+      "body": "请检查提供商配置或服务状态后重试。"
     }
   },
   "workspace": {

@@ -1,6 +1,6 @@
 import { decodeNotification, isCompactionPhase, isRecoveryState } from "../../packages/client-events/notifications"
 import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../packages/client-events/notifications"
-export type { ContextCompaction, RecoveryState, RecoveryStatus } from "../../packages/client-events/notifications"
+export type { ContextCompaction, RecoveryState, RecoveryStatus, RetryStatus } from "../../packages/client-events/notifications"
 
 export type ConnectionStatus =
   | "starting"
@@ -136,6 +136,11 @@ export type InboundEvent =
       usage?: TokenUsage
       context_window_tokens?: number
       goal_state?: Record<string, unknown>
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted"
+      failure_kind?: string
+      failure_error_kind?: string
+      failure_attempts?: number
+      failure_message?: string
     }
   | {
       event: "goal_status"
@@ -349,6 +354,7 @@ const CHAT_EVENTS = new Set([
   "stream_end",
   "reasoning_delta",
   "reasoning_end",
+  "retry_status",
   "turn_end",
   "goal_status",
   "goal_state",
@@ -528,7 +534,16 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
     && (!optional(record.latency_ms, "number")
       || !optional(record.context_window_tokens, "number")
       || (record.usage !== undefined && !isTokenUsage(record.usage))
-      || (record.goal_state !== undefined && !isRecord(record.goal_state)))
+      || (record.goal_state !== undefined && !isRecord(record.goal_state))
+      || (record.outcome !== undefined
+        && !["completed", "failed", "cancelled", "interrupted"].includes(String(record.outcome)))
+      || !optional(record.failure_kind, "string")
+      || !optional(record.failure_error_kind, "string")
+      || (record.failure_attempts !== undefined
+        && (typeof record.failure_attempts !== "number"
+          || !Number.isInteger(record.failure_attempts)
+          || record.failure_attempts < 1))
+      || !optional(record.failure_message, "string"))
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && !isRecord(record.goal_state)) return null

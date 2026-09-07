@@ -1434,6 +1434,13 @@
     "activityWorkingFor": "{{duration}}作業中",
     "activityWorked": "作業しました",
     "activityWorkedFor": "{{duration}}作業しました",
+    "retryConnection": "接続に失敗しました",
+    "retryTimeout": "モデルがタイムアウトしました",
+    "retryRateLimit": "リクエスト制限に達しました",
+    "retryServer": "モデルを利用できません",
+    "retryUnknown": "モデルリクエストに失敗しました",
+    "retryWaiting": "{{error}} · {{seconds}}秒後に再試行 · 試行 {{attempt}}",
+    "retryExhausted": "{{error}} · ターンを終了します",
     "cliActivityRunningOne": "{{name}} を使用中",
     "cliActivityRanOne": "{{name}} を使用しました",
     "cliActivityFailedOne": "{{name}} が失敗しました",
@@ -1532,6 +1539,17 @@
     "turnRejected": {
       "title": "メッセージは送信されませんでした",
       "body": "ゲートウェイがこのメッセージを拒否しました。本文または添付ファイルを確認して、もう一度お試しください。"
+    },
+    "modelRequestFailed": {
+      "billingTitle": "モデルプロバイダーの利用枠を使用できません",
+      "billingBody": "プロバイダーアカウントにクレジットを追加するか、請求状況を確認してから、もう一度お試しください。",
+      "connectionTitle": "モデルプロバイダーに接続できません",
+      "timeoutTitle": "モデルプロバイダーへのリクエストがタイムアウトしました",
+      "rateLimitTitle": "モデルプロバイダーのリクエスト上限に達しました",
+      "serverTitle": "モデルプロバイダーでサービスエラーが発生しました",
+      "unknownTitle": "モデルプロバイダーへのリクエストに失敗しました",
+      "bodyWithAttempt": "{{attempts}} 回目の試行でもリクエストに失敗したため、再試行を停止しました。プロバイダーの設定またはサービス状況を確認して、もう一度お試しください。",
+      "body": "プロバイダーの設定またはサービス状況を確認して、もう一度お試しください。"
     }
   },
   "workspace": {

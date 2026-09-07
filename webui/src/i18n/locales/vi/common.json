@@ -1434,6 +1434,13 @@
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "retryConnection": "Kết nối thất bại",
+    "retryTimeout": "Mô hình đã hết thời gian chờ",
+    "retryRateLimit": "Đã đạt giới hạn yêu cầu",
+    "retryServer": "Mô hình không khả dụng",
+    "retryUnknown": "Yêu cầu mô hình thất bại",
+    "retryWaiting": "{{error}} · thử lại sau {{seconds}} giây · lần thử {{attempt}}",
+    "retryExhausted": "{{error}} · đang kết thúc lượt",
     "cliActivityRunningOne": "Đang dùng {{name}}",
     "cliActivityRanOne": "Đã dùng {{name}}",
     "cliActivityFailedOne": "{{name}} thất bại",
@@ -1532,6 +1539,17 @@
     "turnRejected": {
       "title": "Tin nhắn chưa được gửi",
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Hạn mức của nhà cung cấp mô hình không khả dụng",
+      "billingBody": "Hãy nạp thêm tín dụng hoặc kiểm tra thanh toán của tài khoản nhà cung cấp rồi thử lại.",
+      "connectionTitle": "Không thể kết nối với nhà cung cấp mô hình",
+      "timeoutTitle": "Yêu cầu tới nhà cung cấp mô hình đã hết thời gian chờ",
+      "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
+      "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",
+      "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
+      "bodyWithAttempt": "Yêu cầu vẫn thất bại ở lần thử {{attempts}}, nên hệ thống đã dừng thử lại. Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại.",
+      "body": "Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại."
     }
   },
   "workspace": {

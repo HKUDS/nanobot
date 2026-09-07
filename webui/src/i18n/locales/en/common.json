@@ -1421,6 +1421,13 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "retryConnection": "Connection failed",
+    "retryTimeout": "Model timed out",
+    "retryRateLimit": "Rate limited",
+    "retryServer": "Model unavailable",
+    "retryUnknown": "Model request failed",
+    "retryWaiting": "{{error}} · retrying in {{seconds}}s · attempt {{attempt}}",
+    "retryExhausted": "{{error}} · ending turn",
     "cliActivityRunningOne": "Using {{name}}",
     "cliActivityRanOne": "Used {{name}}",
     "cliActivityFailedOne": "{{name}} failed",
@@ -1546,6 +1553,17 @@
     "turnRejected": {
       "title": "Message was not sent",
       "body": "The gateway rejected this message. Review its text or attachments, then try again."
+    },
+    "modelRequestFailed": {
+      "billingTitle": "Model provider quota is unavailable",
+      "billingBody": "Add credit or check billing for the provider account, then try again.",
+      "connectionTitle": "Could not connect to the model provider",
+      "timeoutTitle": "Model provider request timed out",
+      "rateLimitTitle": "Model provider rate limit reached",
+      "serverTitle": "Model provider service error",
+      "unknownTitle": "Model provider request failed",
+      "bodyWithAttempt": "The request still failed on attempt {{attempts}}, so retries stopped. Check the provider configuration or service status, then try again.",
+      "body": "Check the provider configuration or service status, then try again."
     }
   },
   "workspace": {

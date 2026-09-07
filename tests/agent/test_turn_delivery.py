@@ -3,9 +3,12 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnCompleted
+from nanobot.events import RetryStatusEvent
+from nanobot.providers.base import LLMProvider, ProviderCallContext
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
@@ -86,6 +89,143 @@ async def test_idle_compaction_can_deliver_to_a_legacy_websocket_session() -> No
     await sink.emit(event)
     outbound = factory.bus.outbound.get_nowait()
     assert (outbound.channel, outbound.chat_id, outbound.event) == ("websocket", "chat", event)
+
+
+@pytest.mark.asyncio
+async def test_retry_event_uses_scoped_channel_delivery() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-1"},
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+
+    await delivery.events.emit(RetryStatusEvent(
+        state="waiting",
+        attempt=1,
+        max_attempts=4,
+        error_kind="connection",
+        next_retry_at=123.5,
+    ))
+
+    assert bus.outbound_size == 1
+    outbound = bus.outbound.get_nowait()
+    assert isinstance(outbound.event, RetryStatusEvent)
+    assert outbound.event.error_kind == "connection"
+    assert outbound.event.next_retry_at == 123.5
+    assert outbound.metadata[WEBUI_TURN_METADATA_KEY] == "turn-1"
+
+
+@pytest.mark.asyncio
+async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
+    bus = MessageBus()
+    seen: list[TurnCompleted] = []
+    bus.subscribe(seen.append, TurnCompleted)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery.record_stop_reason("error", failure_error_kind="billing")
+
+    await delivery.complete(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-a",
+            content="Sorry, I encountered an error calling the AI model.",
+        ),
+        publish_completion=True,
+    )
+
+    assert len(seen) == 1
+    assert seen[0].outcome == "failed"
+    assert seen[0].failure_kind == "model"
+    assert seen[0].failure_error_kind == "billing"
+    assert bus.outbound_size == 0
+
+
+@pytest.mark.asyncio
+async def test_delivery_keeps_model_error_message_for_ordinary_channels() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="telegram",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery.record_stop_reason("error")
+    response = OutboundMessage(
+        channel="telegram",
+        chat_id="chat-a",
+        content="Sorry, I encountered an error calling the AI model.",
+    )
+
+    await delivery.complete(response, publish_completion=True)
+
+    assert await bus.consume_outbound() is response
+
+
+@pytest.mark.parametrize("channel", ["telegram", "cli", "websocket"])
+async def test_background_retry_status_is_quiet(channel) -> None:
+    factory = TurnDeliveryFactory(MessageBus())
+    delivery = factory.create(InboundMessage(
+        channel="system", sender_id="job", chat_id=f"{channel}:chat", content="",
+    ), f"{channel}:chat")
+    assert not delivery.events.accepts(RetryStatusEvent)
+    await delivery.events.emit(RetryStatusEvent("waiting", 1, 4, "connection"))
+    assert factory.bus.outbound.empty()
+
+
+async def test_retry_completion_is_isolated_between_turns_in_one_session() -> None:
+    bus = MessageBus()
+    seen: list[TurnCompleted] = []
+    bus.subscribe(seen.append, TurnCompleted)
+    factory = TurnDeliveryFactory(bus)
+    deliveries = [factory.create(InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="",
+        metadata={WEBUI_TURN_METADATA_KEY: turn},
+    ), "websocket:chat") for turn in ("first", "second")]
+    await deliveries[0].events.emit(RetryStatusEvent("exhausted", 4, 4, "connection"))
+    for delivery in reversed(deliveries):
+        delivery.record_stop_reason("error")
+        await delivery.complete(None, publish_completion=True)
+    assert [(event.context.metadata[WEBUI_TURN_METADATA_KEY], event.failure_attempts)
+            for event in seen] == [("second", None), ("first", 4)]
+
+
+async def test_next_model_request_clears_exhaustion_within_the_same_turn() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from nanobot.providers.base import LLMResponse
+
+    class Provider(LLMProvider):
+        async def chat(self, **kwargs):
+            return LLMResponse(content="payment required", finish_reason="error", error_status_code=402)
+
+        def get_default_model(self):
+            return "test"
+
+    bus = MessageBus()
+    completed: list[TurnCompleted] = []
+    bus.subscribe(completed.append, TurnCompleted)
+    msg = InboundMessage(channel="websocket", sender_id="user", chat_id="chat", content="")
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    await delivery.events.emit(RetryStatusEvent("exhausted", 4, 4, "connection"))
+    with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+        response = await Provider(provider_name="test").chat_with_retry(
+            [{"role": "user", "content": "continue"}],
+            provider_context=ProviderCallContext(events=delivery.events),
+        )
+    delivery.record_stop_reason("error", failure_error_kind=LLMProvider.public_error_kind(response))
+    await delivery.complete(None, publish_completion=True)
+    assert completed[0].failure_error_kind == "billing"
+    assert completed[0].failure_attempts is None
 
 
 def test_websocket_lifecycles_get_distinct_internal_owners(tmp_path: Path) -> None:

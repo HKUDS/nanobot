@@ -205,6 +205,9 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
         chat_id="direct",
         session_key="cli:direct",
         metadata={"source": "test"},
+        outcome="failed",
+        failure_kind="model",
+        failure_error_kind="billing",
     )
     await publisher.turn_completed(
         channel="cli",
@@ -221,6 +224,9 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.runtime == "runtime"
     assert first.usage == first_round + second_round
     assert first.round_usages == (first_round, second_round)
+    assert first.outcome == "failed"
+    assert first.failure_kind == "model"
+    assert first.failure_error_kind == "billing"
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None
