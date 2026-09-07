@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -193,13 +195,22 @@ def test_equivalent_workspace_paths_share_one_store(tmp_path: Path) -> None:
     real_workspace = tmp_path / "real_ws"
     real_workspace.mkdir()
     link_workspace = tmp_path / "link_ws"
-    try:
-        link_workspace.symlink_to(real_workspace, target_is_directory=True)
-    except OSError as exc:
-        # Creating directory symlinks needs admin/developer mode on Windows.
-        pytest.skip(f"directory symlink unavailable: {exc}")
+    if os.name == "nt":
+        completed = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link_workspace), str(real_workspace)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            pytest.skip(completed.stderr.strip() or completed.stdout.strip())
+    else:
+        try:
+            link_workspace.symlink_to(real_workspace, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlink unavailable: {exc}")
 
-    # Save via the real path, then read via a symlink to the same directory.
+    # Save via the real path, then read via an equivalent directory link.
     manager = SessionManager(workspace=real_workspace)
     session = manager.get_or_create("telegram:1")
     session.add_message("user", "via-real")
