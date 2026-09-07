@@ -7,7 +7,7 @@ conversation panes, temporary chats, visible agent activity, workspace controls,
 Apps, skill discovery, settings, and Automations in one place. It shares the
 gateway and saved sessions with the native terminal client.
 
-For a visual tour, see the [README feature gallery](../README.md#webui).
+For a visual tour, see the [README feature gallery](../README.md#-webui).
 This guide follows the current source tree; some features are newer than the
 published release.
 

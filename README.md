@@ -43,8 +43,8 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#webui">WebUI</a> ·
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-webui">WebUI</a> ·
   <a href="#terminal">Terminal</a> ·
   <a href="./docs/chat-apps.md">Chat Apps</a> ·
   <a href="./docs/README.md">Documentation</a>
@@ -56,9 +56,9 @@
 
 | You want to... | Go to |
 |---|---|
-| Set up your first personal agent | [Install](#install) and [Quick Start](#quick-start) |
+| Set up your first personal agent | [Install](#-install) and [Quick Start](#-quick-start) |
 | Get a walkthrough with no technical background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
-| Work in the browser or terminal | [WebUI](#webui) and [Terminal](#terminal) |
+| Work in the browser or terminal | [WebUI](#-webui) and [Terminal](#terminal) |
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
@@ -77,9 +77,7 @@
 | **Choose your models and tools** | Switch model presets per topic, configure fallback models, use local or hosted providers, and add Agent Plugins, CLI Apps, MCP servers, and Skills. |
 | **Use it where you work** | Share sessions between the WebUI and terminal, connect [chat apps](./docs/chat-apps.md), or integrate through the [Python SDK](./docs/python-sdk.md) and [OpenAI-compatible API](./docs/openai-api.md). |
 
-<a id="-install"></a>
-
-## Install
+## 📦 Install
 
 Choose a released package for everyday use, or a source checkout for the current development version. Pick **one** install method:
 
@@ -165,9 +163,7 @@ nanobot --version
 
 If `nanobot` is not on `PATH`, invoke it through the method that installed it: reuse the recommended installer's command, use `uv tool run --from nanobot-ai nanobot ...` or `pipx run --spec nanobot-ai nanobot ...`, or use the Python executable from the environment where pip installed the package.
 
-<a id="-quick-start"></a>
-
-## Quick Start
+## 🚀 Quick Start
 
 **Open nanobot in your browser**
 
@@ -232,9 +228,7 @@ For the classic Python terminal interface, use `nanobot --classic`. See the [CLI
 
 <a id="deploy-to-render"></a>
 
-<a id="-deploy"></a>
-
-## Deploy
+## ☁️ Deploy
 
 **Render — one click**
 
@@ -248,9 +242,7 @@ Render will ask for `ANTHROPIC_API_KEY` and a private `NANOBOT_WEB_TOKEN`, then 
 
 Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.md) for Docker, Docker Compose, Linux services, and macOS LaunchAgent setup.
 
-<a id="-webui"></a>
-
-## WebUI
+## 🌐 WebUI
 
 The WebUI brings conversations, project work, and configuration into one browser workbench. Start it with `nanobot webui`.
 
@@ -363,9 +355,7 @@ For older updates, see the [release archive](./docs/release-archive.md) or [GitH
   <a href="https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link"><img alt="MiniMax" height="40" src="https://mintcdn.com/minimax-zh/1UjvBcdoC6r0UeyA/logo/light.svg?fit=max&auto=format&n=1UjvBcdoC6r0UeyA&q=85&s=672d724b639b2d88d0702fae329ea4f8"></a>
 </p>
 
-<a id="-contribute"></a>
-
-## Contribute
+## 🤝 Contribute
 
 Use nanobot for a real task, report what broke, and then pick a focused improvement.
 
