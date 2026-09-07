@@ -298,17 +298,13 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 
 The WebUI and terminal are clients of the same gateway. Chat channels feed messages into the agent through an async message bus; the Python SDK and HTTP API provide programmatic entry points.
 
-```mermaid
-flowchart LR
-    Clients["WebUI · Terminal · Chat apps"] <--> Gateway["Gateway / MessageBus"]
-    Gateway <--> Agent["AgentLoop + AgentRunner"]
-    Code["Python SDK · HTTP API"] <--> Agent
-    Agent <--> Models["Model providers"]
-    Agent <--> Tools["Files · Shell · Web · MCP · Subagents"]
-    Context["Sessions · Memory · Skills"] <--> Agent
-```
+<p align="center">
+  <a href="./images/nanobot_arch.png">
+    <img src="./images/nanobot_arch.png" alt="nanobot architecture: WebUI, terminal, and chat apps connect through the gateway to the agent core, which uses models, tools, and session, memory, and skill context. Python SDK and HTTP API integrations access the core directly." width="900">
+  </a>
+</p>
 
-`AgentLoop` manages sessions, workspaces, and turn context. `AgentRunner` calls the model, executes tools, and streams results. Providers, channels, and tools extend the edges of that core. See [Architecture](./docs/architecture.md) for source ownership and [Development](./docs/development.md) to add an integration.
+`AgentLoop` manages sessions, workspaces, and turn context. `AgentRunner` calls the model, executes tools, and feeds their results back into the conversation until a reply is ready. The arrows show requests and returned results; sessions and memory retain state between turns, while skills supply reusable instructions. See [Architecture](./docs/architecture.md) for source ownership and [Development](./docs/development.md) to add an integration.
 
 <a id="-docs"></a>
 
