@@ -452,6 +452,24 @@ export function AppearanceSettings({
                 : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.turnCompleteSound", "Turn complete sound")}
+            description={tx(
+              "settings.help.turnCompleteSound",
+              "Play a short sound when a task finishes while this page is visible. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.turnCompleteSound}
+              onChange={(turnCompleteSound) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, turnCompleteSound }))
+              }
+              ariaLabel={tx("settings.rows.turnCompleteSound", "Turn complete sound")}
+              label={localPrefs.turnCompleteSound
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>

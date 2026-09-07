@@ -8,6 +8,7 @@ export interface LocalPreferences {
   codeWrap: boolean;
   brandLogos: boolean;
   browserNotifications: boolean;
+  turnCompleteSound: boolean;
   fileEditDisplayMode: FileEditDisplayMode;
 }
 
@@ -25,6 +26,7 @@ export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   codeWrap: true,
   brandLogos: true,
   browserNotifications: false,
+  turnCompleteSound: false,
   fileEditDisplayMode: "summary",
 };
 
@@ -45,6 +47,7 @@ export function readLocalPreferences(): LocalPreferences {
         ? parsed.brandLogos !== false
         : true,
       browserNotifications: parsed.browserNotifications === true,
+      turnCompleteSound: parsed.turnCompleteSound === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
     };
   } catch {
