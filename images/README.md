@@ -10,7 +10,7 @@ The root README uses these product images:
 | [nanobot-context.png](./nanobot-context.png) | Example file edit with inline diff and per-round context usage |
 | [nanobot-apps.png](./nanobot-apps.png) | The built-in MCP preset catalog and custom-server controls |
 | [nanobot-automations.png](./nanobot-automations.png) | Example recurring tasks and the selected task's schedule |
-| [nanobot_arch.png](./nanobot_arch.png) | Illustrated map of clients, gateway, agent core, models, tools, context, and programmatic entry points |
+| [nanobot_arch.png](./nanobot_arch.png) | Illustrated overview of chat, nanobot, and replies, supported by tools, memory, and skills |
 
 The four feature screenshots were captured from the built WebUI at
 [`3f128505`](https://github.com/HKUDS/nanobot/commit/3f128505d0782fba089d1a7b07b7a65d3b2fc985)
@@ -34,43 +34,45 @@ browser captures so the guide continues to show the interface users can operate.
 
 The architecture illustration was generated with the built-in image-generation
 tool, using the [original diagram](https://github.com/HKUDS/nanobot/blob/3f128505d0782fba089d1a7b07b7a65d3b2fc985/images/nanobot_arch.png)
-as a visual reference. Its rounded pastel cards and line icons carry the same
-visual style; its labels and connections describe the current architecture.
-It is an explanatory illustration, not a screenshot.
+as a visual reference. It preserves the rounded pastel panels, large line icons,
+and broad arrows. This is a conceptual overview, not a component map or screenshot.
 
-The topology follows [Architecture](../docs/architecture.md): clients exchange
-messages through the gateway, the agent core calls models and tools and uses
-session, memory, and skill context, and the Python SDK and HTTP API call the
-core directly. The bidirectional arrows summarize interactions rather than
-individual events or execution order. Check these relationships against the
-source before generating a replacement.
+The main path is chat → nanobot → reply. Memory and skills supply context, and
+tools let the agent take action. Keep labels short and leave implementation
+details in the [architecture guide](../docs/architecture.md).
 
 ### Architecture prompt
 
 ```text
 Use case: infographic-diagram
-Asset type: the nanobot GitHub README architecture illustration, landscape, approximately 1800 × 1000.
-Input image: the existing nanobot architecture graphic is the redesign target and visual reference. Retain its friendly pastel cards, softly rounded corners, slightly hand-drawn colored outlines, simple dark line icons, and broad readable arrows. Update its obsolete topology and labels using the exact specification below.
-Design: a polished, calm technical illustration on an opaque warm-white background (#fcfbf8). Flat front-facing composition, no perspective, no 3D, no gradients, no heavy shadows, no title or footer inside the picture. Keep the understated illustrated character of the reference rather than generic flowchart software styling. Modest outer margins. Labels must remain sharp and comfortably readable when the complete image is displayed at 900 CSS pixels wide.
+Asset type: a simple illustrated overview for the nanobot README.
+Input image: the original nanobot diagram is the style reference and redesign target. Closely match its cheerful filled pastel cards, substantial rounded colored borders, large friendly dark outline icons, broad curved arrows, and very sparse large text. Preserve that original visual character, rather than producing a technical component map.
 
-Seven cards, arranged as a balanced component map:
-1. Tall pale-blue "Clients" card at the left, containing three vertically stacked dark line icons and the exact labels "WebUI", "Terminal", "Chat apps".
-2. Soft-yellow "Gateway" card to its right at mid-height, with a speech/message line icon and secondary label "MessageBus".
-3. Larger soft-peach "Agent core" card at the visual center, with a simple robot line icon and the exact secondary labels "AgentLoop" and "AgentRunner", on separate lines.
-4. Small pale-rose "Models" card directly above Agent core, with a model/spark line icon and the label "Hosted / Local".
-5. Soft-mint "Tools" card directly below Agent core, with simple folder, terminal, globe line icons and two short rows: "Files · Shell · Web" and "MCP · Cron · Subagents".
-6. Tall lavender "Context" card on the far right, aligned with Agent core, containing three clear vertically arranged entries "Sessions", "Memory", "Skills" with matching simple dark outline icons. This recalls the reference's purple Context box.
-7. Small pale-blue "Integrations" card below Gateway and left of Tools, containing "Python SDK" and "HTTP API" on separate lines and a small code-brackets icon.
+Create a wide, compact, beautifully balanced illustration on an opaque warm-white background, approximately 1800 × 960. Flat view, smooth large round corners, lightly illustrated edges, gentle pastel yellow / blue / peach / pink / purple, not a whiteboard sketch. Use large simple icons to carry the meaning. No headline, no caption, no legend.
 
-Exactly six visible connections, each a single broad pastel stroke with an arrowhead at BOTH ends:
-Clients <-> Gateway
-Gateway <-> Agent core
-Models <-> Agent core
-Agent core <-> Tools
-Agent core <-> Context
-Integrations <-> Agent core
-The Clients/Gateway/Agent core/Context path reads horizontally left to right. Models and Tools connect vertically to the Agent core above and below. Integrations connects diagonally or with a clean gentle bend to the lower-left edge of Agent core, using its own separated endpoint. Connect at card borders; leave enough space for arrowheads. No line may cross a card, label, icon, or another connection. Do not connect Models directly to Tools. Do not connect Integrations to Gateway. Add no other arrows or connections.
-Use color to distinguish the groups while keeping text uniformly dark and high contrast. Typeset text accurately in a clean rounded sans-serif font. Keep component headings prominent and supporting labels sparse. No additional text, badges, legends, watermark, browser controls, tiny annotations, dotted background, technical grid, or emoji glyphs.
+The ONLY visible text in the entire image is these SIX labels, once each:
+"Chat"
+"nanobot"
+"Reply"
+"Tools"
+"Memory"
+"Skills"
+
+Layout and meaning:
+- A pastel blue card on the left: one large speech-bubble icon, with "Chat".
+- A larger peach/orange card at the center: the friendly simple robot outline icon from the reference, with "nanobot".
+- A pastel pink card on the right: one reply-bubble icon, with "Reply".
+- Above the central nanobot card: a purple rounded group containing just TWO large inset tiles side by side, "Memory" under a database icon, and "Skills" under a gears icon. No heading on this group.
+- Below the central nanobot card: a soft yellow card with a small row of two or three large outline icons suggesting a folder, a browser/globe, and a tool, with only "Tools" below.
+
+Exactly four clean, substantial pastel arrows:
+1. Chat -> nanobot, horizontally.
+2. nanobot -> Reply, horizontally.
+3. The shared purple Memory/Skills group -> nanobot, vertically downward.
+4. nanobot <-> Tools, one short vertical connection with two arrowheads.
+
+No crossed lines, no lines through cards, no loose arrows. Make the central flow immediately obvious. Fill the canvas well, with modest outside margins and clear spacing for the arrows. Give the three main cards similar generous visual weight; use simple and legible large labels that remain clear at 900px README width. The reference has filled pastel UI-like panels, not thin empty boxes: retain that quality.
+Do not include any other text. In particular, no Gateway, API, SDK, class names, code names, implementation details, platform lists, explanatory sentences, bullets, or token labels. No emoji characters, tiny text, watermark, browser UI, technical grid, 3D perspective, or photorealistic objects.
 ```
 
 ## Hero frame prompt

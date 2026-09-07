@@ -296,15 +296,15 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 
 ## Architecture
 
-The WebUI and terminal are clients of the same gateway. Chat channels feed messages into the agent through an async message bus; the Python SDK and HTTP API provide programmatic entry points.
+Send a message from the WebUI, terminal, or a chat app. nanobot brings together the model, tools, memory, and skills to work through your request and reply.
 
 <p align="center">
   <a href="./images/nanobot_arch.png">
-    <img src="./images/nanobot_arch.png" alt="nanobot architecture: WebUI, terminal, and chat apps connect through the gateway to the agent core, which uses models, tools, and session, memory, and skill context. Python SDK and HTTP API integrations access the core directly." width="900">
+    <img src="./images/nanobot_arch.png" alt="Chat flows to nanobot and then to a reply. Memory and skills provide context, while tools let nanobot take action." width="900">
   </a>
 </p>
 
-`AgentLoop` manages sessions, workspaces, and turn context. `AgentRunner` calls the model, executes tools, and feeds their results back into the conversation until a reply is ready. The arrows show requests and returned results; sessions and memory retain state between turns, while skills supply reusable instructions. See [Architecture](./docs/architecture.md) for source ownership and [Development](./docs/development.md) to add an integration.
+Tools let nanobot work with files, run commands, search the web, and use connected apps. Memory carries knowledge across conversations; skills supply reusable instructions. For the implementation, see [Architecture](./docs/architecture.md) and [Development](./docs/development.md).
 
 <a id="-docs"></a>
 
