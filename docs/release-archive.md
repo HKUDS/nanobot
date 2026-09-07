@@ -6,8 +6,6 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
-Each date has one entry, newest first. Days without recorded mainline commits are marked explicitly.
-
 - **2026-09-07** WeCom media uploads use the SDK API; CI runs tests in parallel and skips unrelated jobs.
 - **2026-09-06** Context-window usage in the terminal footer and consistent runtime notifications across clients.
 - **2026-09-05** Visible context-compaction progress in the WebUI, terminal, and chat channels.
