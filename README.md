@@ -300,7 +300,7 @@ Send a message from the WebUI, terminal, or a chat app. nanobot brings together 
 
 <p align="center">
   <a href="./images/nanobot_arch.png">
-    <img src="./images/nanobot_arch.png" alt="Chat flows to nanobot and then to a reply. Memory and skills provide context, while tools let nanobot take action." width="900">
+    <img src="./images/nanobot_arch.png" alt="nanobot agent loop connecting chat apps, messages, an LLM, tools, responses, memory, and skills" width="800">
   </a>
 </p>
 
