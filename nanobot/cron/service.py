@@ -517,6 +517,11 @@ class CronService:
 
     def _arm_timer(self) -> None:
         """Schedule the next timer tick."""
+        # The timer task also owns the agent callback. Store edits during a
+        # callback must not cancel it or start another tick for the same due
+        # job. The final execution rearms after persisting its result.
+        if self._active_executions:
+            return
         if self._timer_task:
             self._timer_task.cancel()
 
