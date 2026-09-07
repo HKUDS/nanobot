@@ -2,9 +2,14 @@
 
 <!-- Meta description: Run nanobot from a browser WebUI with persistent and temporary chats, visible tool activity, workspace controls, Apps, skill discovery, settings, and Automations. -->
 
-The WebUI is nanobot's browser workbench for persistent topics, temporary
-chats, visible agent activity, workspace controls, Apps, skill discovery,
-settings, and Automations in one place.
+The WebUI is nanobot's browser workbench for persistent topics, grouped
+conversation panes, temporary chats, visible agent activity, workspace controls,
+Apps, skill discovery, settings, and Automations in one place. It shares the
+gateway and saved sessions with the native terminal client.
+
+For a visual tour, see the [README feature gallery](../README.md#-webui).
+This guide follows the current source tree; some features are newer than the
+published release.
 
 The published `nanobot-ai` wheel already includes the WebUI bundle. You only need
 the `webui/` source directory when you are changing the frontend itself.
@@ -78,7 +83,9 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Area | Use it for |
 |---|---|
 | Topics | Start persistent topics or temporary chats; switch, search, reorder, fork, or delete persistent topics |
+| Conversation groups | Arrange up to four independent topics in one workbench with resizable panes |
 | Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
+| Context usage | Inspect current context size, per-round token and cache usage, and compaction progress |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for topics, Apps, or MCP presets |
@@ -99,18 +106,50 @@ Drag a topic within its current sidebar group to keep frequently used work in
 your preferred order. Drag a topic from the sidebar into the composer when you
 want to reference it in the next message instead of switching to it.
 
-The message timeline shows both user-visible replies and agent activity. Long
-tool or reasoning sections can be expanded when you need the details.
+### Conversation groups and panes
+
+Open a topic's sidebar action menu and choose **Create group** to turn it into
+a conversation group. Use **Add pane** in the workbench header to start another
+topic alongside it. A group holds up to four panes. To bring in an existing
+topic, drag it onto the group or use **Move to** in its action menu.
+
+Use **Pane layout** to choose columns, rows, a grid, BSP, or a main pane with a
+stack. Drag a divider to resize panes. Each pane has its own conversation;
+select one to direct the shared composer to that topic. Group membership and
+layout persist across refreshes. Grouping topics does not merge their histories.
+
+To bring another topic's work into a conversation, select it from the `@` menu
+or drag it from the sidebar into the composer. The agent can read the selected
+session and exchange messages with other saved sessions. See [Composer](#composer)
+for the distinction between an attached reference and plain text.
+
+### Activity and context usage
+
+The message timeline shows replies and agent activity. Expand the **Worked for**
+section to inspect the reasoning and tool activity for a completed turn.
 
 When the agent writes or edits files, the activity item shows the target path,
-status, changed line counts, and, when available, a unified diff. Use **View
-diff** to expand the change; large diffs may hide unchanged lines or truncate the
-inline preview. Use **Open file** from a file edit to open the read-only file
-preview panel.
+status, and changed line counts. Choose **Settings → Appearance → File edit
+display** to control the detail: **Summary** shows the change summary, **Diff**
+shows available unified patches inline, and **Collapsed diff** lets you expand
+them with **View diff**. Large diffs may hide unchanged lines or truncate the
+inline preview. Select the filename in the activity row to open the read-only
+file preview panel.
 
 File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
+
+Open the context indicator beside the composer model badge to see how much of
+the model's context window is in use. The **Recent rounds** chart shows input
+tokens for each logical model round, including tool-call rounds. Hover or focus
+a bar for input tokens, output tokens, generation time, and the KV cache hit
+rate when reported. Provider usage may be estimated or unavailable; these
+figures are not a billing statement.
+
+When nanobot compacts context, the timeline shows its progress and outcome.
+The compacted summary keeps earlier work available while recent messages remain
+in context. See [Memory](./memory.md) for compaction and Dream consolidation.
 
 ## Temporary Chats
 

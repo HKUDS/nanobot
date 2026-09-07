@@ -2696,7 +2696,7 @@ def test_optional_dependency_metadata_for_enable():
             "socksio>=1.0.0,<2.0.0",
             "python-socks[asyncio]>=2.8.0,<3.0.0; sys_platform != 'win32'",
         ),
-        "wecom": ("wecom-aibot-sdk-python>=0.1.5",),
+        "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
             "neonize>=0.3.18.post0,<0.4.0",

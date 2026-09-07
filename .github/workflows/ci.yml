@@ -1,6 +1,7 @@
 name: Test Suite
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths-ignore:
@@ -41,6 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python_required: ${{ steps.paths.outputs.python_required }}
+      webui_required: ${{ steps.paths.outputs.webui_required }}
+      tui_required: ${{ steps.paths.outputs.tui_required }}
+      docker_required: ${{ steps.paths.outputs.docker_required }}
 
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +60,9 @@ jobs:
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           python_required=true
+          webui_required=true
+          tui_required=true
+          docker_required=true
 
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             diff_range="${BASE_SHA}...${HEAD_SHA}"
@@ -65,12 +72,65 @@ jobs:
 
           if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null &&
             changed_files="$(git diff --name-only --no-renames "$diff_range")" &&
-            [[ -n "$changed_files" ]] &&
-            ! grep -qvE '^(webui/|nanobot/channels/[^/]+/webui/|docs/)' <<< "$changed_files"; then
+            [[ -n "$changed_files" ]]; then
             python_required=false
+            webui_required=false
+            tui_required=false
+            docker_required=false
+
+            while IFS= read -r file; do
+              case "$file" in
+                .github/workflows/*)
+                  # A workflow change must exercise every affected execution path.
+                  python_required=true
+                  webui_required=true
+                  tui_required=true
+                  docker_required=true
+                  ;;
+                webui/*|nanobot/channels/*/webui/*)
+                  webui_required=true
+                  # The Docker image builds and bundles both WebUI trees.
+                  docker_required=true
+                  ;;
+                nanobot/*)
+                  # Channel WebUI files were handled by the previous case.
+                  python_required=true
+                  docker_required=true
+                  ;;
+                tests/test_docker.sh)
+                  docker_required=true
+                  ;;
+                pyproject.toml|hatch_build.py|scripts/install_channel_dependencies.py)
+                  python_required=true
+                  docker_required=true
+                  ;;
+                tests/*|conftest.py|uv.lock|scripts/*)
+                  python_required=true
+                  ;;
+                Dockerfile|Dockerfile.*|.dockerignore|docker-compose*.yml|entrypoint.sh|render-config.json|README.md|LICENSE|THIRD_PARTY_NOTICES.md)
+                  docker_required=true
+                  ;;
+                tui/*)
+                  tui_required=true
+                  ;;
+                docs/*|.agent/*|.github/ISSUE_TEMPLATE/*|AGENTS.md|CLAUDE.md|COMMUNICATION.md|CONTRIBUTING.md|README.md|SECURITY.md|webui/README.md|render.yaml)
+                  # Documentation-only changes are already filtered at the event level.
+                  ;;
+                *)
+                  # Keep new or unclassified paths covered until they are categorized.
+                  python_required=true
+                  webui_required=true
+                  tui_required=true
+                  docker_required=true
+                  ;;
+              esac
+            done <<< "$changed_files"
           fi
 
           echo "python_required=$python_required" >> "$GITHUB_OUTPUT"
+          echo "webui_required=$webui_required" >> "$GITHUB_OUTPUT"
+          echo "tui_required=$tui_required" >> "$GITHUB_OUTPUT"
+          echo "docker_required=$docker_required" >> "$GITHUB_OUTPUT"
 
   test:
     name: Python (${{ matrix.name }})
@@ -86,19 +146,21 @@ jobs:
             os: ubuntu-latest
             python-version: "3.11"
             coverage: false
-            pytest_args: ""
+            # CLI command tests assert exact Rich terminal output; run them
+            # serially below so xdist cannot change terminal-width rendering.
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py"
           - name: latest, 3.14 + coverage
             os: ubuntu-latest
             python-version: "3.14"
             coverage: true
-            pytest_args: ""
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py"
           - name: Windows, 3.14
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests run serially below. Keep
-            # them out of xdist so workers never share a Windows console.
-            pytest_args: "-n 2 --dist loadfile --ignore=tests/tools/test_exec_platform.py"
+            # Real PowerShell/process-tree tests run serially in a separate
+            # job. Keep them out of xdist so workers never share a console.
+            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -110,6 +172,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -138,7 +203,16 @@ jobs:
         if: matrix.coverage
         run: >-
           uv run --no-sync python -m pytest
+          ${{ matrix.pytest_args }}
           --cov=nanobot --cov-report=term-missing:skip-covered
+          --durations=25 --durations-min=1.0
+
+      - name: Run serial CLI command tests with coverage
+        if: matrix.coverage
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/cli/test_commands.py
+          --cov=nanobot --cov-append --cov-report=term-missing:skip-covered
           --durations=25 --durations-min=1.0
 
       - name: Run compatibility tests
@@ -148,14 +222,52 @@ jobs:
           ${{ matrix.pytest_args }}
           --durations=25 --durations-min=1.0
 
+      - name: Run serial CLI command compatibility tests
+        if: ${{ !matrix.coverage }}
+        run: >-
+          uv run --no-sync python -m pytest
+          tests/cli/test_commands.py
+          --durations=25 --durations-min=1.0
+
+  windows_process:
+    name: Python (Windows process compatibility)
+    needs: changes
+    if: needs.changes.outputs.python_required == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Install channel dependencies
+        run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
+
+      - name: Verify dependency consistency
+        run: uv pip check
+
       - name: Run Windows process compatibility tests
-        if: runner.os == 'Windows'
         run: >-
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
           --durations=25 --durations-min=1.0
 
   webui:
+    needs: changes
+    if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -188,6 +300,8 @@ jobs:
         run: bun run build
 
   tui:
+    needs: changes
+    if: needs.changes.outputs.tui_required == 'true'
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -259,6 +373,8 @@ jobs:
           python scripts/package-release.py win32-x64
 
   docker:
+    needs: changes
+    if: needs.changes.outputs.docker_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

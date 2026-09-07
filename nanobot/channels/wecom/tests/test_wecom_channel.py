@@ -3,7 +3,7 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -17,49 +17,16 @@ except ImportError:
 if not WECOM_AVAILABLE:
     pytest.skip("WeCom dependencies not installed (wecom_aibot_sdk)", allow_module_level=True)
 
+from wecom_aibot_sdk import UploadResult, WSClient
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.wecom.runtime import (
     WecomChannel,
     WecomConfig,
-    _guess_wecom_media_type,
     _sanitize_filename,
 )
-
-# Try to import the real response class; fall back to a stub if unavailable.
-try:
-    from wecom_aibot_sdk.utils import WsResponse
-
-    _RealWsResponse = WsResponse
-except ImportError:
-    _RealWsResponse = None
-
-
-class _FakeResponse:
-    """Minimal stand-in for wecom_aibot_sdk WsResponse."""
-
-    def __init__(self, errcode: int = 0, body: dict | None = None, errmsg: str = "ok"):
-        self.errcode = errcode
-        self.errmsg = errmsg
-        self.body = body or {}
-
-
-class _FakeWsManager:
-    """Tracks send_reply calls and returns configurable responses."""
-
-    def __init__(self, responses: list[_FakeResponse] | None = None):
-        self.responses = responses or []
-        self.calls: list[tuple[str, dict, str]] = []
-        self._idx = 0
-
-    async def send_reply(self, req_id: str, data: dict, cmd: str) -> _FakeResponse:
-        self.calls.append((req_id, data, cmd))
-        if self._idx < len(self.responses):
-            resp = self.responses[self._idx]
-            self._idx += 1
-            return resp
-        return _FakeResponse()
 
 
 class _FakeFrame:
@@ -72,16 +39,23 @@ class _FakeFrame:
 class _FakeWeComClient:
     """Fake WeCom client with mock methods."""
 
-    def __init__(self, ws_responses: list[_FakeResponse] | None = None):
-        self._ws_manager = _FakeWsManager(ws_responses)
+    def __init__(self):
         self.download_file = AsyncMock(return_value=(None, None))
+        self.upload_media = AsyncMock(
+            return_value=UploadResult(media_id="media_123", media_type="image")
+        )
         self.reply = AsyncMock()
         self.reply_stream = AsyncMock()
         self.send_message = AsyncMock()
         self.reply_welcome = AsyncMock()
 
 
-# ── Helper function tests (pure, no async) ──────────────────────────
+# ── SDK contract and helper function tests ─────────────────────────
+
+
+def test_sdk_exposes_media_upload_api() -> None:
+    """The declared SDK version provides the public API used by this channel."""
+    assert callable(WSClient.upload_media)
 
 
 def test_sanitize_filename_strips_path_traversal() -> None:
@@ -101,31 +75,6 @@ def test_sanitize_filename_empty_or_dots_fallback() -> None:
     assert _sanitize_filename("..", fallback="fallback.txt") == "fallback.txt"
     assert _sanitize_filename("...", fallback="../../outside.txt") == "outside.txt"
     assert _sanitize_filename("") == "unnamed"
-
-
-def test_guess_wecom_media_type_image() -> None:
-    for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
-        assert _guess_wecom_media_type(f"photo{ext}") == "image"
-
-
-def test_guess_wecom_media_type_video() -> None:
-    for ext in (".mp4", ".avi", ".mov"):
-        assert _guess_wecom_media_type(f"video{ext}") == "video"
-
-
-def test_guess_wecom_media_type_voice() -> None:
-    for ext in (".amr", ".mp3", ".wav", ".ogg"):
-        assert _guess_wecom_media_type(f"audio{ext}") == "voice"
-
-
-def test_guess_wecom_media_type_file_fallback() -> None:
-    for ext in (".pdf", ".doc", ".xlsx", ".zip"):
-        assert _guess_wecom_media_type(f"doc{ext}") == "file"
-
-
-def test_guess_wecom_media_type_case_insensitive() -> None:
-    assert _guess_wecom_media_type("photo.PNG") == "image"
-    assert _guess_wecom_media_type("photo.Jpg") == "image"
 
 
 # ── _download_and_save_media() ──────────────────────────────────────
@@ -203,125 +152,6 @@ async def test_download_and_save_failure() -> None:
     assert result is None
 
 
-# ── _upload_media_ws() ──────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_upload_media_ws_success() -> None:
-    """Happy path: init → chunk → finish → returns (media_id, media_type)."""
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(b"\x89PNG\r\n")
-        tmp = f.name
-
-    try:
-        responses = [
-            _FakeResponse(errcode=0, body={"upload_id": "up_1"}),
-            _FakeResponse(errcode=0, body={}),
-            _FakeResponse(errcode=0, body={"media_id": "media_abc"}),
-        ]
-
-        client = _FakeWeComClient(responses)
-        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
-        channel._client = client
-
-        with patch("wecom_aibot_sdk.utils.generate_req_id", side_effect=lambda x: f"req_{x}"):
-            media_id, media_type = await channel._upload_media_ws(client, tmp)
-
-        assert media_id == "media_abc"
-        assert media_type == "image"
-    finally:
-        os.unlink(tmp)
-
-
-@pytest.mark.asyncio
-async def test_upload_media_ws_oversized_file() -> None:
-    """File >200MB triggers ValueError → returns (None, None)."""
-    # Instead of creating a real 200MB+ file, mock os.path.getsize and open
-    with patch("os.path.getsize", return_value=200 * 1024 * 1024 + 1), \
-         patch("builtins.open", MagicMock()):
-        client = _FakeWeComClient()
-        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
-        channel._client = client
-
-        result = await channel._upload_media_ws(client, "/fake/large.bin")
-        assert result == (None, None)
-
-
-@pytest.mark.asyncio
-async def test_upload_media_ws_init_failure() -> None:
-    """Init step returns errcode != 0 → returns (None, None)."""
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-        f.write(b"hello")
-        tmp = f.name
-
-    try:
-        responses = [
-            _FakeResponse(errcode=50001, errmsg="invalid"),
-        ]
-
-        client = _FakeWeComClient(responses)
-        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
-        channel._client = client
-
-        with patch("wecom_aibot_sdk.utils.generate_req_id", side_effect=lambda x: f"req_{x}"):
-            result = await channel._upload_media_ws(client, tmp)
-
-        assert result == (None, None)
-    finally:
-        os.unlink(tmp)
-
-
-@pytest.mark.asyncio
-async def test_upload_media_ws_chunk_failure() -> None:
-    """Chunk step returns errcode != 0 → returns (None, None)."""
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(b"\x89PNG\r\n")
-        tmp = f.name
-
-    try:
-        responses = [
-            _FakeResponse(errcode=0, body={"upload_id": "up_1"}),
-            _FakeResponse(errcode=50002, errmsg="chunk fail"),
-        ]
-
-        client = _FakeWeComClient(responses)
-        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
-        channel._client = client
-
-        with patch("wecom_aibot_sdk.utils.generate_req_id", side_effect=lambda x: f"req_{x}"):
-            result = await channel._upload_media_ws(client, tmp)
-
-        assert result == (None, None)
-    finally:
-        os.unlink(tmp)
-
-
-@pytest.mark.asyncio
-async def test_upload_media_ws_finish_no_media_id() -> None:
-    """Finish step returns empty media_id → returns (None, None)."""
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(b"\x89PNG\r\n")
-        tmp = f.name
-
-    try:
-        responses = [
-            _FakeResponse(errcode=0, body={"upload_id": "up_1"}),
-            _FakeResponse(errcode=0, body={}),
-            _FakeResponse(errcode=0, body={}),  # no media_id
-        ]
-
-        client = _FakeWeComClient(responses)
-        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
-        channel._client = client
-
-        with patch("wecom_aibot_sdk.utils.generate_req_id", side_effect=lambda x: f"req_{x}"):
-            result = await channel._upload_media_ws(client, tmp)
-
-        assert result == (None, None)
-    finally:
-        os.unlink(tmp)
-
-
 # ── send() ──────────────────────────────────────────────────────────
 
 
@@ -392,14 +222,69 @@ async def test_send_media_then_text() -> None:
         tmp = f.name
 
     try:
-        responses = [
-            _FakeResponse(errcode=0, body={"upload_id": "up_1"}),
-            _FakeResponse(errcode=0, body={}),
-            _FakeResponse(errcode=0, body={"media_id": "media_123"}),
-        ]
-
         channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
-        client = _FakeWeComClient(responses)
+        client = _FakeWeComClient()
+        channel._client = client
+        channel._generate_req_id = lambda x: f"req_{x}"
+        frame = _FakeFrame()
+        channel._chat_frames["chat1"] = frame
+
+        await channel.send(
+            OutboundMessage(channel="wecom", chat_id="chat1", content="see image", media=[tmp])
+        )
+
+        client.upload_media.assert_awaited_once_with(tmp)
+        client.reply.assert_awaited_once_with(
+            frame,
+            {"msgtype": "image", "image": {"media_id": "media_123"}},
+        )
+
+        # Text should have been sent via reply_stream
+        client.reply_stream.assert_called_once()
+    finally:
+        os.unlink(tmp)
+
+
+@pytest.mark.asyncio
+async def test_send_proactive_media_uses_uploaded_media_id() -> None:
+    """Proactive media uses the SDK upload result before sending text."""
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(b"%PDF-1.4")
+        tmp = f.name
+
+    try:
+        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+        client = _FakeWeComClient()
+        client.upload_media.return_value = UploadResult(media_id="media_file", media_type="file")
+        channel._client = client
+
+        await channel.send(
+            OutboundMessage(channel="wecom", chat_id="chat1", content="see file", media=[tmp])
+        )
+
+        client.upload_media.assert_awaited_once_with(tmp)
+        assert client.send_message.await_args_list[0].args == (
+            "chat1",
+            {"msgtype": "file", "file": {"media_id": "media_file"}},
+        )
+        assert client.send_message.await_args_list[1].args == (
+            "chat1",
+            {"msgtype": "markdown", "markdown": {"content": "see file"}},
+        )
+    finally:
+        os.unlink(tmp)
+
+
+@pytest.mark.asyncio
+async def test_send_media_upload_failure_falls_back_to_text() -> None:
+    """Upload failures become a visible text marker without losing the reply."""
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        tmp = f.name
+
+    try:
+        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+        client = _FakeWeComClient()
+        client.upload_media.side_effect = RuntimeError("upload failed")
         channel._client = client
         channel._generate_req_id = lambda x: f"req_{x}"
         channel._chat_frames["chat1"] = _FakeFrame()
@@ -408,13 +293,29 @@ async def test_send_media_then_text() -> None:
             OutboundMessage(channel="wecom", chat_id="chat1", content="see image", media=[tmp])
         )
 
-        # Media should have been sent via reply
-        media_calls = [c for c in client.reply.call_args_list if c[0][1].get("msgtype") == "image"]
-        assert len(media_calls) == 1
-        assert media_calls[0][0][1]["image"]["media_id"] == "media_123"
+        assert "[file upload failed:" in client.reply_stream.await_args.args[2]
+        assert "see image" in client.reply_stream.await_args.args[2]
+    finally:
+        os.unlink(tmp)
 
-        # Text should have been sent via reply_stream
-        client.reply_stream.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_send_media_delivery_failure_propagates_for_manager_retry() -> None:
+    """A failed media reply still propagates after a successful upload."""
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        tmp = f.name
+
+    try:
+        channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+        client = _FakeWeComClient()
+        client.reply.side_effect = RuntimeError("media send failed")
+        channel._client = client
+        channel._chat_frames["chat1"] = _FakeFrame()
+
+        with pytest.raises(RuntimeError, match="media send failed"):
+            await channel.send(
+                OutboundMessage(channel="wecom", chat_id="chat1", content="", media=[tmp])
+            )
     finally:
         os.unlink(tmp)
 
