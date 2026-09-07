@@ -42,7 +42,6 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 - **2026-08-05** Provider-native request switches, separate Mattermost thread/channel policies, and outbound WhatsApp media detection.
 - **2026-08-04** Trusted-proxy authentication, public WebSocket URL configuration, and linked session references.
 - **2026-08-03** Eden AI gateway support, faster saved-session loading, and fixes for IME input and local-trigger message display.
-- **2026-08-02** No mainline commits recorded.
 - **2026-08-01** DeepSeek Responses API support, Weixin recovery after session expiry, and explicit provider namespace handling.
 - **2026-07-31** Slack thread opener isolation, WebUI scroll-position preservation, and timezone data on all platforms.
 - **2026-07-30** Skills marketplace with SkillHub, remote Codex OAuth login, and preserved reasoning state for Responses providers.
@@ -70,7 +69,6 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 - **2026-07-08** 🔐 Safer WebUI/API setup, onboard refresh, responsive prompt rail.
 - **2026-07-07** ⌨️ CLI multiline input, steadier slash commands, safer web fetching.
 - **2026-07-06** 💬 Mattermost channel, Serper search, safer Windows shells.
-- **2026-07-05** No mainline commits recorded.
 - **2026-07-04** 🔌 MCP reconnects, safer Copilot refresh, Windows shutdown fixes.
 - **2026-07-03** 🧙 Guided WebUI setup, plugin controls, Claude Sonnet 4.6 default.
 - **2026-07-02** ⏰ Local triggers with recovery, audit history, WebUI pending status.
@@ -79,7 +77,6 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 - **2026-06-29** 🧠 Context replay scaled to model windows, without fixed message caps.
 - **2026-06-28** 🖼️ MCP images, steadier WebUI reconnects, safer tool calls.
 - **2026-06-27** 🔒 Collision-safe sessions, safer shells, Neonize WhatsApp.
-- **2026-06-26** No mainline commits recorded.
 - **2026-06-25** 🎛️ Thinking controls, MiMo voice input, opt-in Telegram rich messages.
 - **2026-06-24** 🌙 Kimi Coding and OpenCode, steadier reasoning and Anthropic tool calls.
 - **2026-06-23** Added v0.2.2 release news and aligned release announcement dates.
@@ -126,7 +123,6 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 - **2026-05-13** 🧠 Streaming reasoning before answers, automatic backup models, smoother plug-in reconnects.
 - **2026-05-12** 🎛️ Saved model presets with WebUI badge, simpler plug-in tools, quieter Feishu topic threads.
 - **2026-05-11** 🖥️ NVIDIA NIM support, terminal bot name and icon, streamed reasoning and MiMo toggle clarity.
-- **2026-05-10** No mainline commits recorded.
 - **2026-05-09** 🖼️ Sharper image replay, BYO web-search keys in Settings, Feishu threads routed cleanly.
 - **2026-05-08** ✨ Inline chat image, redesigned Settings and keys, Dream memory aligned with visible history.
 - **2026-05-07** 📜 Locale-aware slash palette in WebUI, LAN login, faithful HTTP streaming responses.
