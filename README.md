@@ -34,7 +34,7 @@
 
 # nanobot
 
-**nanobot** is a lightweight, open-source personal AI agent you can run on your own machine or server. Work with it in your browser, terminal, or chat apps: research a question, edit a project, work through documents, or schedule a recurring task. It combines tools, persistent conversations, long-term memory, and agent collaboration in a small Python core.
+🐈 **nanobot** is a lightweight, open-source personal AI agent you can run on your own machine or server. Work with it in your browser, terminal, or chat apps: research a question, edit a project, work through documents, or schedule a recurring task. It combines tools, persistent conversations, long-term memory, and agent collaboration in a small Python core.
 
 <p align="center">
   <a href="./images/nanobot_webui-source.png">
@@ -755,6 +755,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <!-- contributors:end -->
 
 <p align="center">
-  <em>Thanks for visiting nanobot!</em><br><br>
+  <em> Thanks for visiting ✨ nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
