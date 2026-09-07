@@ -188,9 +188,8 @@ export function ThreadMessages({
             hasBodyBelow={false}
             retryStatus={retryStatus}
             startedAtMs={
-              runStartedAt != null
-                ? runStartedAt * 1000
-                : pendingActivity.startedAtMs
+              // Match the activity timeline's prompt-based clock across the first output.
+              pendingActivity.startedAtMs ?? (runStartedAt != null ? runStartedAt * 1000 : undefined)
             }
           />
         </div>
