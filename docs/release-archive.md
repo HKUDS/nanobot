@@ -6,6 +6,13 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-09-05** Visible context-compaction progress in the WebUI, terminal, and chat channels.
+- **2026-09-04** WebUI context usage and cache reuse shown by conversation round.
+- **2026-08-27** `nanobot` opens the native terminal agent; clipboard image attachments are supported.
+- **2026-08-18** Session mentions let agents read and message other saved conversations.
+- **2026-08-12** A WebUI workbench with grouped conversation panes and adjustable layouts.
+- **2026-07-25** Released [v0.3.0 — The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0), with guided WebUI setup, inline subagents, per-session model presets, and live configuration reloads.
+
 - **2026-07-24** 🧭 Guided first-run setup, inline subagents, and model switching from the composer.
 - **2026-07-23** 🔎 Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
 - **2026-07-22** 🔌 Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
