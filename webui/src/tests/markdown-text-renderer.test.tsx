@@ -671,6 +671,61 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByText("\\[x^2\\]")).toBeInTheDocument();
   });
 
+  it.each([false, true])("renders multiline dollar math with attached fences (streaming=%s)", (streaming) => {
+    const formula = String.raw`C = \sum_i \underbrace{\alpha_i T_i}_{w_i}\, c_i`;
+    const sources = [
+      "$$C\n" + formula.slice(2) + "$$",
+      "$$\n" + formula + "$$",
+      "$$" + formula + "\n$$",
+      "$$\n" + formula + "\n$$",
+    ];
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+
+    for (const source of sources) {
+      rerender(
+        <MarkdownTextRenderer streaming={streaming}>
+          {source + "\n\nAfter the formula: $z_i$."}
+        </MarkdownTextRenderer>,
+      );
+      expect(container.querySelector(".katex-error")).toBeNull();
+      expect(container.querySelector(".katex-display annotation")?.textContent?.replace(/\s+/g, " ")).toBe(formula);
+      expect(container.querySelectorAll(".katex")).toHaveLength(2);
+      expect(container).toHaveTextContent("After the formula:");
+    }
+  });
+
+  it("keeps multiline dollar formulas in code literal", () => {
+    const source = "$$C\n= x_i$$";
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>{"```latex\n" + source + "\n```"}</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container).toHaveTextContent("$$C");
+    expect(container).toHaveTextContent("= x_i$$");
+  });
+
+  it.each([
+    "$$x_i$$ and $y_i$ afterwards.",
+    "Before $$x_i$$ and $y_i$ afterwards.",
+    "$$$\nx_i\n$$$\n\nAnd $y_i$ afterwards.",
+    "$$\\text{cost: \\$} + x_i$$\n\nAnd $y_i$ afterwards.",
+  ])("preserves surrounding text and existing dollar syntax: %s", (source) => {
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    expect(container).toHaveTextContent("afterwards.");
+  });
+
+  it("renders the complete formula after partial streaming updates", () => {
+    const source = "$$C\n= \\sum_i c_i$$";
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")).toHaveTextContent("C = \\sum_i c_i");
+  });
+
   it("still renders explicit math blocks", () => {
     const { container } = render(
       <MarkdownTextRenderer>{"$$x^2 + y^2 = z^2$$"}</MarkdownTextRenderer>,
