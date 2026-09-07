@@ -334,8 +334,6 @@ Released July 25, 2026, with guided WebUI setup, inline subagents, per-session m
 
 ## Recent Updates
 
-Development highlights on `main`, after v0.3.0:
-
 - **2026-09-05** 🧠 Visible context-compaction progress in the WebUI, terminal, and chat channels.
 - **2026-09-04** 📊 WebUI context usage and cache reuse shown by conversation round.
 - **2026-08-29** 🖥️ `nanobot` opens the native terminal agent by default.
