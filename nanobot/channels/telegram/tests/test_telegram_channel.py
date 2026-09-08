@@ -2491,6 +2491,11 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/new@nanobot_bot")
     assert pat.fullmatch("/goal@nanobot_bot refine objective")
     assert pat.fullmatch("/trigger@nanobot_bot CI summary")
+    assert pat.fullmatch("/compact")
+    assert pat.fullmatch("/compact@nanobot_bot")
+    assert pat.fullmatch("/evaluator-prompt")
+    assert pat.fullmatch("/evaluator-prompt init")
+    assert not pat.fullmatch("/unknown-command")
     assert pat.fullmatch("/dream-log deadbeef") is None
     assert pat.fullmatch("/dream-restore deadbeef") is None
     assert pat.fullmatch("/dream-prompt init") is None

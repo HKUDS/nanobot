@@ -477,6 +477,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS: list[BotCommand] = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("compact", "Compact this chat's context"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
@@ -495,8 +496,10 @@ class TelegramChannel(BaseChannel):
 
     # Regex for slash commands routed to AgentLoop via ``_forward_command``.
     # Hyphenated ``dream-*`` commands stay on a separate handler (below).
+    # Must cover every builtin router command; ``test_telegram_bus_slash_command_regex_matches_agent_loop_commands``
+    # pins the pairing.
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
-        r"^/(?:new|stop|restart|status|dream|history|goal|trigger|pairing|model|skill)(?:@\w+)?(?:\s+.*)?$"
+        r"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill|evaluator-prompt)(?:@\w+)?(?:\s+.*)?$"
     )
 
     @classmethod
