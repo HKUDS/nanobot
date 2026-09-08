@@ -1945,21 +1945,6 @@ def replay_transcript_to_ui_messages(
                 close_activity_for_answer()
             return
 
-    def ensure_answer_buffer(idx: int, turn_fields: dict[str, Any], created_at_ms: int) -> None:
-        nonlocal buffer_message_id
-        if buffer_message_id is not None:
-            return
-        buffer_message_id = find_active_placeholder(messages, turn_fields)
-        if buffer_message_id is None:
-            buffer_message_id = _new_id("buf", idx)
-            messages.append({
-                "id": buffer_message_id,
-                "role": "assistant",
-                "content": "",
-                "isStreaming": True,
-                "createdAt": created_at_ms,
-            })
-
     def close_reasoning(prev: list[dict[str, Any]]) -> None:
         for i in range(len(prev) - 1, -1, -1):
             if prev[i].get("reasoningStreaming"):
@@ -2262,7 +2247,23 @@ def replay_transcript_to_ui_messages(
             turn_fields = _turn_fields(rec, "answer")
             source_fields = _source_fields(rec)
             close_buffer_from_other_turn(turn_fields)
-            ensure_answer_buffer(idx, turn_fields, _created_at_ms(rec, idx))
+            adopted = find_active_placeholder(messages, turn_fields) if buffer_message_id is None else None
+            if buffer_message_id is None:
+                if adopted:
+                    buffer_message_id = adopted
+                else:
+                    buffer_message_id = _new_id("buf", idx)
+                    messages.append(
+                        {
+                            "id": buffer_message_id,
+                            "role": "assistant",
+                            "content": "",
+                            "isStreaming": True,
+                            **turn_fields,
+                            **source_fields,
+                            "createdAt": _created_at_ms(rec, idx),
+                        },
+                    )
             buffer_parts.append(chunk)
             combined = "".join(buffer_parts)
             for i, m in enumerate(messages):
@@ -2288,7 +2289,17 @@ def replay_transcript_to_ui_messages(
             source_fields = _source_fields(rec)
             close_buffer_from_other_turn(turn_fields)
             if isinstance(final_text, str):
-                ensure_answer_buffer(idx, turn_fields, _created_at_ms(rec, idx))
+                if buffer_message_id is None:
+                    buffer_message_id = find_active_placeholder(messages, turn_fields)
+                if buffer_message_id is None:
+                    buffer_message_id = _new_id("buf", idx)
+                    messages.append({
+                        "id": buffer_message_id,
+                        "role": "assistant",
+                        "content": "",
+                        "isStreaming": True,
+                        "createdAt": _created_at_ms(rec, idx),
+                    })
                 for i, m in enumerate(messages):
                     if m.get("id") == buffer_message_id:
                         messages[i] = {
