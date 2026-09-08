@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 try:
-    from nanobot.channels import qq
+    from nanobot.channels.qq import runtime as qq
 
     QQ_AVAILABLE = getattr(qq, "QQ_AVAILABLE", False)
 except ImportError:
