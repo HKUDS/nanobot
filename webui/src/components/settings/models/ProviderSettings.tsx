@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type MutableRefObject, type ReactNode } from "react";
 import {
   ChevronDown,
   Clipboard,
@@ -49,7 +49,7 @@ import type {
   SettingsPayload,
 } from "@/lib/types";
 
-type ProviderApiType = "auto" | "chat_completions" | "responses";
+export type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderAdvancedField = NonNullable<
   SettingsPayload["providers"][number]["advanced_fields"]
 >[number];
@@ -370,7 +370,11 @@ function ProviderRequestOptions({
 }: {
   providerName: string;
   form: ProviderForm;
-  onChange: (value: Partial<ProviderForm>) => void;
+  onChange: (
+    value: Partial<ProviderForm>,
+    option: ProviderRequestOption,
+    enabled: boolean,
+  ) => void;
 }) {
   const { t } = useTranslation();
   const options = PROVIDER_REQUEST_OPTIONS[providerName] ?? [];
@@ -408,6 +412,8 @@ function ProviderRequestOptions({
               checked={checked}
               onChange={(enabled) => onChange(
                 updateProviderRequestOption(option, enabled, form),
+                option,
+                enabled,
               )}
               ariaLabel={title}
               label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
@@ -650,6 +656,7 @@ export function ProvidersSettings({
   capabilityError,
   expandedProvider,
   providerForms,
+  providerApiTypesBeforeResponsesRef,
   visibleProviderKeys,
   editingProviderKeys,
   providerSaving,
@@ -673,6 +680,7 @@ export function ProvidersSettings({
   capabilityError: string | null;
   expandedProvider: string | null;
   providerForms: Record<string, ProviderForm>;
+  providerApiTypesBeforeResponsesRef: MutableRefObject<Record<string, ProviderApiType>>;
   visibleProviderKeys: Record<string, boolean>;
   editingProviderKeys: Record<string, boolean>;
   providerSaving: string | null;
@@ -682,7 +690,7 @@ export function ProvidersSettings({
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
-  onSaveProvider: (provider: string) => void;
+  onSaveProvider: (provider: string) => Promise<boolean>;
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
@@ -712,10 +720,57 @@ export function ProvidersSettings({
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
   const toggleProvider = (providerName: string) => {
     setCreatingCustomProvider(false);
+    if (expandedProvider) {
+      delete providerApiTypesBeforeResponsesRef.current[expandedProvider];
+    }
     onToggleProvider(providerName);
   };
+  const handleProviderFormChange = (providerName: string, value: Partial<ProviderForm>) => {
+    if (Object.prototype.hasOwnProperty.call(value, "apiType")) {
+      if (value.apiType === "responses") {
+        // An explicit Responses choice must survive disabling web search.
+        // Replace any temporary automatic choice with the user's selection.
+        providerApiTypesBeforeResponsesRef.current[providerName] = "responses";
+      } else {
+        // User explicitly chose a non-Responses type. Clear the cached
+        // value so disabling search keeps the explicit choice.
+        delete providerApiTypesBeforeResponsesRef.current[providerName];
+      }
+    }
+    onChangeProviderForm(providerName, value);
+  };
+  const handleSaveProvider = async (providerName: string) => {
+    if (await onSaveProvider(providerName)) {
+      delete providerApiTypesBeforeResponsesRef.current[providerName];
+    }
+  };
+  const handleProviderRequestOptionChange = (
+    providerName: string,
+    form: ProviderForm,
+    option: ProviderRequestOption,
+    enabled: boolean,
+    value: Partial<ProviderForm>,
+  ) => {
+    let nextValue = value;
+    if (option.forceResponses) {
+      if (enabled) {
+        if (!Object.prototype.hasOwnProperty.call(
+          providerApiTypesBeforeResponsesRef.current,
+          providerName,
+        )) {
+          providerApiTypesBeforeResponsesRef.current[providerName] = form.apiType;
+        }
+      } else {
+        const previousApiType = providerApiTypesBeforeResponsesRef.current[providerName]
+          ?? form.apiType;
+        delete providerApiTypesBeforeResponsesRef.current[providerName];
+        nextValue = { ...value, apiType: previousApiType };
+      }
+    }
+    onChangeProviderForm(providerName, nextValue);
+  };
   const beginCustomProviderCreation = () => {
-    if (expandedProvider) onToggleProvider(expandedProvider);
+    if (expandedProvider) toggleProvider(expandedProvider);
     setCustomProviderDraft(emptyCustomProviderDraft());
     setCustomProviderKeyVisible(false);
     setCreatingCustomProvider(true);
@@ -890,13 +945,20 @@ export function ProvidersSettings({
                 <ProviderRequestOptions
                   providerName={provider.name}
                   form={form}
-                  onChange={(value) => onChangeProviderForm(provider.name, value)}
+                  onChange={(value, option, enabled) =>
+                    handleProviderRequestOptionChange(
+                      provider.name,
+                      form,
+                      option,
+                      enabled,
+                      value,
+                    )}
                 />
                 {supportsOauthAdvancedSettings ? (
                   <ProviderAdvancedOptions
                     fields={advancedFields}
                     form={form}
-                    onChange={(value) => onChangeProviderForm(provider.name, value)}
+                    onChange={(value) => handleProviderFormChange(provider.name, value)}
                     footer={
                       <>
                         <Button
@@ -911,7 +973,7 @@ export function ProvidersSettings({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => onSaveProvider(provider.name)}
+                          onClick={() => handleSaveProvider(provider.name)}
                           disabled={saving || !oauthSettingsDirty}
                           className="rounded-full"
                         >
@@ -1020,12 +1082,19 @@ export function ProvidersSettings({
                 <ProviderRequestOptions
                   providerName={provider.name}
                   form={form}
-                  onChange={(value) => onChangeProviderForm(provider.name, value)}
+                  onChange={(value, option, enabled) =>
+                    handleProviderRequestOptionChange(
+                      provider.name,
+                      form,
+                      option,
+                      enabled,
+                      value,
+                    )}
                 />
                 <ProviderAdvancedOptions
                   fields={advancedFields}
                   form={form}
-                  onChange={(value) => onChangeProviderForm(provider.name, value)}
+                  onChange={(value) => handleProviderFormChange(provider.name, value)}
                 />
                 <div className="flex items-center justify-end gap-2">
                   <Button
@@ -1039,7 +1108,7 @@ export function ProvidersSettings({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => onSaveProvider(provider.name)}
+                    onClick={() => handleSaveProvider(provider.name)}
                     disabled={
                       saving
                       || missingRequiredApiKey
@@ -1277,7 +1346,7 @@ export function ProvidersSettings({
                     onSelect={() => {
                       setCreatingCustomProvider(false);
                       if (expandedProvider !== provider.name) {
-                        onToggleProvider(provider.name);
+                        toggleProvider(provider.name);
                       }
                     }}
                     className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"

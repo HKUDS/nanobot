@@ -370,17 +370,17 @@ export function useModelSettingsActions({
     }
   };
 
-  const saveProvider = async (providerName: string) => {
-    if (providerSaving) return;
+  const saveProvider = async (providerName: string): Promise<boolean> => {
+    if (providerSaving) return false;
     const provider = settings?.providers.find((item) => item.name === providerName);
-    if (!provider) return;
+    if (!provider) return false;
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
     const apiKeyRequired = provider.api_key_required ?? true;
     if (!isOauthProvider && !provider.configured && apiKeyRequired && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
-      return;
+      return false;
     }
     setProviderSaving(providerName);
     try {
@@ -389,7 +389,7 @@ export function useModelSettingsActions({
         : providerName === "azure_openai"
           ? "azure"
           : null;
-      if (supportName && !(await installCapabilities([supportName]))) return;
+      if (supportName && !(await installCapabilities([supportName]))) return false;
       const update: ProviderSettingsUpdate = { provider: providerName };
       if (!isOauthProvider) {
         update.apiKey = apiKey || undefined;
@@ -433,8 +433,10 @@ export function useModelSettingsActions({
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       if (!isOauthProvider) setExpandedProvider(null);
       setError(null);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setProviderSaving(null);
     }
