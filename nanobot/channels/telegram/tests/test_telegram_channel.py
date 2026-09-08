@@ -26,6 +26,7 @@ from nanobot.channels.telegram.runtime import (
     _split_telegram_markdown,
     _StreamBuf,
 )
+from nanobot.events import ContextCompactionEvent
 
 
 class _FakeHTTPXRequest:
@@ -3162,3 +3163,109 @@ async def test_send_delta_stream_end_rich_disabled_uses_legacy_html() -> None:
     channel._app.bot.do_api_request.assert_not_called()
     channel._app.bot.edit_message_text.assert_awaited_once()
     assert "123" not in channel._stream_bufs
+
+
+# ---------------------------------------------------------------------------
+# Compaction notices: started sends, terminal phase edits in place
+# ---------------------------------------------------------------------------
+
+def _compaction_message(phase: str, compaction_id: str = "c1") -> OutboundMessage:
+    return OutboundMessage(
+        channel="telegram",
+        chat_id="999",
+        content={
+            "started": "Compressing context…",
+            "succeeded": "Context compacted.",
+            "failed": "Unable to compact context.",
+            "cancelled": "Context compaction cancelled.",
+        }[phase],
+        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),
+    )
+
+
+@pytest.mark.asyncio
+async def test_compaction_terminal_phase_edits_started_notice_in_place() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=77))
+    channel._app.bot.edit_message_text = AsyncMock()
+
+    await channel.send(_compaction_message("started"))
+
+    channel._app.bot.send_message.assert_awaited_once()
+    channel._app.bot.edit_message_text.assert_not_awaited()
+    assert channel._compaction_notices[("999", "c1")] == 77
+
+    await channel.send(_compaction_message("succeeded"))
+
+    # The outcome rewrites the original notice instead of posting a new message.
+    channel._app.bot.send_message.assert_awaited_once()
+    channel._app.bot.edit_message_text.assert_awaited_once_with(
+        chat_id=999, message_id=77, text="Context compacted.",
+    )
+    assert ("999", "c1") not in channel._compaction_notices
+
+
+@pytest.mark.asyncio
+async def test_compaction_edit_failure_falls_back_to_new_message() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=77))
+    channel._app.bot.edit_message_text = AsyncMock(
+        side_effect=BadRequest("Message to edit not found")
+    )
+
+    await channel.send(_compaction_message("started"))
+    await channel.send(_compaction_message("failed"))
+
+    assert channel._app.bot.send_message.await_count == 2
+    assert channel._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_compaction_terminal_phase_without_notice_sends_message() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
+    channel._app.bot.edit_message_text = AsyncMock()
+
+    await channel.send(_compaction_message("cancelled"))
+
+    channel._app.bot.edit_message_text.assert_not_awaited()
+    channel._app.bot.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.send_message = AsyncMock(
+        side_effect=[
+            SimpleNamespace(message_id=101),
+            SimpleNamespace(message_id=202),
+        ]
+    )
+    channel._app.bot.edit_message_text = AsyncMock()
+
+    await channel.send(_compaction_message("started", compaction_id="c1"))
+    await channel.send(_compaction_message("started", compaction_id="c2"))
+    await channel.send(_compaction_message("succeeded", compaction_id="c1"))
+
+    channel._app.bot.edit_message_text.assert_awaited_once_with(
+        chat_id=999, message_id=101, text="Context compacted.",
+    )
+    assert channel._compaction_notices == {("999", "c2"): 202}
