@@ -784,8 +784,10 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
   });
 
   it("falls back to the current preset while a renamed session reference is stale", async () => {
@@ -809,7 +811,9 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
@@ -891,7 +895,9 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-4 · Company Proxy")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-4 · Company Proxy");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
@@ -943,10 +949,13 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
-    expect(badge).toHaveAttribute(
-      "title",
-      "Default · using deepseek/deepseek-chat",
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(screen.getByLabelText("deepseek-chat"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "deepseek-chat · deepseek/deepseek-chat",
     );
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Default");
+    fireEvent.blur(screen.getByLabelText("deepseek-chat"));
     expect(logo).toBeInTheDocument();
 
     act(() => {
@@ -1328,7 +1337,9 @@ describe("ThreadShell", () => {
     await act(async () => {
       rerender(view(session("chat-new", "fast")));
     });
-    expect(screen.getByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 
