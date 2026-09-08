@@ -160,8 +160,11 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 
 Inside the native terminal Agent, enter `/config` or run `nanobot onboard --wizard` for Quick start.
 Choose account sign-in, API credentials, or a local server, then type to search providers and models.
-Browser sign-in opens automatically, with manual completion options when needed. Save your default
-and optionally send one test message to verify a model reply (provider charges may apply).
+Browser sign-in opens automatically, with manual completion options when needed. After connecting,
+configure a named preset: choose its model and optionally adjust generation settings. Select an
+existing preset to edit it, or save a new one. **Use as default** selects it for new chats without
+changing other presets. Optionally send one test message using the saved preset to verify a model
+reply (provider charges may apply).
 A failed test keeps the saved configuration and offers connection and model changes.
 Start a new chat to use the saved default without changing your previous conversation.
 Already configured users can continue chatting or change models directly.

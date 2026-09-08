@@ -16,22 +16,30 @@ from nanobot.providers.factory import make_provider
 
 async def test_provider_connection(config: Config, payload: dict[str, Any]) -> dict[str, Any]:
     """Send one short prompt to exactly the requested provider, without tools or fallback."""
-    provider_name = payload.get("provider")
-    model = payload.get("model")
-    if not isinstance(provider_name, str) or not provider_name.strip() or provider_name == "auto":
-        return {"status": "error", "message": "Choose a provider before testing."}
-    if not isinstance(model, str) or not model.strip() or len(model) > 512:
-        return {"status": "error", "message": "Choose a valid model ID before testing."}
+    preset_name = payload.get("preset_name")
+    if preset_name is not None:
+        if not isinstance(preset_name, str) or preset_name not in config.model_presets:
+            return {"status": "error", "message": "Save a valid preset before testing."}
+        preset = config.model_presets[preset_name].model_copy(deep=True)
+        model = preset.model
+    else:
+        provider_name = payload.get("provider")
+        model = payload.get("model")
+        if not isinstance(provider_name, str) or not provider_name.strip() or provider_name == "auto":
+            return {"status": "error", "message": "Choose a provider before testing."}
+        if not isinstance(model, str) or not model.strip() or len(model) > 512:
+            return {"status": "error", "message": "Choose a valid model ID before testing."}
+        preset = ModelPresetConfig(provider=provider_name, model=model)
     started = time.monotonic()
     try:
         probe_config = config.model_copy(deep=True)
         probe_config.agents.defaults.fallback_models = []
-        preset = ModelPresetConfig(provider=provider_name, model=model)
         provider = make_provider(resolve_config_env_vars(probe_config), preset=preset)
         async with asyncio.timeout(15):
             response = await provider.chat(
                 [{"role": "user", "content": "Reply with a short hello."}],
-                model=model, max_tokens=256,
+                model=model, max_tokens=min(preset.max_tokens, 256),
+                temperature=preset.temperature, reasoning_effort=preset.reasoning_effort,
             )
     except Exception as exc:
         # Provider exceptions can contain request headers or response bodies. Return

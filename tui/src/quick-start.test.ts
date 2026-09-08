@@ -61,19 +61,63 @@ test("Quick start saves a masked API connection, then explicitly selects a defau
   expect(setup.captureCharFrame()).not.toContain("secret-for-setup")
   setup.mockInput.pressEnter()
   await settle()
-  await choose("Save connection and choose a model")
+  await choose("Save connection and configure preset")
   expect(saved).toHaveLength(1)
   expect(saved[0]).toMatchObject({ agents: { defaults: { model: "anthropic/claude-test" } } })
+  expect(setup.captureCharFrame()).toContain("3/4 Configure preset")
+  await choose("Model ·")
   await choose("Claude Next")
-  expect(setup.captureCharFrame()).toContain("4/4 Review and save")
-  await choose("Save as default model")
+  expect(setup.captureCharFrame()).toContain("3/4 Configure preset")
+  await choose("Save preset and use as default")
   expect(saved).toHaveLength(2)
   expect(saved[1]).toMatchObject({
-    agents: { defaults: { model: "claude-next", provider: "anthropic", modelPreset: null } },
-    modelPresets: { existing: { model: "old-model" } },
+    agents: { defaults: { model: "anthropic/claude-test", modelPreset: "Anthropic" } },
+    modelPresets: { existing: { model: "old-model" }, Anthropic: { model: "claude-next", provider: "anthropic", maxTokens: 8192 } },
     channels: { telegram: { token: null } },
   })
   expect(setup.captureCharFrame()).toContain("Start a new chat")
+})
+
+test("editing a preset keeps its generation settings and can leave the default unchanged", async () => {
+  let snapshot = configSnapshot()
+  snapshot.config.modelPresets = {
+    Coding: { provider: "anthropic", model: "old-model", maxTokens: 4096,
+      contextWindowTokens: 100000, temperature: 0.7, reasoningEffort: "high" },
+  }
+  const originalDefaults = structuredClone(snapshot.config.agents)
+  let discoveries = 0
+  await mount({
+    load: async () => snapshot,
+    save: async (_revision, config) => { snapshot = { ...snapshot, config }; return snapshot },
+    read: async (path) => {
+      if (path.includes("provider-models")) { discoveries++; return { models: [{ id: "new-model" }] } }
+      return { providers: [{ name: "anthropic", label: "Anthropic", configured: true }] }
+    },
+  })
+  await choose("Use an API key")
+  await choose("Anthropic")
+  expect(discoveries).toBe(0)
+  await choose("Edit preset · Coding")
+  await choose("Generation settings")
+  expect(setup.captureCharFrame()).toContain("Output token limit · 4096")
+  expect(setup.captureCharFrame()).toContain("Reasoning effort · high")
+  await choose("Temperature ·")
+  setup.mockInput.pressKey("\u0001")
+  setup.mockInput.pressKey("\u000b")
+  await setup.mockInput.typeText("0.4")
+  setup.mockInput.pressEnter()
+  await settle()
+  await choose("Model ·")
+  await choose("new-model")
+  await choose("Use as default · Yes")
+  await choose("Save preset")
+  expect(snapshot.config.agents).toEqual(originalDefaults)
+  expect(snapshot.config.modelPresets).toEqual({ Coding: {
+    provider: "anthropic", model: "new-model", maxTokens: 4096,
+    contextWindowTokens: 100000, temperature: 0.4, reasoningEffort: "high",
+  } })
+  expect(setup.captureCharFrame()).toContain("Return to chat")
+  expect(setup.captureCharFrame()).not.toContain("Start a new chat")
 })
 
 test.each(["callback_url", "authorization_code", "device_code"])("Quick start completes %s OAuth without entering an API key", async (input) => {
@@ -107,7 +151,7 @@ test.each(["callback_url", "authorization_code", "device_code"])("Quick start co
   }
   expect(requests[0]).toMatchObject({ action: "settings.provider.oauth_login", payload: { remote_browser: true, interactive_flow: true } })
   expect(requests[1]).toMatchObject({ action: "settings.provider.oauth_complete", payload: { flow_id: "flow-1" } })
-  expect(setup.captureCharFrame()).toContain("3/4 Choose a model")
+  expect(setup.captureCharFrame()).toContain("3/4 Configure preset")
 })
 
 test("leaving OAuth setup cancels only its own pending flow", async () => {
@@ -128,23 +172,31 @@ test("leaving OAuth setup cancels only its own pending flow", async () => {
 })
 
 test("model discovery failure retains manual entry and failed save stays reviewable", async () => {
+  let saves = 0
   await mount({
     read: async (path) => {
       if (path.includes("provider-models")) throw new Error("Model service unavailable")
       return { providers: [{ name: "openai_codex", label: "Connected provider", configured: true, auth_type: "oauth" }] }
     },
-    save: async () => { throw new Error("Configuration changed. Reload before saving.") },
+    save: async (_revision, config) => {
+      if (++saves === 1) throw new Error("Configuration changed. Reload before saving.")
+      return { ...configSnapshot(), config }
+    },
   })
   await choose("Sign in with an account")
   await choose("Connected provider")
+  await choose("Model ·")
   expect(setup.captureCharFrame()).toContain("Model service unavailable")
   await choose("Enter a model ID")
   await setup.mockInput.typeText("my-model")
   setup.mockInput.pressEnter()
   await settle()
-  await choose("Save as default model")
+  await choose("Save preset and use as default")
   expect(setup.captureCharFrame()).toContain("Reload before saving")
-  expect(setup.captureCharFrame()).toContain("4/4 Review and save")
+  expect(setup.captureCharFrame()).toContain("3/4 Configure preset")
+  await choose("Save preset and use as default")
+  expect(saves).toBe(2)
+  expect(setup.captureCharFrame()).toContain("Start a new chat")
 })
 
 
@@ -174,7 +226,8 @@ test("a saved default skips setup and changing models reuses credentials", async
     : { providers: [{ name: "anthropic", label: "Anthropic", configured: true }] } })
   expect(setup.captureCharFrame()).toContain("Continue chatting")
   expect(setup.captureCharFrame()).not.toContain("settings ·")
-  await choose("Change model")
+  await choose("Configure preset")
+  await choose("Model ·")
   expect(setup.captureCharFrame()).toContain("New model")
   expect(setup.captureCharFrame()).not.toContain("API key (optional)")
 })
@@ -199,7 +252,7 @@ test("a test message is explicit and failed checks preserve the saved model for 
       : { providers: [{ name: "anthropic", label: "Anthropic", configured: true }] },
     request: async (action, payload) => {
       expect(action).toBe("settings.provider.test")
-      expect(payload).toEqual({ provider: "anthropic", model: "test-model" })
+      expect(payload).toEqual({ preset_name: "Anthropic" })
       calls++
       return calls === 1 ? { status: "error", message: "Access denied. Change connection to sign in again." }
         : { status: "ok", message: "Hello!" }
@@ -207,13 +260,14 @@ test("a test message is explicit and failed checks preserve the saved model for 
   })
   await choose("Use an API key")
   await choose("Anthropic")
+  await choose("Model ·")
   await choose("test-model")
-  await choose("Save as default model")
+  await choose("Save preset and use as default")
   expect(calls).toBe(0)
   expect(setup.captureCharFrame()).toContain("not verified")
   await choose("Send a test message")
   expect(setup.captureCharFrame()).toContain("Access denied")
-  expect(snapshot.config).toMatchObject({ agents: { defaults: { model: "test-model" } } })
+  expect(snapshot.config).toMatchObject({ agents: { defaults: { modelPreset: "Anthropic" } }, modelPresets: { Anthropic: { model: "test-model" } } })
   await choose("Send a test message")
   expect(setup.captureCharFrame()).toContain("Model replied successfully")
   expect(setup.captureCharFrame()).toContain("Hello!")
@@ -240,6 +294,8 @@ test("automatic callback sign-in opens the browser and advances without a manual
   expect(setup.captureCharFrame()).not.toContain("Paste callback URL")
   callback!("http://localhost:1455/auth/callback?code=fake&state=test")
   await settle()
+  expect(setup.captureCharFrame()).toContain("3/4 Configure preset")
+  await choose("Model ·")
   expect(setup.captureCharFrame()).toContain("hello-model")
   expect(stopped).toBe(1)
 })

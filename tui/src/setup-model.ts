@@ -15,6 +15,14 @@ export interface SetupProvider {
 }
 
 export interface SetupModel { id: string; label: string; description: string }
+export interface SetupPreset {
+  provider: string
+  model: string
+  maxTokens: number
+  contextWindowTokens: number
+  temperature: number
+  reasoningEffort: string | null
+}
 export interface SetupAuthorization {
   flowId: string
   url: string
@@ -75,12 +83,49 @@ export function decodeSetupAuthorization(value: unknown): SetupAuthorization | n
   }
 }
 
-/** Select the implicit default without modifying named presets used by other sessions. */
-export function setupDraft(snapshot: ConfigEditorSnapshot, provider: string, model: string): Record<string, unknown> {
+export function newSetupPreset(snapshot: ConfigEditorSnapshot, provider: string): SetupPreset {
+  const defaults = readConfigValue(snapshot.config, "/agents/defaults")
+  const active = readConfigValue(snapshot.config, "/agents/defaults/modelPreset")
+  const presets = snapshot.config.modelPresets
+  const base = typeof active === "string" && record(presets) && record(presets[active])
+    ? presets[active] : record(defaults) ? defaults : {}
+  return {
+    provider, model: "",
+    maxTokens: typeof base.maxTokens === "number" ? base.maxTokens : 8192,
+    contextWindowTokens: typeof base.contextWindowTokens === "number" ? base.contextWindowTokens : 200_000,
+    temperature: typeof base.temperature === "number" ? base.temperature : 0.1,
+    reasoningEffort: null,
+  }
+}
+
+/** Stage one named preset and its optional default pointer in a single revision-bound save. */
+export function setupDraft(snapshot: ConfigEditorSnapshot, name: string, preset: SetupPreset,
+  makeDefault: boolean, existingName: string | null = null): Record<string, unknown> {
+  name = name.trim()
+  if (!name || Array.from(name).length > 48 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name)) {
+    throw new Error("Use a printable preset name of 1–48 characters.")
+  }
+  if (name.toLocaleLowerCase() === "default") throw new Error("The name default is reserved. Choose another preset name.")
+  const presets = record(snapshot.config.modelPresets) ? snapshot.config.modelPresets : {}
+  if (existingName !== null && (name !== existingName || !record(presets[existingName]))) {
+    throw new Error("Reload the preset before saving. Rename existing presets in Advanced settings.")
+  }
+  if (Object.keys(presets).some((key) => key !== existingName && key.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    throw new Error("A preset with this name already exists. Select it explicitly or choose a different name.")
+  }
+  if (!preset.model.trim()) throw new Error("Choose a model for this preset.")
+  for (const [label, value] of [["Output token limit", preset.maxTokens], ["Context window", preset.contextWindowTokens]] as const) {
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer.`)
+  }
+  if (!Number.isFinite(preset.temperature) || preset.temperature < 0 || preset.temperature > 2) {
+    throw new Error("Temperature must be between 0 and 2.")
+  }
   const draft = cloneConfig(snapshot.config)
-  writeConfigValue(draft, "/agents/defaults/provider", provider)
-  writeConfigValue(draft, "/agents/defaults/model", model)
-  writeConfigValue(draft, "/agents/defaults/modelPreset", null)
+  draft.modelPresets = {
+    ...(record(draft.modelPresets) ? draft.modelPresets : {}),
+    [name]: { ...(existingName && record(presets[existingName]) ? presets[existingName] : {}), ...preset },
+  }
+  if (makeDefault) writeConfigValue(draft, "/agents/defaults/modelPreset", name)
   return draft
 }
 

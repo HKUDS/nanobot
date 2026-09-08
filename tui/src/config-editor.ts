@@ -27,8 +27,8 @@ import { hideScrollbars } from "./scrollbox"
 import type { ConfigEditorSection, ConfigEditorSnapshot } from "./protocol"
 import {
   activeSetupModel, decodeSetupAuthorization, decodeSetupModels, decodeSetupProviders,
-  record, setupDraft,
-  type SetupAuthorization, type SetupModel, type SetupProvider,
+  record, setupDraft, newSetupPreset,
+  type SetupAuthorization, type SetupModel, type SetupProvider, type SetupPreset,
 } from "./setup-model"
 
 export interface ConfigEditorTheme {
@@ -109,7 +109,11 @@ export class ConfigEditor {
   private providers: SetupProvider[] = []
   private provider: SetupProvider | null = null
   private models: SetupModel[] = []
-  private model = ""
+  private preset: SetupPreset | null = null
+  private presetName = ""
+  private existingPresetName: string | null = null
+  private makeDefault = true
+  private generationOptions = false
   private authorization: SetupAuthorization | null = null
   private inputAction: ((value: string) => void) | null = null
   private generation = 0
@@ -380,7 +384,13 @@ export class ConfigEditor {
     if (key.name === "escape") {
       if (this.saving) return true
       if (this.page === "setup" && this.setupStep !== "provider" && this.setupStep !== "done") {
-        this.setupStep = "provider"
+        if (this.setupStep === "review" && this.preset && !this.discardArmed) {
+          this.discardArmed = true
+          this.feedback.content = "Press Esc again to discard the preset form, or Ctrl+S to save it."
+          return true
+        }
+        if (this.setupStep === "review") this.preset = null
+        this.setupStep = this.setupStep === "model" ? "review" : "provider"
         this.cancelSignIn()
         this.selected = 0
         this.rebuildRows()
@@ -463,6 +473,7 @@ export class ConfigEditor {
   }
 
   private useSnapshot(snapshot: ConfigEditorSnapshot): void {
+    this.preset = null
     this.snapshot = snapshot
     this.draft = cloneConfig(snapshot.config)
     this.dirty.clear()
@@ -494,10 +505,10 @@ export class ConfigEditor {
       this.rows = [
         ...(connected ? [
           this.action("Continue chatting", "Use your current model. A reply confirms that the connection works.", () => this.hide()),
-          this.action("Change model", "Choose another model using your saved connection.", () => {
+          this.action("Configure preset", "Choose another model using your saved connection.", () => {
             this.provider = connected
             this.page = "setup"
-            void this.loadSetupModels()
+            this.beginPreset()
           }),
         ] : []),
         this.action("Sign in with an account", "Quick start · Use your existing subscription in a browser. No API key needed.", () => { void this.startSetup("account") }),
@@ -627,8 +638,8 @@ export class ConfigEditor {
       : this.page === "advanced-home" ? "Advanced settings"
       : this.page === "setup" ? `Quick start · ${this.setupStep === "provider" ? "1/4 Choose a provider"
         : this.setupStep === "credentials" ? "2/4 Connect your account"
-          : this.setupStep === "model" ? "3/4 Choose a model"
-            : this.setupStep === "review" ? "4/4 Review and save" : "Saved"}`
+          : this.setupStep === "model" ? "3/4 Preset · Choose model"
+            : this.setupStep === "review" ? "3/4 Configure preset" : "4/4 Test and chat"}`
       : this.page === "search" ? `Search · ${this.query || "all settings"}`
         : this.snapshot?.presentation.sections.find((section) => section.id === this.sectionId)?.label
           || "Settings"
@@ -898,9 +909,9 @@ export class ConfigEditor {
     if (this.setupStep === "credentials") return `${this.provider?.label || "Provider"} · ${this.provider?.oauth
       ? "Sign in with your account. No API key needed." : "Use credentials from this provider's developer console."}`
     if (this.setupStep === "model") return `${this.provider?.label} · ${this.provider?.oauth ? "Signed in" : "Credentials saved"}\nType to find a model, or enter its exact ID below.`
-    if (this.setupStep === "review") return `${this.provider?.label} · ${this.model}`
+    if (this.setupStep === "review") return `${this.provider?.label} · ${this.existingPresetName ? "Edit saved preset" : "Create a model preset"}\nA preset saves your model and generation settings together.`
     return this.tested ? "Model replied successfully. You're ready to chat."
-      : "Default saved · Model reply not verified.\nSend one short test message to check access. Provider charges may apply."
+      : `Preset ${this.presetName} saved · Model reply not verified.\nSend one short test message. Provider charges may apply.`
   }
 
   private activeProvider(): SetupProvider | undefined {
@@ -933,12 +944,12 @@ export class ConfigEditor {
       ).map((provider) => this.action(
         `${provider.label} · ${provider.configured ? provider.oauth ? "Signed in" : "Credentials saved" : provider.oauth ? "Account" : provider.local ? "Local server" : provider.keyRequired ? "API key" : "Cloud / API connection"}`,
         provider.oauth ? "Use browser sign-in with your existing account."
-          : "Use this provider's API key and endpoint. You will choose the model next.",
+          : "Use this provider's API key and endpoint. You will configure a model preset next.",
         () => {
           this.cancelSignIn()
           this.provider = provider
           this.connectionOptions = false
-          if (provider.configured) { void this.loadSetupModels(); return }
+          if (provider.configured) { this.beginPreset(); return }
           this.setupStep = "credentials"
           this.selected = 0
           this.feedback.content = ""
@@ -987,7 +998,7 @@ export class ConfigEditor {
             this.signInHelp = !this.signInHelp; this.rebuildRows()
           }))
         } else {
-          if (provider.configured) rows.push(this.action("Continue with connected account", "Keep your current sign-in and choose a model.", () => { void this.loadSetupModels() }))
+          if (provider.configured) rows.push(this.action("Continue with connected account", "Keep your current sign-in and configure a preset.", () => { this.beginPreset() }))
           if (provider.loginSupported) rows.push(this.action(
             provider.configured ? "Sign in again" : `Sign in to ${provider.label}`,
             "Start browser authorization. Account credentials are saved when sign-in completes.",
@@ -1014,7 +1025,7 @@ export class ConfigEditor {
             ...(name === "apiBase" && !field.value ? { value: provider.apiBase } : {}),
           } })
         }
-        rows.push(this.action("Save connection and choose a model", "Save the API connection now so nanobot can load your available models. The default model is unchanged until the final step.", () => {
+        rows.push(this.action("Save connection and configure preset", "Save the connection, then configure a named model preset.", () => {
           void this.runSetup(async () => {
             const key = this.fields.find((field) => field.path === this.providerPath("apiKey"))
             if (provider.keyRequired && !key?.configured) throw new Error("Enter an API key before continuing.")
@@ -1026,7 +1037,7 @@ export class ConfigEditor {
             }
             if (this.dirty.size) await this.persistSetup()
             provider.configured = true
-          }, () => { void this.loadSetupModels() })
+          }, () => { this.beginPreset() })
         }))
         rows.push(this.action(this.connectionOptions ? "Hide connection options" : "More connection options", "Change the default endpoint or add optional authentication.", () => {
           this.connectionOptions = !this.connectionOptions
@@ -1050,34 +1061,69 @@ export class ConfigEditor {
         this.chooseSetupModel(value)
       })),
       this.action("Reload model list", "Retry fetching the models available to this account.", () => { void this.loadSetupModels() }),
-      this.action("Back to connection", "Change credentials or sign in again.", () => {
-        this.setupStep = "credentials"
+      this.action("Back to preset", "Keep the preset and return without changing the model.", () => {
+        this.setupStep = "review"
         this.selected = 0
         this.rebuildRows()
       }),
     ]
-    if (this.setupStep === "review") {
+    if (this.setupStep === "review" && this.preset) {
+      const preset = this.preset
+      const presets = record(this.snapshot?.config.modelPresets) ? this.snapshot!.config.modelPresets : {}
       return [
-        this.action("Save as default model", "Use this provider and model for new chats. Existing named model presets are preserved.", () => { void this.finishSetup() }),
-        this.action("Choose a different model", "Return to the model list.", () => {
-          this.setupStep = "model"
-          this.selected = 0
-          this.rebuildRows()
+        this.action(`Preset name · ${this.presetName}`, this.existingPresetName
+          ? "Editing this saved preset also affects chats that use it. Rename in Advanced settings."
+          : "Give this configuration a name, such as Coding or Fast replies.", () => {
+          if (!this.existingPresetName) this.askSetup("Preset name", false, (value) => {
+            this.presetName = value.trim(); this.rebuildRows()
+          }, this.presetName)
         }),
-        this.action("Discard draft and reload", "Discard unsaved model and workspace changes and reload the saved configuration.", () => {
+        this.action(`Model · ${preset.model || "Choose a model"}`, "Choose the model this preset will use.", () => { void this.loadSetupModels() }),
+        this.action(`Use as default · ${this.makeDefault ? "Yes" : "No"}`, "Use this preset for new chats. Existing chats keep their selection.", () => {
+          this.makeDefault = !this.makeDefault; this.rebuildRows()
+        }),
+        this.action(this.generationOptions ? "Hide generation settings" : "Generation settings", "Adjust output length, context window, temperature, and reasoning effort.", () => {
+          this.generationOptions = !this.generationOptions; this.rebuildRows()
+        }),
+        ...(this.generationOptions ? ([
+          ["maxTokens", "Output token limit", "Maximum tokens generated in one response."],
+          ["contextWindowTokens", "Context window", "Set the context capacity supported by your model."],
+          ["temperature", "Temperature", "Randomness from 0 to 2; lower values give more consistent replies."],
+          ["reasoningEffort", "Reasoning effort", "Use a value supported by your model, or leave empty for its default."],
+        ] as const).map(([key, label, description]) => this.action(`${label} · ${preset[key] ?? "Model default"}`, description, () => {
+          this.askSetup(label, false, (value) => {
+            if (key === "reasoningEffort") preset[key] = value.trim() || null
+            else {
+              if (!value.trim() || !Number.isFinite(Number(value))) throw new Error("Enter a number.")
+              preset[key] = Number(value)
+            }
+            this.rebuildRows()
+          }, String(preset[key] ?? ""))
+        })) : []),
+        this.action(this.makeDefault ? "Save preset and use as default" : "Save preset", "Save the named preset and its generation settings together.", () => { void this.finishSetup() }),
+        ...Object.entries(presets).filter(([name, value]) => name !== this.existingPresetName && record(value) && value.provider === this.provider?.name)
+          .map(([name, value]) => this.action(`Edit preset · ${name}`, "Load this saved preset. This replaces the unsaved preset form.", () => {
+            this.preset = { ...newSetupPreset(this.snapshot!, this.provider!.name), ...value as SetupPreset }
+            this.presetName = name; this.existingPresetName = name; this.rebuildRows()
+          })),
+        ...(this.existingPresetName ? [this.action("Create a new preset", "Start a separate preset for this provider.", () => {
+          this.preset = null; this.beginPreset()
+        })] : []),
+        this.action("Discard draft and reload", "Discard unsaved preset and workspace changes.", () => {
+          this.preset = null
           void this.runSetup(async () => { this.useSnapshot(await this.options.load()) })
         }),
       ]
     }
     return [
       this.action(this.tested ? "Send another test message" : "Send a test message", "Sends ‘Reply with a short hello.’ to this model once. Provider charges may apply.", () => { void this.testConnection() }),
-      this.action("Start a new chat", "Start a fresh conversation with your saved default model. Your previous chat is preserved.", () => {
-        if (this.hide()) this.options.startChat?.()
+      this.action(this.makeDefault ? "Start a new chat" : "Return to chat", this.makeDefault ? "Start a fresh conversation with your saved default preset." : "Select this preset from the model menu when you want to use it.", () => {
+        if (this.hide() && this.makeDefault) this.options.startChat?.()
       }),
       this.action("Change connection", "Update the API key or endpoint, or sign in again. Your saved model is kept.", () => {
         this.setupStep = "credentials"; this.selected = 0; this.rebuildRows()
       }),
-      this.action("Choose a different model", "Keep the connection and choose another model.", () => { void this.loadSetupModels() }),
+      this.action("Choose a different model", "Keep the connection and choose another model.", () => { this.beginPreset() }),
       { kind: "back" },
     ]
   }
@@ -1132,9 +1178,9 @@ export class ConfigEditor {
     }
   }
 
-  private async persistSetup(): Promise<void> {
+  private async persistSetup(config = this.draft): Promise<void> {
     if (!this.snapshot) throw new Error("Reload configuration before saving.")
-    const saved = await this.options.save(this.snapshot.revision, cloneConfig(this.draft))
+    const saved = await this.options.save(this.snapshot.revision, cloneConfig(config))
     if (this.destroyed) return
     this.snapshot = saved
     this.draft = cloneConfig(saved.config)
@@ -1194,7 +1240,7 @@ export class ConfigEditor {
       }
     }, () => {
       if (this.authorization) this.scheduleSignIn()
-      else if (provider.configured) void this.loadSetupModels()
+      else if (provider.configured) this.beginPreset()
     })
   }
 
@@ -1234,7 +1280,7 @@ export class ConfigEditor {
       this.stopCallback?.()
       this.stopCallback = null
       this.cancelInput()
-      await this.loadSetupModels()
+      this.beginPreset()
     } catch (error) {
       if (!this.destroyed && this.authorization === auth) {
         this.signInHelp = true
@@ -1258,7 +1304,7 @@ export class ConfigEditor {
       if (!this.options.request) throw new Error("Update the gateway to send a test message.")
       this.feedback.content = "Sending one test message…"
       const result = await this.options.request("settings.provider.test", {
-        provider: this.provider!.name, model: this.model,
+        preset_name: this.presetName,
       })
       if (this.destroyed) return
       if (!record(result) || typeof result.message !== "string") throw new Error("No test result returned. Retry or check the connection.")
@@ -1269,6 +1315,25 @@ export class ConfigEditor {
       this.feedback.content = this.tested && typeof result.elapsed_seconds === "number"
         ? `Reply (${result.elapsed_seconds}s): ${message}` : message
     })
+  }
+
+  private beginPreset(): void {
+    if (!this.provider || !this.snapshot) return
+    if (!this.preset || this.preset.provider !== this.provider.name) {
+      this.preset = newSetupPreset(this.snapshot, this.provider.name)
+      const presets = record(this.snapshot.config.modelPresets) ? this.snapshot.config.modelPresets : {}
+      const base = this.provider.label.slice(0, 40)
+      this.presetName = base
+      let suffix = 2
+      while (Object.keys(presets).some((name) => name.toLowerCase() === this.presetName.toLowerCase()) || this.presetName.toLowerCase() === "default") this.presetName = `${base} ${suffix++}`
+      this.existingPresetName = null
+      this.makeDefault = true
+    }
+    this.setupStep = "review"
+    this.listOffset = 0
+    this.selected = 0
+    this.feedback.content = ""
+    this.rebuildRows()
   }
 
   private async loadSetupModels(): Promise<void> {
@@ -1289,33 +1354,35 @@ export class ConfigEditor {
   }
 
   private chooseSetupModel(model: string): void {
-    this.model = model
+    if (this.preset) this.preset.model = model
     this.setupStep = "review"
+    this.listOffset = 0
     this.selected = 0
-    this.feedback.content = "Save this default, then send a test message. Workspace and other options are in Advanced settings."
+    this.feedback.content = "Configure the preset, then save it. A test message is optional."
     this.rebuildRows()
   }
 
   private async finishSetup(): Promise<void> {
-    if (!this.snapshot || !this.provider || !this.model) return
+    if (!this.snapshot || !this.provider || !this.preset) return
     await this.runSetup(async () => {
-      this.draft = setupDraft({ ...this.snapshot!, config: this.draft }, this.provider!.name, this.model)
-      this.dirty.add("/agents/defaults/model")
-      await this.persistSetup()
+      const candidate = setupDraft({ ...this.snapshot!, config: this.draft }, this.presetName, this.preset!, this.makeDefault, this.existingPresetName)
+      await this.persistSetup(candidate)
       if (this.destroyed) return
+      this.existingPresetName = this.presetName.trim()
+      this.presetName = this.existingPresetName
       this.setupStep = "done"
       this.tested = false
       this.testedRevision = ""
       this.selected = 0
       this.feedback.fg = this.theme.success
-      this.feedback.content = "Saved. New chats will use your selected model."
-      this.options.onStatus?.("Default model saved")
+      this.feedback.content = this.makeDefault ? "Preset saved as default for new chats." : "Preset saved. Select it from the model menu when you want to use it."
+      this.options.onStatus?.("Model preset saved")
     })
   }
 
-  private askSetup(label: string, secret: boolean, action: (value: string) => void): void {
+  private askSetup(label: string, secret: boolean, action: (value: string) => void, initialValue = ""): void {
     this.beginFieldEdit({ path: "", label, breadcrumb: label, description: "", sectionId: "models",
-      type: "string", value: "", enumValues: [], nullable: false, secret, configured: false,
+      type: "string", value: initialValue, enumValues: [], nullable: false, secret, configured: false,
       deprecated: false, advanced: false, raw: false })
     this.inputAction = action
   }

@@ -29,7 +29,7 @@ async def test_probe_uses_explicit_model_without_tools_or_fallback(monkeypatch):
     assert presets[0].provider == "anthropic"
     chat.assert_awaited_once_with(
         [{"role": "user", "content": "Reply with a short hello."}],
-        model="my-model", max_tokens=256,
+        model="my-model", max_tokens=256, temperature=0.1, reasoning_effort=None,
     )
     assert config.model_dump() == original
 
@@ -68,3 +68,35 @@ async def test_invalid_probe_does_not_create_a_provider(monkeypatch, payload):
         raise AssertionError("Invalid input must not reach a provider")
     monkeypatch.setattr("nanobot.webui.settings_probe.make_provider", forbidden)
     assert (await probe(Config(), payload))["status"] == "error"
+
+
+async def test_probe_uses_saved_preset_generation_settings_without_changing_default(monkeypatch):
+    config = Config()
+    config.model_presets["Coding"] = ModelPresetConfig(
+        provider="anthropic", model="coding-model", max_tokens=128,
+        temperature=0.7, reasoning_effort="high",
+    )
+    original = config.model_dump()
+    chat = AsyncMock(return_value=LLMResponse(content="Hello!"))
+
+    def make(probe_config, *, preset):
+        assert preset == config.model_presets["Coding"]
+        assert probe_config.agents.defaults.fallback_models == []
+        return type("Provider", (), {"chat": chat})()
+
+    monkeypatch.setattr("nanobot.webui.settings_probe.make_provider", make)
+    result = await probe(config, {"preset_name": "Coding"})
+    assert result["status"] == "ok"
+    chat.assert_awaited_once_with(
+        [{"role": "user", "content": "Reply with a short hello."}],
+        model="coding-model", max_tokens=128, temperature=0.7, reasoning_effort="high",
+    )
+    assert config.model_dump() == original
+
+
+async def test_probe_rejects_missing_saved_preset(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Missing preset must not make a model request")
+
+    monkeypatch.setattr("nanobot.webui.settings_probe.make_provider", forbidden)
+    assert (await probe(Config(), {"preset_name": "missing"}))["status"] == "error"
