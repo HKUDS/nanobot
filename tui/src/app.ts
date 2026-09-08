@@ -25,6 +25,7 @@ import {
   fetchGatewayHealth,
   decodeConfigEditorSnapshot,
   fetchConfigEditor,
+  fetchSetupData,
   fetchHistory,
   fetchGatewayConnection,
   fetchMentionCandidates,
@@ -840,6 +841,22 @@ export class NanobotTui {
       renderer,
       configEditorTheme(this.palette),
       {
+        read: (path) => fetchSetupData(this.options.apiUrl, this.options.apiToken, path, this.apiReauthenticator),
+        copyText: async (text) => {
+          if (!this.renderer.copyToClipboardOSC52(text)) await copyWithSystemClipboard(text)
+        },
+        request: async (action, payload) => {
+          if (!this.client.requestMutation) throw new Error("Wait for the gateway to connect, then try again.")
+          return this.client.requestMutation(action, payload)
+        },
+        openUrl: async (url) => {
+          const parsed = new URL(url)
+          if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Invalid sign-in link.")
+          const command = process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url]
+            : process.platform === "darwin" ? ["open", url] : ["xdg-open", url]
+          const child = Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
+          if (await child.exited !== 0) throw new Error("Unable to open a browser. Copy the sign-in link and open it manually.")
+        },
         load: () => fetchConfigEditor(
           this.options.apiUrl,
           this.options.apiToken,
@@ -1512,7 +1529,7 @@ export class NanobotTui {
       || !this.options.apiToken
     ) return
     this.initialViewPending = undefined
-    void this.openConfig()
+    void this.openConfig(true)
   }
 
   private async refreshApiConnection(
@@ -2892,7 +2909,7 @@ export class NanobotTui {
     this.updateMeta()
   }
 
-  private async openConfig(): Promise<void> {
+  private async openConfig(quickStart = false): Promise<void> {
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2901,7 +2918,7 @@ export class NanobotTui {
     this.dismissRuntimeControls()
     this.clearComposer()
     this.composer.blur()
-    await this.configEditor.show()
+    await this.configEditor.show(quickStart)
   }
 
   private async loadOlderHistory(): Promise<void> {

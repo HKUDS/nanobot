@@ -846,6 +846,18 @@ export async function fetchConfigEditor(
   return decodeConfigEditorSnapshot(await response.json() as unknown)
 }
 
+export async function fetchSetupData(
+  apiUrl: string,
+  apiToken: string,
+  path: string,
+  reauthenticate?: ApiReauthenticator,
+): Promise<unknown> {
+  if (!apiUrl || !apiToken) throw new Error("Wait for the gateway to connect, then try again.")
+  const response = await fetchApi(apiUrl, apiToken, path, reauthenticate)
+  if (!response.ok) throw new Error(`Unable to load setup data (HTTP ${response.status}). Try again.`)
+  return await response.json() as unknown
+}
+
 export function decodeConfigEditorSnapshot(payload: unknown): ConfigEditorSnapshot {
   if (!isRecord(payload)
     || typeof payload.version !== "number"

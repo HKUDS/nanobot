@@ -3328,7 +3328,7 @@ describe("NanobotTui layout", () => {
       await setup.renderOnce()
 
       const frame = setup.captureCharFrame()
-      expect(frame).toContain("Configuration · Essentials")
+      expect(frame).toContain("Configuration · Overview")
       expect(frame).toContain("Models and providers")
       expect(frame).not.toContain("Max tokens")
       expect(sent).toEqual([])
@@ -3347,7 +3347,7 @@ describe("NanobotTui layout", () => {
       const url = String(input)
       const body = url.includes("/api/settings/config-editor")
         ? configSnapshot()
-        : { commands: [], mentions: [] }
+        : { providers: [], commands: [], mentions: [] }
       return Promise.resolve(new Response(JSON.stringify(body)))
     }) as typeof fetch
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
@@ -3359,7 +3359,7 @@ describe("NanobotTui layout", () => {
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
     const ui = app as unknown as {
-      configEditor: { visible: boolean }
+      configEditor: { visible: boolean; loading: boolean; saving: boolean }
       useGatewayConnection(apiUrl: string, apiToken: string): void
     }
 
@@ -3368,10 +3368,10 @@ describe("NanobotTui layout", () => {
       expect(ui.configEditor.visible).toBe(false)
 
       ui.useGatewayConnection("http://nanobot.test", "token")
-      await waitUntil(() => ui.configEditor.visible)
+      await waitUntil(() => ui.configEditor.visible && !ui.configEditor.loading && !ui.configEditor.saving)
       await setup.renderOnce()
 
-      expect(setup.captureCharFrame()).toContain("Configuration · Essentials")
+      expect(setup.captureCharFrame()).toContain("Quick start · 1/4 Choose a provider")
     } finally {
       globalThis.fetch = original
       app.stop()

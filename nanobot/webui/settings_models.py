@@ -465,6 +465,7 @@ def _provider_settings_row(
         ),
         "auth_type": "oauth" if spec.is_oauth else "api_key",
         "api_key_required": provider_requires_api_key(spec),
+        "api_base_required": provider_requires_api_base(spec),
         "api_key_hint": mask_secret_hint(provider_config.api_key),
         "api_base": provider_config.api_base,
         "default_api_base": spec.default_api_base or None,
@@ -1600,6 +1601,27 @@ def login_oauth_provider(
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         token = get_github_copilot_login_status()
+        interactive_flow = query_first(query, "interactive_flow")
+        if not token and interactive_flow is not None and parse_bool(interactive_flow, "interactive_flow"):
+            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
+
+            flow = GitHubCopilotOAuthFlow()
+            try:
+                flow.start()
+            except Exception as exc:
+                flow.cancel()
+                raise WebUISettingsError(f"GitHub sign-in failed: {exc}", status=502) from exc
+            flow_id = secrets.token_urlsafe(24)
+            oauth_flows.register(spec.name, flow_id, flow)
+            return {
+                "status": "authorization_required",
+                "provider": spec.name,
+                "flow_id": flow_id,
+                "authorization_url": flow.authorization_url,
+                "user_code": flow.user_code,
+                "expires_in": flow.remaining_seconds,
+                "completion_input": "device_code",
+            }
         if not token:
             token = login_github_copilot(print_fn=lambda _message: None)
         if not (token and token.access):
@@ -1649,7 +1671,7 @@ def complete_oauth_provider(
     provider_name = (query_first(query, "provider") or "").strip()
     flow_id = (query_first(query, "flow_id") or "").strip()
     spec = find_by_name(provider_name)
-    if spec is None or spec.name not in {"openai_codex", "xai_grok"}:
+    if spec is None or spec.name not in {"openai_codex", "xai_grok", "github_copilot"}:
         raise WebUISettingsError("OAuth completion is not supported for this provider")
     if not flow_id:
         raise WebUISettingsError("flow_id is required")
@@ -1657,6 +1679,11 @@ def complete_oauth_provider(
     flow = oauth_flows.get(spec.name, flow_id)
     if flow is None:
         raise WebUISettingsError(f"{spec.label} sign-in expired. Start again.", status=410)
+
+    cancel = query_first(query, "cancel")
+    if cancel is not None and parse_bool(cancel, "cancel"):
+        oauth_flows.remove(spec.name, flow_id, flow)
+        return {"status": "cancelled", "provider": spec.name, "flow_id": flow_id}
 
     try:
         if spec.name == "openai_codex":
@@ -1669,6 +1696,12 @@ def complete_oauth_provider(
                 token = complete_openai_codex_oauth_login(flow, authorization_response)
             except OpenAICodexOAuthInputError as exc:
                 raise WebUISettingsError(str(exc), status=400) from exc
+        elif spec.name == "github_copilot":
+            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
+
+            if not isinstance(flow, GitHubCopilotOAuthFlow):
+                raise WebUISettingsError("Invalid GitHub sign-in session. Start again.")
+            token = flow.complete()
         else:
             from nanobot.providers.xai_oauth import complete_xai_oauth_login
 
@@ -1723,6 +1756,7 @@ def logout_oauth_provider(
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+        oauth_flows.clear(spec.name)
         token_path = get_storage().get_token_path()
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth

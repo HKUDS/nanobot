@@ -18,13 +18,18 @@ import {
   displayConfigValue,
   editorInitialValue,
   parseConfigValue,
-  primaryConfigPaths,
+  escapePointer,
   readConfigValue,
   writeConfigValue,
   type ConfigField,
 } from "./config-editor-model"
 import { hideScrollbars } from "./scrollbox"
 import type { ConfigEditorSection, ConfigEditorSnapshot } from "./protocol"
+import {
+  activeSetupModel, decodeSetupAuthorization, decodeSetupModels, decodeSetupProviders,
+  record, setupDraft,
+  type SetupAuthorization, type SetupModel, type SetupProvider,
+} from "./setup-model"
 
 export interface ConfigEditorTheme {
   text: string
@@ -42,15 +47,20 @@ export interface ConfigEditorOptions {
   save: (revision: string, config: Record<string, unknown>) => Promise<ConfigEditorSnapshot>
   onVisibilityChange?: (visible: boolean) => void
   onStatus?: (message: string) => void
+  request?: (action: string, payload: Record<string, unknown>) => Promise<unknown>
+  read?: (path: string) => Promise<unknown>
+  openUrl?: (url: string) => Promise<void>
+  copyText?: (text: string) => Promise<void>
 }
 
-type EditorPage = "home" | "section" | "search"
+type EditorPage = "home" | "section" | "search" | "setup"
 type EditPurpose = "field" | "search"
 type ConfigRow =
   | { kind: "field"; field: ConfigField }
   | { kind: "section"; section: ConfigEditorSection; count: number }
   | { kind: "advanced"; count: number }
   | { kind: "back" }
+  | { kind: "action"; label: string; description: string; run: () => void }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -91,6 +101,15 @@ export class ConfigEditor {
   private destroyed = false
   private discardArmed = false
   private terminalWidth = 80
+  private setupStep: "provider" | "credentials" | "model" | "review" | "done" = "provider"
+  private providers: SetupProvider[] = []
+  private provider: SetupProvider | null = null
+  private models: SetupModel[] = []
+  private model = ""
+  private authorization: SetupAuthorization | null = null
+  private inputAction: ((value: string) => void) | null = null
+  private generation = 0
+  private modelQuery = ""
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -124,10 +143,11 @@ export class ConfigEditor {
       id: "nanobot-tui-config-intro",
       content: "Set up what nanobot needs first. Every other setting remains available below.",
       width: "100%",
-      height: 1,
+      minHeight: 1,
+      maxHeight: 3,
       flexShrink: 0,
       fg: theme.muted,
-      truncate: true,
+      wrapMode: "word",
       selectable: false,
     })
     this.detail = new TextRenderable(renderer, {
@@ -245,7 +265,7 @@ export class ConfigEditor {
     return this.root.visible
   }
 
-  async show(): Promise<void> {
+  async show(quickStart = false): Promise<void> {
     if (this.loading) return
     this.root.visible = true
     this.options.onVisibilityChange?.(true)
@@ -258,6 +278,7 @@ export class ConfigEditor {
       if (!this.destroyed) {
         this.useSnapshot(snapshot)
         this.feedback.content = ""
+        if (quickStart) void this.startSetup()
       }
     } catch (error) {
       if (!this.destroyed) {
@@ -272,6 +293,7 @@ export class ConfigEditor {
 
   hide(force = false): boolean {
     if (!this.visible) return true
+    if (this.saving && !force) return false
     if (!force && this.dirty.size && !this.discardArmed) {
       this.discardArmed = true
       this.feedback.fg = this.theme.error
@@ -280,6 +302,8 @@ export class ConfigEditor {
     }
     this.cancelInput()
     this.root.visible = false
+    this.generation += 1
+    this.cancelSignIn()
     this.discardArmed = false
     this.options.onVisibilityChange?.(false)
     return true
@@ -287,18 +311,30 @@ export class ConfigEditor {
 
   handleKey(key: KeyEvent): boolean {
     if (!this.visible) return false
+    if (this.saving || this.loading) return true
     if (this.editPurpose) return this.handleEditKey(key)
     if (key.name !== "escape") this.discardArmed = false
     if (key.ctrl && key.name === "s") {
-      void this.save()
+      if (this.page === "setup") {
+        if (this.setupStep === "review") void this.finishSetup()
+      } else void this.save()
       return true
     }
     if (key.name === "escape") {
+      if (this.saving) return true
+      if (this.page === "setup" && this.setupStep !== "provider" && this.setupStep !== "done") {
+        this.setupStep = "provider"
+        this.cancelSignIn()
+        this.selected = 0
+        this.rebuildRows()
+        return true
+      }
       if (this.page !== "home") this.goHome()
       else this.hide()
       return true
     }
     if (!key.ctrl && !key.meta && key.name === "/") {
+      if (this.page === "setup") return true
       this.beginSearch()
       return true
     }
@@ -360,6 +396,8 @@ export class ConfigEditor {
 
   destroy(): void {
     this.destroyed = true
+    this.cancelSignIn()
+    this.generation += 1
     this.renderer.keyInput.off("paste", this.handlePaste)
   }
 
@@ -391,18 +429,18 @@ export class ConfigEditor {
       return
     }
     if (this.page === "home") {
-      const fields = primaryConfigPaths(this.snapshot).flatMap((path) => {
-        const field = this.fields.find((candidate) => candidate.path === path && !candidate.raw)
-        return field ? [field] : []
-      })
       this.rows = [
-        ...fields.map((field): ConfigRow => ({ kind: "field", field })),
+        this.action("Quick start",
+          "New here? Start with guided setup. You can sign in with an account or use an API key.",
+          () => { void this.startSetup() }),
         ...this.snapshot.presentation.sections.map((section): ConfigRow => ({
           kind: "section",
           section,
           count: this.fields.filter((field) => field.sectionId === section.id).length,
         })),
       ]
+    } else if (this.page === "setup") {
+      this.rows = this.setupRows()
     } else if (this.page === "section") {
       const fields = this.fields.filter((field) => field.sectionId === this.sectionId)
       const basic = fields.filter((field) => !field.advanced)
@@ -428,11 +466,13 @@ export class ConfigEditor {
   }
 
   private renderRows(): void {
+    if (this.destroyed) return
     for (const child of [...this.scroll.getChildren()]) {
       this.scroll.remove(child)
       child.destroyRecursively()
     }
     this.updateHeader()
+    if (this.page === "setup" && !this.editPurpose) this.footer.content = "↑/↓ move · Enter select · Esc back"
     if (this.loading && !this.rows.length) {
       this.scroll.add(this.rowText("  Preparing the complete settings map…", false, this.theme.muted))
       return
@@ -478,7 +518,8 @@ export class ConfigEditor {
 
   private describeRow(row: ConfigRow, selected: boolean): string {
     const marker = selected ? "›" : " "
-    if (row.kind === "back") return `${marker} ← Essentials`
+    if (row.kind === "back") return `${marker} ← Configuration`
+    if (row.kind === "action") return `${marker} ${row.label}`
     if (row.kind === "advanced") {
       return `${marker} ${this.advanced ? "▾" : "▸"} Advanced · ${row.count} settings`
     }
@@ -486,21 +527,27 @@ export class ConfigEditor {
       return `${marker} → ${row.section.label} · ${row.count} settings`
     }
     const suffix = row.field.deprecated ? " [legacy]" : ""
-    const value = displayConfigValue(row.field)
+    const value = this.page === "setup" && row.field.path.endsWith("/apiBase") && !row.field.value
+      ? "Provider default" : displayConfigValue(row.field)
     const label = this.page === "home" ? row.field.label : row.field.breadcrumb
     const available = Math.max(8, this.terminalWidth - value.length - 8)
     return `${marker} ${label.slice(0, available)}${suffix}  ${value}`
   }
 
   private updateHeader(): void {
-    const page = this.page === "home" ? "Essentials"
+    const page = this.page === "home" ? "Overview"
+      : this.page === "setup" ? `Quick start · ${this.setupStep === "provider" ? "1/4 Choose a provider"
+        : this.setupStep === "credentials" ? "2/4 Connect your account"
+          : this.setupStep === "model" ? "3/4 Choose a model"
+            : this.setupStep === "review" ? "4/4 Review and save" : "Saved"}`
       : this.page === "search" ? `Search · ${this.query || "all settings"}`
         : this.snapshot?.presentation.sections.find((section) => section.id === this.sectionId)?.label
           || "Settings"
     const dirty = this.dirty.size ? ` · ${this.dirty.size} unsaved` : ""
-    this.header.content = `Configuration · ${page}${dirty}`
+    this.header.content = `Configuration · ${page}${dirty}${this.saving ? " · Loading…" : ""}`
     this.intro.content = this.page === "home"
-      ? "Set up what nanobot needs first. Every other setting remains available below."
+      ? `Current model: ${this.snapshot ? activeSetupModel(this.snapshot) : "Loading…"}. Advanced settings below.`
+      : this.page === "setup" ? this.setupIntro()
       : this.page === "search"
         ? "Search spans the complete configuration, including provider, channel, tool, and gateway fields."
         : this.snapshot?.presentation.sections.find((section) => section.id === this.sectionId)
@@ -519,8 +566,9 @@ export class ConfigEditor {
         : ""
       const choices = row.field.enumValues.length
         ? ` · choices: ${row.field.enumValues.map(String).join(", ")}` : ""
-      this.detail.content = `${row.field.path}${secret}${choices}${row.field.description
-        ? `\n${row.field.description}` : ""}`
+      this.detail.content = `${row.field.description || row.field.breadcrumb}${secret}${choices}`
+    } else if (row.kind === "action") {
+      this.detail.content = row.description
     } else if (row.kind === "section") {
       this.detail.content = row.section.description
     } else if (row.kind === "advanced") {
@@ -544,7 +592,9 @@ export class ConfigEditor {
   private activate(): void {
     const row = this.rows[this.selected]
     if (!row || this.loading || this.saving) return
-    if (row.kind === "back") {
+    if (row.kind === "action") {
+      row.run()
+    } else if (row.kind === "back") {
       this.goHome()
     } else if (row.kind === "section") {
       this.page = "section"
@@ -565,6 +615,8 @@ export class ConfigEditor {
   }
 
   private goHome(): void {
+    this.generation += 1
+    this.cancelSignIn()
     this.cancelInput()
     this.page = "home"
     this.sectionId = ""
@@ -614,7 +666,9 @@ export class ConfigEditor {
     }
     this.dirty.add(field.path)
     this.feedback.fg = this.theme.muted
-    this.feedback.content = "Change staged. Press Ctrl+S to save."
+    this.feedback.content = this.page === "setup"
+      ? "Change staged. Select the save action below to continue."
+      : "Change staged. Press Ctrl+S to save."
     const selectedPath = field.path
     this.refreshFields()
     const next = this.rows.findIndex((row) => row.kind === "field" && row.field.path === selectedPath)
@@ -695,6 +749,12 @@ export class ConfigEditor {
     if (!field) return
     const input = field.secret ? this.secretValue : this.editorInput.plainText
     try {
+      if (this.inputAction) {
+        const action = this.inputAction
+        action(input.trim())
+        this.cancelInput()
+        return
+      }
       const value = parseConfigValue(field, input)
       if (value !== undefined) this.change(field, value)
       this.cancelInput()
@@ -705,6 +765,7 @@ export class ConfigEditor {
   }
 
   private cancelInput(): void {
+    this.inputAction = null
     this.editPurpose = null
     this.editingField = null
     this.secretValue = ""
@@ -735,6 +796,305 @@ export class ConfigEditor {
     event.stopPropagation()
     this.secretValue += stripAnsiSequences(decodePasteBytes(event.bytes)).replace(/[\r\n]+/gu, "")
     this.renderSecretInput()
+  }
+
+  private action(label: string, description: string, run: () => void): ConfigRow {
+    return { kind: "action", label, description, run }
+  }
+
+  private setupIntro(): string {
+    if (this.setupStep === "provider") return "Choose the service you have an account with. Connected services appear first."
+    if (this.authorization?.userCode) return `Open the sign-in page and enter code: ${this.authorization.userCode}`
+    if (this.setupStep === "credentials") return `${this.provider?.label || "Provider"} · ${this.provider?.oauth
+      ? "Sign in with your account. No API key needed." : "Use credentials from this provider's developer console."}`
+    if (this.setupStep === "model") return "Choose a model available to your account, or enter its exact ID."
+    if (this.setupStep === "review") return `${this.provider?.label} · ${this.model}`
+    return "Your default model is saved. Close setup and send a message to try it."
+  }
+
+  private setupRows(): ConfigRow[] {
+    if (this.setupStep === "provider") return [
+      ...this.providers.map((provider) => this.action(
+        `${provider.label} · ${provider.configured ? "Connected" : provider.oauth ? "Sign in with account" : provider.keyRequired ? "API key" : "API connection"}`,
+        provider.oauth ? "Use browser sign-in with your existing account."
+          : "Use this provider's API key and endpoint. You will choose the model next.",
+        () => {
+          this.provider = provider
+          this.cancelSignIn()
+          this.setupStep = "credentials"
+          this.selected = 0
+          this.feedback.content = ""
+          this.rebuildRows()
+        },
+      )),
+      this.action("Reload providers", "Retry loading the available services.", () => { void this.startSetup() }),
+      { kind: "back" },
+    ]
+    if (this.setupStep === "credentials" && this.provider) {
+      const provider = this.provider
+      const rows: ConfigRow[] = []
+      if (provider.oauth) {
+        if (this.authorization) {
+          const auth = this.authorization
+          rows.push(this.action("Open sign-in page", auth.userCode ? `Enter this code in your browser: ${auth.userCode}`
+            : "Finish signing in in your browser, then check sign-in here.",
+          () => { void this.runSetup(async () => {
+            if (!this.options.openUrl) throw new Error("Open the sign-in link shown below in your browser.")
+            await this.options.openUrl(auth.url)
+            this.feedback.content = auth.userCode ? `Browser opened. Enter code: ${auth.userCode}` : "Browser opened. Complete sign-in, then check sign-in here."
+          }) }))
+          rows.push(this.action("Check sign-in", "Check whether browser sign-in is complete.", () => { void this.completeSignIn() }))
+          if (auth.input !== "device_code") rows.push(this.action(
+            auth.input === "callback_url" ? "Paste callback URL" : "Paste authorization code",
+            auth.input === "callback_url" ? "If your browser could not connect after sign-in, paste its full address here."
+              : "Copy the authorization code shown after sign-in and paste it here.",
+            () => this.askSetup("Complete sign-in", true, (value) => {
+              if (!value) throw new Error("Paste the response from your browser.")
+              void this.completeSignIn(value)
+            }),
+          ))
+          rows.push(this.action("Copy sign-in link", "Copy the full sign-in URL to open it on another device.", () => {
+            void this.runSetup(async () => {
+              if (this.options.copyText) await this.options.copyText(auth.url)
+              else if (!this.renderer.copyToClipboardOSC52(auth.url)) throw new Error("This terminal could not copy the sign-in link. Try Open sign-in page.")
+              this.feedback.content = "Sign-in link copied."
+            })
+          }))
+          rows.push(this.action("Restart sign-in", "Cancel this authorization and get a fresh sign-in link.", () => {
+            this.cancelSignIn()
+            void this.startSignIn()
+          }))
+        } else {
+          if (provider.configured) rows.push(this.action("Continue with connected account", "Keep your current sign-in and choose a model.", () => { void this.loadSetupModels() }))
+          if (provider.loginSupported) rows.push(this.action(
+            provider.configured ? "Sign in again" : `Sign in to ${provider.label}`,
+            "Start browser authorization. Account credentials are saved when sign-in completes.",
+            () => { void this.startSignIn() },
+          ))
+          else if (!provider.configured) rows.push(this.action("Reload account status", "Sign in using the provider's CLI, then reload your account status.", () => { void this.startSetup() }))
+        }
+      } else {
+        for (const [name, label, description] of [
+          ["apiKey", provider.keyRequired ? "API key" : "API key (optional)", provider.keyRequired
+            ? "Create an API key in your provider's developer console, then paste it here. Input is hidden."
+            : "Leave empty for a local server or credentials from your cloud environment. Paste a key only if your service requires it."],
+          ["apiBase", "API endpoint", "Use the provider's API base URL. Keep the default unless you use a proxy or local server."],
+          ["region", "AWS region", "Enter the AWS region where you enabled model access, or use your AWS environment's default."],
+          ["profile", "AWS profile", "Use an existing AWS credentials profile, or leave empty to use your environment's credentials."],
+        ]) {
+          const field = this.fields.find((item) => item.path === this.providerPath(name!))
+          if (field) rows.push({ kind: "field", field: {
+            ...field, label: label!, breadcrumb: label!, description: description!,
+            ...(name === "apiBase" && !field.value ? { value: provider.apiBase } : {}),
+          } })
+        }
+        rows.push(this.action("Save connection and choose a model", "Save the API connection now so nanobot can load your available models. The default model is unchanged until the final step.", () => {
+          void this.runSetup(async () => {
+            const key = this.fields.find((field) => field.path === this.providerPath("apiKey"))
+            if (provider.keyRequired && !key?.configured) throw new Error("Enter an API key before continuing.")
+            const base = readConfigValue(this.draft, this.providerPath("apiBase")) || provider.apiBase
+            if (!base && provider.baseRequired) throw new Error("Enter your provider's API endpoint before continuing.")
+            if (base) {
+              const url = new URL(String(base))
+              if (!["http:", "https:"].includes(url.protocol)) throw new Error("Use an http:// or https:// API endpoint.")
+            }
+            if (this.dirty.size) await this.persistSetup()
+            provider.configured = true
+          }, () => { void this.loadSetupModels() })
+        }))
+      }
+      rows.push(this.action("Choose another provider", "Return to the provider list. Saved credentials remain available.", () => {
+        this.cancelSignIn()
+        this.setupStep = "provider"
+        this.selected = 0
+        this.rebuildRows()
+      }))
+      return rows
+    }
+    if (this.setupStep === "model") return [
+      this.action("Find a model", "Filter the model list by name.", () => this.askSetup("Find a model", false, (value) => {
+        this.modelQuery = value.toLocaleLowerCase()
+        this.selected = 0
+        this.rebuildRows()
+      })),
+      ...this.models.filter((model) => `${model.id} ${model.label}`.toLocaleLowerCase().includes(this.modelQuery)).map((model) => this.action(
+        model.label, model.description || model.id, () => this.chooseSetupModel(model.id),
+      )),
+      this.action("Enter a model ID", "Use the exact model ID listed by your provider. Availability is checked when you send a message.", () => this.askSetup("Model ID", false, (value) => {
+        if (!value) throw new Error("Enter a model ID.")
+        this.chooseSetupModel(value)
+      })),
+      this.action("Reload model list", "Retry fetching the models available to this account.", () => { void this.loadSetupModels() }),
+      this.action("Back to connection", "Change credentials or sign in again.", () => {
+        this.setupStep = "credentials"
+        this.selected = 0
+        this.rebuildRows()
+      }),
+    ]
+    if (this.setupStep === "review") {
+      const workspace = this.fields.find((field) => field.path === "/agents/defaults/workspace")
+      return [
+        ...(workspace ? [{ kind: "field" as const, field: { ...workspace, breadcrumb: "Workspace", description: "The folder where nanobot keeps its workspace files. Keep the default to get started." } }] : []),
+        this.action("Save as default model", "Use this provider and model for new chats. Existing named model presets are preserved.", () => { void this.finishSetup() }),
+        this.action("Choose a different model", "Return to the model list.", () => {
+          this.setupStep = "model"
+          this.selected = 0
+          this.rebuildRows()
+        }),
+        this.action("Discard draft and reload", "Discard unsaved model and workspace changes and reload the saved configuration.", () => {
+          void this.runSetup(async () => { this.useSnapshot(await this.options.load()) })
+        }),
+      ]
+    }
+    return [
+      this.action("Close setup and chat", "Send a message to try your selected model. If credentials or access are rejected, reopen /config to update the connection.", () => this.hide()),
+      { kind: "back" },
+    ]
+  }
+
+  private providerPath(field: string): string {
+    const normalize = (value: string) => value.replace(/[^a-z0-9]/giu, "").toLocaleLowerCase()
+    const key = Object.keys(record(this.draft.providers) ? this.draft.providers : {})
+      .find((name) => normalize(name) === normalize(this.provider?.name || "")) || this.provider?.name || ""
+    return `/providers/${escapePointer(key)}/${field}`
+  }
+
+  private async startSetup(): Promise<void> {
+    if (this.dirty.size && this.page !== "setup") {
+      this.feedback.content = "Save your advanced changes with Ctrl+S before starting Quick start."
+      return
+    }
+    this.page = "setup"
+    this.setupStep = "provider"
+    this.selected = 0
+    this.cancelSignIn()
+    await this.runSetup(async () => {
+      if (!this.options.read) throw new Error("Update the gateway to use guided setup.")
+      this.providers = decodeSetupProviders(await this.options.read("/api/settings"))
+    })
+  }
+
+  private async runSetup(work: () => Promise<void>, next?: () => void): Promise<void> {
+    if (this.saving) return
+    const generation = this.generation
+    this.saving = true
+    this.feedback.fg = this.theme.muted
+    this.feedback.content = ""
+    this.rebuildRows()
+    let succeeded = false
+    try {
+      await work()
+      succeeded = true
+    } catch (error) {
+      this.feedback.fg = this.theme.error
+      this.feedback.content = errorMessage(error)
+    } finally {
+      this.saving = false
+      if (!this.destroyed && generation === this.generation) {
+        this.rebuildRows()
+        if (succeeded) next?.()
+      }
+    }
+  }
+
+  private async persistSetup(): Promise<void> {
+    if (!this.snapshot) throw new Error("Reload configuration before saving.")
+    const saved = await this.options.save(this.snapshot.revision, cloneConfig(this.draft))
+    this.snapshot = saved
+    this.draft = cloneConfig(saved.config)
+    this.dirty.clear()
+    this.refreshFields()
+  }
+
+  private cancelSignIn(): void {
+    const auth = this.authorization
+    this.authorization = null
+    if (auth && this.provider && this.options.request) {
+      void this.options.request("settings.provider.oauth_complete", {
+        provider: this.provider.name, flow_id: auth.flowId, cancel: true,
+      }).catch(() => {})
+    }
+  }
+
+  private async startSignIn(): Promise<void> {
+    const provider = this.provider
+    if (!provider) return
+    await this.runSetup(async () => {
+      if (!this.options.request) throw new Error("Update the gateway to sign in.")
+      const result = await this.options.request("settings.provider.oauth_login", {
+        provider: provider.name, remote_browser: true, interactive_flow: true,
+      })
+      this.authorization = decodeSetupAuthorization(result)
+      if (!this.authorization) provider.configured = true
+      this.feedback.content = this.authorization?.userCode
+        ? `Enter code in your browser: ${this.authorization.userCode}`
+        : this.authorization ? "Select Open sign-in page to continue in your browser." : "Signed in. Continue to choose a model."
+    })
+  }
+
+  private async completeSignIn(response?: string): Promise<void> {
+    const auth = this.authorization
+    const provider = this.provider
+    if (!auth || !provider) return
+    await this.runSetup(async () => {
+      if (!this.options.request) throw new Error("Update the gateway to sign in.")
+      const result = await this.options.request("settings.provider.oauth_complete", {
+        provider: provider.name, flow_id: auth.flowId,
+        ...(response ? { authorization_response: response } : {}),
+      })
+      if (record(result) && result.status === "pending") {
+        this.feedback.content = "Waiting for browser sign-in. Complete it, then check again."
+        return
+      }
+      const connected = decodeSetupProviders(result).find((item) => item.name === provider.name)
+      if (!connected?.configured) throw new Error("Sign-in did not complete. Try signing in again.")
+      provider.configured = true
+      this.authorization = null
+      this.feedback.content = "Signed in. Continue with your connected account to choose a model."
+    })
+  }
+
+  private async loadSetupModels(): Promise<void> {
+    if (!this.provider) return
+    this.setupStep = "model"
+    this.selected = 0
+    this.models = []
+    this.modelQuery = ""
+    await this.runSetup(async () => {
+      if (!this.options.read) throw new Error("Enter a model ID to continue.")
+      const result = decodeSetupModels(await this.options.read(`/api/settings/provider-models?provider=${encodeURIComponent(this.provider!.name)}`))
+      this.models = result.models
+      this.feedback.content = result.message || (result.models.length ? "" : "No models listed. Enter a model ID or reload the list.")
+    })
+  }
+
+  private chooseSetupModel(model: string): void {
+    this.model = model
+    this.setupStep = "review"
+    this.selected = 0
+    this.feedback.content = "Review your workspace, then save your default model."
+    this.rebuildRows()
+  }
+
+  private async finishSetup(): Promise<void> {
+    if (!this.snapshot || !this.provider || !this.model) return
+    await this.runSetup(async () => {
+      this.draft = setupDraft({ ...this.snapshot!, config: this.draft }, this.provider!.name, this.model)
+      this.dirty.add("/agents/defaults/model")
+      await this.persistSetup()
+      this.setupStep = "done"
+      this.selected = 0
+      this.feedback.fg = this.theme.success
+      this.feedback.content = "Saved. New chats will use your selected model."
+      this.options.onStatus?.("Default model saved")
+    })
+  }
+
+  private askSetup(label: string, secret: boolean, action: (value: string) => void): void {
+    this.beginFieldEdit({ path: "", label, breadcrumb: label, description: "", sectionId: "models",
+      type: "string", value: "", enumValues: [], nullable: false, secret, configured: false,
+      deprecated: false, advanced: false, raw: false })
+    this.inputAction = action
   }
 
   private async save(): Promise<void> {

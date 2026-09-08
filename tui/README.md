@@ -40,11 +40,16 @@ visible in the transcript.
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 
-Use `/config` to edit the complete nanobot configuration without leaving the agent. The first
-view contains only workspace, model, provider, and credentials; domain pages keep low-frequency
-settings under an explicit Advanced row, while `/` inside the editor searches every schema and
-plugin field. Changes remain staged until `Ctrl+S`, secrets never render in the terminal, and
-`Esc` asks before discarding unsaved work.
+Use `/config` to open configuration. **Quick start** guides you through choosing a provider,
+connecting with an API key or browser sign-in, selecting a model, and saving it as your default.
+API credentials are saved when you select **Save connection and choose a model**; OAuth credentials
+are saved when authorization completes. The final step saves your model and workspace choices.
+`nanobot onboard --wizard` opens Quick start directly. Codex supports browser callbacks, Grok
+supports pasted authorization codes, and Copilot displays its device code in the terminal.
+
+The configuration overview also links to advanced settings by domain. `/` searches every schema
+and plugin field outside Quick start. Advanced edits remain staged until `Ctrl+S`; `Esc` asks before
+discarding unsaved work. Secret input is hidden.
 
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` sends immediately,

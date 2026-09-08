@@ -33,7 +33,7 @@ describe("ConfigEditor", () => {
     editor = undefined
   })
 
-  test("keeps essentials on the first screen and finds folded advanced settings", async () => {
+  test("starts with guided setup and finds folded advanced settings", async () => {
     setup = await createTestRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     editor = new ConfigEditor(setup.renderer, theme, {
       load: async () => configSnapshot(),
@@ -47,9 +47,9 @@ describe("ConfigEditor", () => {
     await editor.show()
     await setup.renderOnce()
     const essentials = setup.captureCharFrame()
-    expect(essentials).toContain("Configuration · Essentials")
-    expect(essentials).toContain("Workspace")
-    expect(essentials).toContain("API key")
+    expect(essentials).toContain("Configuration · Overview")
+    expect(essentials).toContain("Quick start")
+    expect(essentials).toContain("account or use an API key")
     expect(essentials).toContain("Models and providers")
     expect(essentials).not.toContain("Max tokens")
 

@@ -158,9 +158,10 @@ follow the printed WebUI **Settings → Models** or `nanobot onboard --wizard` r
 | `nanobot --logs` | Use the classic prompt and show runtime logs while chatting |
 | `nanobot agent --open config` | Start the terminal Agent directly in Configuration |
 
-Inside the native terminal Agent, enter `/config` at any time to edit configuration. The first page
-keeps the essential workspace and model choices visible; section links and `/` search expose the
-complete advanced configuration. Press `Ctrl+S` to persist staged changes.
+Inside the native terminal Agent, enter `/config` to open configuration. Quick start guides you
+through connecting a provider with an API key or browser sign-in, choosing a model, and saving it
+as your default. `nanobot onboard --wizard` opens this guide directly. The overview also links to
+advanced settings; `/` searches them and `Ctrl+S` saves staged advanced edits.
 
 Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved
 conversation, and `/context` explains the compacted summary and raw session suffix available to
