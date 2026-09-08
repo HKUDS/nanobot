@@ -195,8 +195,8 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
-const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
+const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now   Tab send next"
+const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now   Tab next"
 const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
@@ -428,7 +428,7 @@ function connectionStatusText(
       ? "Still getting ready…"
       : "Nanobot is taking longer to respond…"
   }
-  if (status === "error") return "Nanobot unavailable · restart nanobot"
+  if (status === "error") return "Nanobot unavailable   restart nanobot"
   return "Session ended"
 }
 
@@ -458,7 +458,7 @@ interface RenderedRetryStatus extends RetryStatus {
 
 export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
   const label = retryFailureLabel(status.error_kind)
-  if (status.state === "exhausted") return `${label} · ending turn`
+  if (status.state === "exhausted") return `${label}   ending turn`
   if (status.state === "recovered") return "Connection restored"
   if (status.state === "cleared") return "Retry status cleared"
   const remaining = Math.max(
@@ -468,7 +468,7 @@ export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now())
   const attempt = status.max_attempts
     ? `${status.attempt}/${status.max_attempts}`
     : String(status.attempt)
-  return `${label} · retrying in ${remaining}s · attempt ${attempt}`
+  return `${label}   retrying in ${remaining}s   attempt ${attempt}`
 }
 
 export function sessionExitMessage(chatId: string): string {
@@ -1060,7 +1060,7 @@ export class NanobotTui {
     }
     const command = this.commandMenu.resolve(visibleContent)
     if ((command || visibleContent.startsWith("!")) && this.draft.media(visibleContent).length) {
-      this.status.content = "Images cannot be used with commands · remove the image first"
+      this.status.content = "Images cannot be used with commands   remove the image first"
       return
     }
     if (command?.source === "tui") {
@@ -1469,8 +1469,8 @@ export class NanobotTui {
       this.setActive(false)
       this.recoveryNotice.show(state)
       this.status.content = state.can_continue === false
-        ? "Interrupted · dismiss to start a new message"
-        : "Interrupted · continue or dismiss"
+        ? "Interrupted   dismiss to start a new message"
+        : "Interrupted   continue or dismiss"
       this.composer.focus()
       return
     }
@@ -1574,7 +1574,7 @@ export class NanobotTui {
     if (status === "error" && !info) return
     this.connectionMessage = connectionStatusText(status, info)
     if (this.options.desktopGatewayId && status === "error") {
-      this.connectionMessage = "Desktop disconnected or incompatible · exit and run nanobot to reconnect"
+      this.connectionMessage = "Desktop disconnected or incompatible   exit and run nanobot to reconnect"
     }
     if (status === "connected") {
       this.ready = false
@@ -1603,14 +1603,14 @@ export class NanobotTui {
   private renderConnectionMessage(): void {
     this.configEditor.updateConnectionStatus(this.connectionMessage)
     this.status.content = this.unsentSubmit
-      ? `Not sent · press Enter to retry when ready · ${this.connectionMessage}`
+      ? `Not sent   press Enter to retry when ready   ${this.connectionMessage}`
       : this.connectionMessage
   }
 
   private markSubmitUnsent(sendFailed = false): void {
     this.unsentSubmit = true
     if (sendFailed) {
-      this.status.content = "Not sent · send failed; press Enter to retry when ready"
+      this.status.content = "Not sent   send failed; press Enter to retry when ready"
       return
     }
     this.renderConnectionMessage()
@@ -1643,14 +1643,14 @@ export class NanobotTui {
   private renderActiveStatus(): void {
     if (this.sessionLoading || this.sessionMenu.visible) return
     if (this.retryStatus) {
-      const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
-      const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
+      const navigation = this.transcriptNavigation.awayFromBottom ? "   Ctrl+End latest" : ""
+      const queued = this.promptQueue.length ? `   ${this.promptQueue.length} queued` : ""
       this.status.content = `${retryStatusLine(this.retryStatus)}${queued}${navigation}`
       return
     }
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
-    const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
-    const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
+    const navigation = this.transcriptNavigation.awayFromBottom ? "   Ctrl+End latest" : ""
+    const queued = this.promptQueue.length ? `   ${this.promptQueue.length} queued` : ""
     this.status.content = shimmerStatus(
       this.activeLabel,
       `  ${elapsed}${queued}${navigation}`,
@@ -1660,14 +1660,14 @@ export class NanobotTui {
   }
 
   private readyStatus(detail = this.readyDetail): string {
-    if (this.unsentSubmit) return "Not sent · press Enter to retry"
+    if (this.unsentSubmit) return "Not sent   press Enter to retry"
     if (this.transcriptNavigation.awayFromBottom) {
       return this.transcriptNavigation.unseenOutput
-        ? "New output · Ctrl+End latest"
-        : "History · Ctrl+End latest"
+        ? "New output   Ctrl+End latest"
+        : "History   Ctrl+End latest"
     }
-    if (detail) return `Ready · ${detail}`
-    return this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
+    if (detail) return `Ready   ${detail}`
+    return this.historyHasMore ? "Ready   PageUp for earlier history" : "Ready"
   }
 
   private sendNextFollowUp(): void {
@@ -1709,7 +1709,7 @@ export class NanobotTui {
 
   private canSendPrompt(prompt: QueuedPrompt): boolean {
     if (this.draft.hasImageLabelConflict(this.composer.plainText)) {
-      this.status.content = "Duplicate image placeholder text · rename or remove it before sending"
+      this.status.content = "Duplicate image placeholder text   rename or remove it before sending"
       return false
     }
     if (!this.hasPrompt(prompt)) return false
@@ -1730,7 +1730,7 @@ export class NanobotTui {
     if (!this.activeTurn || !this.ready) return
     const visibleContent = this.composer.plainText.trim()
     if (this.draft.media(visibleContent).length) {
-      this.status.content = "Images cannot be queued · press Enter to send now"
+      this.status.content = "Images cannot be queued   press Enter to send now"
       return
     }
     const content = this.draft.expand(visibleContent).trim()
@@ -2402,7 +2402,7 @@ export class NanobotTui {
         return
       }
       this.composer.insertText(insertion.text)
-      this.status.content = `Pasted ${insertion.description} · review before sending`
+      this.status.content = `Pasted ${insertion.description}   review before sending`
     } catch (error) {
       if (
         this.quitting
@@ -2426,7 +2426,7 @@ export class NanobotTui {
     if (!insertion.text) return
     this.composer.insertText(insertion.text)
     if (insertion.compacted) {
-      this.status.content = `Pasted ${insertion.description} · review before sending`
+      this.status.content = `Pasted ${insertion.description}   review before sending`
     }
   }
 
@@ -2554,7 +2554,7 @@ export class NanobotTui {
       this.ready = false
       this.clearPromptQueue()
       this.sessionMetadataId += 1
-      this.sessionTitle = `Fork · ${preview.slice(0, 48)}`
+      this.sessionTitle = `Fork   ${preview.slice(0, 48)}`
       this.host.reportTitle(preview)
       this.contextTokens = null
       this.lastUsage = null
@@ -2712,7 +2712,7 @@ export class NanobotTui {
       return
     }
     if (this.activeTurn && lifecycle === "agent_turn") {
-      this.status.content = "A turn is already running · Ctrl+C to stop"
+      this.status.content = "A turn is already running   Ctrl+C to stop"
       return
     }
     let turnId: string
@@ -2850,7 +2850,7 @@ export class NanobotTui {
         this.apiReauthenticator,
       )
       if (!context) {
-        this.status.content = "Context unavailable · new session or older gateway"
+        this.status.content = "Context unavailable   new session or older gateway"
         return
       }
       this.contextTokens = context.estimatedSessionTokens
@@ -2960,7 +2960,7 @@ export class NanobotTui {
       this.historyBeforeCursor = history.beforeCursor
       this.historyHasMore = history.hasMoreBefore
       this.status.content = history.hasMoreBefore
-        ? `${history.messages.length} earlier messages · PageUp for more`
+        ? `${history.messages.length} earlier messages   PageUp for more`
         : "Start of session"
     } catch (error) {
       if (hydrationId !== this.hydrationId) return

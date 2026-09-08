@@ -273,7 +273,7 @@ export class ConfigEditor {
     })
     this.footer = new TextRenderable(renderer, {
       id: "nanobot-tui-config-footer",
-      content: "↑/↓ move · enter edit · / search · ctrl+s save · esc close",
+      content: "↑/↓ move   enter edit   / search   ctrl+s save   esc close",
       width: "100%",
       height: 1,
       flexShrink: 0,
@@ -306,7 +306,7 @@ export class ConfigEditor {
     this.options.onVisibilityChange?.(true)
     this.feedback.content = "Connecting to gateway…"
     this.rebuildRows()
-    this.footer.content = "Connecting… · Ctrl+C exit"
+    this.footer.content = "Connecting…   Ctrl+C exit"
   }
 
   updateConnectionStatus(message: string): void {
@@ -317,7 +317,7 @@ export class ConfigEditor {
     if (this.loading) return
     this.waitingForGateway = false
     this.onboarding = quickStart
-    this.footer.content = "↑/↓ move · Enter select · / search · Esc back · Ctrl+C exit"
+    this.footer.content = "↑/↓ move   Enter select   / search   Esc back   Ctrl+C exit"
     this.root.visible = true
     this.options.onVisibilityChange?.(true)
     this.loading = true
@@ -443,8 +443,8 @@ export class ConfigEditor {
     this.intro.height = height >= 18 ? 2 : 1
     this.detail.height = height >= 18 ? 2 : 1
     this.footer.content = width >= 72
-      ? "↑/↓ move · enter edit · / search · ctrl+s save · esc back/close"
-      : "↑/↓ · enter · / search · ctrl+s · esc"
+      ? "↑/↓ move   enter edit   / search   ctrl+s save   esc back/close"
+      : "↑/↓   enter   / search   ctrl+s   esc"
     this.renderRows()
   }
 
@@ -511,9 +511,9 @@ export class ConfigEditor {
             this.beginPreset()
           }),
         ] : []),
-        this.action("Sign in with an account", "Quick start · Use your existing subscription in a browser. No API key needed.", () => { void this.startSetup("account") }),
-        this.action("Use an API key", "Quick start · Connect a hosted API or cloud account using its developer credentials.", () => { void this.startSetup("api") }),
-        this.action("Connect a local model", "Quick start · Connect a running local model server, such as Ollama.", () => { void this.startSetup("local") }),
+        this.action("Sign in with an account", "Quick start   Use your existing subscription in a browser. No API key needed.", () => { void this.startSetup("account") }),
+        this.action("Use an API key", "Quick start   Connect a hosted API or cloud account using its developer credentials.", () => { void this.startSetup("api") }),
+        this.action("Connect a local model", "Quick start   Connect a running local model server, such as Ollama.", () => { void this.startSetup("local") }),
         this.action("Advanced settings", "Configure channels, tools, workspace, and other optional settings.", () => {
           this.page = "advanced-home"
           this.selected = 0
@@ -570,8 +570,8 @@ export class ConfigEditor {
     }
     this.updateHeader()
     if (this.page === "setup" && !this.editPurpose) this.footer.content = filtering
-      ? "Type to search · ↑/↓ move · Enter select · Esc back"
-      : "↑/↓ move · Enter select · Esc back"
+      ? "Type to search   ↑/↓ move   Enter select   Esc back"
+      : "↑/↓ move   Enter select   Esc back"
     if (this.loading && !this.rows.length) {
       this.scroll.add(this.rowText("  Preparing the complete settings map…", false, this.theme.muted))
       return
@@ -620,10 +620,10 @@ export class ConfigEditor {
     if (row.kind === "back") return `${marker} ← Configuration`
     if (row.kind === "action") return `${marker} ${row.label}`
     if (row.kind === "advanced") {
-      return `${marker} ${this.advanced ? "▾" : "▸"} Advanced · ${row.count} settings`
+      return `${marker} ${this.advanced ? "▾" : "▸"} Advanced   ${row.count} settings`
     }
     if (row.kind === "section") {
-      return `${marker} → ${row.section.label} · ${row.count} settings`
+      return `${marker} → ${row.section.label}   ${row.count} settings`
     }
     const suffix = row.field.deprecated ? " [legacy]" : ""
     const value = this.page === "setup" && row.field.path.endsWith("/apiBase") && !row.field.value
@@ -636,17 +636,17 @@ export class ConfigEditor {
   private updateHeader(): void {
     const page = this.page === "home" ? this.onboarding ? "Quick start" : "Overview"
       : this.page === "advanced-home" ? "Advanced settings"
-      : this.page === "setup" ? `Quick start · ${this.setupStep === "provider" ? "1/4 Choose a provider"
+      : this.page === "setup" ? `Quick start   ${this.setupStep === "provider" ? "1/4 Choose a provider"
         : this.setupStep === "credentials" ? "2/4 Connect your account"
-          : this.setupStep === "model" ? "3/4 Preset · Choose model"
+          : this.setupStep === "model" ? "3/4 Preset   Choose model"
             : this.setupStep === "review" ? "3/4 Configure preset" : "4/4 Test and chat"}`
-      : this.page === "search" ? `Search · ${this.query || "all settings"}`
+      : this.page === "search" ? `Search   ${this.query || "all settings"}`
         : this.snapshot?.presentation.sections.find((section) => section.id === this.sectionId)?.label
           || "Settings"
-    const dirty = this.dirty.size ? ` · ${this.dirty.size} unsaved` : ""
-    this.header.content = `Configuration · ${page}${dirty}${this.saving ? " · Loading…" : ""}`
+    const dirty = this.dirty.size ? `   ${this.dirty.size} unsaved` : ""
+    this.header.content = `Configuration   ${page}${dirty}${this.saving ? "   Loading…" : ""}`
     this.intro.content = this.page === "home"
-      ? this.activeProvider() ? `${this.activeProvider()!.label} · ${this.snapshot ? activeSetupModel(this.snapshot) : ""}\n${this.tested && this.testedRevision === this.snapshot?.revision ? "Model replied successfully." : "Credentials saved · Model reply not checked in this setup."}`
+      ? this.activeProvider() ? `${this.activeProvider()!.label}   ${this.snapshot ? activeSetupModel(this.snapshot) : ""}\n${this.tested && this.testedRevision === this.snapshot?.revision ? "Model replied successfully." : "Credentials saved   Model reply not checked in this setup."}`
         : "Get started with nanobot.\nConnect a model to send your first message."
       : this.page === "setup" ? this.setupIntro()
       : this.page === "search"
@@ -663,10 +663,10 @@ export class ConfigEditor {
     }
     if (row.kind === "field") {
       const secret = row.field.secret
-        ? row.field.configured ? " · secret is configured" : " · secret is not set"
+        ? row.field.configured ? "   secret is configured" : "   secret is not set"
         : ""
       const choices = row.field.enumValues.length
-        ? ` · choices: ${row.field.enumValues.map(String).join(", ")}` : ""
+        ? `   choices: ${row.field.enumValues.map(String).join(", ")}` : ""
       this.detail.content = `${row.field.description || row.field.breadcrumb}${secret}${choices}`
     } else if (row.kind === "action") {
       this.detail.content = row.description
@@ -783,8 +783,8 @@ export class ConfigEditor {
     this.secretValue = ""
     this.editorFrame.visible = true
     this.editorLabel.content = field.secret
-      ? `${field.breadcrumb} · type a replacement · Enter apply · Esc cancel`
-      : `${field.breadcrumb} · Enter apply · Shift+Enter newline · Esc cancel`
+      ? `${field.breadcrumb}   type a replacement   Enter apply   Esc cancel`
+      : `${field.breadcrumb}   Enter apply   Shift+Enter newline   Esc cancel`
     this.editorInput.visible = !field.secret
     this.secretInput.visible = field.secret
     if (field.secret) {
@@ -805,7 +805,7 @@ export class ConfigEditor {
     this.editorFrame.visible = true
     this.editorInput.visible = true
     this.secretInput.visible = false
-    this.editorLabel.content = "Search every setting · Enter search · Esc cancel"
+    this.editorLabel.content = "Search every setting   Enter search   Esc cancel"
     this.editorInput.setText(this.query)
     this.editorInput.cursorOffset = this.query.length
     this.editorInput.focus()
@@ -876,8 +876,8 @@ export class ConfigEditor {
     this.editorInput.visible = true
     this.secretInput.visible = false
     this.footer.content = this.terminalWidth >= 72
-      ? "↑/↓ move · enter edit · / search · ctrl+s save · esc back/close"
-      : "↑/↓ · enter · / search · ctrl+s · esc"
+      ? "↑/↓ move   enter edit   / search   ctrl+s save   esc back/close"
+      : "↑/↓   enter   / search   ctrl+s   esc"
   }
 
   private renderSecretInput(): void {
@@ -887,8 +887,8 @@ export class ConfigEditor {
 
   private updateFooterForInput(): void {
     this.footer.content = this.editingField?.secret
-      ? "Input is hidden · enter apply · backspace erase · esc cancel"
-      : "enter apply · shift+enter newline · esc cancel"
+      ? "Input is hidden   enter apply   backspace erase   esc cancel"
+      : "enter apply   shift+enter newline   esc cancel"
   }
 
   private handlePaste = (event: PasteEvent): void => {
@@ -906,12 +906,12 @@ export class ConfigEditor {
   private setupIntro(): string {
     if (this.setupStep === "provider") return `${this.providerGroup === "account" ? "Sign in with an account" : this.providerGroup === "local" ? "Connect a local model" : "Use an API key or cloud credentials"}\nType a provider name to narrow the list.`
     if (this.authorization?.userCode) return `Open the sign-in page and enter code: ${this.authorization.userCode}`
-    if (this.setupStep === "credentials") return `${this.provider?.label || "Provider"} · ${this.provider?.oauth
+    if (this.setupStep === "credentials") return `${this.provider?.label || "Provider"}   ${this.provider?.oauth
       ? `${setupProviderStatus(this.provider)}\n${this.provider.configured ? "Sign in again, or continue with saved credentials and test access." : "Sign in with your account. No API key needed."}` : "Use credentials from this provider's developer console."}`
-    if (this.setupStep === "model") return `${this.provider?.label} · ${this.provider ? setupProviderStatus(this.provider) : ""}\nType to find a model, or enter its exact ID below.`
-    if (this.setupStep === "review") return `${this.provider?.label} · ${this.existingPresetName ? "Edit saved preset" : "Create a model preset"}\nA preset saves your model and generation settings together.`
+    if (this.setupStep === "model") return `${this.provider?.label}   ${this.provider ? setupProviderStatus(this.provider) : ""}\nType to find a model, or enter its exact ID below.`
+    if (this.setupStep === "review") return `${this.provider?.label}   ${this.existingPresetName ? "Edit saved preset" : "Create a model preset"}\nA preset saves your model and generation settings together.`
     return this.tested ? "Model replied successfully. You're ready to chat."
-      : `Preset ${this.presetName} saved · Model reply not verified.\nSend one short test message. Provider charges may apply.`
+      : `Preset ${this.presetName} saved   Model reply not verified.\nSend one short test message. Provider charges may apply.`
   }
 
   private activeProvider(): SetupProvider | undefined {
@@ -942,7 +942,7 @@ export class ConfigEditor {
         (this.providerGroup === "account" ? provider.oauth : this.providerGroup === "local" ? provider.local : !provider.oauth && !provider.local)
         && `${provider.name} ${provider.label}`.toLocaleLowerCase().includes(this.providerQuery.toLocaleLowerCase()),
       ).map((provider) => this.action(
-        `${provider.label} · ${setupProviderStatus(provider)}`,
+        `${provider.label}   ${setupProviderStatus(provider)}`,
         provider.oauth ? "Saved credentials may have expired or been revoked. Sign in again, or continue and test your preset."
           : "Use this provider's API key and endpoint. You will configure a model preset next.",
         () => {
@@ -1071,15 +1071,15 @@ export class ConfigEditor {
       const preset = this.preset
       const presets = record(this.snapshot?.config.modelPresets) ? this.snapshot!.config.modelPresets : {}
       return [
-        this.action(`Preset name · ${this.presetName}`, this.existingPresetName
+        this.action(`Preset name   ${this.presetName}`, this.existingPresetName
           ? "Editing this saved preset also affects chats that use it. Rename in Advanced settings."
           : "Give this configuration a name, such as Coding or Fast replies.", () => {
           if (!this.existingPresetName) this.askSetup("Preset name", false, (value) => {
             this.presetName = value.trim(); this.rebuildRows()
           }, this.presetName)
         }),
-        this.action(`Model · ${preset.model || "Choose a model"}`, "Choose the model this preset will use.", () => { void this.loadSetupModels() }),
-        this.action(`Use as default · ${this.makeDefault ? "Yes" : "No"}`, "Use this preset for new chats. Existing chats keep their selection.", () => {
+        this.action(`Model   ${preset.model || "Choose a model"}`, "Choose the model this preset will use.", () => { void this.loadSetupModels() }),
+        this.action(`Use as default   ${this.makeDefault ? "Yes" : "No"}`, "Use this preset for new chats. Existing chats keep their selection.", () => {
           this.makeDefault = !this.makeDefault; this.rebuildRows()
         }),
         this.action(this.generationOptions ? "Hide generation settings" : "Generation settings", "Adjust output length, context window, temperature, and reasoning effort.", () => {
@@ -1090,7 +1090,7 @@ export class ConfigEditor {
           ["contextWindowTokens", "Context window", "Set the context capacity supported by your model."],
           ["temperature", "Temperature", "Randomness from 0 to 2; lower values give more consistent replies."],
           ["reasoningEffort", "Reasoning effort", "Use a value supported by your model, or leave empty for its default."],
-        ] as const).map(([key, label, description]) => this.action(`${label} · ${preset[key] ?? "Model default"}`, description, () => {
+        ] as const).map(([key, label, description]) => this.action(`${label}   ${preset[key] ?? "Model default"}`, description, () => {
           this.askSetup(label, false, (value) => {
             if (key === "reasoningEffort") preset[key] = value.trim() || null
             else {
@@ -1102,7 +1102,7 @@ export class ConfigEditor {
         })) : []),
         this.action(this.makeDefault ? "Save preset and use as default" : "Save preset", "Save the named preset and its generation settings together.", () => { void this.finishSetup() }),
         ...Object.entries(presets).filter(([name, value]) => name !== this.existingPresetName && record(value) && value.provider === this.provider?.name)
-          .map(([name, value]) => this.action(`Edit preset · ${name}`, "Load this saved preset. This replaces the unsaved preset form.", () => {
+          .map(([name, value]) => this.action(`Edit preset   ${name}`, "Load this saved preset. This replaces the unsaved preset form.", () => {
             this.preset = { ...newSetupPreset(this.snapshot!, this.provider!.name), ...value as SetupPreset }
             this.presetName = name; this.existingPresetName = name; this.rebuildRows()
           })),

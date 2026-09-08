@@ -62,7 +62,7 @@ export class ContextPanel {
   }
 
   show(context: SessionContextSnapshot): void {
-    this.stats.content = `~${formatTokenCount(context.estimatedSessionTokens)} tokens · ${context.replayMessages} replay · ${context.archivedMessages} archived`
+    this.stats.content = `~${formatTokenCount(context.estimatedSessionTokens)} tokens   ${context.replayMessages} replay   ${context.archivedMessages} archived`
     this.summary.content = context.archivedSummary ?? ""
     this.root.visible = true
   }

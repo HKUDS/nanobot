@@ -577,7 +577,7 @@ export class Transcript {
     const hidden = activity.lines.length - visibleSteps
     const disclosure = hidden > 0 ? `${hidden} earlier steps` : `${activity.lines.length} steps`
     activity.text.content = [
-      `  … ${disclosure} · Ctrl+O expand`,
+      `  … ${disclosure}   Ctrl+O expand`,
       ...visible.map((item) => item.text),
     ].join("\n")
   }

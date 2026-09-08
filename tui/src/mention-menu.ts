@@ -57,7 +57,7 @@ export class MentionMenu {
     this.picker = new PickerMenu(renderer, theme, {
       id: "nanobot-tui-mention-menu",
       searchText: (item) => `${item.name} ${item.displayName} ${item.description}`,
-      render: (item) => `${item.displayName}  @${item.name} · ${item.kind}`,
+      render: (item) => `${item.displayName}  @${item.name}   ${item.kind}`,
       emptyText: "No matching sessions or tools",
     })
     this.root = this.picker.root

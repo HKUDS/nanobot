@@ -75,7 +75,7 @@ describe("ConfigEditor", () => {
     await editor.show()
     await setup.renderOnce()
     const essentials = setup.captureCharFrame()
-    expect(essentials).toContain("Configuration · Overview")
+    expect(essentials).toContain("Configuration   Overview")
     expect(essentials).toContain("Quick start")
     expect(essentials).toContain("Use an API key")
     expect(essentials).toContain("Advanced settings")
@@ -87,7 +87,7 @@ describe("ConfigEditor", () => {
     setup.mockInput.pressEnter()
     await setup.renderOnce()
     const search = setup.captureCharFrame()
-    expect(search).toContain("Configuration · Search · max tokens")
+    expect(search).toContain("Configuration   Search   max tokens")
     expect(search).toContain("Max tokens")
   })
 

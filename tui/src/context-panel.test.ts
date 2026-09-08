@@ -36,7 +36,7 @@ describe("ContextPanel", () => {
     await setup.renderOnce()
 
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("~950 tokens · 8 replay · 0 archived")
+    expect(frame).toContain("~950 tokens   8 replay   0 archived")
     expect(frame).not.toContain("Agent context")
     expect(frame).not.toContain("no compacted summary")
   })

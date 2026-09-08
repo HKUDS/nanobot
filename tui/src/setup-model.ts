@@ -59,7 +59,7 @@ export function setupProviderStatus(provider: SetupProvider): string {
   if (provider.oauth && provider.expiresAt !== null && provider.expiresAt <= Date.now()) {
     return "Token expired"
   }
-  if (provider.configured) return provider.oauth ? "Saved · Not verified" : "Credentials saved"
+  if (provider.configured) return provider.oauth ? "Saved   Not verified" : "Credentials saved"
   return provider.oauth ? "Account" : provider.local ? "Local server" : provider.keyRequired ? "API key" : "Cloud / API connection"
 }
 

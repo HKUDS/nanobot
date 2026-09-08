@@ -237,7 +237,7 @@ describe("NanobotTui layout", () => {
     expect(frame).toContain("✓ Read  config.json")
     expect(frame).not.toContain("› Read")
     expect(frame).not.toContain("private chain of thought")
-    expect(frame).toContain("Ready · 1.2s")
+    expect(frame).toContain("Ready   1.2s")
   })
 
   test("waits for an IME commit before reading the submitted text", async () => {
@@ -659,7 +659,7 @@ describe("NanobotTui layout", () => {
     ui.composer.setText("first")
     ui.composer.submit()
     await waitUntil(() => sent.length === 1)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now   Tab send next")
 
     ui.composer.setText("one more detail")
     await setup.flush()
@@ -669,7 +669,7 @@ describe("NanobotTui layout", () => {
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
     expect(ui.status.plainText).not.toContain("Steering")
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now   Tab send next")
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],
       mcpPresets: [],
@@ -1780,7 +1780,7 @@ describe("NanobotTui layout", () => {
       expect(ui.runtimeControls.contextText.plainText).toContain("~2.2k ctx")
       const frame = setup.captureCharFrame()
 
-      expect(frame).toContain("~2.2k tokens · 10 replay · 16 archived")
+      expect(frame).toContain("~2.2k tokens   10 replay   16 archived")
       expect(frame).toContain("The earlier turns agreed on a release plan.")
       expect(frame).not.toContain("Agent context")
       expect(frame).not.toContain("summary active")
@@ -1860,8 +1860,8 @@ describe("NanobotTui layout", () => {
     await waitUntil(() => ui.diffViewer.visible)
     await setup.flush()
     let frame = setup.captureCharFrame()
-    expect(frame).toContain("Diff · Last turn · 2 changes · +3 -1")
-    expect(frame).toContain("1/2 · src/first.ts · +2 -1")
+    expect(frame).toContain("Diff   Last turn   2 changes   +3 -1")
+    expect(frame).toContain("1/2   src/first.ts   +2 -1")
     expect(frame).toContain("const newValue = 2")
     expect(frame).toContain("Diff truncated by the gateway")
     expect(frame).not.toContain("Ask nanobot anything")
@@ -1869,7 +1869,7 @@ describe("NanobotTui layout", () => {
     setup.mockInput.pressArrow("right")
     await setup.flush()
     frame = setup.captureCharFrame()
-    expect(frame).toContain("2/2 · src/second.py · +1 -0")
+    expect(frame).toContain("2/2   src/second.py   +1 -0")
     expect(frame).toContain("print('hello')")
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
@@ -1879,7 +1879,7 @@ describe("NanobotTui layout", () => {
 
     setup.resize(52, 18)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("←/→ file · pgup/pgdn · esc")
+    expect(setup.captureCharFrame()).toContain("←/→ file   pgup/pgdn   esc")
 
     setup.mockInput.pressEscape()
     await waitUntil(() => !ui.diffViewer.visible)
@@ -1977,9 +1977,9 @@ describe("NanobotTui layout", () => {
       expect(frame).not.toContain("Steer this turn…")
       expect(frame).not.toContain("Ask a follow-up…")
       if (width >= 40 && height >= 9) {
-        expect(occurrences(frame, "Enter send now · Tab send next")).toBe(1)
+        expect(occurrences(frame, "Enter send now   Tab send next")).toBe(1)
       } else if (width >= 28 && height >= 9) {
-        expect(occurrences(frame, "Enter now · Tab next")).toBe(1)
+        expect(occurrences(frame, "Enter now   Tab next")).toBe(1)
       }
       expect(occurrences(frame, "default ▾")).toBe(height >= 14 ? 1 : 0)
     }
@@ -2341,8 +2341,8 @@ describe("NanobotTui layout", () => {
     })
     await setup.flush()
 
-    const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
-    expect(footer).toContain("Ready · 1.7s")
+    const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready   1.7s")) || ""
+    expect(footer).toContain("Ready   1.7s")
     expect(footer).toContain("11% context")
   })
 
@@ -2587,7 +2587,7 @@ describe("NanobotTui layout", () => {
     }
     const status = ui.status
     expect(status.plainText).toMatch(/^Thinking\s+0s/u)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now   Tab send next")
     expect(ui.composerFrame.height).toBe(3)
     const shimmerColors = new Set(
       status.content.chunks
@@ -2641,7 +2641,7 @@ describe("NanobotTui layout", () => {
       retry_after_s: 5,
     })
     expect(ui.status.plainText).toMatch(
-      /^Could not connect to the model provider · retrying in [45]s · attempt 1\/4/u,
+      /^Could not connect to the model provider   retrying in [45]s   attempt 1\/4/u,
     )
 
     app.accept({
@@ -2706,7 +2706,7 @@ describe("NanobotTui layout", () => {
     await setup.renderOnce()
     let frame = setup.captureCharFrame()
 
-    expect(frame).toContain("7 earlier steps · Ctrl+O expand")
+    expect(frame).toContain("7 earlier steps   Ctrl+O expand")
     expect(frame).not.toContain("tool_0")
     expect(frame).toContain("tool_7")
     expect(frame).toContain("tool_9")
@@ -2762,7 +2762,7 @@ describe("NanobotTui layout", () => {
     await setup.renderOnce()
     let frame = setup.captureCharFrame()
 
-    expect(frame).toContain("6 steps · Ctrl+O expand")
+    expect(frame).toContain("6 steps   Ctrl+O expand")
     expect(frame).toContain("✓ Read 6 files")
     expect(frame).not.toContain("src/file-0.ts")
 
@@ -2927,7 +2927,7 @@ describe("NanobotTui layout", () => {
       attempt: 9,
       elapsedMs: 3_800,
     })
-    expect(ui.status.plainText).toBe("Nanobot unavailable · restart nanobot")
+    expect(ui.status.plainText).toBe("Nanobot unavailable   restart nanobot")
     expect(ui.status.plainText).not.toContain("gateway")
     expect(ui.status.plainText).not.toContain("127.0.0.1")
     expect(ui.status.plainText).not.toContain("HTTP")
@@ -3141,14 +3141,14 @@ describe("NanobotTui layout", () => {
 
       expect(sent).toEqual([])
       expect(composer.plainText).toBe("sent during reconnect")
-      expect(ui.status.plainText).toContain("Not sent · press Enter to retry when ready")
+      expect(ui.status.plainText).toContain("Not sent   press Enter to retry when ready")
 
       resolveReconnect(new Response(JSON.stringify({
         messages: [{ role: "assistant", content: "restored history" }],
         page: { has_more_before: false },
       })))
       await waitUntil(() => ui.ready)
-      expect(ui.status.plainText).toBe("Not sent · press Enter to retry")
+      expect(ui.status.plainText).toBe("Not sent   press Enter to retry")
       composer.submit()
       await waitUntil(() => sent.length === 1)
       await setup.flush()
@@ -3328,7 +3328,7 @@ describe("NanobotTui layout", () => {
       await setup.renderOnce()
 
       const frame = setup.captureCharFrame()
-      expect(frame).toContain("Configuration · Overview")
+      expect(frame).toContain("Configuration   Overview")
       expect(frame).toContain("Advanced settings")
       expect(frame).not.toContain("Max tokens")
       expect(sent).toEqual([])
@@ -3411,7 +3411,7 @@ describe("NanobotTui layout", () => {
     try {
       await setup.renderOnce()
       expect(ui.configEditor.visible).toBe(true)
-      expect(setup.captureCharFrame()).toContain("Configuration · Quick start")
+      expect(setup.captureCharFrame()).toContain("Configuration   Quick start")
       expect(setup.captureCharFrame()).toContain("Sign in with an account")
       const menuRow = () => setup!.captureCharFrame().split("\n").findIndex((line) => line.includes("Sign in with an account"))
       const initialMenuRow = menuRow()
@@ -3422,7 +3422,7 @@ describe("NanobotTui layout", () => {
       expect(setup.captureCharFrame()).toContain("Connecting")
       setup.mockInput.pressEnter()
       await setup.renderOnce()
-      expect(setup.captureCharFrame()).toContain("Configuration · Quick start")
+      expect(setup.captureCharFrame()).toContain("Configuration   Quick start")
 
       ui.useGatewayConnection("http://nanobot.test", "token")
       await waitUntil(() => ui.configEditor.visible && !ui.configEditor.loading && !ui.configEditor.saving)
@@ -3563,7 +3563,7 @@ describe("NanobotTui with a Herdr pane title reporter", () => {
     expect(activeFrame).toContain("default ▾")
     expect(occurrences(activeFrame, "› Ship the Herdr integration")).toBe(1)
     expect(occurrences(activeFrame, "app.ts")).toBe(1)
-    expect(ui.composer.placeholder).toBe("Enter send now · Tab send next")
+    expect(ui.composer.placeholder).toBe("Enter send now   Tab send next")
     expect(ui.composerFrame.height).toBe(3)
     expect(titles).toEqual(["Ship the Herdr integration"])
 
