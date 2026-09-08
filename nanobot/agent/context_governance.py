@@ -717,8 +717,11 @@ class ContextGovernor:
                 tool_call_id,
                 config.session_key or "default",
             )
-            content = result
-        if isinstance(content, str) and len(content) > config.max_tool_result_chars:
+            return truncate_text(result, config.max_tool_result_chars) if isinstance(result, str) else result
+        # A complete reference is the minimum useful output: cutting its path
+        # loses access to the original. The helper bounds previews and keeps
+        # this indivisible metadata even for budgets smaller than the path.
+        if config.workspace is None and isinstance(content, str):
             return truncate_text(content, config.max_tool_result_chars)
         return content
 

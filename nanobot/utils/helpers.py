@@ -606,19 +606,36 @@ def maybe_persist_tool_result(
     max_chars: int,
     read_file_available: bool | None = None,
 ) -> Any:
-    """Persist oversized tool output and replace it with a stable reference string."""
+    """Offload oversized strings/text blocks; complete references are indivisible.
+
+    ``max_chars`` bounds each text preview, with a complete reference as the
+    minimum output when its path alone cannot fit the configured budget.
+    """
     if workspace is None or max_chars <= 0:
         return content
+
+    if isinstance(content, list):
+        # Normalize text blocks independently so replacing inline images with
+        # persistence placeholders cannot change the text's normalization.
+        blocks: list[Any] = []
+        for index, raw_block in enumerate(cast(list[object], content)):
+            block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
+            if block is not None and block.get("type") == "text" and isinstance(block.get("text"), str):
+                blocks.append({
+                    **block,
+                    "text": maybe_persist_tool_result(
+                        workspace, session_key, f"{tool_call_id}_text_{index}", block["text"],
+                        max_chars=max_chars, read_file_available=read_file_available,
+                    ),
+                })
+            else:
+                blocks.append(raw_block)
+        return blocks
 
     text_payload: str | None = None
     suffix = "txt"
     if isinstance(content, str):
         text_payload = content
-    elif isinstance(content, list):
-        text_payload = stringify_text_blocks(cast(list[object], content))
-        if text_payload is None:
-            return cast(Any, content)
-        suffix = "json"
     else:
         return content
 
@@ -633,10 +650,7 @@ def maybe_persist_tool_result(
         logger.exception("Failed to clean stale tool result buckets in {}", root)
     path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
     if not path.exists():
-        if suffix == "json" and isinstance(content, list):
-            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
-        else:
-            _write_text_atomic(path, text_payload)
+        _write_text_atomic(path, text_payload)
 
     preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
     try:

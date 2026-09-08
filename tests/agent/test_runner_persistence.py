@@ -334,3 +334,66 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
     assert tool_message["content"] == "tool result"
+
+
+async def test_mixed_tool_text_survives_model_save_replay(tmp_path):
+    from nanobot.agent.context_governance import ContextGovernanceConfig, ContextGovernor
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.session.manager import Session
+
+    tools = ToolRegistry()
+    reader = ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path)
+    tools.register(reader)
+    config = ContextGovernanceConfig(
+        provider=MagicMock(), model="test", tools=tools, workspace=tmp_path,
+        session_key="mixed", max_tool_result_chars=2048,
+    )
+    raw = "start-" + "x" * 20_000 + "-end"
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}}
+    messages = [
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "mixed", "type": "function",
+            "function": {"name": "custom_image_tool", "arguments": "{}"},
+        }]},
+        {"role": "tool", "name": "custom_image_tool", "tool_call_id": "mixed",
+         "content": [{"type": "text", "text": raw}, image]},
+    ]
+    governor = ContextGovernor()
+    live = governor.prepare_messages_for_model(config, messages)
+    reference = live[-1]["content"][0]["text"]
+    assert len(reference) <= 2048
+    assert live[-1]["content"][1] == image
+    loop = AgentLoop.__new__(AgentLoop)
+    session = Session(key="mixed")
+    loop._save_turn(session, live, skip=0)
+    replay = governor.prepare_messages_for_model(config, session.get_history())
+    assert replay[-1]["content"][0]["text"] == reference
+    assert "data:image" not in str(replay[-1]["content"])
+    readback = await reader.execute(path=".nanobot/tool-results/mixed/mixed_text_0.txt")
+    assert raw in readback
+    assert messages[-1]["content"][0]["text"] == raw
+
+
+async def test_tiny_budget_keeps_complete_readable_reference(tmp_path):
+    from nanobot.agent.context_governance import ContextGovernanceConfig, ContextGovernor
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    tools = ToolRegistry()
+    reader = ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path)
+    tools.register(reader)
+    session_key = "review-session-0123456789-0123456789"
+    call_id = "call_012345678901234567890123456789"
+    config = ContextGovernanceConfig(
+        provider=MagicMock(), model="test", tools=tools, workspace=tmp_path,
+        session_key=session_key, max_tool_result_chars=64,
+    )
+    raw = "y" * 20_000
+    reference = ContextGovernor.normalize_tool_result(config, call_id, "exec", raw)
+    assert reference.startswith("[truncated: ") and reference.endswith("]")
+    path = reference.removeprefix("[truncated: ").removesuffix("]")
+    assert raw in await reader.execute(path=path)
+    assert ContextGovernor.normalize_tool_result(config, call_id, "exec", reference) == reference
+    assert (tmp_path / path).read_text(encoding="utf-8") == raw
