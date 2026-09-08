@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -16,6 +18,8 @@ from nanobot.providers.factory import make_provider
 
 async def test_provider_connection(config: Config, payload: dict[str, Any]) -> dict[str, Any]:
     """Send one short prompt to exactly the requested provider, without tools or fallback."""
+    if payload.get("check_credentials") is True:
+        return await check_oauth_access(config, payload)
     preset_name = payload.get("preset_name")
     if preset_name is not None:
         if not isinstance(preset_name, str) or preset_name not in config.model_presets:
@@ -70,3 +74,49 @@ async def test_provider_connection(config: Config, payload: dict[str, Any]) -> d
     else:
         message = "No model reply received. Check connection and model access, then retry."
     return {"status": "error", "message": message, "elapsed_seconds": elapsed}
+
+
+async def check_oauth_access(config: Config, payload: dict[str, Any]) -> dict[str, Any]:
+    """Check the live authenticated catalog, never a cached or built-in fallback."""
+    name = payload.get("provider")
+    if name not in ("xai_grok", "openai_codex", "github_copilot"):
+        return {"status": "error", "message": "Account checks are unavailable for this provider."}
+    resolved = resolve_config_env_vars(config.model_copy(deep=True))
+    proxy = getattr(resolved.providers, name).proxy or None
+    try:
+        if name == "xai_grok":
+            from nanobot.providers.xai_grok_provider import check_xai_grok_access
+            check = check_xai_grok_access
+        elif name == "openai_codex":
+            from nanobot.providers.openai_codex_provider import check_openai_codex_access
+            check = check_openai_codex_access
+        else:
+            from nanobot.providers.github_copilot_provider import check_github_copilot_access
+            check = check_github_copilot_access
+        async with asyncio.timeout(18):
+            await asyncio.to_thread(check, proxy)
+        return {"status": "available", "message": "Account accepted by the model catalog. Test a preset to check a model reply."}
+    except Exception as exc:
+        status = getattr(exc, "status_code", None)
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+        # oauth-cli-kit currently wraps refresh failures in an unstructured RuntimeError.
+        # Parse only its fixed prefix and OAuth error code; never return the response body.
+        oauth_error = getattr(exc, "oauth_error", None)
+        refresh = re.match(r"^Token refresh failed: (\d{3}) (.*)$", str(exc), re.DOTALL)
+        if refresh:
+            status = int(refresh[1])
+            try:
+                body = json.loads(refresh[2])
+                oauth_error = cast(dict[str, Any], body).get("error") if isinstance(body, dict) else None
+            except ValueError:
+                pass
+        missing = str(exc) in (
+            "OAuth credentials not found. Please run the login command.",
+            "GitHub Copilot is not logged in",
+        )
+        if missing or status in (401, 403) or oauth_error == "invalid_grant":
+            return {"status": "signin_required", "message": "Credentials rejected. Sign in again."}
+        if isinstance(exc, (TimeoutError, httpx.RequestError)) or isinstance(exc.__cause__, httpx.RequestError):
+            return {"status": "unreachable", "message": "Could not reach the provider. Check the network and retry."}
+        return {"status": "error", "message": "Account check failed. Retry or sign in again."}

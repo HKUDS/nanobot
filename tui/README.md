@@ -45,6 +45,13 @@ account**, **Use an API key**, or **Connect a local model**. Type to search prov
 results appear eight at a time. If your default already has credentials, you can continue chatting
 or configure a preset without repeating sign-in.
 
+Opening the account list checks saved credentials against each provider's live authenticated model
+catalog in the background. Status shows **Checking…**, **Available**, **Sign in again**,
+**Network error**, or **Check failed**. These checks bypass cached and built-in model lists,
+refresh tokens when needed, and send no chat messages. **Reload providers** repeats the checks.
+An accepted account does not guarantee access or quota for every model; test the saved preset to
+verify a model reply.
+
 Browser sign-in opens automatically. Codex receives its callback on the terminal machine;
 Copilot displays a device code and waits for approval. Grok asks for the authorization code.
 **Browser didn't open?** exposes copy-link, manual callback, and restart options. If the local

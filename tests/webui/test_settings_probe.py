@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -100,3 +101,38 @@ async def test_probe_rejects_missing_saved_preset(monkeypatch):
 
     monkeypatch.setattr("nanobot.webui.settings_probe.make_provider", forbidden)
     assert (await probe(Config(), {"preset_name": "missing"}))["status"] == "error"
+
+
+@pytest.mark.parametrize("name", ["xai_grok", "openai_codex", "github_copilot"])
+async def test_account_check_uses_live_provider_access_without_chat(monkeypatch, name):
+    calls = []
+
+    def check(proxy):
+        calls.append(proxy)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Account check must not instantiate a chat provider")
+
+    monkeypatch.setattr(f"nanobot.providers.{name}_provider.check_{name}_access", check)
+    monkeypatch.setattr("nanobot.webui.settings_probe.make_provider", forbidden)
+    result = await probe(Config(), {"provider": name, "check_credentials": True})
+    assert result["status"] == "available"
+    assert calls == [None]
+
+
+@pytest.mark.parametrize(("failure", "expected"), [
+    (httpx.HTTPStatusError("secret", request=httpx.Request("GET", "https://example.test"),
+                          response=httpx.Response(401)), "signin_required"),
+    (httpx.ConnectError("secret"), "unreachable"),
+    (TimeoutError("secret"), "unreachable"),
+    (RuntimeError('Token refresh failed: 400 {"error":"invalid_grant","secret":"hidden"}'), "signin_required"),
+    (RuntimeError("secret"), "error"),
+])
+async def test_account_check_distinguishes_rejected_credentials_from_network(monkeypatch, failure, expected):
+    def check(proxy):
+        raise failure
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider.check_xai_grok_access", check)
+    result = await probe(Config(), {"provider": "xai_grok", "check_credentials": True})
+    assert result["status"] == expected
+    assert "secret" not in str(result)

@@ -133,6 +133,7 @@ export class ConfigEditor {
   private pendingCallback: { auth: SetupAuthorization; response: string } | null = null
   private connectionOptions = false
   private authorizationSubmitted = false
+  private accountChecks = new WeakMap<SetupProvider, number>()
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -948,7 +949,7 @@ export class ConfigEditor {
         && `${provider.name} ${provider.label}`.toLocaleLowerCase().includes(this.providerQuery.toLocaleLowerCase()),
       ).map((provider) => this.action(
         `${provider.label}   ${setupProviderStatus(provider)}`,
-        provider.oauth ? "Saved credentials may have expired or been revoked. Sign in again, or continue and test your preset."
+        provider.oauth ? provider.accessMessage || "Checks account access in the background. Select an account to sign in or configure a preset."
           : "Use this provider's API key and endpoint. You will configure a model preset next.",
         () => {
           this.cancelSignIn()
@@ -1157,6 +1158,33 @@ export class ConfigEditor {
       if (!this.options.read) throw new Error("Update the gateway to use guided setup.")
       this.providers = decodeSetupProviders(await this.options.read("/api/settings"))
     })
+    void this.checkAccounts()
+  }
+
+  private async checkAccounts(only?: SetupProvider): Promise<void> {
+    if (!this.options.request || this.providerGroup !== "account") return
+    const generation = this.generation
+    await Promise.all(this.providers.filter((provider) => (!only || provider === only) && provider.oauth && (provider.configured || provider.expiresAt !== null)).map(async (provider) => {
+      const version = (this.accountChecks.get(provider) || 0) + 1
+      this.accountChecks.set(provider, version)
+      provider.accessStatus = "checking"
+      this.rebuildRows()
+      try {
+        const result = await this.options.request!("settings.provider.test", {
+          provider: provider.name, check_credentials: true,
+        })
+        if (this.destroyed || generation !== this.generation || !this.providers.includes(provider) || this.accountChecks.get(provider) !== version) return
+        if (record(result) && ["available", "signin_required", "unreachable", "error"].includes(String(result.status))) {
+          provider.accessStatus = result.status as SetupProvider["accessStatus"]
+          provider.accessMessage = typeof result.message === "string" ? stripAnsiSequences(result.message).replace(/[\r\n]+/gu, " ") : ""
+        } else provider.accessStatus = "error"
+      } catch {
+        if (this.destroyed || generation !== this.generation || !this.providers.includes(provider) || this.accountChecks.get(provider) !== version) return
+        provider.accessStatus = "error"
+        provider.accessMessage = "Account check failed. Reload providers to retry."
+      }
+      if (!this.authorization && !this.signInBusy) this.rebuildRows()
+    }))
   }
 
   private async runSetup(work: () => Promise<void>, next?: () => void): Promise<void> {
@@ -1213,6 +1241,9 @@ export class ConfigEditor {
   private async startSignIn(): Promise<void> {
     const provider = this.provider
     if (!provider) return
+    this.accountChecks.set(provider, (this.accountChecks.get(provider) || 0) + 1)
+    provider.accessStatus = undefined
+    provider.accessMessage = undefined
     await this.runSetup(async () => {
       if (!this.options.request) throw new Error("Update the gateway to sign in.")
       const result = await this.options.request("settings.provider.oauth_login", {
@@ -1249,7 +1280,7 @@ export class ConfigEditor {
       }
     }, () => {
       if (this.authorization) this.scheduleSignIn()
-      else if (provider.configured) this.beginPreset()
+      else if (provider.configured) { this.beginPreset(); void this.checkAccounts(provider) }
     })
   }
 
@@ -1291,6 +1322,7 @@ export class ConfigEditor {
       this.stopCallback = null
       this.cancelInput()
       this.beginPreset()
+      void this.checkAccounts(provider)
     } catch (error) {
       if (!this.destroyed && this.authorization === auth) {
         this.signInHelp = true

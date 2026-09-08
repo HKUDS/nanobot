@@ -344,6 +344,11 @@ def invalidate_github_copilot_model_catalog() -> None:
     _GITHUB_COPILOT_MODEL_CATALOG.invalidate()
 
 
+def check_github_copilot_access(proxy: str | None = None) -> None:
+    """Check authenticated model access without cached or built-in catalog fallback."""
+    _fetch_github_copilot_models(proxy)
+
+
 def _fetch_github_copilot_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
     github_token = get_storage().load()
     if not github_token or not github_token.access:

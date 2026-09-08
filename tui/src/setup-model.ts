@@ -7,6 +7,8 @@ export interface SetupProvider {
   oauth: boolean
   configured: boolean
   expiresAt: number | null
+  accessStatus?: "checking" | "available" | "signin_required" | "unreachable" | "error"
+  accessMessage?: string
   loginSupported: boolean
   keyRequired: boolean
   baseRequired: boolean
@@ -56,6 +58,10 @@ export function decodeSetupProviders(value: unknown): SetupProvider[] {
 }
 
 export function setupProviderStatus(provider: SetupProvider): string {
+  if (provider.accessStatus) return {
+    checking: "Checking…", available: "Available", signin_required: "Sign in again",
+    unreachable: "Network error", error: "Check failed",
+  }[provider.accessStatus]
   if (provider.oauth && provider.expiresAt !== null && provider.expiresAt <= Date.now()) {
     return "Token expired"
   }

@@ -60,6 +60,33 @@ test.each([40, 64, 88])("provider status columns stay aligned at width %i", asyn
   expect(columns()).toEqual([initial[0]!])
 })
 
+test("account checks update live status without blocking navigation or accepting stale reloads", async () => {
+  const checks: Array<(result: unknown) => void> = []
+  await mount({
+    read: async () => ({ providers: [{ name: "xai_grok", label: "Grok", auth_type: "oauth",
+      configured: true, oauth_login_supported: true, oauth_expires_at: 1 }] }),
+    request: async (action, payload) => {
+      expect(action).toBe("settings.provider.test")
+      expect(payload).toEqual({ provider: "xai_grok", check_credentials: true })
+      return new Promise((resolve) => checks.push(resolve))
+    },
+  })
+  await choose("Sign in with an account")
+  expect(setup.captureCharFrame()).toContain("Checking…")
+  await choose("Reload providers")
+  expect(checks).toHaveLength(2)
+  checks[0]!({ status: "available", message: "Old result" })
+  await settle()
+  expect(setup.captureCharFrame()).toContain("Checking…")
+  checks[1]!({ status: "signin_required", message: "Credentials rejected. Sign in again." })
+  await settle()
+  expect(setup.captureCharFrame()).toMatch(/Grok +Sign in again/u)
+  await choose("Reload providers")
+  checks[2]!({ status: "available", message: "Account accepted by the model catalog." })
+  await settle()
+  expect(setup.captureCharFrame()).toMatch(/Grok +Available/u)
+})
+
 test("Quick start saves a masked API connection, then explicitly selects a default without deleting presets", async () => {
   let snapshot = configSnapshot()
   snapshot.config.modelPresets = { existing: { model: "old-model", provider: "anthropic" } }
