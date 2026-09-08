@@ -457,6 +457,82 @@ class TestConsolidatorArchiveErrorHandling:
         consolidator.store.raw_archive.assert_not_called()
 
 
+class TestConsolidatorArchivePromptOverride:
+    """Archive prompt should honor a workspace-local override, like Dream."""
+
+    async def test_default_prompt_used_without_override(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.",
+            finish_reason="stop",
+        )
+
+        await _archive(consolidator, [{"role": "user", "content": "hello"}], runtime)
+
+        call = mock_provider.chat_with_retry.call_args.kwargs
+        sent_prompt = call["messages"][-1]["content"]
+        assert sent_prompt == _ARCHIVE_PROMPT
+
+    async def test_workspace_archive_prompt_overrides_default(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        store.archive_prompt_file.parent.mkdir(parents=True)
+        store.archive_prompt_file.write_text(
+            "Custom Archive prompt.",
+            encoding="utf-8",
+        )
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.",
+            finish_reason="stop",
+        )
+
+        await _archive(consolidator, [{"role": "user", "content": "hello"}], runtime)
+
+        call = mock_provider.chat_with_retry.call_args.kwargs
+        sent_prompt = call["messages"][-1]["content"]
+        assert sent_prompt == "Custom Archive prompt."
+
+    async def test_empty_workspace_archive_prompt_uses_default(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        store.archive_prompt_file.parent.mkdir(parents=True)
+        store.archive_prompt_file.write_text("  \n", encoding="utf-8")
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.",
+            finish_reason="stop",
+        )
+
+        await _archive(consolidator, [{"role": "user", "content": "hello"}], runtime)
+
+        call = mock_provider.chat_with_retry.call_args.kwargs
+        sent_prompt = call["messages"][-1]["content"]
+        assert sent_prompt == _ARCHIVE_PROMPT
+
+    async def test_workspace_archive_prompt_override_is_capped(
+        self, consolidator, mock_provider, store, runtime
+    ):
+        store.archive_prompt_file.parent.mkdir(parents=True)
+        store.archive_prompt_file.write_text("x" * 40_000, encoding="utf-8")
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.",
+            finish_reason="stop",
+        )
+
+        await _archive(consolidator, [{"role": "user", "content": "hello"}], runtime)
+
+        call = mock_provider.chat_with_retry.call_args.kwargs
+        sent_prompt = call["messages"][-1]["content"]
+        assert "x" * 40_000 not in sent_prompt
+        assert "... (truncated)" in sent_prompt
+
+    def test_has_archive_prompt_override_reflects_file_state(self, store):
+        assert store.has_archive_prompt_override() is False
+        store.archive_prompt_file.parent.mkdir(parents=True)
+        store.archive_prompt_file.write_text("Custom.", encoding="utf-8")
+        assert store.has_archive_prompt_override() is True
+
+
 class TestConsolidatorPromptEstimate:
     async def test_estimate_uses_full_unarchived_tail(self, consolidator, runtime):
         """Consolidation pressure must account for the full unarchived tail."""

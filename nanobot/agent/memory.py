@@ -82,6 +82,7 @@ class MemoryStore:
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._dream_prompt_oversize_logged = False
+        self._archive_prompt_oversize_logged = False
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
@@ -538,6 +539,33 @@ class MemoryStore:
             return text
         return self.default_dream_prompt()
 
+    @property
+    def archive_prompt_file(self) -> Path:
+        return workspace_prompt_file(self.workspace, "consolidator_archive")
+
+    def has_archive_prompt_override(self) -> bool:
+        return has_workspace_prompt_override(self.archive_prompt_file)
+
+    @staticmethod
+    def default_archive_prompt() -> str:
+        return render_template("agent/consolidator_archive.md", strip=True)
+
+    def _archive_template(self) -> str:
+        text, original_chars = load_workspace_prompt_override(self.archive_prompt_file)
+        if text is not None:
+            if (
+                original_chars > WORKSPACE_PROMPT_MAX_CHARS
+                and not self._archive_prompt_oversize_logged
+            ):
+                self._archive_prompt_oversize_logged = True
+                logger.warning(
+                    "workspace Archive prompt exceeds {} chars ({}); truncating. "
+                    "Further occurrences suppressed.",
+                    WORKSPACE_PROMPT_MAX_CHARS, original_chars,
+                )
+            return text
+        return self.default_archive_prompt()
+
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
@@ -846,11 +874,7 @@ class MemoryArchiver:
                 ),
             )
 
-        prompt = render_template(
-            "agent/consolidator_archive.md",
-            strip=True,
-            archive_count=len(source_messages),
-        )
+        prompt = self.store._archive_template()
         prompt_message = {"role": "user", "content": prompt}
         provider_context = None
         call_tools = request_tools
