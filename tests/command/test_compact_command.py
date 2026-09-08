@@ -89,6 +89,56 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["manual", "idle"])
+@pytest.mark.parametrize("summary", ["The current task is to inspect the checkpoint.", "(nothing)"])
+async def test_checkpoint_continues_through_reloaded_session(loop, trigger, summary) -> None:
+    key = "cli:checkpoint-resume"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "Inspect the checkpoint")
+    session.add_message("assistant", "Inspection started")
+    loop.sessions.save(session)
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
+    loop.provider.chat_with_retry.return_value = LLMResponse(content=summary)
+
+    if trigger == "manual":
+        await loop._process_message(
+            InboundMessage(channel="cli", sender_id="user", chat_id="checkpoint-resume",
+                           content="/compact"),
+            runtime=loop.llm_runtime(),
+        )
+    else:
+        await loop.auto_compact._archive(key, runtime=loop.llm_runtime())
+
+    loop.sessions.invalidate(key)
+    loop.auto_compact._summaries.clear()
+    reloaded = loop.sessions.get_or_create(key)
+    assert reloaded.metadata["_last_summary"]["text"] == summary
+    assert reloaded.last_archived == 2
+    assert reloaded.get_history() == [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+
+    loop.provider.chat_with_retry.reset_mock()
+    loop.provider.chat_with_retry.return_value = LLMResponse(content="Inspection complete.")
+    response = await loop.process_direct("Continue the inspection", session_key=key)
+    assert response.content == "Inspection complete."
+    loop.provider.chat_with_retry.assert_awaited_once()
+    sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
+    expected_summary = reloaded.metadata["_last_summary"] if summary != "(nothing)" else None
+    assert sent[0] == {
+        "role": "system",
+        "content": loop.context.build_system_prompt(channel="cli", session_summary=expected_summary),
+    }
+    assert [message["role"] for message in sent] == ["system", "user", "user"]
+    assert sent[1] == {"role": "user", "content": SUMMARY_CONTINUATION_TEXT}
+    assert "Continue the inspection" in sent[2]["content"]
+
+    loop.sessions.invalidate(key)
+    resumed = loop.sessions.get_or_create(key)
+    assert [message["role"] for message in resumed.get_history()] == ["user", "user", "assistant"]
+    assert resumed.get_history()[0]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert resumed.get_history()[-1]["content"] == "Inspection complete."
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_commands", [False, True])
 async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archive(
     loop, legacy_commands,
