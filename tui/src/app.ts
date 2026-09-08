@@ -27,6 +27,7 @@ import {
   fetchGatewayConnection,
   fetchMentionCandidates,
   fetchSessionContext,
+  fetchSessionUsage,
   fetchSessions,
   fetchSlashCommands,
   type ApiReauthenticator,
@@ -56,6 +57,7 @@ import {
 } from "./command-menu"
 import { SessionMenu, sessionLabel } from "./session-menu"
 import { ContextPanel, formatTokenCount, type ContextPanelTheme } from "./context-panel"
+import { UsagePanel, type UsagePanelTheme } from "./usage-panel"
 import {
   DiffViewer,
   latestTurnFileEdits,
@@ -215,6 +217,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     action: "context",
   },
   {
+    command: "/usage",
+    title: "Token usage",
+    description: "Show context occupancy and recent model-call input tokens",
+    action: "usage",
+  },
+  {
     command: "/diff",
     title: "Last turn diff",
     description: "Inspect file changes from the latest turn",
@@ -309,6 +317,10 @@ function contextPanelTheme(palette: Palette): ContextPanelTheme {
     border: palette.border,
     accent: palette.accent,
   }
+}
+
+function usagePanelTheme(palette: Palette): UsagePanelTheme {
+  return { ...palette, cached: palette.cool }
 }
 
 function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewerTheme {
@@ -479,6 +491,8 @@ export class NanobotTui {
   private readonly branchMenu: BranchMenu
   private readonly runtimeControls: RuntimeControls
   private readonly contextPanel: ContextPanel
+  private readonly usagePanel: UsagePanel
+  private usageRequestId = 0
   private readonly diffViewer: DiffViewer
   private readonly queuePreview: QueuePreview
   private readonly recoveryNotice: RecoveryNotice
@@ -603,6 +617,7 @@ export class NanobotTui {
     this.skillMenu = new SkillMenu(renderer, commandMenuTheme(this.palette))
     this.branchMenu = new BranchMenu(renderer, commandMenuTheme(this.palette))
     this.contextPanel = new ContextPanel(renderer, contextPanelTheme(this.palette))
+    this.usagePanel = new UsagePanel(renderer, usagePanelTheme(this.palette))
     this.diffViewer = new DiffViewer(
       renderer,
       diffViewerTheme(this.palette, this.backgroundKnown),
@@ -828,6 +843,7 @@ export class NanobotTui {
     this.shell.add(this.skillMenu.root)
     this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
+    this.shell.add(this.usagePanel.root)
     this.shell.add(this.runtimeControls.menuRoot)
     this.shell.add(this.title)
     this.shell.add(this.queuePreview.root)
@@ -984,6 +1000,7 @@ export class NanobotTui {
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
       else if (command.command.action === "context") void this.openContext()
+      else if (command.command.action === "usage") this.openUsage()
       else if (command.command.action === "diff") this.openDiff()
       else if (command.command.action === "branch") void this.openBranch()
       else if (command.command.action === "detach") this.quit(true)
@@ -1074,6 +1091,8 @@ export class NanobotTui {
     if (event.event === "attached") {
       const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
       this.currentChatId = event.chat_id
+      this.usagePanel.hide()
+      this.usageRequestId += 1
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
         this.applyModelPreset(event.model_preset)
@@ -1116,6 +1135,7 @@ export class NanobotTui {
     switch (event.event) {
       case "context_compaction":
         this.transcript.compaction({ id: event.compaction_id, phase: event.phase })
+        if (event.phase === "succeeded" && this.usagePanel.visible) void this.refreshUsage()
         return
       case "message_accepted":
         this.reconcileTurnOwnership(event)
@@ -1244,6 +1264,7 @@ export class NanobotTui {
           : ""
         this.status.content = this.readyStatus()
         if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
+        if (this.usagePanel.visible) void this.refreshUsage()
         this.sendNextFollowUp()
         return
       case "goal_status":
@@ -1636,6 +1657,10 @@ export class NanobotTui {
       this.status.content = "Images cannot be queued · press Enter to send now"
       return
     }
+    if (this.commandMenu.resolve(visibleContent)?.source === "tui") {
+      this.status.content = "Local commands cannot be queued · press Enter to run"
+      return
+    }
     const content = this.draft.expand(visibleContent).trim()
     if (!content) return
     this.promptQueue.enqueue({
@@ -1700,6 +1725,21 @@ export class NanobotTui {
       }
       key.preventDefault()
       return
+    }
+    if (this.usagePanel.visible && !key.ctrl && !key.meta) {
+      if (key.name === "escape") {
+        this.usagePanel.hide()
+        if (this.activeTurn) this.renderActiveStatus()
+        else this.status.content = this.readyStatus()
+        this.updateMeta()
+        key.preventDefault()
+        return
+      }
+      if (key.name === "left" || key.name === "right") {
+        this.usagePanel.move(key.name === "left" ? -1 : 1)
+        key.preventDefault()
+        return
+      }
     }
     if (this.contextPanel.visible && key.name === "escape") {
       this.contextPanel.hide()
@@ -1969,6 +2009,7 @@ export class NanobotTui {
     this.branchMenu.setTheme(commandMenuTheme(this.palette))
     this.runtimeControls.setTheme(runtimeControlsTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
+    this.usagePanel.setTheme(usagePanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
     this.queuePreview.setTheme(queuePreviewTheme(this.palette))
     this.recoveryNotice.setTheme(recoveryNoticeTheme(this.palette))
@@ -1990,6 +2031,7 @@ export class NanobotTui {
     this.resizeComposer()
     this.syncComposerPlaceholder()
     this.contextPanel.resize(this.renderer.height)
+    this.usagePanel.resize(this.renderer.width, this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
     this.title.visible = this.renderer.height >= 14
     this.runtimeControls.resize(this.renderer.width)
@@ -2001,6 +2043,7 @@ export class NanobotTui {
     const mode: FooterMode = this.runtimeControls.visible ? "runtime"
       : this.mentionMenu.visible ? "mention"
       : this.skillMenu.visible ? "skill"
+      : this.usagePanel.visible ? "usage"
       : this.activeTurn ? "active"
       : this.branchMenu.visible ? "branch"
       : this.commandMenu.visible ? "command"
@@ -2216,6 +2259,7 @@ export class NanobotTui {
     if (clearedUnsent) this.unsentSubmit = false
     this.runtimeControls.hide()
     if (this.contextPanel.visible && value) this.contextPanel.hide()
+    if (this.usagePanel.visible && value) this.usagePanel.hide()
     this.syncComposerPlaceholder()
     if (this.sessionMenu.visible) this.syncSessionMenu()
     else if (this.branchMenu.visible) this.syncBranchMenu()
@@ -2345,6 +2389,7 @@ export class NanobotTui {
     this.skillMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
+    this.usagePanel.hide()
     this.activeMentionQuery = null
     this.activeSkillQuery = null
   }
@@ -2401,6 +2446,7 @@ export class NanobotTui {
   }
 
   private async openBranch(): Promise<void> {
+    this.usagePanel.hide()
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2471,6 +2517,7 @@ export class NanobotTui {
   }
 
   private async openSessions(): Promise<void> {
+    this.usagePanel.hide()
     this.commandMenu.hide()
     this.dismissRuntimeControls()
     this.mentionMenu.hide()
@@ -2555,6 +2602,7 @@ export class NanobotTui {
   }
 
   private startNewChat(): void {
+    this.usagePanel.hide()
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2724,7 +2772,36 @@ export class NanobotTui {
     }
   }
 
+  private openUsage(): void {
+    this.closeTransientMenus()
+    this.clearComposer()
+    this.usagePanel.showMessage("Loading usage…")
+    this.updateMeta()
+    void this.refreshUsage()
+  }
+
+  private async refreshUsage(): Promise<void> {
+    const requestId = ++this.usageRequestId
+    const chatId = this.client.activeChatId
+    const current = () => !this.quitting && this.usagePanel.visible
+      && requestId === this.usageRequestId && chatId === this.client.activeChatId
+    try {
+      const snapshot = await fetchSessionUsage(
+        this.options.apiUrl,
+        this.options.apiToken,
+        chatId,
+        this.apiReauthenticator,
+      )
+      if (!current()) return
+      this.usagePanel.show(snapshot)
+    } catch {
+      if (!current()) return
+      this.usagePanel.showMessage("Usage unavailable · reopen /usage to retry")
+    }
+  }
+
   private async openContext(): Promise<void> {
+    this.usagePanel.hide()
     this.commandMenu.hide()
     this.hideSessionMenu()
     this.mentionMenu.hide()
@@ -2798,6 +2875,7 @@ export class NanobotTui {
   }
 
   private openDiff(): void {
+    this.usagePanel.hide()
     this.commandMenu.hide()
     this.hideSessionMenu()
     this.mentionMenu.hide()
