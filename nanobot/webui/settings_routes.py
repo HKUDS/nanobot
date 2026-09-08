@@ -67,6 +67,7 @@ from nanobot.webui.settings_contracts import (
     SettingsRequest,
     SettingsRouteResult,
 )
+from nanobot.webui.settings_probe import test_provider_connection
 from nanobot.webui.settings_services import WebUISettingsServices
 from nanobot.webui.version_check import check_for_update
 
@@ -153,6 +154,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/provider/test",
     "/api/settings/config-editor/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
@@ -297,6 +299,12 @@ class WebUISettingsRouter:
             return self._handle_config_editor()
         if route == ("root", "config-editor-update"):
             return self._handle_config_editor_update(request)
+        if route == ("root", "provider-test"):
+            payload = _mutation_payload(request)
+            if payload is None:
+                return self._error_response(400, "Provider and model are required.")
+            config = await asyncio.to_thread(self.settings.config.load)
+            return self._json_response(await test_provider_connection(config, payload))
 
         domain, action = route
         domain_request = self._domain_request(
@@ -348,6 +356,8 @@ class WebUISettingsRouter:
             return "root", "config-editor"
         if path == "/api/settings/config-editor/update":
             return "root", "config-editor-update"
+        if path == "/api/settings/provider/test":
+            return "root", "provider-test"
         if action := _MODEL_ROUTES.get(path):
             return "models", action
         if action := _CAPABILITY_ROUTES.get(path):

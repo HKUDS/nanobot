@@ -101,6 +101,7 @@ import {
 } from "./footer-hints"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "./host"
 import { ConfigEditor, type ConfigEditorTheme } from "./config-editor"
+import { listenForSetupCallback } from "./setup-callback"
 
 interface AppOptions {
   resolveConnection?: () => Promise<GatewayConnection>
@@ -842,6 +843,8 @@ export class NanobotTui {
       configEditorTheme(this.palette),
       {
         read: (path) => fetchSetupData(this.options.apiUrl, this.options.apiToken, path, this.apiReauthenticator),
+        listenForCallback: listenForSetupCallback,
+        startChat: () => this.startNewChat(),
         copyText: async (text) => {
           if (!this.renderer.copyToClipboardOSC52(text)) await copyWithSystemClipboard(text)
         },
@@ -1778,6 +1781,11 @@ export class NanobotTui {
       }
     }
     if (this.configEditor.visible) {
+      if (key.ctrl && key.name === "c") {
+        key.preventDefault()
+        setTimeout(() => this.quit(), 0)
+        return
+      }
       if (this.configEditor.handleKey(key)) key.preventDefault()
       return
     }
@@ -2974,6 +2982,7 @@ export class NanobotTui {
     this.submitPending = false
     this.stopSessionRefresh()
     this.host.release()
+    this.configEditor.destroy()
     this.client.close()
     this.renderer.destroy()
     const chatId = this.client.activeChatId || this.options.chatId

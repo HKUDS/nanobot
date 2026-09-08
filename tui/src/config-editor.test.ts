@@ -49,7 +49,7 @@ describe("ConfigEditor", () => {
       await editor.show()
       await setup.renderOnce()
       const menuRow = () => setup!.captureCharFrame().split("\n")
-        .findIndex((line) => line.includes("Quick start"))
+        .findIndex((line) => line.includes("Sign in with an account"))
       const initialRow = menuRow()
       expect(initialRow).toBeGreaterThan(0)
 
@@ -77,8 +77,9 @@ describe("ConfigEditor", () => {
     const essentials = setup.captureCharFrame()
     expect(essentials).toContain("Configuration · Overview")
     expect(essentials).toContain("Quick start")
-    expect(essentials).toContain("account or use an API key")
-    expect(essentials).toContain("Models and providers")
+    expect(essentials).toContain("Use an API key")
+    expect(essentials).toContain("Advanced settings")
+    expect(essentials).not.toContain("Models and providers")
     expect(essentials).not.toContain("Max tokens")
 
     setup.mockInput.pressKey("/")

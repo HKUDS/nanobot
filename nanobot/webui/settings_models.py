@@ -458,6 +458,7 @@ def _provider_settings_row(
         "name": name,
         "label": spec.label,
         "is_custom": is_custom,
+        "is_local": bool(spec.is_local),
         "configured": (
             bool(oauth_status["configured"])
             if oauth_status is not None

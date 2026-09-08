@@ -3329,7 +3329,7 @@ describe("NanobotTui layout", () => {
 
       const frame = setup.captureCharFrame()
       expect(frame).toContain("Configuration · Overview")
-      expect(frame).toContain("Models and providers")
+      expect(frame).toContain("Advanced settings")
       expect(frame).not.toContain("Max tokens")
       expect(sent).toEqual([])
 
@@ -3339,6 +3339,50 @@ describe("NanobotTui layout", () => {
       globalThis.fetch = original
       app.stop()
     }
+  })
+
+  test.each(["loading", "input", "oauth"])("Ctrl+C exits configuration during %s", async (phase) => {
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    let closed = false
+    const transport = client(sent)
+    transport.close = () => { closed = true }
+    const app = NanobotTui.mount(setup.renderer, options, transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    const configEditor = (app as unknown as { configEditor: import("./config-editor").ConfigEditor }).configEditor
+    let resolveLoad: ((value: ReturnType<typeof configSnapshot>) => void) | undefined
+    const requests: Record<string, unknown>[] = []
+    Object.assign((configEditor as unknown as { options: object }).options, {
+      load: () => phase === "loading" ? new Promise((resolve) => { resolveLoad = resolve }) : Promise.resolve(configSnapshot()),
+      read: async () => ({ providers: phase === "oauth"
+        ? [{ name: "github_copilot", label: "Copilot", auth_type: "oauth", oauth_login_supported: true }]
+        : [{ name: "anthropic", label: "Anthropic", api_key_required: true }] }),
+      openUrl: async () => {},
+      request: async (_action: string, payload: Record<string, unknown>) => {
+        requests.push(payload)
+        return payload.cancel ? { status: "cancelled" }
+          : { status: "authorization_required", flow_id: "exit-flow", authorization_url: "https://example.test/login", completion_input: "device_code" }
+      },
+    })
+    const showing = configEditor.show()
+    if (phase !== "loading") {
+      await showing
+      if (phase === "input") setup.mockInput.pressKey("\u001b[B")
+      setup.mockInput.pressEnter()
+      await Bun.sleep(30)
+      setup.mockInput.pressEnter()
+      await Bun.sleep(30)
+      setup.mockInput.pressEnter()
+      await Bun.sleep(30)
+      if (phase === "input") await setup.mockInput.typeText("unsaved-secret")
+    }
+    setup.mockInput.pressKey("c", { ctrl: true })
+    await waitUntil(() => closed)
+    expect(setup.renderer.isDestroyed).toBe(true)
+    expect(sent).toEqual([])
+    if (phase === "oauth") expect(requests.at(-1)).toMatchObject({ flow_id: "exit-flow", cancel: true })
+    resolveLoad?.(configSnapshot())
+    await showing
   })
 
   test("opens the requested configuration view after bootstrap credentials arrive", async () => {
@@ -3371,7 +3415,7 @@ describe("NanobotTui layout", () => {
       await waitUntil(() => ui.configEditor.visible && !ui.configEditor.loading && !ui.configEditor.saving)
       await setup.renderOnce()
 
-      expect(setup.captureCharFrame()).toContain("Quick start · 1/4 Choose a provider")
+      expect(setup.captureCharFrame()).toContain("Sign in with an account")
     } finally {
       globalThis.fetch = original
       app.stop()

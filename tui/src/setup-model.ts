@@ -10,6 +10,8 @@ export interface SetupProvider {
   keyRequired: boolean
   baseRequired: boolean
   apiBase: string
+  local: boolean
+  advancedFields: string[]
 }
 
 export interface SetupModel { id: string; label: string; description: string }
@@ -34,6 +36,8 @@ export function decodeSetupProviders(value: unknown): SetupProvider[] {
       configured: row.configured === true, loginSupported: row.oauth_login_supported === true,
       keyRequired: row.api_key_required === true,
       baseRequired: row.api_base_required === true,
+      local: row.is_local === true,
+      advancedFields: Array.isArray(row.advanced_fields) ? row.advanced_fields.filter((field): field is string => typeof field === "string") : [],
       apiBase: typeof row.api_base === "string" && row.api_base ? row.api_base
         : typeof row.default_api_base === "string" ? row.default_api_base : "",
     }]

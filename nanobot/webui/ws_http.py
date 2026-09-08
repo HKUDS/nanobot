@@ -160,6 +160,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.provider.create": "/api/settings/provider/create",
     "settings.provider.oauth_login": "/api/settings/provider/oauth-login",
     "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
+    "settings.provider.test": "/api/settings/provider/test",
     "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",
     "settings.web_search.update": "/api/settings/web-search/update",
     "settings.api_service.start": "/api/settings/api-service/start",

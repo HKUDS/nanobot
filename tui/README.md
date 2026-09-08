@@ -40,16 +40,28 @@ visible in the transcript.
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 
-Use `/config` to open configuration. **Quick start** guides you through choosing a provider,
-connecting with an API key or browser sign-in, selecting a model, and saving it as your default.
-API credentials are saved when you select **Save connection and choose a model**; OAuth credentials
-are saved when authorization completes. The final step saves your model and workspace choices.
-`nanobot onboard --wizard` opens Quick start directly. Codex supports browser callbacks, Grok
-supports pasted authorization codes, and Copilot displays its device code in the terminal.
+Use `/config` or `nanobot onboard --wizard` to open Quick start. Choose **Sign in with an
+account**, **Use an API key**, or **Connect a local model**. Type to search providers and models;
+results appear eight at a time. If your default already has credentials, you can continue chatting
+or change its model without repeating setup.
 
-The configuration overview also links to advanced settings by domain. `/` searches every schema
-and plugin field outside Quick start. Advanced edits remain staged until `Ctrl+S`; `Esc` asks before
-discarding unsaved work. Secret input is hidden.
+Browser sign-in opens automatically. Codex receives its callback on the terminal machine;
+Copilot displays a device code and waits for approval. Grok asks for the authorization code.
+**Browser didn't open?** exposes copy-link, manual callback, and restart options. If the local
+callback port is unavailable, the manual callback input appears automatically.
+
+API credentials are saved when you select **Save connection and choose a model**; OAuth credentials
+are saved when authorization completes. Save the selected default, then optionally select
+**Send a test message**. This sends one short request to that model; provider charges may apply.
+Saving credentials alone is not reported as a successful model check. A failed check keeps the
+saved configuration and offers connection and model changes. **Start a new chat** uses the saved
+default and preserves the previous conversation.
+
+**Advanced settings** contains workspace, channel, tool, and other settings. `/` searches every
+schema and plugin field outside Quick start. Advanced edits remain staged until `Ctrl+S`; `Esc`
+asks before discarding unsaved work. Secret input is hidden. `Ctrl+C` exits configuration even
+while typing, saving, or waiting for sign-in; unsaved edits are discarded and login listeners and
+polling are stopped.
 
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` sends immediately,

@@ -576,3 +576,26 @@ async def test_version_check_route_enforces_auth_and_bounds_failures(
     assert failed.status_code == 500
     assert json.loads(failed.body) == {"error": "version check failed"}
     assert "upstream secret body" not in failed.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_provider_probe_requires_websocket_auth_and_uses_gateway_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.model = "scoped-model"
+    save_config(config, config_path)
+    probe = AsyncMock(return_value={"status": "ok", "message": "Hello"})
+    monkeypatch.setattr("nanobot.webui.settings_routes.test_provider_connection", probe)
+    path = "/api/settings/provider/test"
+    router = _router(config_path=config_path)
+    plain = SimpleNamespace(path=path, headers=Headers())
+    assert (await router.dispatch(None, plain, path)).status_code == 405
+    payload = {"provider": "anthropic", "model": "chosen-model"}
+    request = _mutation_request(path, payload)
+    denied = _router(config_path=config_path, authorized=False)
+    assert (await denied.dispatch(None, request, path)).status_code == 401
+    probe.assert_not_awaited()
+    response = await router.dispatch(None, request, path)
+    assert json.loads(response.body)["message"] == "Hello"
+    assert probe.await_args.args[0].agents.defaults.model == "scoped-model"
+    assert probe.await_args.args[1] == payload
