@@ -29,7 +29,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -42,7 +42,6 @@ from nanobot.utils.helpers import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 SESSION_CACHE_MAX_SIZE = 128
-MIN_COMPACTED_REPLAY_MESSAGES = 8
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -352,44 +351,19 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        A committed in-turn checkpoint replaces its old prefix with the stored
+        A committed summary checkpoint replaces its old prefix with the stored
         summary and resumes replay at a hidden continuation marker. A positive
         ``max_messages`` applies an additional caller-owned count limit.
         """
-        replay_start = self.last_archived
-        if replay_start and not (
-            replay_start < len(self.messages)
-            and is_summary_checkpoint(self.messages[replay_start])
-        ):
-            recent_start = recent_message_start_index(
-                self.messages,
-                MIN_COMPACTED_REPLAY_MESSAGES,
-                extend_to_user=True,
-            )
-            replay_start = min(replay_start, recent_start)
-
-        # A later idle archive must not pull its retained suffix across an
-        # earlier replacement checkpoint, whether manual or in-turn.
-        for index in range(min(self.last_archived, len(self.messages) - 1), replay_start - 1, -1):
-            if is_summary_checkpoint(self.messages[index]):
-                replay_start = index
-                break
-
-        replayable = self.messages[replay_start:]
+        replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
         else:
-            unarchived_count = len(self.messages) - self.last_archived
-            if replay_start < self.last_archived and unarchived_count < max_messages:
-                # The archived replay suffix can exceed the nominal count when one
-                # tool-heavy turn spans the boundary. Preserve that complete turn.
-                start_idx = 0
-            else:
-                start_idx = recent_message_start_index(
-                    replayable,
-                    max_messages,
-                    extend_to_user=extend_to_user,
-                )
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
         sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive

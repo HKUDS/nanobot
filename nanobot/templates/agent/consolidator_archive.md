@@ -17,6 +17,7 @@ Always retain a compact working-state handoff:
 - unresolved blockers
 - next action
 - exact identifiers needed for that action
+- the latest user request and its answer or result, even when the task is complete
 
 Mark working-state facts `[ephemeral]`.
 
@@ -39,4 +40,4 @@ When space is limited, prioritize user corrections and preferences, then solutio
 Return one concise retained fact per line in this form:
 - [mark] fact
 
-Use `(nothing)` when no fact qualifies and there is no active working state.
+This checkpoint replaces the original messages for every compaction trigger. If there is no active task or lasting fact, retain a brief `[ephemeral]` summary of the recent exchange so the next turn can continue naturally.

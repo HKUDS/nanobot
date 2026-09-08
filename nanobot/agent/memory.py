@@ -25,16 +25,8 @@ from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
-from nanobot.session.manager import (
-    MIN_COMPACTED_REPLAY_MESSAGES,
-    Session,
-    SessionManager,
-)
-from nanobot.session.summary import (
-    SUMMARY_CONTINUATION_TEXT,
-    is_summary_checkpoint,
-    session_summary_from_metadata,
-)
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -936,8 +928,9 @@ class MemoryArchiver:
         if not summary:
             logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
             return raw_fallback()
-        if summary != "(nothing)":
-            self.store.append_history(summary, session_key=session_key)
+        if summary == "(nothing)":
+            return raw_fallback()
+        self.store.append_history(summary, session_key=session_key)
         return summary
 
     async def archive_session(
@@ -951,7 +944,7 @@ class MemoryArchiver:
         """Archive a captured session prefix without mutating the session."""
         messages = [
             message for message in session.messages[session.last_archived:archive_end]
-            if not message.get("_command")
+            if not message.get("_command") and not is_summary_checkpoint(message)
         ]
         if not messages:
             return None
@@ -1084,13 +1077,6 @@ class Consolidator:
             fallback_max_tokens=max(1, checkpoint_tokens),
             provider_state=provider_state,
         )
-        if summary == "(nothing)":
-            summary = self.archiver._raw_checkpoint(
-                source_messages,
-                session_key=session_key,
-                previous_summary=previous_summary,
-                max_tokens=max_output_tokens,
-            )
         if summary is None:
             return None
         return truncate_text_to_tokens(summary, max(1, max_output_tokens))
@@ -1123,19 +1109,6 @@ class Consolidator:
         if not session.messages:
             return []
         return session.get_history()
-
-    @staticmethod
-    def _set_last_summary(
-        session: Session,
-        summary: str,
-        *,
-        last_active: datetime | None = None,
-    ) -> None:
-        if summary != "(nothing)":
-            session.metadata["_last_summary"] = {
-                "text": summary,
-                "last_active": (last_active or session.updated_at).isoformat(),
-            }
 
     def estimate_session_prompt_tokens(
         self,
@@ -1191,21 +1164,14 @@ class Consolidator:
         session_key: str,
         *,
         runtime: LLMRuntime,
-        max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
+        max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
     ) -> str | None:
-        """Archive the full idle tail while keeping recent messages replayable.
+        """Replace archived history with a summary checkpoint.
 
-        ``max_suffix=0`` commits a replacement checkpoint for manual compaction.
-        Other values retain the fixed recent window for SDK compatibility.
+        ``max_suffix`` is accepted for SDK compatibility and no longer retains
+        archived messages. All compaction triggers share checkpoint replay.
         """
-        if max_suffix not in (0, MIN_COMPACTED_REPLAY_MESSAGES):
-            logger.debug(
-                "Idle-session compact for {} uses the fixed replay window ({}, requested {})",
-                session_key,
-                MIN_COMPACTED_REPLAY_MESSAGES,
-                max_suffix,
-            )
         lock = self.get_lock(session_key)
         async with lock:
             self.sessions.invalidate(session_key)
@@ -1217,17 +1183,7 @@ class Consolidator:
                 not message.get("_command") and not is_summary_checkpoint(message)
                 for message in messages_to_archive
             )
-            previous_summary = session_summary_from_metadata(
-                session.metadata, fallback_last_active=session.updated_at,
-            )
-            if not has_new_messages and (
-                max_suffix != 0
-                or previous_summary is None
-                or not any(
-                    message.get("content") != SUMMARY_CONTINUATION_TEXT
-                    for message in session.get_history()
-                )
-            ):
+            if not has_new_messages:
                 return ""
 
             compaction_id = uuid4().hex
@@ -1237,24 +1193,14 @@ class Consolidator:
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
             try:
-                if not has_new_messages and previous_summary:
-                    summary = previous_summary["text"]
-                else:
-                    summary = await self.archive_session(
-                        session,
-                        archive_end=archive_end,
-                        runtime=runtime,
+                summary = await self.archive_session(
+                    session, archive_end=archive_end, runtime=runtime,
+                )
+                if summary:
+                    # Concurrent appends remain after the captured boundary.
+                    session.commit_summary_checkpoint(
+                        summary, insert_at=archive_end, last_active=last_active,
                     )
-                if summary is not None:
-                    # Capture the boundary before awaiting the provider so concurrent
-                    # appends remain after the checkpoint and eligible for archival.
-                    if max_suffix == 0:
-                        session.commit_summary_checkpoint(
-                            summary, insert_at=archive_end, last_active=last_active,
-                        )
-                    else:
-                        self._set_last_summary(session, summary, last_active=last_active)
-                        session.last_archived = archive_end
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
                     self.sessions.save(session)
@@ -1266,7 +1212,7 @@ class Consolidator:
                     ),
                 )
                 raise
-            if summary is None:
+            if not summary:
                 await events.emit(
                     ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
                 )
@@ -1279,16 +1225,11 @@ class Consolidator:
                 ),
             )
 
-            visible = session.get_history(
-                max_messages=MIN_COMPACTED_REPLAY_MESSAGES,
-                extend_to_user=True,
-            )
-
             logger.info(
                 "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
                 session_key,
                 len(messages_to_archive),
-                len(visible),
+                len(session.get_history()),
                 len(session.messages),
                 bool(summary),
             )

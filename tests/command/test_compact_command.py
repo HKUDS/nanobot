@@ -222,7 +222,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manual_compact_discards_idle_suffix_and_persists_boundary(loop) -> None:
+async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
     key = "cli:test"
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "large tool turn")
@@ -236,14 +236,16 @@ async def test_manual_compact_discards_idle_suffix_and_persists_boundary(loop) -
     loop.sessions.save(session)
     runtime = loop.llm_runtime()
     await loop.consolidator.compact_idle_session(key, runtime=runtime)
-    assert len(loop.sessions.get_or_create(key).get_history()) == 42
+    assert [m["content"] for m in loop.sessions.get_or_create(key).get_history()] == [
+        SUMMARY_CONTINUATION_TEXT,
+    ]
 
     await loop._process_message(
         InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact"),
         runtime=runtime,
     )
     loop.provider.chat_with_retry.assert_awaited_once()
-    assert loop.bus.outbound_size == 2
+    assert loop.bus.outbound_size == 0
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)
     assert len(reloaded.messages) == 43
@@ -258,5 +260,5 @@ async def test_manual_compact_discards_idle_suffix_and_persists_boundary(loop) -
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)
     assert [m["content"] for m in reloaded.get_history()] == [
-        SUMMARY_CONTINUATION_TEXT, "next question", "next answer",
+        SUMMARY_CONTINUATION_TEXT,
     ]
