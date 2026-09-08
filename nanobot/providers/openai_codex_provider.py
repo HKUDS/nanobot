@@ -47,7 +47,8 @@ from nanobot.providers.registry import ProviderModelSpec, find_by_name
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
-OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.144.0"
+# The server gates model visibility by client version; older catalogs omit Astra.
+OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.153.4"
 DEFAULT_ORIGINATOR = "nanobot"
 _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
 
