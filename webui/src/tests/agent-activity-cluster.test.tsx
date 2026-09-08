@@ -563,6 +563,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
@@ -980,6 +981,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Deleted")).toBeInTheDocument();
     expect(screen.queryByText("Edited")).not.toBeInTheDocument();
@@ -1237,6 +1239,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Searched X · nanobot oauth")).toBeInTheDocument();
     expect(screen.queryByText(/Completed X search/i)).not.toBeInTheDocument();
@@ -1270,6 +1273,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
     expect(screen.getByText("Searched release notes access_token=<redacted>")).toBeInTheDocument();
@@ -1486,6 +1490,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const title = screen.getByText("Example documentation");
     const url = screen.getByText("example.com/docs");
@@ -1567,6 +1572,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const run = screen.getByText(/Reviewed sources.*2 files/).closest('[data-testid="activity-step"]');
     expect(run).toBeInTheDocument();
@@ -1607,6 +1613,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not search files “needle”").closest(
       '[data-testid="activity-step"]',
@@ -1635,6 +1642,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/password|signed-secret/)).not.toBeInTheDocument();
     expect(screen.getByText("Completed Download asset")).toBeInTheDocument();
@@ -1721,6 +1729,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
@@ -1815,6 +1824,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
@@ -1848,6 +1858,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
@@ -1915,6 +1926,7 @@ describe("AgentActivityCluster", () => {
                   "-const fps = 30;",
                   "+const fps = 60;",
                   " start();",
+
                 ]),
               },
             ],
@@ -1924,6 +1936,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       const fileRefs = screen.getAllByTestId("activity-file-reference");
       expect(fileRefs).toHaveLength(3);
@@ -1984,6 +1997,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.getByText("Could not edit")).toBeInTheDocument();
@@ -2091,6 +2105,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Could not generate image")).toBeInTheDocument();
     const row = screen.getByText("Could not generate image").closest(
@@ -2163,6 +2178,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const steps = screen.getAllByTestId("activity-step");
     expect(steps.length).toBeGreaterThanOrEqual(3);

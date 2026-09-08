@@ -14,7 +14,6 @@ import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surf
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 import {
-  findPromptElement,
   type PromptAnchor,
   promptTop,
   userPromptAnchors,
@@ -51,7 +50,6 @@ const MARKER_MIN_GAP_PX = 9;
 const MARKER_BASE_WIDTH_PX = 9;
 const MARKER_STACK_GAP_PX = 16;
 const RAIL_FALLBACK_HEIGHT_PX = 300;
-const MEASURE_RETRY_FRAMES = 4;
 const HOVER_MARKER_WIDTHS_PX = [28, 22, 16, 11];
 
 export function PromptRail({
@@ -101,20 +99,7 @@ export function PromptRail({
     setActivePromptId((current) => current === next ? current : next);
   }, [scrollRef]);
 
-  useEffect(() => {
-    let frame = 0;
-    let remainingFrames = MEASURE_RETRY_FRAMES;
-    const measure = () => {
-      updateMarkers();
-      remainingFrames -= 1;
-      if (remainingFrames > 0) {
-        frame = window.requestAnimationFrame(measure);
-      }
-    };
-    measure();
-    return () => window.cancelAnimationFrame(frame);
-  }, [bottomOffset, updateMarkers]);
-
+  const railVisible = markers.length > 0;
   useEffect(() => {
     const scrollEl = scrollRef.current;
     if (!scrollEl) return undefined;
@@ -126,28 +111,30 @@ export function PromptRail({
       scrollFrame = window.requestAnimationFrame(updateActivePrompt);
     };
     const scheduleMeasurement = () => {
-      window.cancelAnimationFrame(resizeFrame);
-      resizeFrame = window.requestAnimationFrame(updateMarkers);
+      if (resizeFrame) return;
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        updateMarkers();
+      });
     };
 
+    scheduleMeasurement();
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(scheduleMeasurement);
+    observer?.observe(scrollEl);
+    if (scrollEl.firstElementChild) observer?.observe(scrollEl.firstElementChild);
+    if (railRef.current) observer?.observe(railRef.current);
     scrollEl.addEventListener("scroll", scheduleActivePrompt, { passive: true });
     window.addEventListener("resize", scheduleMeasurement);
     return () => {
       window.cancelAnimationFrame(scrollFrame);
       window.cancelAnimationFrame(resizeFrame);
+      observer?.disconnect();
       scrollEl.removeEventListener("scroll", scheduleActivePrompt);
       window.removeEventListener("resize", scheduleMeasurement);
     };
-  }, [scrollRef, updateActivePrompt, updateMarkers]);
-
-  useEffect(() => {
-    const scrollEl = scrollRef.current;
-    if (!scrollEl || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(() => updateMarkers());
-    observer.observe(scrollEl);
-    if (scrollEl.firstElementChild) observer.observe(scrollEl.firstElementChild);
-    return () => observer.disconnect();
-  }, [scrollRef, updateMarkers]);
+  }, [bottomOffset, railVisible, scrollRef, updateActivePrompt, updateMarkers]);
 
   if (markers.length === 0) return null;
 
@@ -250,8 +237,13 @@ function measurePrompts(
   anchors: PromptAnchor[],
   scrollRange: number,
 ): MeasuredPrompt[] {
+  const elements = new Map<string, HTMLElement>();
+  for (const element of scrollEl.querySelectorAll<HTMLElement>("[data-user-prompt-id]")) {
+    const id = element.dataset.userPromptId;
+    if (id !== undefined && !elements.has(id)) elements.set(id, element);
+  }
   return anchors.flatMap((anchor) => {
-    const target = findPromptElement(scrollEl, anchor.id);
+    const target = elements.get(anchor.id);
     if (!target) return [];
     const top = Math.max(0, Math.min(scrollRange, promptTop(scrollEl, target) - 16));
     return [{

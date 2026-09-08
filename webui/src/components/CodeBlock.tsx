@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -40,6 +40,8 @@ const CODE_FONT_STACK = [
 ].join(", ");
 
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
+const CODE_PAGE_CHARS = 24_000;
+const CODE_PAGE_LINES = 400;
 
 const LazyHighlightedCode = lazy(async () => {
   const [
@@ -127,6 +129,7 @@ function CodeTextBlock({
   code,
   chrome,
   showLineNumbers,
+  startLine = 1,
   testId,
   className,
   renderText = renderPlainText,
@@ -134,11 +137,12 @@ function CodeTextBlock({
   code: string;
   chrome: "default" | "none";
   showLineNumbers: boolean;
+  startLine?: number;
   testId: string;
   className?: string;
   renderText?: (value: string) => ReactNode;
 }) {
-  const lines = code.split("\n");
+  const lines = showLineNumbers ? code.split("\n") : [];
   return (
     <pre
       className={cn(
@@ -156,7 +160,7 @@ function CodeTextBlock({
           lines.map((line, index) => (
             <span key={index} className="flex min-w-max">
               <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground/60">
-                {index + 1}
+                {startLine + index}
               </span>
               <span className="whitespace-pre">{renderText(line || " ")}</span>
               {index < lines.length - 1 ? "\n" : null}
@@ -184,9 +188,37 @@ export function CodeBlock({
 }: CodeBlockProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [page, setPage] = useState(0);
+  const renderAnsi = useMemo(() => shouldRenderAnsi(language, code), [language, code]);
+  const plainCode = useMemo(() => renderAnsi ? stripAnsi(code) : code, [renderAnsi, code]);
+  const pages = useMemo(() => {
+    const boundaries = [0];
+    let lines = 0;
+    for (let index = 0; index < plainCode.length; index++) {
+      if (plainCode[index] === "\n") lines++;
+      if (lines >= CODE_PAGE_LINES || index + 1 - boundaries[boundaries.length - 1] >= CODE_PAGE_CHARS) {
+        // Keep a UTF-16 surrogate pair on the same page.
+        const char = plainCode.charCodeAt(index);
+        if (char >= 0xd800 && char <= 0xdbff) continue;
+        boundaries.push(index + 1);
+        lines = 0;
+      }
+    }
+    if (boundaries[boundaries.length - 1] !== plainCode.length) boundaries.push(plainCode.length);
+    return boundaries;
+  }, [plainCode]);
+  const pageCount = Math.max(1, pages.length - 1);
+  const currentPage = Math.min(page, pageCount - 1);
+  const displayedCode = pageCount > 1 ? plainCode.slice(pages[currentPage], pages[currentPage + 1]) : code;
+  const startLine = useMemo(() => {
+    let line = 1;
+    for (let index = 0; index < (pages[currentPage] ?? 0); index++) {
+      if (plainCode[index] === "\n") line++;
+    }
+    return line;
+  }, [currentPage, pages, plainCode]);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";
-  const renderAnsi = shouldRenderAnsi(language, code);
   const syntaxLanguage = normalizeCodeLanguage(language);
   const copyLabel = copied ? t("code.copied") : t("code.copyAria");
 
@@ -207,15 +239,15 @@ export function CodeBlock({
       )}
       data-language={language || t("code.fallbackLanguage")}
     >
-      {renderAnsi ? (
+      {renderAnsi && pageCount === 1 ? (
         <CodeTextBlock
-          code={code}
+          code={displayedCode}
           chrome={chrome}
           showLineNumbers={showLineNumbers}
           testId="ansi-code"
           renderText={renderAnsiText}
         />
-      ) : highlight ? (
+      ) : highlight && pageCount === 1 ? (
         <Suspense
           fallback={
             <CodeTextBlock
@@ -237,12 +269,24 @@ export function CodeBlock({
         </Suspense>
       ) : (
         <CodeTextBlock
-          code={code}
+          code={displayedCode}
           chrome={chrome}
           showLineNumbers={showLineNumbers}
+          startLine={startLine}
           testId="plain-code-fallback"
         />
       )}
+      {pageCount > 1 ? (
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 px-3 py-2 text-xs">
+          <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+            {t("code.previousPage", { defaultValue: "Previous page" })}
+          </button>
+          <span>{t("code.page", { page: currentPage + 1, count: pageCount, defaultValue: "{{page}} / {{count}}" })}</span>
+          <button type="button" disabled={currentPage === pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+            {t("code.nextPage", { defaultValue: "Next page" })}
+          </button>
+        </div>
+      ) : null}
       {hasChrome ? (
         <button
           type="button"

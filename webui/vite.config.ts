@@ -59,6 +59,17 @@ export function gzipWebuiAssets(): Plugin {
 }
 
 export function webuiManualChunk(id: string): string | undefined {
+  const locale = /\/webui\/locales\/([^/]+)\.json$/.exec(id)?.[1]
+    ?? /\/src\/i18n\/locales\/([^/]+)\/common\.json$/.exec(id)?.[1];
+  if (locale) return `locale-${locale}`;
+  // Clipboard actions are shared with lazy Markdown and must not pull it into the shell.
+  if (id.endsWith("/src/lib/clipboard.ts")) return "clipboard";
+  if (id.endsWith("/src/lib/markdown-math.ts")
+    || id.includes("node_modules/rehype-katex/")
+    // The micromark barrel also exports an HTML renderer that imports KaTeX.
+    || (id.includes("node_modules/micromark-extension-math/") && id.endsWith("/html.js"))) {
+    return "markdown-math";
+  }
   if (
     id.includes("node_modules/react/")
     || id.includes("node_modules/react-dom/")
@@ -73,12 +84,8 @@ export function webuiManualChunk(id: string): string | undefined {
   }
   // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
   // outside the core markdown chunk so ordinary replies do not download them.
-  if (
-    id.includes("node_modules/streamdown/dist/mermaid-")
-    || id.includes("node_modules/streamdown/dist/highlighted-body-")
-  ) {
-    return;
-  }
+  if (id.includes("node_modules/streamdown/dist/mermaid-")) return "markdown-diagrams";
+  if (id.includes("node_modules/streamdown/dist/highlighted-body-")) return "markdown-code";
   // Refractor reaches this HAST helper through hastscript. Keeping it with
   // Refractor prevents syntax-highlight <-> markdown-vendor circular chunks.
   if (

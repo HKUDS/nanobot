@@ -51,6 +51,15 @@ describe("entryLazyFeatureImports", () => {
 });
 
 describe("webuiManualChunk", () => {
+  it("groups common and channel translations into one request per locale", () => {
+    expect(webuiManualChunk("/repo/webui/src/i18n/locales/en/common.json")).toBe("locale-en");
+    expect(webuiManualChunk("/repo/nanobot/channels/slack/webui/locales/en.json")).toBe("locale-en");
+    expect(webuiManualChunk("/repo/nanobot/channels/slack/webui/locales/zh-CN.json")).toBe("locale-zh-CN");
+    expect(webuiManualChunk("/repo/node_modules/rehype-katex/index.js")).toBe("markdown-math");
+    expect(webuiManualChunk("/repo/webui/src/lib/markdown-math.ts")).toBe("markdown-math");
+    expect(webuiManualChunk("/repo/node_modules/micromark-extension-math/lib/html.js")).toBe("markdown-math");
+    expect(webuiManualChunk("/repo/webui/src/lib/clipboard.ts")).toBe("clipboard");
+  });
   it("keeps the React runtime outside lazy feature chunks", () => {
     expect(webuiManualChunk("/repo/node_modules/react/index.js")).toBe("react-vendor");
     expect(webuiManualChunk("/repo/node_modules/react-dom/client.js")).toBe("react-vendor");
@@ -83,10 +92,10 @@ describe("webuiManualChunk", () => {
   it("leaves Streamdown's optional renderers as lazy chunks", () => {
     expect(
       webuiManualChunk("/repo/node_modules/streamdown/dist/mermaid-ABC.js"),
-    ).toBeUndefined();
+    ).toBe("markdown-diagrams");
     expect(
       webuiManualChunk("/repo/node_modules/streamdown/dist/highlighted-body-ABC.js"),
-    ).toBeUndefined();
+    ).toBe("markdown-code");
   });
 
   it("leaves language grammars as independently loaded chunks", () => {

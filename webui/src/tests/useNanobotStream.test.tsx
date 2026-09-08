@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
@@ -340,6 +341,30 @@ describe("useNanobotStream", () => {
       } else {
         delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
       }
+      vi.useRealTimers();
+    }
+  });
+
+  it("buffers a hidden chat view and flushes its ordered deltas on return", () => {
+    vi.useFakeTimers();
+    const fake = fakeClient();
+    const Client = wrap(fake.client);
+    let visible = false;
+    const { result, rerender, unmount } = renderHook(() => useNanobotStream("hidden-view", EMPTY_MESSAGES), {
+      wrapper: ({ children }) => <Client><ThreadVisibilityContext.Provider value={visible}>{children}</ThreadVisibilityContext.Provider></Client>,
+    });
+    try {
+      act(() => {
+        for (let seq = 1; seq <= 100; seq++) fake.emit("hidden-view", {
+          event: "delta", chat_id: "hidden-view", text: "x", turn_id: "turn", turn_seq: seq,
+        });
+      });
+      expect(result.current.messages).toHaveLength(0);
+      visible = true;
+      rerender();
+      expect(result.current.messages[0]).toMatchObject({ content: "x".repeat(100), turnSeq: 100 });
+    } finally {
+      unmount();
       vi.useRealTimers();
     }
   });

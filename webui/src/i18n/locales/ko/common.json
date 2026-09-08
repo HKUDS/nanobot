@@ -1483,6 +1483,9 @@
     "truncated": "파일이 커서 미리보기가 잘렸습니다."
   },
   "code": {
+    "previousPage": "이전 페이지",
+    "nextPage": "다음 페이지",
+    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "코드",
     "copyAria": "코드 복사",
     "copy": "복사",

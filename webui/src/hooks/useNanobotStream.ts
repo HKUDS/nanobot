@@ -1,6 +1,7 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
@@ -274,6 +275,9 @@ export function useNanobotStream(
   dismissStreamError: () => void;
 } {
   const { client } = useClient();
+  const threadVisible = useThreadVisibility();
+  const threadVisibleRef = useRef(threadVisible);
+  threadVisibleRef.current = threadVisible;
   const { t } = useTranslation();
   const initialRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
@@ -518,16 +522,30 @@ export function useNanobotStream(
   const applyPendingStreamEvents = useCallback(
     (prev: UIMessage[], events: PendingStreamEvent[]): UIMessage[] => {
       let next = prev;
-      for (const event of events) {
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index];
+        const chunks = [event.text];
+        let turn = event.turn;
+        while (index + 1 < events.length) {
+          const nextEvent = events[index + 1];
+          if (nextEvent.kind !== event.kind
+            || nextEvent.turn.turnId !== event.turn.turnId
+            || nextEvent.turn.turnPhase !== event.turn.turnPhase
+            || (nextEvent.kind === "delta" && event.kind === "delta" && nextEvent.source !== event.source)) break;
+          chunks.push(nextEvent.text);
+          turn = { ...turn, ...nextEvent.turn };
+          index++;
+        }
+        const text = chunks.join("");
         if (event.kind === "delta") {
-          next = appendAnswerChunk(next, event.text, event.turn, event.source);
+          next = appendAnswerChunk(next, text, turn, event.source);
         } else {
           if (closeActiveAssistantStream()) clearActivitySegment();
           next = attachReasoningChunk(
             next,
-            event.text,
+            text,
             { ensure: ensureActivitySegmentId },
-            event.turn,
+            turn,
           );
         }
       }
@@ -621,7 +639,7 @@ export function useNanobotStream(
 
   const schedulePendingStreamFlush = useCallback(() => {
     if (streamFrameRef.current !== null || streamTimerRef.current !== null) return;
-    if (document.visibilityState === "hidden") {
+    if (document.visibilityState === "hidden" || !threadVisibleRef.current) {
       streamTimerRef.current = window.setTimeout(() => {
         streamTimerRef.current = null;
         const events = pendingStreamEventsRef.current;
@@ -641,8 +659,18 @@ export function useNanobotStream(
   }, [applyPendingStreamEvents]);
 
   useEffect(() => {
+    if (threadVisible) {
+      flushPendingStreamEvents();
+    } else if (streamFrameRef.current !== null) {
+      window.cancelAnimationFrame(streamFrameRef.current);
+      streamFrameRef.current = null;
+      schedulePendingStreamFlush();
+    }
+  }, [threadVisible, flushPendingStreamEvents, schedulePendingStreamFlush]);
+
+  useEffect(() => {
     const flushOnReturn = () => {
-      if (document.visibilityState !== "visible") return;
+      if (document.visibilityState !== "visible" || !threadVisibleRef.current) return;
       if (pendingStreamEventsRef.current.length === 0) return;
       flushPendingStreamEvents();
     };

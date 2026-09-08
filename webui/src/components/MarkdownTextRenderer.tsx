@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import rehypeKatex from "rehype-katex";
 import { Check, Globe2 } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -35,7 +34,6 @@ import { browserSafeFaviconUrls } from "@/lib/provider-brand";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
-import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
 
 interface MarkdownTextRendererProps {
@@ -285,7 +283,19 @@ const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
 ];
-const rehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [rehypeKatex];
+type MathPlugin = typeof import("@/lib/markdown-math").default;
+let loadedMathPlugin: MathPlugin | undefined;
+let mathPluginPromise: Promise<MathPlugin> | undefined;
+
+function loadMathPlugin(): Promise<MathPlugin> {
+  return mathPluginPromise ??= import("@/lib/markdown-math").then((module) => {
+    loadedMathPlugin = module.default;
+    return module.default;
+  }).catch((error) => {
+    mathPluginPromise = undefined;
+    throw error;
+  });
+}
 
 const DIRECT_LINKS = { enabled: false } as const;
 const SAFE_MARKDOWN_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
@@ -519,6 +529,20 @@ export default function MarkdownTextRenderer({
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
+  const [mathPlugin, setMathPlugin] = useState(() => loadedMathPlugin);
+  const needsMath = /\$|\\[([]/.test(children);
+  useEffect(() => {
+    if (!needsMath || mathPlugin) return;
+    let cancelled = false;
+    void loadMathPlugin().then((plugin) => {
+      if (!cancelled) setMathPlugin(() => plugin);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [needsMath, mathPlugin]);
+  const rehypePlugins = useMemo<NonNullable<StreamdownProps["rehypePlugins"]>>(
+    () => needsMath && mathPlugin ? [mathPlugin] : [],
+    [needsMath, mathPlugin],
+  );
   const components = useMemo<Components>(
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
@@ -795,6 +819,7 @@ export default function MarkdownTextRenderer({
 
   return (
     <Streamdown
+      key={needsMath && mathPlugin ? "math" : "text"}
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
       isAnimating={false}

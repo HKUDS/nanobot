@@ -1483,6 +1483,9 @@
     "truncated": "ファイルが大きいため、プレビューは途中まで表示されています。"
   },
   "code": {
+    "previousPage": "前のページ",
+    "nextPage": "次のページ",
+    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "コード",
     "copyAria": "コードをコピー",
     "copy": "コピー",

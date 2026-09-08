@@ -1,8 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
+
+
+// Exercise the asynchronous math boundary once, then test the loaded grammar cases.
+beforeAll(async () => {
+  const view = render(<MarkdownTextRenderer>{"$$x^2$$"}</MarkdownTextRenderer>);
+  await waitFor(() => expect(view.container.querySelector(".katex")).toBeInTheDocument());
+  view.unmount();
+});
 
 describe("MarkdownTextRenderer", () => {
   it("renders clickable markdown links in blue", () => {

@@ -5,6 +5,26 @@ import { describe, expect, it, vi } from "vitest";
 import { CodeBlock } from "@/components/CodeBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
 
+it("bounds large code pages and makes every page reachable", async () => {
+  const source = Array.from({ length: 1200 }, (_, i) => `line ${i}`).join("\n");
+  render(<CodeBlock code={source} language="typescript" showLineNumbers />);
+  expect(screen.getByTestId("plain-code-fallback").textContent?.length).toBeLessThan(10000);
+  await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+  expect(screen.getByTestId("plain-code-fallback")).toHaveTextContent("line 400");
+  await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+  expect(screen.getByTestId("plain-code-fallback")).toHaveTextContent("line 1199");
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+});
+
+it("keeps Unicode characters intact at the page boundary", async () => {
+  const source = "x".repeat(23999) + "😀tail";
+  render(<CodeBlock code={source} highlight={false} />);
+  const first = screen.getByTestId("plain-code-fallback").textContent;
+  await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+  expect(first).toBe("x".repeat(23999) + "😀");
+  expect(first + screen.getByTestId("plain-code-fallback").textContent!).toBe(source);
+});
+
 const mockedStyles = vi.hoisted(() => ({
   dark: { pre: { background: "#111" } },
   light: { pre: { background: "#fff" } },

@@ -1497,6 +1497,9 @@
     "truncated": "Preview is truncated because this file is large."
   },
   "code": {
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "code",
     "copyAria": "Copy code",
     "copy": "Copy",

@@ -1497,6 +1497,9 @@
     "truncated": "A pré-visualização foi truncada porque este arquivo é grande."
   },
   "code": {
+    "previousPage": "Página anterior",
+    "nextPage": "Próxima página",
+    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "código",
     "copyAria": "Copiar código",
     "copy": "Copiar",
