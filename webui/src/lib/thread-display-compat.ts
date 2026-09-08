@@ -62,6 +62,23 @@ function deriveAssistantCompletionTimes(messages: UIMessage[]): UIMessage[] {
   });
 }
 
+function identifyCompactReplies(messages: UIMessage[]): UIMessage[] {
+  const turns = new Set(messages.flatMap((message) => (
+    message.role === "user" && message.content.trim().toLowerCase() === "/compact" && message.turnId
+      ? [message.turnId]
+      : []
+  )));
+  return messages.map((message) => {
+    if (message.role !== "assistant" || message.kind || message.isStreaming
+      || !message.turnId || !turns.has(message.turnId)) return message;
+    if (message.content === "Nothing to compact.") return { ...message, compactReply: "empty" };
+    if (message.content === "Unable to compact context. Check the logs and try again.") {
+      return { ...message, compactReply: "failed" };
+    }
+    return message;
+  });
+}
+
 export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   const normalized = scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
   const hiddenTurns = new Set(normalized.flatMap((message) => (
@@ -75,5 +92,5 @@ export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
     && !(message.role === "user" && isModelCommandText(message.content))
     && !(message.role === "assistant" && isModelCommandResponseText(message.content))
   ));
-  return deriveAssistantCompletionTimes(visible);
+  return deriveAssistantCompletionTimes(identifyCompactReplies(visible));
 }

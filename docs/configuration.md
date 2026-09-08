@@ -1904,11 +1904,26 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 }
 ```
 
+**AnySearch** (key-optional, anonymous quota):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "anysearch"
+      }
+    }
+  }
+}
+```
+
+AnySearch works out of the box with no key, via its anonymous quota (lower rate limits). Set `apiKey` (or `ANYSEARCH_API_KEY`) from [anysearch.com](https://anysearch.com/console/api-keys) to lift rate limits. It also offers vertical-domain search and full-page URL content extraction.
+
 #### `tools.web.search`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `anysearch`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |

@@ -423,8 +423,7 @@ async def test_runner_preserves_tool_result_before_rejecting_unfit_followup():
             ],
             tools=tools,
             model="gpt-5.6",
-            context_window_tokens=3_000,
-            context_block_limit=200,
+            context_window_tokens=2_224,
             max_tokens=1_000,
             max_iterations=3,
             max_tool_result_chars=10_000,
@@ -1282,9 +1281,10 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
 
 
 @pytest.mark.asyncio
-async def test_runner_binds_on_retry_wait_callback():
-    """Provider retry heartbeats use the explicitly supplied callback."""
+async def test_runner_carries_retry_notifications_in_provider_context():
+    """The runner carries a generic scope, not an event-specific callback."""
     from nanobot.agent.runner import AgentRunner
+    from nanobot.events import EventSink, RetryWaitEvent
 
     captured: dict = {}
 
@@ -1309,10 +1309,13 @@ async def test_runner_binds_on_retry_wait_callback():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        retry_wait_callback=retry_wait_cb,
+        events=EventSink(retry_wait_cb),
     ))
 
-    assert captured["on_retry_wait"] is retry_wait_cb
+    assert "on_retry_wait" not in captured
+    event = RetryWaitEvent("waiting")
+    await captured["provider_context"].events.emit(event)
+    retry_wait_cb.assert_awaited_once_with(event)
 
 
 # ---------------------------------------------------------------------------

@@ -25,10 +25,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
-from nanobot.utils.progress_events import (
-    invoke_file_edit_progress,
-    on_progress_accepts_file_edit_events,
-)
+from nanobot.utils.progress_events import output_events
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
@@ -55,7 +52,7 @@ def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
         sessions=loop.sessions,
         schedule_background=lambda coro: loop.schedule_background(coro),
     )
-    coordinator.subscribe(loop.runtime_events)
+    coordinator.subscribe()
 
 
 class TestToolEventProgress:
@@ -87,7 +84,7 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"
@@ -160,7 +157,7 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"
@@ -232,7 +229,7 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"
@@ -272,7 +269,7 @@ class TestToolEventProgress:
         await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert file_events == []
@@ -368,10 +365,8 @@ class TestToolEventProgress:
             chat_id="chat1",
             content="edit",
         )
-        progress = loop.turn_delivery_factory.create(msg, msg.session_key).progress_callback()
-        assert progress is not None
-        assert on_progress_accepts_file_edit_events(progress) is True
-        await invoke_file_edit_progress(progress, edit_events)
+        events = loop.turn_delivery_factory.create(msg, msg.session_key).events
+        await events.emit(ProgressEvent(file_edit_events=edit_events))
         outbound = await bus.consume_outbound()
         assert outbound.channel == "telegram"
         assert isinstance(outbound.event, ProgressEvent)
@@ -685,14 +680,12 @@ class TestToolEventProgress:
         async def cancel_after_merge(
             _msg: InboundMessage,
             *,
-            on_stream,
-            on_stream_end,
+            delivery,
             **_kwargs,
         ):
-            assert on_stream is not None
-            assert on_stream_end is not None
-            await on_stream("partial")
-            await on_stream_end(resuming=True, merge_next=True)
+            assert delivery.streaming
+            await delivery.events.emit(StreamDeltaEvent(content="partial"))
+            await delivery.events.emit(StreamEndEvent(resuming=True, merge_next=True))
             raise asyncio.CancelledError
 
         loop._process_message = cancel_after_merge  # type: ignore[method-assign]
@@ -1019,8 +1012,8 @@ class TestToolEventProgress:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
-            on_stream=on_stream,
+            events=output_events(on_progress=on_progress, on_stream=on_stream),
+            streaming=True,
         )
 
         assert result.final_content == "Done"
@@ -1212,6 +1205,77 @@ class TestToolEventProgress:
 
         assert captured["provider"] is provider
         assert captured["model"] == "test-model"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    async def test_webui_title_requires_inbound_opt_in(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+    ) -> None:
+        from nanobot.session.manager import SessionManager
+        from nanobot.session.webui_turns import maybe_generate_webui_title_after_turn
+
+        sessions = SessionManager(tmp_path)
+        session = sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        session.add_message("user", "say hello")
+        session.add_message("assistant", "Hello")
+        sessions.save(session)
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Greeting"))
+
+        generated = await maybe_generate_webui_title_after_turn(
+            channel="websocket",
+            chat_id="chat1",
+            metadata=metadata,
+            sessions=sessions,
+            session_key=session.key,
+            provider=provider,
+            model="test-model",
+        )
+
+        assert generated is False
+        provider.chat_with_retry.assert_not_awaited()
+        assert "title" not in session.metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    async def test_webui_turn_without_opt_in_does_not_schedule_title(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done"))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        session = loop.sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        loop.sessions.save(session)
+        scheduled: list[object] = []
+
+        def schedule_background(coro: object) -> None:
+            scheduled.append(coro)
+            if hasattr(coro, "close"):
+                coro.close()
+
+        loop.schedule_background = schedule_background  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata=metadata,
+        ))
+
+        assert scheduled == []
+        provider.chat_with_retry.assert_awaited_once()
+        assert "title" not in session.metadata
 
     @pytest.mark.asyncio
     async def test_webui_command_turn_does_not_schedule_title_generation(

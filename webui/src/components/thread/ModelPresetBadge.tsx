@@ -14,6 +14,7 @@ import {
   floatingItemFocusClassName,
 } from "@/components/ui/floating-surface";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -114,6 +115,7 @@ export function ModelPresetBadge({
 }: ModelPresetBadgeProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const [motion, setMotion] = useState<PresetMotion | null>(null);
   const [motionWidth, setMotionWidth] = useState<number | null>(null);
   const gestureRef = useRef<PresetGesture | null>(null);
@@ -135,11 +137,14 @@ export function ModelPresetBadge({
   const displayLabel = fallbackDisplayLabel || label;
   const displayModelDetail = fallbackPreset
     ? fallbackPreset.model
-    : fallbackModelName
-      ? null
-      : modelDetail;
+    : fallbackModelName || modelDetail;
   const displayProvider = fallbackPreset?.provider
     || (fallbackModelName ? inferProviderFromModelName(fallbackModelName) : provider);
+  const tooltipLabel = [...new Set([
+    displayLabel,
+    displayModelDetail,
+    fallbackModelName ? null : providerLabel,
+  ].filter(Boolean))].join(" · ");
   const presets = !activeName
     ? modelPresets
     : listedIndex < 0
@@ -278,20 +283,19 @@ export function ModelPresetBadge({
       label={displayLabel}
       modelDetail={displayModelDetail}
       provider={displayProvider}
-      providerLabel={fallbackModelName ? null : providerLabel}
       needsSetup={needsSetup}
       needsAttention={needsSetup && attentionRequest > 0}
       fallbackModelName={fallbackModelName}
-      fallbackFromLabel={fallbackModelName ? label : null}
       isHero={isHero}
     />
   );
 
-  if (!canSwitch) {
-    const Container = opensSetup ? "button" : "span";
-    return (
+  const Container = opensSetup ? "button" : "span";
+  const badge = !canSwitch ? (
+    <TooltipTrigger asChild>
       <Container
-        aria-label={fallbackModelName ? `${displayLabel} (fallback from ${label})` : label}
+        aria-label={displayLabel}
+        tabIndex={opensSetup ? undefined : 0}
         type={opensSetup ? "button" : undefined}
         onClick={opensSetup ? onClick : undefined}
         className={cn(
@@ -302,10 +306,8 @@ export function ModelPresetBadge({
       >
         {pill}
       </Container>
-    );
-  }
-
-  return (
+    </TooltipTrigger>
+  ) : (
     <Popover
       open={open}
       onOpenChange={(nextOpen) => {
@@ -314,86 +316,88 @@ export function ModelPresetBadge({
       }}
     >
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          data-switching={motion ? "true" : undefined}
-          aria-label={label}
-          aria-expanded={open}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerLeave={(event) => {
-            const gesture = gestureRef.current;
-            if (gesture && gesture.pointerId === event.pointerId && !gesture.active) clearGesture();
-          }}
-          onPointerUp={(event) => finishGesture(event, true)}
-          onPointerCancel={(event) => finishGesture(event, false)}
-          onLostPointerCapture={(event) => finishGesture(event, false)}
-          onContextMenu={(event) => {
-            if (gestureRef.current?.active) event.preventDefault();
-          }}
-          onDragStart={(event) => event.preventDefault()}
-          onKeyDown={handleKeyDown}
-          onClickCapture={(event) => {
-            if (!suppressClickRef.current) return;
-            suppressClickRef.current = false;
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          style={{
-            touchAction: "manipulation",
-            width: motionWidth ? `${motionWidth}px` : undefined,
-          }}
-          className={cn(
-            "thread-composer-model-badge group relative inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] cursor-pointer appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
-            motion && "z-10 cursor-grabbing",
-            !motion && "cursor-grab",
-            isHero ? "h-8" : "h-9",
-          )}
-        >
-          {motion ? (
-            <>
-              <span data-testid="composer-model-pill-layout" className="invisible inline-flex h-full shrink-0" aria-hidden>
-                {pill}
-              </span>
-              <span
-                data-testid="composer-model-pill-viewport"
-                className={cn(
-                  "composer-model-pill-viewport pointer-events-none absolute -left-2 right-0 overflow-hidden bg-transparent",
-                  isHero ? "-bottom-2.5 -top-2.5" : "-bottom-3 -top-3",
-                )}
-                aria-hidden
-              >
-                <span
-                  data-testid="composer-model-pill-track"
-                  data-settling={motion.settling ? "true" : undefined}
-                  className="composer-model-pill-track ml-auto flex w-[calc(100%-0.5rem)] flex-col items-end gap-1 will-change-transform"
-                  onTransitionEnd={(event) => {
-                    if (motion.settling && event.currentTarget === event.target) clearMotion();
-                  }}
-                  style={{
-                    paddingTop: isHero ? "10px" : "12px",
-                    transform: `translate3d(0, ${-pillStride * (2 + motion.remainder)}px, 0)`,
-                  }}
-                >
-                  {PILL_OFFSETS.map((offset) => {
-                    const preset = presets[wrapIndex(motion.index + offset, presets.length)];
-                    return (
-                      <PresetPill
-                        key={motion.index + offset}
-                        label={preset.name}
-                        modelDetail={preset.model}
-                        provider={preset.provider}
-                        isHero={isHero}
-                        offset={offset}
-                        scale={motion.settling ? 1 : dockScale(offset - motion.remainder)}
-                      />
-                    );
-                  })}
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            data-switching={motion ? "true" : undefined}
+            aria-label={displayLabel}
+            aria-expanded={open}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerLeave={(event) => {
+              const gesture = gestureRef.current;
+              if (gesture && gesture.pointerId === event.pointerId && !gesture.active) clearGesture();
+            }}
+            onPointerUp={(event) => finishGesture(event, true)}
+            onPointerCancel={(event) => finishGesture(event, false)}
+            onLostPointerCapture={(event) => finishGesture(event, false)}
+            onContextMenu={(event) => {
+              if (gestureRef.current?.active) event.preventDefault();
+            }}
+            onDragStart={(event) => event.preventDefault()}
+            onKeyDown={handleKeyDown}
+            onClickCapture={(event) => {
+              if (!suppressClickRef.current) return;
+              suppressClickRef.current = false;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            style={{
+              touchAction: "manipulation",
+              width: motionWidth ? `${motionWidth}px` : undefined,
+            }}
+            className={cn(
+              "thread-composer-model-badge group relative inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] cursor-pointer appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
+              motion && "z-10 cursor-grabbing",
+              !motion && "cursor-grab",
+              isHero ? "h-8" : "h-9",
+            )}
+          >
+            {motion ? (
+              <>
+                <span data-testid="composer-model-pill-layout" className="invisible inline-flex h-full shrink-0" aria-hidden>
+                  {pill}
                 </span>
-              </span>
-            </>
-          ) : pill}
-        </button>
+                <span
+                  data-testid="composer-model-pill-viewport"
+                  className={cn(
+                    "composer-model-pill-viewport pointer-events-none absolute -left-2 right-0 overflow-hidden bg-transparent",
+                    isHero ? "-bottom-2.5 -top-2.5" : "-bottom-3 -top-3",
+                  )}
+                  aria-hidden
+                >
+                  <span
+                    data-testid="composer-model-pill-track"
+                    data-settling={motion.settling ? "true" : undefined}
+                    className="composer-model-pill-track ml-auto flex w-[calc(100%-0.5rem)] flex-col items-end gap-1 will-change-transform"
+                    onTransitionEnd={(event) => {
+                      if (motion.settling && event.currentTarget === event.target) clearMotion();
+                    }}
+                    style={{
+                      paddingTop: isHero ? "10px" : "12px",
+                      transform: `translate3d(0, ${-pillStride * (2 + motion.remainder)}px, 0)`,
+                    }}
+                  >
+                    {PILL_OFFSETS.map((offset) => {
+                      const preset = presets[wrapIndex(motion.index + offset, presets.length)];
+                      return (
+                        <PresetPill
+                          key={motion.index + offset}
+                          label={preset.name}
+                          modelDetail={preset.model}
+                          provider={preset.provider}
+                          isHero={isHero}
+                          offset={offset}
+                          scale={motion.settling ? 1 : dockScale(offset - motion.remainder)}
+                        />
+                      );
+                    })}
+                  </span>
+                </span>
+              </>
+            ) : pill}
+          </button>
+        </TooltipTrigger>
       </PopoverTrigger>
       <PopoverContent
         align="end"
@@ -448,6 +452,15 @@ export function ModelPresetBadge({
       </PopoverContent>
     </Popover>
   );
+
+  return (
+    <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+      <Tooltip open={tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
+        {badge}
+        <TooltipContent side="top">{tooltipLabel}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 function PresetOption({
@@ -495,11 +508,9 @@ function PresetPill({
   label,
   modelDetail,
   provider,
-  providerLabel,
   needsSetup = false,
   needsAttention = false,
   fallbackModelName,
-  fallbackFromLabel,
   isHero,
   offset,
   scale,
@@ -507,11 +518,9 @@ function PresetPill({
   label: string;
   modelDetail?: string | null;
   provider?: string | null;
-  providerLabel?: string | null;
   needsSetup?: boolean;
   needsAttention?: boolean;
   fallbackModelName?: string | null;
-  fallbackFromLabel?: string | null;
   isHero: boolean;
   offset?: number;
   scale?: number;
@@ -521,10 +530,6 @@ function PresetPill({
   const inferredProvider = needsSetup
     ? null
     : provider || inferProviderFromModelName(modelDetail || label);
-  const title = [...new Set([label, modelDetail, providerLabel].filter(Boolean))].join(" · ");
-  const fallbackTitle = fallbackModelName
-    ? `${fallbackFromLabel || label} · using ${fallbackModelName}`
-    : title;
 
   useLayoutEffect(() => {
     const node = labelRef.current;
@@ -541,7 +546,6 @@ function PresetPill({
       data-fallback={fallbackModelName ? "true" : undefined}
       data-needs-setup={needsSetup ? "true" : undefined}
       data-preset-offset={offset}
-      title={fallbackTitle || undefined}
       className={cn(
         "composer-model-badge composer-model-pill inline-flex h-full max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/70",
         "w-fit",

@@ -539,9 +539,6 @@ class WebSocketChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
 
-    def _expected_path(self) -> str:
-        return _normalize_config_path(self.config.path)
-
     def _build_ssl_context(self) -> ssl.SSLContext | None:
         cert = self.config.ssl_certfile.strip()
         key = self.config.ssl_keyfile.strip()
@@ -578,9 +575,6 @@ class WebSocketChannel(BaseChannel):
             query,
             headers,
         )
-
-    def _consume_issued_token(self, connection: ServerConnection, token: str) -> bool:
-        return self.gateway.endpoint.consume_issued_token(connection, token)
 
     # -- Server lifecycle and connection ingress ---------------------------
 
@@ -815,6 +809,9 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"terminal": {
+                            "protocolVersion": 1, "gatewayId": self.gateway.tokens.instance_id,
+                        }} if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,
                 )
@@ -1388,7 +1385,14 @@ class WebSocketChannel(BaseChannel):
         """Persist as requested, frame, and fan out one encoded WebUI payload."""
         conns = list(self._subs.get(chat_id, ()))
         body: dict[str, Any] = dict(payload)
-        if persistence == "turn_complete":
+        if persistence == "turn_activity":
+            self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="activity",
+            )
+        elif persistence == "turn_complete":
             canonical_webui_turn = (metadata or {}).get("webui") is True
             prior_persistence_failure = (
                 canonical_webui_turn

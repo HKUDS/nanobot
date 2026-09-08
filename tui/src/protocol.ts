@@ -1,3 +1,7 @@
+import { decodeNotification, isCompactionPhase, isRecoveryState } from "../../packages/client-events/notifications"
+import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../packages/client-events/notifications"
+export type { ContextCompaction, RecoveryState, RecoveryStatus, RetryStatus } from "../../packages/client-events/notifications"
+
 export type ConnectionStatus =
   | "starting"
   | "connecting"
@@ -76,16 +80,6 @@ export interface RuntimeControls {
   canUseFullAccess: boolean
 }
 
-export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed"
-
-export interface RecoveryState {
-  status: RecoveryStatus
-  recovery_id: string
-  reason?: string
-  attempts?: number
-  can_continue?: boolean
-}
-
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | {
@@ -142,6 +136,11 @@ export type InboundEvent =
       usage?: TokenUsage
       context_window_tokens?: number
       goal_state?: Record<string, unknown>
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted"
+      failure_kind?: string
+      failure_error_kind?: string
+      failure_attempts?: number
+      failure_message?: string
     }
   | {
       event: "goal_status"
@@ -151,7 +150,7 @@ export type InboundEvent =
       turn_id?: string
     }
   | { event: "goal_state"; chat_id: string; goal_state: Record<string, unknown> }
-  | ({ event: "recovery_state"; chat_id: string } & RecoveryState)
+  | NotificationEvent
   | {
       event: "session_updated"
       chat_id: string
@@ -193,6 +192,8 @@ type OutboundEvent =
     }
 
 export interface ClientOptions {
+  expectedGatewayId?: string
+  reconnect?: boolean
   url?: string
   resolveConnection?: () => Promise<GatewayConnection>
   checkHealth?: () => Promise<GatewayHealthStatus>
@@ -234,6 +235,7 @@ export interface HistoryMessage {
   media?: MediaAttachment[]
   toolEvents?: ToolProgressEvent[]
   fileEdits?: FileEditEvent[]
+  compaction?: ContextCompaction
   forkIndex?: number
 }
 
@@ -352,10 +354,12 @@ const CHAT_EVENTS = new Set([
   "stream_end",
   "reasoning_delta",
   "reasoning_end",
+  "retry_status",
   "turn_end",
   "goal_status",
   "goal_state",
   "recovery_state",
+  "context_compaction",
   "session_updated",
   "turn_model_updated",
   "error",
@@ -437,15 +441,6 @@ function isWorkspaceScope(value: unknown): value is WorkspaceScopePayload {
     && (value.access_mode === "restricted" || value.access_mode === "full")
     && optional(value.project_name, "string")
     && optional(value.restrict_to_workspace, "boolean")
-}
-
-function isRecoveryState(value: unknown): value is RecoveryState {
-  return isRecord(value)
-    && ["resuming", "awaiting_user", "recovered", "failed"].includes(String(value.status))
-    && typeof value.recovery_id === "string"
-    && optional(value.reason, "string")
-    && optional(value.attempts, "number")
-    && optional(value.can_continue, "boolean")
 }
 
 interface WebUIResponseEvent {
@@ -539,11 +534,20 @@ function decodeInboundEvent(value: unknown): InboundEvent | null | undefined {
     && (!optional(record.latency_ms, "number")
       || !optional(record.context_window_tokens, "number")
       || (record.usage !== undefined && !isTokenUsage(record.usage))
-      || (record.goal_state !== undefined && !isRecord(record.goal_state)))
+      || (record.goal_state !== undefined && !isRecord(record.goal_state))
+      || (record.outcome !== undefined
+        && !["completed", "failed", "cancelled", "interrupted"].includes(String(record.outcome)))
+      || !optional(record.failure_kind, "string")
+      || !optional(record.failure_error_kind, "string")
+      || (record.failure_attempts !== undefined
+        && (typeof record.failure_attempts !== "number"
+          || !Number.isInteger(record.failure_attempts)
+          || record.failure_attempts < 1))
+      || !optional(record.failure_message, "string"))
   ) return null
   if (name === "goal_status" && record.status !== "running" && record.status !== "idle") return null
   if (name === "goal_state" && !isRecord(record.goal_state)) return null
-  if (name === "recovery_state" && !isRecoveryState(record)) return null
+  if (decodeNotification(record) === null) return null
   if (
     name === "session_updated"
     && (!optional(record.scope, "string")
@@ -608,6 +612,20 @@ export async function fetchHistory(
   for (const message of payload.messages || []) {
     const role = message.role
     const content = message.content
+    if (message.kind === "compaction") {
+      const compaction = message.compaction
+      if (isRecord(compaction)
+        && typeof compaction.id === "string"
+        && compaction.id
+        && isCompactionPhase(compaction.phase)) {
+        messages.push({
+          role: "activity",
+          content: "",
+          compaction: { id: compaction.id, phase: compaction.phase },
+        })
+      }
+      continue
+    }
     if (role === "tool" && message.kind === "trace") {
       const traces = Array.isArray(message.traces)
         ? message.traces.filter((value): value is string => typeof value === "string")
@@ -1056,6 +1074,8 @@ export function sanitizeConnectionFailure(error: unknown): string {
 }
 
 export class NanobotClient {
+  private identityVerified = false
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null
   private socket: WebSocket | null = null
   private chatId = ""
   private workspaceScope?: WorkspaceScopePayload
@@ -1099,6 +1119,7 @@ export class NanobotClient {
   private async open(): Promise<void> {
     if (this.socket || this.opening || this.closedByClient) return
     this.opening = true
+    this.identityVerified = !this.options.expectedGatewayId
     this.nextRetryAt = 0
     this.connectionAttempt += 1
     this.reportConnectionProgress()
@@ -1138,6 +1159,9 @@ export class NanobotClient {
     }
     let opened = false
     this.socket = socket
+    if (this.options.expectedGatewayId) {
+      this.handshakeTimer = setTimeout(() => this.desktopFailure(), 8_000)
+    }
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return
       opened = true
@@ -1156,6 +1180,7 @@ export class NanobotClient {
     })
     socket.addEventListener("error", () => {
       if (this.socket !== socket) return
+      if (this.options.reconnect === false) { this.desktopFailure(); return }
       this.lastFailure = "connection failed"
       this.reportRetryState()
     })
@@ -1167,6 +1192,7 @@ export class NanobotClient {
         this.options.onStatus("closed")
         return
       }
+      if (this.options.reconnect === false) { this.desktopFailure(); return }
       if (opened) {
         this.connectionAttempt = 0
         this.reconnectAttempt = 0
@@ -1179,6 +1205,8 @@ export class NanobotClient {
   }
 
   close(): void {
+    if (this.handshakeTimer) clearTimeout(this.handshakeTimer)
+    this.handshakeTimer = null
     this.closedByClient = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
@@ -1255,6 +1283,9 @@ export class NanobotClient {
     payload: Record<string, unknown> = {},
     timeoutMs = 20_000,
   ): Promise<T> {
+    if (this.options.expectedGatewayId && !this.identityVerified) {
+      return Promise.reject(new Error("Desktop identity not verified"))
+    }
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("gateway connection is not open"))
     }
@@ -1298,10 +1329,23 @@ export class NanobotClient {
     try {
       value = JSON.parse(raw) as unknown
     } catch {
+      if (!this.identityVerified && this.options.expectedGatewayId) { this.desktopFailure(); return }
       this.options.onStatus("error", "gateway sent invalid JSON")
       return
     }
     const response = decodeWebUIResponse(value)
+    if (!this.identityVerified) {
+      // Matching metadata is insufficient: an invalid ready frame must not
+      // unlock mutations or cancel the bounded compatibility handshake.
+      if (!isRecord(value) || decodeInboundEvent(value)?.event !== "ready" || !isRecord(value.terminal)
+        || value.terminal.protocolVersion !== 1 || value.terminal.gatewayId !== this.options.expectedGatewayId) {
+        this.desktopFailure()
+        return
+      }
+      this.identityVerified = true
+      if (this.handshakeTimer) clearTimeout(this.handshakeTimer)
+      this.handshakeTimer = null
+    }
     if (response === null) {
       this.options.onStatus("error", "gateway sent an invalid event")
       return
@@ -1355,6 +1399,7 @@ export class NanobotClient {
   }
 
   private async checkHealthAndScheduleReconnect(): Promise<void> {
+    if (this.options.reconnect === false) { this.desktopFailure(); return }
     if (this.options.checkHealth) {
       try {
         this.healthStatus = await this.options.checkHealth()
@@ -1375,6 +1420,11 @@ export class NanobotClient {
         : {}),
       ...(this.healthStatus ? { health: this.healthStatus } : {}),
     }
+  }
+
+  private desktopFailure(): void {
+    this.close()
+    this.options.onStatus("error", "Desktop disconnected or is incompatible; reconnect from the terminal", this.connectionInfo())
   }
 
   private reportConnectionProgress(): void {
@@ -1413,6 +1463,7 @@ export class NanobotClient {
   }
 
   private write(event: OutboundEvent): void {
+    if (this.options.expectedGatewayId && !this.identityVerified) throw new Error("Desktop identity not verified")
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error("gateway connection is not open")
     }

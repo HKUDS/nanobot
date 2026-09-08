@@ -1,8 +1,16 @@
+import type { ContextCompaction, NotificationEvent, RecoveryState, RetryStatus as WireRetryStatus } from "../../../packages/client-events/notifications";
+export type { RecoveryState, RecoveryStatus } from "../../../packages/client-events/notifications";
+
 type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-type MessageKind = "message" | "trace";
+type MessageKind = "message" | "trace" | "compaction";
+
+export interface UIContextCompaction extends ContextCompaction {
+  /** Live wire transitions announce; hydrated transcript rows stay silent. */
+  announce?: boolean;
+}
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
@@ -56,16 +64,10 @@ export interface TurnUsage {
 
 export type RoundUsage = TurnUsage;
 
-export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed";
-
-export interface RecoveryState {
-  status: RecoveryStatus;
-  recovery_id: string;
-  reason?: string;
-  attempts?: number;
-  can_continue?: boolean;
+export interface RetryStatus extends WireRetryStatus {
+  next_retry_at?: number;
+  turn_id?: string;
 }
-
 export interface UIMessage {
   id: string;
   role: Role;
@@ -86,6 +88,10 @@ export interface UIMessage {
   /** Internal projection marker for assistant text emitted before a later tool.
    * It is not a wire message and is rendered as a compact activity row. */
   activityKind?: "model";
+  /** Context-compaction lifecycle rendered as a standalone channel notice. */
+  compaction?: UIContextCompaction;
+  /** Display-only localization marker for fixed /compact command replies. */
+  compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
@@ -1193,15 +1199,6 @@ export interface ChannelConfigurePayload {
   nanobot_features?: NanobotFeaturesPayload;
 }
 
-export interface SettingsUpdate {
-  model?: string;
-  provider?: string;
-  modelPreset?: string | null;
-  contextWindowTokens?: number;
-  timezone?: string;
-  toolHintMaxLength?: number;
-}
-
 export interface ModelConfigurationCreate {
   name: string;
   provider: string;
@@ -1371,10 +1368,7 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | ({
-      event: "recovery_state";
-      chat_id: string;
-    } & RecoveryState)
+  | (NotificationEvent & InboundTurnMetadata)
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1432,6 +1426,11 @@ export type InboundEvent =
       context_window_tokens?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted";
+      failure_kind?: string;
+      failure_error_kind?: string;
+      failure_attempts?: number;
+      failure_message?: string;
     } & InboundTurnMetadata)
   | ({
       event: "goal_status";

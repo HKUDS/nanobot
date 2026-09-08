@@ -58,7 +58,9 @@ def test_valid_offset_is_preserved():
     session = _session(10, 4)
     assert session.last_consolidated == 4
     assert session.last_archived == 4
-    assert len(session.get_history()) == 8
+    assert session.get_history() == [
+        {"role": "user", "content": f"msg{i}"} for i in range(4, 10)
+    ]
 
 
 def test_last_archived_field_migrates_with_legacy_alias(tmp_path: Path):

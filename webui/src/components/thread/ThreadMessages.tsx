@@ -4,7 +4,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -14,6 +14,7 @@ interface ThreadMessagesProps {
   activeTurnId?: string | null;
   /** Optimistic or canonical active-turn start, in unix seconds. */
   runStartedAt?: number | null;
+  retryStatus?: RetryStatus | null;
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -39,6 +40,16 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
       hasLaterUnitBeforeUser = false;
       continue;
     }
+    if (
+      unit.type === "message"
+      && unit.message.role === "assistant"
+      && unit.message.kind === "compaction"
+    ) {
+      // Compaction notices are session lifecycle markers, not assistant answers.
+      // They must neither expose nor displace the answer-level fork action.
+      flags[i] = false;
+      continue;
+    }
     if (unit.type === "message" && unit.message.role === "assistant") {
       flags[i] = !hasLaterUnitBeforeUser;
     }
@@ -53,6 +64,7 @@ export function ThreadMessages({
   isStreaming = false,
   activeTurnId = null,
   runStartedAt = null,
+  retryStatus = null,
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
@@ -87,7 +99,7 @@ export function ThreadMessages({
     isStreaming
     && liveActivityClusterIndices.size === 0
     && pendingTurn !== null
-    && !pendingTurn.hasVisibleOutput
+    && (retryStatus !== null || !pendingTurn.hasVisibleOutput)
   ) ? pendingTurn : null;
   const currentTurnStartIndex = isStreaming
     ? activeTurnStartIndex(units, activeTurnId)
@@ -151,6 +163,11 @@ export function ThreadMessages({
                       : index > currentTurnStartIndex
                   )
             }
+            retryStatus={
+              unit.type === "activity" && liveActivityClusterIndices.has(index)
+                ? retryStatus
+                : null
+            }
             forkIndex={forkIndex}
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
             forkBoundaryLabel={t("thread.forkedFromHistory")}
@@ -169,10 +186,10 @@ export function ThreadMessages({
             messages={[]}
             isTurnStreaming
             hasBodyBelow={false}
+            retryStatus={retryStatus}
             startedAtMs={
-              runStartedAt != null
-                ? runStartedAt * 1000
-                : pendingActivity.startedAtMs
+              // Match the activity timeline's prompt-based clock across the first output.
+              pendingActivity.startedAtMs ?? (runStartedAt != null ? runStartedAt * 1000 : undefined)
             }
           />
         </div>
@@ -233,6 +250,7 @@ interface ThreadDisplayUnitProps {
   hasBodyBelow: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
+  retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
   forkBoundaryLabel: string;
@@ -252,6 +270,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   hasBodyBelow,
   deferOffscreenRender,
   isTurnStreaming,
+  retryStatus,
   forkIndex,
   showForkBoundary,
   forkBoundaryLabel,
@@ -283,6 +302,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           <AgentActivityCluster
             messages={unit.messages}
             isTurnStreaming={isTurnStreaming}
+            retryStatus={retryStatus}
             hasBodyBelow={hasBodyBelow}
             turnLatencyMs={unit.turnLatencyMs}
             startedAtMs={unit.startedAtMs}
@@ -319,6 +339,7 @@ function threadDisplayUnitPropsEqual(
     && previous.hasBodyBelow === next.hasBodyBelow
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
     && previous.forkBoundaryLabel === next.forkBoundaryLabel

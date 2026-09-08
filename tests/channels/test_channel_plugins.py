@@ -265,10 +265,8 @@ def test_channels_config_getattr_returns_extra():
     assert section["enabled"] is True
 
 
-def test_channels_config_has_no_per_channel_fields():
-    """After decoupling, ChannelsConfig has no explicit channel fields."""
+def test_channels_config_keeps_shared_delivery_defaults():
     cfg = ChannelsConfig()
-    assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is True
     assert cfg.extract_document_text is True
@@ -2698,7 +2696,7 @@ def test_optional_dependency_metadata_for_enable():
             "socksio>=1.0.0,<2.0.0",
             "python-socks[asyncio]>=2.8.0,<3.0.0; sys_platform != 'win32'",
         ),
-        "wecom": ("wecom-aibot-sdk-python>=0.1.5",),
+        "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
             "neonize>=0.3.18.post0,<0.4.0",
@@ -3536,6 +3534,8 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
 
     # Create a real cancelled task
     async def dummy_task():
@@ -3614,6 +3614,8 @@ async def test_stop_all_handles_channel_exception():
     mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
     mgr._dispatch_task = None
 
     # Should not raise even if channel.stop() raises
@@ -3653,6 +3655,8 @@ async def test_stop_all_handles_channel_stop_cancelled_task():
         "next": next_channel,
     }
     mgr._channel_tasks = {}
+    mgr._outbound_tasks = {}
+    mgr._stopping_channels = set()
     mgr._dispatch_task = None
 
     await mgr.stop_all()

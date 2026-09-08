@@ -157,6 +157,7 @@ async def test_llm_arrearage_error_surfaces_clear_message():
 
     assert result.stop_reason == "error"
     assert result.final_content == _ARREARAGE_ERROR_MESSAGE
+    assert result.failure_error_kind == "billing"
 
 
 @pytest.mark.asyncio

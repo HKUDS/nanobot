@@ -15,6 +15,7 @@ from nanobot.agent.hook import (
     CompositeHook,
 )
 from nanobot.agent.tools.context import RequestContext
+from nanobot.utils.progress_events import output_events
 
 
 def _ctx() -> AgentHookContext:
@@ -507,7 +508,7 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
     await loop._run_agent_loop(
         TranscriptInput(history=[{"role": "user", "content": "hi"}], current_message=None),
         runtime=runtime,
-        on_progress=on_progress,
+        events=output_events(on_progress=on_progress),
         request_context=RequestContext(
             channel="websocket",
             chat_id="chat-1",
@@ -521,7 +522,8 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
 
     assert events == ["registered:0", "turn:0"]
     assert [label for label, _ in captured] == ["registered", "turn"]
-    assert [context.on_progress for _, context in captured] == [on_progress, on_progress]
+    assert captured[0][1].events is captured[1][1].events
+    assert captured[0][1].events.publish is not None
     assert [context.workspace for _, context in captured] == [tmp_path, tmp_path]
     assert [context.channel for _, context in captured] == ["websocket", "websocket"]
     assert [context.chat_id for _, context in captured] == ["chat-1", "chat-1"]
@@ -580,7 +582,7 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
         await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=bad_progress,
+            events=output_events(on_progress=bad_progress),
         )
 
 

@@ -125,6 +125,9 @@ function fakeClient() {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
       },
+      getRunTurnId() {
+        return null;
+      },
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
       },
@@ -197,6 +200,67 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-compaction", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-compaction", {
+        event: "context_compaction",
+        chat_id: "chat-compaction",
+        compaction_id: "compact-1",
+        phase: "started",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    const createdAt = result.current.messages[0].createdAt;
+    expect(result.current.messages[0]).toMatchObject({
+      id: "compaction-compact-1",
+      kind: "compaction",
+      compaction: {
+        id: "compact-1",
+        phase: "started",
+        announce: true,
+      },
+    });
+
+    act(() => {
+      fake.emit("chat-compaction", {
+        event: "context_compaction",
+        chat_id: "chat-compaction",
+        compaction_id: "compact-1",
+        phase,
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      id: "compaction-compact-1",
+      createdAt,
+      compaction: {
+        phase,
+        announce: true,
+      },
+    });
+  });
+
+  it("keeps a hydrated terminal compaction when a queued start arrives", () => {
+    const fake = fakeClient();
+    const initial = [{ id: "compaction-c1", role: "assistant" as const, content: "",
+      kind: "compaction" as const, createdAt: 123,
+      compaction: { id: "c1", phase: "succeeded" as const } }];
+    const { result } = renderHook(() => useNanobotStream("chat", initial), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => fake.emit("chat", { event: "context_compaction", chat_id: "chat",
+      compaction_id: "c1", phase: "started" }));
+    expect(result.current.messages).toEqual(initial);
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");
@@ -3164,6 +3228,72 @@ describe("useNanobotStream", () => {
     });
     expect(result.current.runStartedAt).toBeNull();
     expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("clears retry status and exposes a terminal model failure at turn end", () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(120_000);
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-retry", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "retry_status",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        state: "waiting",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+        retry_after_s: 3.5,
+      });
+    });
+    expect(result.current.retryStatus).toEqual({
+      state: "waiting",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+      next_retry_at: 123.5,
+      turn_id: "turn-1",
+    });
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "retry_status",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        state: "cleared",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+      });
+    });
+    expect(result.current.retryStatus).toBeNull();
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "turn_end",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Unlocalized server failure",
+      });
+    });
+    expect(result.current.retryStatus).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamError).toEqual({
+      kind: "model_request_failed",
+      chatId: "chat-retry",
+      turnId: "turn-1",
+      errorKind: "connection",
+      attempts: 4,
+    });
+    dateNow.mockRestore();
   });
 
   it("clears runStartedAt on turn_end even without idle", () => {

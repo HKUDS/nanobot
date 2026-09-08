@@ -1,25 +1,16 @@
-"""Runtime event bus for agent state notifications.
-
-This bus is separate from :mod:`nanobot.bus.queue`: message bus events are
-user/chat delivery, while runtime events are in-process state notifications
-that optional subscribers such as WebUI adapters may render.
-"""
+"""Runtime state facts and turn-scoped publication through MessageBus."""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import inspect
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from nanobot.bus.events import InboundMessage
+from nanobot.events import AgentEvent
 from nanobot.providers.base import LLMUsage
 
 if TYPE_CHECKING:
+    from nanobot.bus.queue import MessageBus
     from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -35,14 +26,14 @@ class RuntimeEventContext:
 
 
 @dataclass(frozen=True)
-class SessionTurnStarted:
+class SessionTurnStarted(AgentEvent):
     """A user/system turn has loaded its session and is about to build context."""
 
     context: RuntimeEventContext
 
 
 @dataclass(frozen=True)
-class UserInputAccepted:
+class UserInputAccepted(AgentEvent):
     """User input was accepted for dispatch or injection into a session."""
 
     context: RuntimeEventContext
@@ -50,7 +41,7 @@ class UserInputAccepted:
 
 
 @dataclass(frozen=True)
-class TurnRuntimeAdmitted:
+class TurnRuntimeAdmitted(AgentEvent):
     """The immutable model runtime selected for one admitted turn."""
 
     context: RuntimeEventContext
@@ -58,7 +49,7 @@ class TurnRuntimeAdmitted:
 
 
 @dataclass(frozen=True)
-class TurnRunStatusChanged:
+class TurnRunStatusChanged(AgentEvent):
     """Visible run status changed for a turn."""
 
     context: RuntimeEventContext
@@ -67,7 +58,7 @@ class TurnRunStatusChanged:
 
 
 @dataclass(frozen=True)
-class TurnCompleted:
+class TurnCompleted(AgentEvent):
     """A turn has delivered its final user-visible response."""
 
     context: RuntimeEventContext
@@ -76,10 +67,14 @@ class TurnCompleted:
     usage: LLMUsage | None = None
     # Logical model rounds in display order; recovery dispatches are aggregated.
     round_usages: tuple[LLMUsage, ...] = ()
+    outcome: str = "completed"
+    failure_kind: str | None = None
+    failure_error_kind: str | None = None
+    failure_attempts: int | None = None
 
 
 @dataclass(frozen=True)
-class SessionTurnPersisted:
+class SessionTurnPersisted(AgentEvent):
     """A completed turn has been written to local session storage."""
 
     context: RuntimeEventContext
@@ -88,7 +83,7 @@ class SessionTurnPersisted:
 
 
 @dataclass(frozen=True)
-class GoalStateChanged:
+class GoalStateChanged(AgentEvent):
     """A session's sustained-goal state changed."""
 
     context: RuntimeEventContext
@@ -96,80 +91,11 @@ class GoalStateChanged:
 
 
 @dataclass(frozen=True)
-class RuntimeModelChanged:
+class RuntimeModelChanged(AgentEvent):
     """The active runtime model/preset changed."""
 
     model: str
     model_preset: str | None
-
-
-RuntimeEvent = (
-    UserInputAccepted
-    | SessionTurnStarted
-    | TurnRuntimeAdmitted
-    | SessionTurnPersisted
-    | TurnRunStatusChanged
-    | TurnCompleted
-    | GoalStateChanged
-    | RuntimeModelChanged
-)
-RuntimeEventType = (
-    type[UserInputAccepted]
-    | type[SessionTurnStarted]
-    | type[TurnRuntimeAdmitted]
-    | type[SessionTurnPersisted]
-    | type[TurnRunStatusChanged]
-    | type[TurnCompleted]
-    | type[GoalStateChanged]
-    | type[RuntimeModelChanged]
-)
-RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
-_HandlerEntry = tuple[RuntimeEventType | None, RuntimeEventHandler]
-
-
-class RuntimeEventBus:
-    """Small in-process pub/sub bus for runtime state.
-
-    Subscribers run in registration order. ``publish`` awaits async handlers so
-    callers can preserve ordering when a runtime event must follow a user
-    message. ``publish_nowait`` is available for synchronous call sites.
-    """
-
-    def __init__(self) -> None:
-        self._handlers: list[_HandlerEntry] = []
-
-    def subscribe(
-        self,
-        handler: RuntimeEventHandler,
-        event_type: RuntimeEventType | None = None,
-    ) -> Callable[[], None]:
-        entry = (event_type, handler)
-        self._handlers.append(entry)
-
-        def _unsubscribe() -> None:
-            with contextlib.suppress(ValueError):
-                self._handlers.remove(entry)
-
-        return _unsubscribe
-
-    async def publish(self, event: RuntimeEvent) -> None:
-        for event_type, handler in list(self._handlers):
-            if event_type is not None and not isinstance(event, event_type):
-                continue
-            try:
-                result = handler(event)
-                if inspect.isawaitable(result):
-                    await result
-            except Exception:
-                logger.exception("runtime event handler failed for {}", type(event).__name__)
-
-    def publish_nowait(self, event: RuntimeEvent) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            logger.debug("dropping runtime event without a running loop: {}", type(event).__name__)
-            return
-        loop.create_task(self.publish(event))
 
 
 class RuntimeEventPublisher:
@@ -179,8 +105,8 @@ class RuntimeEventPublisher:
     the mechanics of building event contexts and carrying per-turn metadata.
     """
 
-    def __init__(self, bus: RuntimeEventBus | None = None) -> None:
-        self.bus = bus or RuntimeEventBus()
+    def __init__(self, bus: MessageBus) -> None:
+        self.bus = bus
         self._turn_latency_ms: dict[str, int] = {}
         self._turn_runtime: dict[str, LLMRuntime] = {}
         self._turn_usage: dict[str, LLMUsage] = {}
@@ -337,6 +263,10 @@ class RuntimeEventPublisher:
         chat_id: str,
         session_key: str,
         metadata: dict[str, Any] | None,
+        outcome: str = "completed",
+        failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
     ) -> None:
         await self.bus.publish(
             TurnCompleted(
@@ -350,6 +280,10 @@ class RuntimeEventPublisher:
                 runtime=self._turn_runtime.pop(session_key, None),
                 usage=self._turn_usage.pop(session_key, None),
                 round_usages=self._turn_round_usages.pop(session_key, ()),
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=failure_error_kind,
+                failure_attempts=failure_attempts,
             )
         )
 

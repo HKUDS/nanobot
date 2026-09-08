@@ -1,7 +1,6 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
 import os
-import subprocess
 import sys
 import time
 import webbrowser
@@ -50,7 +49,6 @@ __all__ = [
     "_print_foreground_port_conflict",
     "_print_webui_foreground_lifecycle",
     "_resolve_webui_config_path",
-    "_run_quick_start_for_webui",
     "_tcp_endpoint_reachable",
     "_validate_gateway_startup",
     "_warn_webui_bind_scope",
@@ -68,15 +66,45 @@ console = Console()
 def _launch_browser(url: str) -> bool:
     """Open *url* and request a foreground browser window."""
     if sys.platform == "darwin":
-        result = subprocess.run(
-            ["open", url],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
+        return _launch_macos_browser(url)
+    if sys.platform == "win32":
+        from nanobot.cli.windows_browser import launch_browser
+
+        return launch_browser(url)
     return bool(webbrowser.open(url, new=2, autoraise=True))
+
+
+def _launch_macos_browser(url: str) -> bool:
+    """Deliver URLs through Launch Services, never a credential-bearing argv."""
+    import ctypes
+
+    try:
+        foundation = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+        )
+        services = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+        foundation.CFURLCreateWithBytes.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32, ctypes.c_void_p,
+        ]
+        foundation.CFURLCreateWithBytes.restype = ctypes.c_void_p
+        foundation.CFRelease.argtypes = [ctypes.c_void_p]
+        foundation.CFRelease.restype = None
+        services.LSOpenCFURLRef.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        services.LSOpenCFURLRef.restype = ctypes.c_int32
+        encoded = url.encode("utf-8")
+        url_ref = foundation.CFURLCreateWithBytes(None, encoded, len(encoded), 0x08000100, None)
+        if not url_ref:
+            return False
+        try:
+            # HTTP URLs reach the preferred browser in a GURL Apple event, not
+            # through `open <url>` or a BROWSER command's process arguments.
+            return services.LSOpenCFURLRef(url_ref, None) == 0
+        finally:
+            foundation.CFRelease(url_ref)
+    except (OSError, AttributeError, UnicodeError):
+        # Callers may display exception text. Keep URLs out of error output and
+        # never retry with a subprocess/controller that can expose credentials.
+        return False
 
 
 def _confirm_webui_action(message: str, *, yes: bool) -> None:
@@ -574,43 +602,3 @@ def _gateway_instance_command(
         workspace_path = str(Path(workspace).expanduser().resolve(strict=False))
         parts.extend(["--workspace", workspace_path])
     return " ".join(shlex.quote(part) for part in parts)
-
-
-def _run_quick_start_for_webui(
-    config: Config,
-    *,
-    yes: bool,
-    config_path: Path,
-) -> Config:
-    """Offer the existing Quick Start flow when provider setup is missing."""
-    if yes:
-        console.print(
-            "[red]Error: provider/model setup is incomplete, and --yes cannot answer "
-            "provider credentials.[/red]"
-        )
-        console.print("Complete provider/model setup:")
-        _print_model_setup_steps(config_path)
-        raise typer.Exit(1)
-
-    console.print()
-    console.print("[yellow]Model provider setup is not ready.[/yellow]")
-    console.print(
-        "Quick Start will ask for provider, API key/base URL, model, and WebUI password."
-    )
-    _confirm_webui_action("Run Quick Start now?", yes=False)
-
-    from nanobot.cli.onboard import run_quick_start_onboard
-
-    try:
-        result = run_quick_start_onboard(config)
-    except RuntimeError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        console.print(
-            "[yellow]Run `nanobot onboard --wizard` "
-            "after installing wizard dependencies.[/yellow]"
-        )
-        raise typer.Exit(1) from exc
-    if not result.should_save:
-        console.print("[yellow]Quick Start cancelled. No changes were saved.[/yellow]")
-        raise typer.Exit(1)
-    return result.config

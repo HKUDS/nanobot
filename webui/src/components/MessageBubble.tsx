@@ -25,6 +25,7 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import {
   Tooltip,
@@ -343,6 +344,10 @@ export function MessageBubble({
     [mcpPresets, message.mcpPresets],
   );
 
+  if (message.kind === "compaction" && message.compaction) {
+    return <ContextCompactionNotice compaction={message.compaction} />;
+  }
+
   if (message.kind === "trace") {
     return <TraceGroup message={message} />;
   }
@@ -440,7 +445,12 @@ export function MessageBubble({
     );
   }
 
-  const empty = message.content.trim().length === 0;
+  const assistantContent = message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+  const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
@@ -507,7 +517,7 @@ export function MessageBubble({
               preserveStreamingLayout
               onOpenFilePreview={onOpenFilePreview}
             >
-              {message.content}
+              {assistantContent}
             </MarkdownText>
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
@@ -528,7 +538,7 @@ export function MessageBubble({
             )}
           >
             {showCopyButton ? (
-              <MessageCopyButton content={message.content} />
+              <MessageCopyButton content={assistantContent} />
             ) : null}
             {showForkButton ? (
               <Tooltip>

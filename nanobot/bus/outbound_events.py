@@ -9,18 +9,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.events import AgentEvent
+from nanobot.events import ContextCompactionEvent as ContextCompactionEvent
+from nanobot.events import RecoveryStateEvent as RecoveryStateEvent
+from nanobot.events import RetryStatusEvent as RetryStatusEvent
+from nanobot.events import RetryWaitEvent as RetryWaitEvent
 from nanobot.providers.base import LLMUsage
 
 
-class OutboundEvent:
-    """Marker base for internal outbound runtime events."""
-
-
 @dataclass(frozen=True)
-class ProgressEvent(OutboundEvent):
+class ProgressEvent(AgentEvent):
     content: str = ""
     tool_hint: bool = False
     reasoning: bool = False
@@ -32,18 +33,18 @@ class ProgressEvent(OutboundEvent):
 
 
 @dataclass(frozen=True)
-class RetryWaitEvent(OutboundEvent):
-    content: str = ""
+class FileEditEvent(ProgressEvent):
+    """File activity whose snapshot collection requires an interested consumer."""
 
 
 @dataclass(frozen=True)
-class StreamDeltaEvent(OutboundEvent):
+class StreamDeltaEvent(AgentEvent):
     content: str = ""
     stream_id: str | None = None
 
 
 @dataclass(frozen=True)
-class StreamEndEvent(OutboundEvent):
+class StreamEndEvent(AgentEvent):
     content: str = ""
     stream_id: str | None = None
     resuming: bool = False
@@ -51,46 +52,42 @@ class StreamEndEvent(OutboundEvent):
 
 
 @dataclass(frozen=True)
-class StreamedResponseEvent(OutboundEvent):
+class StreamedResponseEvent(AgentEvent):
     pass
 
 
 @dataclass(frozen=True)
-class TurnEndEvent(OutboundEvent):
+class TurnEndEvent(AgentEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
     usage: LLMUsage | None = None
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
+    outcome: str = "completed"
+    failure_kind: str | None = None
+    failure_error_kind: str | None = None
+    failure_attempts: int | None = None
+    failure_message: str | None = None
 
 
 @dataclass(frozen=True)
-class RecoveryStateEvent(OutboundEvent):
-    status: str
-    recovery_id: str
-    reason: str | None = None
-    attempts: int = 0
-    can_continue: bool | None = None
-
-
-@dataclass(frozen=True)
-class GoalStatusEvent(OutboundEvent):
+class GoalStatusEvent(AgentEvent):
     status: str
     started_at: float | None = None
 
 
 @dataclass(frozen=True)
-class GoalStateSyncEvent(OutboundEvent):
+class GoalStateSyncEvent(AgentEvent):
     goal_state: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class SessionUpdatedEvent(OutboundEvent):
+class SessionUpdatedEvent(AgentEvent):
     scope: str | None = None
 
 
 @dataclass(frozen=True)
-class UserInputEvent(OutboundEvent):
+class UserInputEvent(AgentEvent):
     """A user-input row projected by an edge adapter."""
 
     content: str
@@ -99,13 +96,13 @@ class UserInputEvent(OutboundEvent):
 
 
 @dataclass(frozen=True)
-class RuntimeModelUpdatedEvent(OutboundEvent):
+class RuntimeModelUpdatedEvent(AgentEvent):
     model: str | None
     model_preset: str | None = None
 
 
 @dataclass(frozen=True)
-class TurnModelUpdatedEvent(OutboundEvent):
+class TurnModelUpdatedEvent(AgentEvent):
     """The canonical preset and concrete model handling one chat turn."""
 
     model: str
@@ -118,7 +115,7 @@ def outbound_message_for_event(
     *,
     channel: str,
     chat_id: str,
-    event: OutboundEvent,
+    event: AgentEvent,
     content: str | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> OutboundMessage:
@@ -133,17 +130,9 @@ def outbound_message_for_event(
     )
 
 
-def outbound_event_from_message(msg: OutboundMessage) -> OutboundEvent | None:
-    """Return the typed outbound event carried by *msg*, if any."""
-
-    if msg.event is not None:
-        return msg.event
-    return _legacy_event_from_metadata(msg)
-
-
 def replace_outbound_event(
     msg: OutboundMessage,
-    event: OutboundEvent,
+    event: AgentEvent,
     *,
     content: str | None = None,
 ) -> OutboundMessage:
@@ -156,117 +145,18 @@ def replace_outbound_event(
     )
 
 
-def _event_content(event: OutboundEvent) -> str:
+def _event_content(event: AgentEvent) -> str:
     if isinstance(
         event,
         ProgressEvent | RetryWaitEvent | StreamDeltaEvent | StreamEndEvent | UserInputEvent,
     ):
         return event.content
+    if isinstance(event, ContextCompactionEvent):
+        if event.phase == "started":
+            return "Compressing context…"
+        if event.phase == "failed":
+            return "Unable to compact context."
+        if event.phase == "cancelled":
+            return "Context compaction cancelled."
+        return "Context compacted."
     return ""
-
-
-def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
-    """Bridge pre-typed outbound metadata flags into typed events.
-
-    New code should set ``OutboundMessage.event`` directly. The fallback keeps
-    older in-process extensions and channel plugins from losing runtime events
-    while they migrate off reserved metadata flags.
-    """
-
-    meta = msg.metadata or {}
-    if meta.get("_runtime_model_updated"):
-        return RuntimeModelUpdatedEvent(
-            model=_metadata_str(meta, "model"),
-            model_preset=_metadata_str(meta, "model_preset"),
-        )
-    if meta.get("_goal_state_sync"):
-        goal_state = meta.get("goal_state")
-        return GoalStateSyncEvent(
-            cast(dict[str, Any], goal_state)
-            if isinstance(goal_state, dict)
-            else {"active": False}
-        )
-    if meta.get("_goal_status"):
-        status = meta.get("goal_status")
-        if not isinstance(status, str) or not status:
-            return None
-        return GoalStatusEvent(
-            status=status,
-            started_at=_metadata_float(meta, "started_at", "goal_started_at"),
-        )
-    if meta.get("_turn_end"):
-        goal_state = meta.get("goal_state")
-        return TurnEndEvent(
-            latency_ms=_metadata_int(meta, "latency_ms"),
-            goal_state=cast(dict[str, Any], goal_state) if isinstance(goal_state, dict) else None,
-            context_window_tokens=_metadata_int(meta, "context_window_tokens"),
-        )
-    if meta.get("_session_updated"):
-        return SessionUpdatedEvent(scope=_metadata_str(meta, "_session_update_scope"))
-    if meta.get("_retry_wait"):
-        return RetryWaitEvent(content=msg.content)
-    if meta.get("_stream_end"):
-        return StreamEndEvent(
-            content=msg.content,
-            stream_id=_metadata_str(meta, "_stream_id"),
-            resuming=bool(meta.get("_resuming")),
-            merge_next=bool(meta.get("_merge_next")),
-        )
-    if meta.get("_stream_delta"):
-        return StreamDeltaEvent(
-            content=msg.content,
-            stream_id=_metadata_str(meta, "_stream_id"),
-        )
-    if meta.get("_streamed"):
-        return StreamedResponseEvent()
-    if (
-        meta.get("_progress")
-        or meta.get("_reasoning_delta")
-        or meta.get("_reasoning_end")
-        or meta.get("_reasoning")
-        or meta.get("_file_edit_events")
-        or meta.get("_tool_events")
-    ):
-        tool_events = meta.get("_tool_events")
-        file_edit_events = meta.get("_file_edit_events")
-        return ProgressEvent(
-            content=msg.content,
-            tool_hint=bool(meta.get("_tool_hint")),
-            reasoning=bool(meta.get("_reasoning")),
-            reasoning_delta=bool(meta.get("_reasoning_delta")),
-            reasoning_end=bool(meta.get("_reasoning_end")),
-            stream_id=_metadata_str(meta, "_stream_id"),
-            tool_events=cast(list[dict[str, Any]], tool_events)
-            if isinstance(tool_events, list)
-            else None,
-            file_edit_events=cast(list[dict[str, Any]], file_edit_events)
-            if isinstance(file_edit_events, list)
-            else None,
-        )
-    return None
-
-
-def _metadata_str(meta: Mapping[str, Any], key: str) -> str | None:
-    value = meta.get(key)
-    return value if isinstance(value, str) and value else None
-
-
-def _metadata_int(meta: Mapping[str, Any], key: str) -> int | None:
-    value = meta.get(key)
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    return None
-
-
-def _metadata_float(meta: Mapping[str, Any], *keys: str) -> float | None:
-    for key in keys:
-        value = meta.get(key)
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, int | float):
-            return float(value)
-    return None

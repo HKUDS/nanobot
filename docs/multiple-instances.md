@@ -108,8 +108,21 @@ nanobot gateway --config ~/.nanobot-discord/config.json
 
 Each gateway instance also exposes a lightweight HTTP health endpoint on `gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`, so the endpoint stays local unless you explicitly set `gateway.host` to a public or LAN-facing address.
 
-- `GET /health` returns `{"status":"ok"}`
-- Other paths return `404`
+`GET /health` reports process liveness and WebSocket channel readiness:
+
+- Returns `200 OK` when the WebSocket channel is disabled or running.
+- Returns `503 Service Unavailable` when the WebSocket channel is enabled but not running.
+
+The JSON response includes `status`, `process`, `ready`, and `websocket`.
+For example, with the WebSocket channel disabled:
+
+```json
+{"status":"ok","process":"alive","ready":true,"websocket":"disabled"}
+```
+
+Readiness currently reflects only the WebSocket channel. A successful response does not verify other chat channels, MCP servers, or model provider connectivity.
+
+Other paths return `404`.
 
 Override workspace for one-off runs when needed:
 

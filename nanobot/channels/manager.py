@@ -21,7 +21,6 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
-    outbound_event_from_message,
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -59,6 +58,8 @@ def _default_webui_dist() -> Path | None:
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
+_OUTBOUND_CONCURRENCY = 32
+_OUTBOUND_PENDING_LIMIT = 256
 _RESTART_NOTICE_START_TIMEOUT_S = 30.0
 _RESTART_NOTICE_START_POLL_S = 0.25
 ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE = 1000
@@ -138,6 +139,11 @@ class ChannelManager:
         self._channel_errors: dict[str, str] = {}
         self._channel_tasks: dict[str, asyncio.Task[None]] = {}
         self._dispatch_task: asyncio.Task[None] | None = None
+        self._outbound_tasks: dict[asyncio.Task[None], tuple[str, str]] = {}
+        self._outbound_tails: dict[tuple[str, str], asyncio.Task[None]] = {}
+        self._outbound_slots = asyncio.Semaphore(_OUTBOUND_PENDING_LIMIT)
+        self._outbound_sends = asyncio.Semaphore(_OUTBOUND_CONCURRENCY)
+        self._stopping_channels: set[str] = set()
         self._started = False
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
 
@@ -389,6 +395,14 @@ class ChannelManager:
         return task
 
     async def _stop_channel(self, name: str) -> bool:
+        self._stopping_channels.add(name)
+        try:
+            await self._cancel_outbound(name)
+            return await self._stop_channel_runtime(name)
+        finally:
+            self._stopping_channels.discard(name)
+
+    async def _stop_channel_runtime(self, name: str) -> bool:
         channel = self.channels.get(name)
         if channel is None:
             self._channel_tasks.pop(name, None)
@@ -683,7 +697,7 @@ class ChannelManager:
 
     def _should_suppress_outbound(self, msg: OutboundMessage) -> bool:
         metadata = msg.metadata or {}
-        if isinstance(outbound_event_from_message(msg), ProgressEvent):
+        if isinstance(msg.event, ProgressEvent):
             return False
         fingerprint = self._fingerprint_content(msg.content)
         if not fingerprint:
@@ -704,7 +718,53 @@ class ChannelManager:
 
         return False
 
+    async def _cancel_outbound(self, channel: str | None = None) -> None:
+        tasks = [task for task, key in self._outbound_tasks.items()
+                 if channel is None or key[0] == channel]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _queue_outbound(self, channel: BaseChannel, msg: OutboundMessage) -> None:
+        """Bound scheduled sends; preserve FIFO per destination, not across chats.
+
+        Retry waits occupy only their destination and one send slot. Saturation
+        pauses dispatch rather than creating unbounded tasks or dropping messages.
+        """
+        await self._outbound_slots.acquire()
+        if msg.channel in self._stopping_channels or self.channels.get(msg.channel) is not channel:
+            self._outbound_slots.release()
+            return
+        key = (msg.channel, msg.chat_id)
+        previous = self._outbound_tails.get(key)
+
+        async def send() -> None:
+            if previous is not None:
+                await asyncio.shield(asyncio.gather(previous, return_exceptions=True))
+            async with self._outbound_sends:
+                await self._send_with_retry(channel, msg)
+
+        task = asyncio.create_task(send(), name=f"outbound-{msg.channel}-{msg.chat_id}")
+        self._outbound_tasks[task] = key
+        self._outbound_tails[key] = task
+
+        def finished(done: asyncio.Task[None]) -> None:
+            self._outbound_tasks.pop(done, None)
+            if self._outbound_tails.get(key) is done:
+                self._outbound_tails.pop(key, None)
+            self._outbound_slots.release()
+            if not done.cancelled() and (error := done.exception()) is not None:
+                logger.error("Outbound delivery to {}:{} failed: {}", *key, error)
+
+        task.add_done_callback(finished)
+
     async def _dispatch_outbound(self) -> None:
+        try:
+            await self._dispatch_outbound_loop()
+        finally:
+            await self._cancel_outbound()
+
+    async def _dispatch_outbound_loop(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
 
@@ -723,7 +783,7 @@ class ChannelManager:
                         timeout=1.0
                     )
 
-                event = outbound_event_from_message(msg)
+                event = msg.event
                 progress_event = event if isinstance(event, ProgressEvent) else None
                 if progress_event and (
                     progress_event.reasoning_delta
@@ -737,7 +797,7 @@ class ChannelManager:
                     # content silently drops here.
                     channel = self.channels.get(msg.channel)
                     if channel is not None and channel.show_reasoning:
-                        await self._send_with_retry(channel, msg)
+                        await self._queue_outbound(channel, msg)
                     continue
 
                 if progress_event:
@@ -765,7 +825,7 @@ class ChannelManager:
                 if isinstance(event, StreamDeltaEvent):
                     msg, extra_pending = self._coalesce_stream_deltas(msg)
                     pending.extend(extra_pending)
-                    event = outbound_event_from_message(msg)
+                    event = msg.event
 
                 channel = self.channels.get(msg.channel)
                 if channel:
@@ -780,7 +840,7 @@ class ChannelManager:
                         if self._should_suppress_outbound(msg):
                             logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
                             continue
-                    await self._send_with_retry(channel, msg)
+                    await self._queue_outbound(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
 
@@ -848,7 +908,7 @@ class ChannelManager:
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if isinstance(event, ProgressEvent) and event.reasoning_end:
             await ChannelManager._send_reasoning_end(channel, msg, event)
         elif isinstance(event, ProgressEvent) and event.reasoning_delta:
@@ -881,7 +941,7 @@ class ChannelManager:
         Returns:
             tuple of (merged_message, list_of_non_matching_messages)
         """
-        first_event = outbound_event_from_message(first_msg)
+        first_event = first_msg.event
         first_stream_id = first_event.stream_id if isinstance(first_event, StreamDeltaEvent) else None
         target_key = (first_msg.channel, first_msg.chat_id, first_stream_id)
         combined_content = first_msg.content
@@ -901,7 +961,7 @@ class ChannelManager:
                 break
 
             # Check if this message belongs to the same stream
-            next_event = outbound_event_from_message(next_msg)
+            next_event = next_msg.event
             next_stream_id = (
                 next_event.stream_id
                 if isinstance(next_event, StreamDeltaEvent | StreamEndEvent)

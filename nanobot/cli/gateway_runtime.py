@@ -357,7 +357,6 @@ def _run_gateway(
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
-    from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.watcher import watch_config_file
     from nanobot.cron.bound_runner import run_bound_cron_job
@@ -410,7 +409,6 @@ def _run_gateway(
     )
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    runtime_events = RuntimeEventBus()
     fallback_model_observer = build_webui_fallback_model_observer(bus)
 
     def _observe_provider(snapshot: ProviderSnapshot) -> ProviderSnapshot:
@@ -468,7 +466,6 @@ def _run_gateway(
 
     turn_delivery_factory = TurnDeliveryFactory(
         bus,
-        runtime_events,
         route_policy=WebuiTurnRoutePolicy(session_manager),
     )
 
@@ -492,7 +489,6 @@ def _run_gateway(
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
-        runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
@@ -510,7 +506,6 @@ def _run_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    webui_turn_coordinator.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -1020,6 +1015,7 @@ def _run_gateway(
                     tasks,
                     runtime_tasks,
                 )
+                await bus.drain()
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
@@ -1029,7 +1025,10 @@ def _run_gateway(
             finally:
                 restore_shutdown_handlers()
 
-    with gateway_runtime.foreground_instance(gateway_start_options):
+    with (
+        gateway_runtime.foreground_instance(gateway_start_options),
+        webui_turn_coordinator.connected(),
+    ):
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

@@ -275,20 +275,6 @@ def test_model_presets_accepts_camel_case_root_key() -> None:
     assert config.model_presets["fast"].provider == "openai"
 
 
-def test_legacy_model_preset_label_is_ignored() -> None:
-    config = Config.model_validate({
-        "modelPresets": {
-            "gpt-5-6-sol": {
-                "label": "Codex",
-                "model": "openai-codex/gpt-5.6-luna",
-            }
-        }
-    })
-
-    assert set(config.model_presets) == {"gpt-5-6-sol"}
-    assert "label" not in config.model_presets["gpt-5-6-sol"].model_dump()
-
-
 @pytest.mark.parametrize(
     "model_presets",
     [

@@ -1,8 +1,11 @@
+import asyncio
+
 import pytest
 
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
-    RuntimeEventBus,
     RuntimeEventContext,
     RuntimeEventPublisher,
     RuntimeModelChanged,
@@ -15,9 +18,101 @@ from nanobot.bus.runtime_events import (
 from nanobot.providers.base import LLMUsage
 
 
+async def test_local_state_subscriber_does_not_block_routed_delivery():
+    bus = MessageBus()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def observe(event):
+        entered.set()
+        await release.wait()
+
+    bus.subscribe(observe, RuntimeModelChanged)
+    dispatch = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await asyncio.wait_for(
+            bus.publish_event(ProgressEvent(content="working"), channel="cli", chat_id="other"),
+            timeout=1,
+        )
+        message = await asyncio.wait_for(bus.consume_outbound(), timeout=1)
+        assert (message.chat_id, message.content) == ("other", "working")
+        assert not dispatch.done()
+    finally:
+        release.set()
+        await dispatch
+
+
+async def test_disconnect_skips_a_handler_in_an_existing_dispatch_snapshot():
+    bus = MessageBus()
+    seen = []
+
+    def first(event):
+        disconnect()
+
+    bus.subscribe(first)
+    disconnect = bus.subscribe(seen.append)
+    await bus.publish(RuntimeModelChanged("model", None))
+    disconnect()
+    assert seen == []
+
+
+async def test_awaited_dispatch_preserves_order_and_propagates_cancellation():
+    bus = MessageBus()
+    entered, release = asyncio.Event(), asyncio.Event()
+    seen = []
+
+    async def slow(event):
+        entered.set()
+        await release.wait()
+        seen.append("first")
+
+    bus.subscribe(slow)
+    bus.subscribe(lambda event: seen.append("second"))
+    task = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    await entered.wait()
+    assert not task.done()
+    assert seen == []
+    release.set()
+    await task
+    assert seen == ["first", "second"]
+
+    release.clear()
+    entered.clear()
+    task = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert seen == ["first", "second"]
+
+
+async def test_scheduled_dispatch_is_owned_and_can_be_drained():
+    bus = MessageBus()
+    entered, release = asyncio.Event(), asyncio.Event()
+    seen = []
+
+    async def slow(event):
+        entered.set()
+        await release.wait()
+        seen.append(event.model)
+
+    bus.subscribe(slow, RuntimeModelChanged)
+    task = bus.publish_nowait(RuntimeModelChanged("model", None))
+    assert task is not None
+    assert not entered.is_set()
+    await entered.wait()
+    draining = asyncio.create_task(bus.drain())
+    assert seen == []
+    release.set()
+    await draining
+    assert task.done()
+    assert seen == ["model"]
+    await bus.drain()
+
+
 @pytest.mark.asyncio
 async def test_runtime_event_bus_filters_by_event_type() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[str] = []
 
     async def handle_run_status(event: TurnRunStatusChanged) -> None:
@@ -42,7 +137,7 @@ async def test_runtime_event_bus_filters_by_event_type() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_event_bus_keeps_catch_all_subscription() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[str] = []
 
     def handle_any(event) -> None:
@@ -57,7 +152,7 @@ async def test_runtime_event_bus_keeps_catch_all_subscription() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_builds_context_from_inbound_message() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
     msg = InboundMessage(
@@ -93,7 +188,7 @@ async def test_runtime_event_publisher_builds_context_from_inbound_message() -> 
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
 
@@ -110,6 +205,9 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
         chat_id="direct",
         session_key="cli:direct",
         metadata={"source": "test"},
+        outcome="failed",
+        failure_kind="model",
+        failure_error_kind="billing",
     )
     await publisher.turn_completed(
         channel="cli",
@@ -126,6 +224,9 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     assert first.runtime == "runtime"
     assert first.usage == first_round + second_round
     assert first.round_usages == (first_round, second_round)
+    assert first.outcome == "failed"
+    assert first.failure_kind == "model"
+    assert first.failure_error_kind == "billing"
     assert isinstance(second, TurnCompleted)
     assert second.latency_ms is None
     assert second.runtime is None
@@ -134,7 +235,7 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_exposes_admitted_runtime() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
     msg = InboundMessage(
@@ -165,7 +266,7 @@ async def test_runtime_event_publisher_exposes_admitted_runtime() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_event_publisher_emits_persisted_turn_attributes() -> None:
-    bus = RuntimeEventBus()
+    bus = MessageBus()
     seen: list[object] = []
     publisher = RuntimeEventPublisher(bus)
     msg = InboundMessage(

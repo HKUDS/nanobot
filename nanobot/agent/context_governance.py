@@ -8,16 +8,19 @@ session history list in place.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
@@ -62,7 +65,7 @@ ProviderCompactionConsolidator = Callable[
 ]
 
 SNIP_SAFETY_BUFFER = 1024
-# read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
+# read_file has its own bound; exempt it to avoid persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
@@ -115,7 +118,6 @@ class ContextGovernanceConfig:
     session_key: str | None
     max_tool_result_chars: int
     context_window_tokens: int | None = None
-    context_block_limit: int | None = None
     max_tokens: int | None = None
 
 
@@ -198,6 +200,7 @@ class ModelRequestState:
     tool_definitions: list[dict[str, Any]] | None = None
     compaction: ContextCompactionState | None = None
     provider_compaction_applied: bool = False
+    events: EventSink = NO_EVENTS
 
 
 class ContextGovernor:
@@ -412,33 +415,6 @@ class ContextGovernor:
             return None
         return measured, source
 
-    def fit_request(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-        usage: LLMUsage | None,
-        *,
-        usage_matches_messages: bool,
-        tool_definitions: list[dict[str, Any]] | None,
-        request_context_tokens: int | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Fit the request when its measured or estimated input is pressured."""
-        pressure = self.request_pressure(
-            config,
-            messages,
-            usage,
-            usage_matches_messages=usage_matches_messages,
-            tool_definitions=tool_definitions,
-            request_context_tokens=request_context_tokens,
-        )
-        if pressure is None:
-            return messages, False
-        return self.fit_to_budget(
-            config,
-            messages,
-            tool_definitions=tool_definitions,
-        ), True
-
     @staticmethod
     def _summary_transcript(
         compaction: ContextCompactionState,
@@ -493,17 +469,39 @@ class ContextGovernor:
             )
             return
 
-        summary = await compaction.consolidate_provider_compaction(
-            response.provider_compaction_state,
-            deepcopy(accepted_messages),
-            compaction.active_summary,
+        compaction_id = uuid4().hex
+        await state.events.emit(
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
+        try:
+            summary = await compaction.consolidate_provider_compaction(
+                response.provider_compaction_state,
+                deepcopy(accepted_messages),
+                compaction.active_summary,
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            await state.events.emit(
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                ),
+            )
+            raise
         if not summary:
+            await state.events.emit(
+                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+            )
             return
         compaction.active_summary = summary
         compaction.summary_checkpoint = SessionSummaryCheckpoint(
             summary=summary,
             transcript_boundary=transcript_boundary,
+        )
+        await state.events.emit(
+            ContextCompactionEvent(
+                compaction_id=compaction_id,
+                phase="succeeded",
+            ),
         )
 
     async def _compact_request_history(
@@ -516,46 +514,65 @@ class ContextGovernor:
         tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         """Replace accepted history H with a checkpoint while preserving delta."""
-        delta_messages = compaction.delta_after_accepted(messages)
-        consolidation_prefix = self.prepare_messages_for_model(
-            state.config,
-            compaction.accepted_messages,
+        measured, _source = pressure
+        compaction_id = uuid4().hex
+        await state.events.emit(
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
-        summary = await compaction.consolidate_history(
-            deepcopy(consolidation_prefix),
-            compaction.active_summary,
-        )
-        if not summary:
-            measured, source = pressure
-            raise ContextWindowExceededError(
-                session_key=state.config.session_key,
-                estimated_tokens=measured,
-                input_budget=self.input_budget(state.config),
-                source=source,
+        try:
+            delta_messages = compaction.delta_after_accepted(messages)
+            consolidation_prefix = self.prepare_messages_for_model(
+                state.config,
+                compaction.accepted_messages,
             )
+            summary = await compaction.consolidate_history(
+                deepcopy(consolidation_prefix),
+                compaction.active_summary,
+            )
+            if not summary:
+                raise ContextWindowExceededError(
+                    session_key=state.config.session_key,
+                    estimated_tokens=measured,
+                    input_budget=self.input_budget(state.config),
+                    source=_source,
+                )
 
-        compaction.active_summary = summary
-        prepared = self.prepare_messages_for_model(
-            state.config,
-            [
-                *self._summary_transcript(compaction, summary),
-                {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
-                *delta_messages,
-            ],
-        )
-        # Responses-style state is append-only. Replacing H with a
-        # checkpoint requires a fresh request; a successful response may
-        # establish a new provider-owned state at the rewritten boundary.
-        state.conversation.replace_transcript(compaction.raw_messages)
-        state.usage = None
-        prepared = self.ensure_request_fits(
-            state.config,
-            prepared,
-            tool_definitions=tool_definitions,
-        )
-        compaction.summary_checkpoint = SessionSummaryCheckpoint(
-            summary=summary,
-            transcript_boundary=compaction.raw_accepted_boundary,
+            compaction.active_summary = summary
+            prepared = self.prepare_messages_for_model(
+                state.config,
+                [
+                    *self._summary_transcript(compaction, summary),
+                    {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
+                    *delta_messages,
+                ],
+            )
+            # Responses-style state is append-only. Replacing H with a
+            # checkpoint requires a fresh request; a successful response may
+            # establish a new provider-owned state at the rewritten boundary.
+            state.conversation.replace_transcript(compaction.raw_messages)
+            state.usage = None
+            prepared = self.ensure_request_fits(
+                state.config,
+                prepared,
+                tool_definitions=tool_definitions,
+            )
+            compaction.summary_checkpoint = SessionSummaryCheckpoint(
+                summary=summary,
+                transcript_boundary=compaction.raw_accepted_boundary,
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            await state.events.emit(
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                ),
+            )
+            raise
+        await state.events.emit(
+            ContextCompactionEvent(
+                compaction_id=compaction_id,
+                phase="succeeded",
+            ),
         )
         return prepared
 
@@ -590,7 +607,7 @@ class ContextGovernor:
         request_was_fitted = False
         compaction = state.compaction
         if compaction is None:
-            prepared, request_was_fitted = self.fit_request(
+            pressure = self.request_pressure(
                 state.config,
                 prepared,
                 state.usage,
@@ -598,6 +615,26 @@ class ContextGovernor:
                 tool_definitions=tool_definitions,
                 request_context_tokens=request_context_tokens,
             )
+            if pressure is not None:
+                compaction_id = uuid4().hex
+                await state.events.emit(
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                )
+                try:
+                    prepared = self.fit_to_budget(
+                        state.config,
+                        prepared,
+                        tool_definitions=tool_definitions,
+                    )
+                except Exception:
+                    await state.events.emit(
+                        ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                    )
+                    raise
+                await state.events.emit(
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="succeeded"),
+                )
+                request_was_fitted = True
         else:
             pressure = self.request_pressure(
                 state.config,
@@ -630,6 +667,10 @@ class ContextGovernor:
                 context_window_tokens=state.config.context_window_tokens,
             )
         )
+        if state.events.publish is not None:
+            provider_context = replace(
+                provider_context or ProviderCallContext(), events=state.events,
+            )
         state.messages = deepcopy(prepared)
         state.tool_definitions = deepcopy(tool_definitions)
         return prepared, provider_context
@@ -647,9 +688,7 @@ class ContextGovernor:
         max_output = config.max_tokens if isinstance(config.max_tokens, int) else (
             provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
         )
-        budget = config.context_block_limit or (
-            config.context_window_tokens - max_output - SNIP_SAFETY_BUFFER
-        )
+        budget = config.context_window_tokens - max_output - SNIP_SAFETY_BUFFER
         return budget if budget > 0 else 0
 
     @staticmethod
@@ -662,24 +701,48 @@ class ContextGovernor:
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result
-        try:
+
+        def persist_text(text: str, call_id: str) -> str:
             content = maybe_persist_tool_result(
                 config.workspace,
                 config.session_key,
-                tool_call_id,
-                result,
+                call_id,
+                text,
                 max_chars=config.max_tool_result_chars,
             )
+            # Persisted references must retain their complete paths.
+            return truncate_text(content, config.max_tool_result_chars) if config.workspace is None else content
+
+        original_result: object = result
+        try:
+            if isinstance(result, str):
+                return persist_text(result, tool_call_id)
+            if isinstance(result, list):
+                result = cast(list[object], result)
+                blocks: list[dict[str, Any]] = []
+                for raw_block in result:
+                    if not isinstance(raw_block, dict):
+                        return result
+                    block = cast(dict[str, Any], raw_block)
+                    if not isinstance(block.get("type"), str):
+                        return result
+                    if block["type"] == "text" and not isinstance(block.get("text"), str):
+                        return result
+                    blocks.append(block)
+                # Image redaction must not change how neighboring text is normalized.
+                return [
+                    {**block, "text": persist_text(block["text"], f"{tool_call_id}_text_{index}")}
+                    if block["type"] == "text" else block
+                    for index, block in enumerate(blocks)
+                ]
         except Exception:
             logger.exception(
                 "Tool result persist failed for {} in {}; using raw result",
                 tool_call_id,
                 config.session_key or "default",
             )
-            content = result
-        if isinstance(content, str) and len(content) > config.max_tool_result_chars:
-            return truncate_text(content, config.max_tool_result_chars)
-        return content
+            return truncate_text(result, config.max_tool_result_chars) if isinstance(result, str) else original_result
+        return result
 
     @staticmethod
     def strip_placeholder_assistant_messages(

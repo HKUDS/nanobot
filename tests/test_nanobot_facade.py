@@ -472,13 +472,6 @@ async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
     assert seen == []
 
 
-def test_runtime_client_does_not_expose_generic_event_subscription():
-    from nanobot.sdk.clients import RuntimeClient
-
-    assert hasattr(RuntimeClient, "on_session_turn_persisted")
-    assert not hasattr(RuntimeClient, "subscribe")
-
-
 def test_import_from_top_level():
     import nanobot
 
@@ -742,7 +735,6 @@ async def test_run_model_overrides_can_overlap_without_default_mutation(tmp_path
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    assert not hasattr(bot, "_runtime_overrides")
     original_runtime = bot._loop.runtime_resolver.runtime
     active_runs: list[tuple[str, str]] = []
     first_entered = asyncio.Event()
@@ -824,7 +816,6 @@ async def test_run_model_override_is_per_run_without_default_mutation(tmp_path):
 
     async def fake_process_direct(message, *, session_key, hooks, runtime):
         assert runtime is override_runtime
-        assert not hasattr(bot._loop.runner, "provider")
         assert runtime.model == "openai/gpt-4.1-mini"
         assert runtime.context_window_tokens == 4096
         assert bot._loop.runtime_resolver.runtime is original_runtime
@@ -840,7 +831,6 @@ async def test_run_model_override_is_per_run_without_default_mutation(tmp_path):
         model_preset=None,
         config=bot._config,
     )
-    assert not hasattr(bot._loop.runner, "provider")
     assert bot._loop.runtime_resolver.runtime is original_runtime
 
 

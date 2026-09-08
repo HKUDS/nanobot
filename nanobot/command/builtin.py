@@ -11,6 +11,8 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from loguru import logger
+
 from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
@@ -70,6 +72,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Reset this chat and start a fresh conversation.",
         "square-pen",
         lifecycle="finalize_active_turn",
+    ),
+    BuiltinCommandSpec(
+        "/compact",
+        "Compact context",
+        "Compact this chat's context and continue the conversation.",
+        "archive",
     ),
     BuiltinCommandSpec(
         "/stop",
@@ -335,6 +343,29 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         content="New session started.",
         metadata=dict(ctx.msg.metadata or {})
     )
+
+
+async def cmd_compact(ctx: CommandContext) -> None:
+    """Compact the current session without resetting the conversation."""
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    runtime = ctx.runtime or loop.runtime_for_session(session)
+    delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
+
+    try:
+        summary = await loop.consolidator.compact_idle_session(
+            ctx.key,
+            runtime=runtime,
+            events=delivery.events,
+        )
+    except Exception:
+        logger.exception("Manual context compaction failed for {}", ctx.key)
+        return
+
+    if summary:
+        refreshed = loop.sessions.get_or_create(ctx.key)
+        refreshed.provider_state = None
+        loop.sessions.save(refreshed)
 
 
 def _format_preset_names(names: list[str]) -> str:
@@ -1044,6 +1075,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
+    router.exact("/compact", cmd_compact)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

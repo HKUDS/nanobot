@@ -6,6 +6,50 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-09-07** 🔌 WeCom media uploads use the SDK API; CI runs tests in parallel and skips unrelated jobs.
+- **2026-09-06** 📊 Context-window usage in the terminal footer and consistent runtime notifications across clients.
+- **2026-09-05** 🧠 Visible context-compaction progress in the WebUI, terminal, and chat channels.
+- **2026-09-04** 📊 WebUI context usage and cache reuse shown by conversation round.
+- **2026-09-03** 🔐 Matrix SAS verification fixes, fallback handling for raised provider errors, and recovery from stale WebUI stream state after reconnects.
+- **2026-09-02** 🧙 First-run model setup in the WebUI, improved preset creation and activation, and cleanup of unsaved pane sessions.
+- **2026-09-01** 📝 Terminal drafts typed after submission are preserved; Dream avoids duplicate profile context and gateway listener checks handle platform differences.
+- **2026-08-31** 💬 Rich Telegram streaming previews, cumulative memory summaries, and simpler terminal headers.
+- **2026-08-30** 📬 Email fetches headers before message bodies, DingTalk drains inbound work on shutdown, and reasoning streams close on cancellation.
+- **2026-08-29** 🖥️ The `nanobot` command opens the native terminal agent; OAuth model catalogs are discovered online, with Grok 4.6 subscription support.
+- **2026-08-28** 🖥️ The full terminal UI remains available inside Herdr panes.
+- **2026-08-27** 📎 Clipboard image attachments in the native terminal, smoother paged history, and a model-picker shortcut to settings.
+- **2026-08-26** 🔌 MCP readiness retries before turns, stable Codex prompt-cache routing, and detection of rapid same-size file rewrites.
+- **2026-08-25** 🧰 Skill-reference completion in the terminal, document retrieval on demand, and waiting for shell sessions without repeated polling.
+- **2026-08-24** 🔄 Visible session activity and recovery controls in the terminal, preserved shell state after Ctrl+C, and ordered WebUI follow-ups.
+- **2026-08-23** 🖥️ Named nanobot processes, separate WebUI answer and reasoning sections, and refreshed maintainer and contributor credits.
+- **2026-08-22** 💬 Unified WebUI turn activity, LaTeX rendered as Unicode in the terminal, and retirement of disabled Dream and heartbeat jobs.
+- **2026-08-21** 🧠 DeepSeek V4 vision, terminal `/detach` to keep work running, and retries before switching to a fallback provider.
+- **2026-08-20** 🖥️ New terminal chats use the launch workspace, exit prints a resume command, and standard SOCKS5 proxies are supported.
+- **2026-08-19** 🔗 Session mentions let agents read and message other saved conversations, with fixes for transcript retention and invalid compaction summaries.
+- **2026-08-18** ⚡ Faster terminal startup, refreshed expired gateway credentials, and recovery from stalled Telegram polling.
+- **2026-08-17** 🖥️ Native terminal UI with a shared gateway, session navigation, slash commands, and queued follow-ups.
+- **2026-08-16** 🔌 OrcaRouter gateway support, atomic model-preset renames, and ordered WebUI mutation replay after reconnects.
+- **2026-08-15** ⏰ Cron persistence-failure recovery and replay guards, grouped-tab range selection, and clearer model-preset names.
+- **2026-08-14** 🗂️ Dragging topics into and out of pane groups, a native workspace folder picker, and session-file concurrency fixes.
+- **2026-08-13** 🔌 DeepSeek V4 Pro Responses support, Gemini tool-history compatibility across model switches, and persisted Weixin QR-login credentials.
+- **2026-08-12** 🖥️ A WebUI workbench with grouped conversation panes and adjustable layouts.
+- **2026-08-11** 📱 Mobile home-screen installation through PWA support, portable Agent Plugins, and visible MCP connection failures.
+- **2026-08-10** 🔑 Browser OAuth for remote MCP servers, forced Weixin QR-login fixes, and improved WebUI recovery states.
+- **2026-08-09** 🎙️ WebUI guidance for voice input's HTTPS requirement and expanded user-path test coverage.
+- **2026-08-08** ⏳ Temporary chats in the WebUI, with explicit expiry guidance and cleanup of session-owned shell processes.
+- **2026-08-07** 🎛️ Responsive model-preset details, clearer preset deletion controls, and Weixin login and streaming fixes.
+- **2026-08-06** 📝 Drag sessions into composer mentions, save sidebar ordering, and load the WebUI with a smaller initial payload.
+- **2026-08-05** ⚙️ Provider-native request switches, separate Mattermost thread/channel policies, and outbound WhatsApp media detection.
+- **2026-08-04** 🔐 Trusted-proxy authentication, public WebSocket URL configuration, and linked session references.
+- **2026-08-03** 🔌 Eden AI gateway support, faster saved-session loading, and fixes for IME input and local-trigger message display.
+- **2026-08-01** 🔌 DeepSeek Responses API support, Weixin recovery after session expiry, and explicit provider namespace handling.
+- **2026-07-31** 💬 Slack thread opener isolation, WebUI scroll-position preservation, and timezone data on all platforms.
+- **2026-07-30** 🧩 Skills marketplace with SkillHub, remote Codex OAuth login, and preserved reasoning state for Responses providers.
+- **2026-07-29** 📬 WebUI message-delivery status, media references in memory consolidation, and UTF-8 input handling on PowerShell 5.
+- **2026-07-28** 🧰 Actionable startup diagnostics and WebUI recovery, SDK host integration hooks, and improved streaming scroll behavior.
+- **2026-07-27** 🧠 Dream model preset overrides and history-integrity fixes; DingTalk sender mentions and an option to disable private chats.
+- **2026-07-26** 🖥️ Fresh desktop installs open the WebUI; channel tool hints are enabled by default, with mobile overflow and file-diff display fixes.
+- **2026-07-25** 🚀 Released [v0.3.0 — The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0), with guided WebUI setup, inline subagents, per-session model presets, and live configuration reloads.
 - **2026-07-24** 🧭 Guided first-run setup, inline subagents, and model switching from the composer.
 - **2026-07-23** 🔎 Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
 - **2026-07-22** 🔌 Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
@@ -35,6 +79,7 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 - **2026-06-27** 🔒 Collision-safe sessions, safer shells, Neonize WhatsApp.
 - **2026-06-25** 🎛️ Thinking controls, MiMo voice input, opt-in Telegram rich messages.
 - **2026-06-24** 🌙 Kimi Coding and OpenCode, steadier reasoning and Anthropic tool calls.
+- **2026-06-23** 🚀 Added v0.2.2 release news and aligned release announcement dates.
 - **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
 - **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
 - **2026-06-20** 💬 Telegram rich messages, safer SDK concurrency, smoother Quick Start.
@@ -45,18 +90,19 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 - **2026-06-15** 📱 Mobile WebUI polish, optional file tools, real API usage.
 - **2026-06-14** 🖼️ Themed cover, partner links, stronger Codex image streaming.
 - **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
-
 - **2026-06-12** 💬 Slack allowlisted channels can require mentions.
 - **2026-06-11** ✂️ Fenced-code message splitting.
 - **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
 - **2026-06-09** 🎙️ Shared voice input, more STT providers, TeX and email polish.
 - **2026-06-08** 🧮 Token heatmap fix, safer MCP HTTP probing, docs cleanup.
+- **2026-06-07** 💬 WhatsApp recognizes group mentions that use LID identifiers.
 - **2026-06-06** 🧰 SDK MCP cleanup, removable OpenAI image defaults.
 - **2026-06-05** 🖼️ Azure AAD, custom image providers, `/skill`, steadier pairing.
 - **2026-06-04** 🔌 MCP reconnects, `uv pip` install fallback, QQ pairing.
 - **2026-06-03** 🧠 Hidden-history recovery, quieter email progress handling.
 - **2026-06-02** 📬 Email attachments, Napcat QQ, Volcengine search, simpler Dream.
 - **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
+- **2026-05-31** ⏰ Heartbeat skips empty or completed-only task lists; Matrix SAS verification and WebUI code-block language fallback fixes.
 - **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
 - **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
 - **2026-05-28** 🗂️ Project workspaces, access controls, steadier goals and streaming.

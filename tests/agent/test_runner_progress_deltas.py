@@ -12,6 +12,7 @@ from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.utils.progress_events import output_events
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -61,7 +62,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
     async def stream_cb(content: str) -> None:
         streamed_text.append(content)
 
-    hook = AgentProgressHook(on_progress=progress_cb, on_stream=stream_cb)
+    hook = AgentProgressHook(output_events(on_progress=progress_cb, on_stream=stream_cb), streaming=True)
     result = await AgentRunner().run(make_run_spec(
         provider,
         initial_messages=[{"role": "user", "content": "search X"}],
@@ -135,7 +136,7 @@ async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
     async def stream_cb(_content: str) -> None:
         pass
 
-    hook = AgentProgressHook(on_progress=progress_cb, on_stream=stream_cb)
+    hook = AgentProgressHook(output_events(on_progress=progress_cb, on_stream=stream_cb), streaming=True)
     result = await AgentRunner().run(make_run_spec(
         provider,
         initial_messages=[{"role": "user", "content": "search X"}],
@@ -213,7 +214,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         workspace=tmp_path,
-        hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
+        hook=FileEditActivityHook(events=output_events(on_progress=progress_cb), workspace=tmp_path),
     ))
 
     assert result.final_content == "done"
@@ -283,7 +284,7 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         workspace=tmp_path,
-        hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
+        hook=FileEditActivityHook(events=output_events(on_progress=progress_cb), workspace=tmp_path),
     ))
 
     assert result.final_content == "done"
@@ -345,7 +346,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         workspace=tmp_path,
-        hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
+        hook=FileEditActivityHook(events=output_events(on_progress=progress_cb), workspace=tmp_path),
     ))
 
     assert result.stop_reason == "completed"
@@ -405,7 +406,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         workspace=tmp_path,
-        hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
+        hook=FileEditActivityHook(events=output_events(on_progress=progress_cb), workspace=tmp_path),
     )))
     await asyncio.wait_for(executing.wait(), timeout=1)
 

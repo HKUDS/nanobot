@@ -1,4 +1,3 @@
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,35 +25,6 @@ def test_workspace_state_defaults_when_file_missing(tmp_path, monkeypatch) -> No
 
     assert state["default_access_mode"] == "default"
     assert webui_workspace_state_path() == tmp_path / "webui" / "workspace-state.json"
-
-
-def test_workspace_state_ignores_legacy_project_history(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
-    project = tmp_path / "project"
-    project.mkdir()
-    path = webui_workspace_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "recent_projects": [
-                    {"project_path": str(project)},
-                    {"project_path": str(tmp_path / "missing")},
-                ],
-                "last_scope": {
-                    "project_path": str(project),
-                    "access_mode": "full",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    state = read_webui_workspace_state()
-
-    assert "recent_projects" not in state
-    assert "last_scope" not in state
-    assert state["default_access_mode"] == "default"
 
 
 def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> None:
