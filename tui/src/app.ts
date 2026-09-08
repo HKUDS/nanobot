@@ -922,6 +922,10 @@ export class NanobotTui {
     this.handleResize()
     this.composer.focus()
     this.transcript.header(options)
+    if (this.initialViewPending === "config") {
+      this.configEditor.showWaitingForGateway()
+      this.composer.blur()
+    }
   }
 
   static async create(options: AppOptions): Promise<NanobotTui> {
@@ -1526,7 +1530,8 @@ export class NanobotTui {
 
   private openInitialViewIfReady(): void {
     if (
-      !this.rendererStarted
+      this.quitting
+      || !this.rendererStarted
       || this.initialViewPending !== "config"
       || !this.options.apiUrl
       || !this.options.apiToken
@@ -1596,6 +1601,7 @@ export class NanobotTui {
   }
 
   private renderConnectionMessage(): void {
+    this.configEditor.updateConnectionStatus(this.connectionMessage)
     this.status.content = this.unsentSubmit
       ? `Not sent · press Enter to retry when ready · ${this.connectionMessage}`
       : this.connectionMessage

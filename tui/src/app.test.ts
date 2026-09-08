@@ -3385,7 +3385,7 @@ describe("NanobotTui layout", () => {
     await showing
   })
 
-  test("opens the requested configuration view after bootstrap credentials arrive", async () => {
+  test("paints onboarding before startup and fills it when bootstrap credentials arrive", async () => {
     const original = globalThis.fetch
     globalThis.fetch = ((input: RequestInfo | URL) => {
       const url = String(input)
@@ -3405,21 +3405,51 @@ describe("NanobotTui layout", () => {
     const ui = app as unknown as {
       configEditor: { visible: boolean; loading: boolean; saving: boolean }
       useGatewayConnection(apiUrl: string, apiToken: string): void
+      handleStatus(status: string): void
     }
 
     try {
+      await setup.renderOnce()
+      expect(ui.configEditor.visible).toBe(true)
+      expect(setup.captureCharFrame()).toContain("Configuration · Quick start")
+      expect(setup.captureCharFrame()).toContain("Sign in with an account")
+      const menuRow = () => setup!.captureCharFrame().split("\n").findIndex((line) => line.includes("Sign in with an account"))
+      const initialMenuRow = menuRow()
       await app.start()
-      expect(ui.configEditor.visible).toBe(false)
+      expect(ui.configEditor.visible).toBe(true)
+      ui.handleStatus("connecting")
+      await setup.renderOnce()
+      expect(setup.captureCharFrame()).toContain("Connecting")
+      setup.mockInput.pressEnter()
+      await setup.renderOnce()
+      expect(setup.captureCharFrame()).toContain("Configuration · Quick start")
 
       ui.useGatewayConnection("http://nanobot.test", "token")
       await waitUntil(() => ui.configEditor.visible && !ui.configEditor.loading && !ui.configEditor.saving)
       await setup.renderOnce()
 
       expect(setup.captureCharFrame()).toContain("Sign in with an account")
+      expect(setup.captureCharFrame()).not.toContain("Connecting")
+      expect(menuRow()).toBe(initialMenuRow)
     } finally {
       globalThis.fetch = original
       app.stop()
     }
+  })
+
+  test("Ctrl+C exits onboarding before bootstrap has completed", async () => {
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    let closed = false
+    const transport = client()
+    transport.close = () => { closed = true }
+    const app = NanobotTui.mount(setup.renderer, { ...options, initialView: "config" }, transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Quick start")
+    setup.mockInput.pressKey("c", { ctrl: true })
+    await waitUntil(() => closed)
+    expect(setup.renderer.isDestroyed).toBe(true)
+    app.stop()
   })
 
   test("detaches without sending a message or reporting a normal exit", async () => {

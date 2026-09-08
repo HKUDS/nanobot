@@ -99,6 +99,8 @@ export class ConfigEditor {
   private secretValue = ""
   private dirty = new Set<string>()
   private loading = false
+  private waitingForGateway = false
+  private onboarding = false
   private saving = false
   private destroyed = false
   private discardArmed = false
@@ -293,8 +295,25 @@ export class ConfigEditor {
     return this.root.visible
   }
 
+  showWaitingForGateway(): void {
+    this.onboarding = true
+    this.waitingForGateway = true
+    this.root.visible = true
+    this.options.onVisibilityChange?.(true)
+    this.feedback.content = "Connecting to gateway…"
+    this.rebuildRows()
+    this.footer.content = "Connecting… · Ctrl+C exit"
+  }
+
+  updateConnectionStatus(message: string): void {
+    if (this.waitingForGateway && !this.destroyed) this.feedback.content = message
+  }
+
   async show(quickStart = false): Promise<void> {
     if (this.loading) return
+    this.waitingForGateway = false
+    this.onboarding = quickStart
+    this.footer.content = "↑/↓ move · Enter select · / search · Esc back · Ctrl+C exit"
     this.root.visible = true
     this.options.onVisibilityChange?.(true)
     this.loading = true
@@ -349,7 +368,7 @@ export class ConfigEditor {
 
   handleKey(key: KeyEvent): boolean {
     if (!this.visible) return false
-    if (this.saving || this.loading) return true
+    if (this.saving || this.loading || this.waitingForGateway) return true
     if (this.editPurpose) return this.handleEditKey(key)
     if (key.name !== "escape") this.discardArmed = false
     if (key.ctrl && key.name === "s") {
@@ -466,7 +485,7 @@ export class ConfigEditor {
   }
 
   private rebuildRows(): void {
-    if (!this.snapshot) {
+    if (!this.snapshot && this.page !== "home") {
       this.rows = []
       return
     }
@@ -492,7 +511,7 @@ export class ConfigEditor {
       ]
     } else if (this.page === "advanced-home") {
       this.rows = [{ kind: "back" },
-        ...this.snapshot.presentation.sections.map((section): ConfigRow => ({
+        ...this.snapshot!.presentation.sections.map((section): ConfigRow => ({
           kind: "section",
           section,
           count: this.fields.filter((field) => field.sectionId === section.id).length,
@@ -604,7 +623,7 @@ export class ConfigEditor {
   }
 
   private updateHeader(): void {
-    const page = this.page === "home" ? "Overview"
+    const page = this.page === "home" ? this.onboarding ? "Quick start" : "Overview"
       : this.page === "advanced-home" ? "Advanced settings"
       : this.page === "setup" ? `Quick start · ${this.setupStep === "provider" ? "1/4 Choose a provider"
         : this.setupStep === "credentials" ? "2/4 Connect your account"
@@ -662,7 +681,7 @@ export class ConfigEditor {
 
   private activate(): void {
     const row = this.rows[this.selected]
-    if (!row || this.loading || this.saving) return
+    if (!row || this.loading || this.saving || this.waitingForGateway) return
     if (row.kind === "action") {
       row.run()
     } else if (row.kind === "back") {
