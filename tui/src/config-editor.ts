@@ -24,6 +24,7 @@ import {
   type ConfigField,
 } from "./config-editor-model"
 import { hideScrollbars } from "./scrollbox"
+import { configColumns } from "./config-grid"
 import type { ConfigEditorSection, ConfigEditorSnapshot } from "./protocol"
 import {
   activeSetupModel, decodeSetupAuthorization, decodeSetupModels, decodeSetupProviders,
@@ -618,19 +619,23 @@ export class ConfigEditor {
   private describeRow(row: ConfigRow, selected: boolean): string {
     const marker = selected ? "›" : " "
     if (row.kind === "back") return `${marker} ← Configuration`
-    if (row.kind === "action") return `${marker} ${row.label}`
+    if (row.kind === "action") {
+      const separator = row.label.indexOf("   ")
+      return `${marker} ${separator < 0 ? row.label : configColumns(
+        row.label.slice(0, separator), row.label.slice(separator + 3), this.terminalWidth - 8,
+      )}`
+    }
     if (row.kind === "advanced") {
-      return `${marker} ${this.advanced ? "▾" : "▸"} Advanced   ${row.count} settings`
+      return `${marker} ${configColumns(`${this.advanced ? "▾" : "▸"} Advanced`, `${row.count} settings`, this.terminalWidth - 8)}`
     }
     if (row.kind === "section") {
-      return `${marker} → ${row.section.label}   ${row.count} settings`
+      return `${marker} ${configColumns(`→ ${row.section.label}`, `${row.count} settings`, this.terminalWidth - 8)}`
     }
     const suffix = row.field.deprecated ? " [legacy]" : ""
     const value = this.page === "setup" && row.field.path.endsWith("/apiBase") && !row.field.value
       ? "Provider default" : displayConfigValue(row.field)
     const label = this.page === "home" ? row.field.label : row.field.breadcrumb
-    const available = Math.max(8, this.terminalWidth - value.length - 8)
-    return `${marker} ${label.slice(0, available)}${suffix}  ${value}`
+    return `${marker} ${configColumns(label + suffix, value, this.terminalWidth - 8)}`
   }
 
   private updateHeader(): void {

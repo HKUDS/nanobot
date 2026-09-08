@@ -28,7 +28,7 @@ async function choose(label: string) {
   setup.mockInput.pressKey("\u001b[H")
   for (let i = 0; i < 80; i++) {
     await setup.renderOnce()
-    if (setup.captureCharFrame().split("\n").some((line) => line.includes(`› ${label}`))) {
+    if (setup.captureCharFrame().split("\n").some((line) => line.replace(/ +/gu, " ").includes(`› ${label}`.replace(/ +/gu, " ")))) {
       setup.mockInput.pressEnter()
       await settle()
       return
@@ -37,6 +37,28 @@ async function choose(label: string) {
   }
   throw new Error(`Missing action: ${label}\n${setup.captureCharFrame()}`)
 }
+
+test.each([40, 64, 88])("provider status columns stay aligned at width %i", async (width) => {
+  await mount({ read: async () => ({ providers: [
+    { name: "codex", label: "OpenAI Codex", auth_type: "oauth", configured: true },
+    { name: "grok", label: "xAI Grok", auth_type: "oauth", configured: true, oauth_expires_at: 1 },
+    { name: "custom", label: "中文账号名称很长很长很长很长", auth_type: "oauth", configured: true },
+  ] }) }, width)
+  await choose("Sign in with an account")
+  const columns = () => setup.captureCharFrame().split("\n").flatMap((line) => {
+    const match = /Unknown|Token expired/u.exec(line)
+    return match ? [Bun.stringWidth(line.slice(0, match.index))] : []
+  })
+  const initial = columns()
+  expect(initial).toHaveLength(3)
+  expect(new Set(initial).size).toBe(1)
+  setup.mockInput.pressKey("\u001b[B")
+  await settle()
+  expect(columns()).toEqual(initial)
+  await setup.mockInput.typeText("grok")
+  await settle()
+  expect(columns()).toEqual([initial[0]!])
+})
 
 test("Quick start saves a masked API connection, then explicitly selects a default without deleting presets", async () => {
   let snapshot = configSnapshot()
@@ -99,8 +121,8 @@ test("editing a preset keeps its generation settings and can leave the default u
   expect(discoveries).toBe(0)
   await choose("Edit preset   Coding")
   await choose("Generation settings")
-  expect(setup.captureCharFrame()).toContain("Output token limit   4096")
-  expect(setup.captureCharFrame()).toContain("Reasoning effort   high")
+  expect(setup.captureCharFrame()).toMatch(/Output token limit +4096/u)
+  expect(setup.captureCharFrame()).toMatch(/Reasoning effort +high/u)
   await choose("Temperature  ")
   setup.mockInput.pressKey("\u0001")
   setup.mockInput.pressKey("\u000b")
@@ -206,7 +228,7 @@ test("expired OAuth credentials offer sign-in again instead of claiming a live l
     oauth_login_supported: true, oauth_expires_at: Date.now() - 1000,
   }] }) })
   await choose("Sign in with an account")
-  expect(setup.captureCharFrame()).toContain("Grok   Token expired")
+  expect(setup.captureCharFrame()).toMatch(/Grok +Token expired/u)
   expect(setup.captureCharFrame()).not.toContain("Signed in")
   await choose("Grok")
   expect(setup.captureCharFrame()).toContain("Sign in again")
