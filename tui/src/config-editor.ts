@@ -27,7 +27,7 @@ import { hideScrollbars } from "./scrollbox"
 import type { ConfigEditorSection, ConfigEditorSnapshot } from "./protocol"
 import {
   activeSetupModel, decodeSetupAuthorization, decodeSetupModels, decodeSetupProviders,
-  record, setupDraft, newSetupPreset,
+  record, setupDraft, newSetupPreset, setupProviderStatus,
   type SetupAuthorization, type SetupModel, type SetupProvider, type SetupPreset,
 } from "./setup-model"
 
@@ -907,8 +907,8 @@ export class ConfigEditor {
     if (this.setupStep === "provider") return `${this.providerGroup === "account" ? "Sign in with an account" : this.providerGroup === "local" ? "Connect a local model" : "Use an API key or cloud credentials"}\nType a provider name to narrow the list.`
     if (this.authorization?.userCode) return `Open the sign-in page and enter code: ${this.authorization.userCode}`
     if (this.setupStep === "credentials") return `${this.provider?.label || "Provider"} · ${this.provider?.oauth
-      ? "Sign in with your account. No API key needed." : "Use credentials from this provider's developer console."}`
-    if (this.setupStep === "model") return `${this.provider?.label} · ${this.provider?.oauth ? "Signed in" : "Credentials saved"}\nType to find a model, or enter its exact ID below.`
+      ? `${setupProviderStatus(this.provider)}\n${this.provider.configured ? "Sign in again, or continue with saved credentials and test access." : "Sign in with your account. No API key needed."}` : "Use credentials from this provider's developer console."}`
+    if (this.setupStep === "model") return `${this.provider?.label} · ${this.provider ? setupProviderStatus(this.provider) : ""}\nType to find a model, or enter its exact ID below.`
     if (this.setupStep === "review") return `${this.provider?.label} · ${this.existingPresetName ? "Edit saved preset" : "Create a model preset"}\nA preset saves your model and generation settings together.`
     return this.tested ? "Model replied successfully. You're ready to chat."
       : `Preset ${this.presetName} saved · Model reply not verified.\nSend one short test message. Provider charges may apply.`
@@ -942,14 +942,14 @@ export class ConfigEditor {
         (this.providerGroup === "account" ? provider.oauth : this.providerGroup === "local" ? provider.local : !provider.oauth && !provider.local)
         && `${provider.name} ${provider.label}`.toLocaleLowerCase().includes(this.providerQuery.toLocaleLowerCase()),
       ).map((provider) => this.action(
-        `${provider.label} · ${provider.configured ? provider.oauth ? "Signed in" : "Credentials saved" : provider.oauth ? "Account" : provider.local ? "Local server" : provider.keyRequired ? "API key" : "Cloud / API connection"}`,
-        provider.oauth ? "Use browser sign-in with your existing account."
+        `${provider.label} · ${setupProviderStatus(provider)}`,
+        provider.oauth ? "Saved credentials may have expired or been revoked. Sign in again, or continue and test your preset."
           : "Use this provider's API key and endpoint. You will configure a model preset next.",
         () => {
           this.cancelSignIn()
           this.provider = provider
           this.connectionOptions = false
-          if (provider.configured) { this.beginPreset(); return }
+          if (provider.configured && !provider.oauth) { this.beginPreset(); return }
           this.setupStep = "credentials"
           this.selected = 0
           this.feedback.content = ""
@@ -998,7 +998,7 @@ export class ConfigEditor {
             this.signInHelp = !this.signInHelp; this.rebuildRows()
           }))
         } else {
-          if (provider.configured) rows.push(this.action("Continue with connected account", "Keep your current sign-in and configure a preset.", () => { this.beginPreset() }))
+          if (provider.configured) rows.push(this.action("Continue with saved credentials", "Configure a preset, then test access. Expired tokens may refresh automatically; revoked credentials require sign-in.", () => { this.beginPreset() }))
           if (provider.loginSupported) rows.push(this.action(
             provider.configured ? "Sign in again" : `Sign in to ${provider.label}`,
             "Start browser authorization. Account credentials are saved when sign-in completes.",
@@ -1215,7 +1215,11 @@ export class ConfigEditor {
       })
       if (this.destroyed || !this.visible) return
       this.authorization = decodeSetupAuthorization(result)
-      if (!this.authorization) provider.configured = true
+      if (!this.authorization) {
+        const connected = decodeSetupProviders(result).find((item) => item.name === provider.name)
+        provider.configured = connected?.configured === true
+        provider.expiresAt = connected?.expiresAt ?? null
+      }
       if (this.authorization) {
         this.feedback.content = "Waiting for browser sign-in… Esc goes back; Ctrl+C exits."
         if (this.authorization.input === "callback_url") {
@@ -1276,6 +1280,7 @@ export class ConfigEditor {
       const connected = decodeSetupProviders(result).find((item) => item.name === provider.name)
       if (!connected?.configured) throw new Error("Sign-in did not complete. Try signing in again.")
       provider.configured = true
+      provider.expiresAt = connected.expiresAt
       this.authorization = null
       this.stopCallback?.()
       this.stopCallback = null

@@ -6,6 +6,7 @@ export interface SetupProvider {
   label: string
   oauth: boolean
   configured: boolean
+  expiresAt: number | null
   loginSupported: boolean
   keyRequired: boolean
   baseRequired: boolean
@@ -42,6 +43,7 @@ export function decodeSetupProviders(value: unknown): SetupProvider[] {
     return [{
       name: row.name, label: row.label, oauth: row.auth_type === "oauth",
       configured: row.configured === true, loginSupported: row.oauth_login_supported === true,
+      expiresAt: typeof row.oauth_expires_at === "number" ? row.oauth_expires_at : null,
       keyRequired: row.api_key_required === true,
       baseRequired: row.api_base_required === true,
       local: row.is_local === true,
@@ -51,6 +53,14 @@ export function decodeSetupProviders(value: unknown): SetupProvider[] {
     }]
   }).sort((a, b) => Number(b.configured) - Number(a.configured)
     || Number(b.oauth) - Number(a.oauth) || a.label.localeCompare(b.label))
+}
+
+export function setupProviderStatus(provider: SetupProvider): string {
+  if (provider.oauth && provider.expiresAt !== null && provider.expiresAt <= Date.now()) {
+    return "Token expired"
+  }
+  if (provider.configured) return provider.oauth ? "Saved · Not verified" : "Credentials saved"
+  return provider.oauth ? "Account" : provider.local ? "Local server" : provider.keyRequired ? "API key" : "Cloud / API connection"
 }
 
 export function decodeSetupModels(value: unknown): { models: SetupModel[]; message: string } {

@@ -185,6 +185,7 @@ test("model discovery failure retains manual entry and failed save stays reviewa
   })
   await choose("Sign in with an account")
   await choose("Connected provider")
+  await choose("Continue with saved credentials")
   await choose("Model ·")
   expect(setup.captureCharFrame()).toContain("Model service unavailable")
   await choose("Enter a model ID")
@@ -197,6 +198,21 @@ test("model discovery failure retains manual entry and failed save stays reviewa
   await choose("Save preset and use as default")
   expect(saves).toBe(2)
   expect(setup.captureCharFrame()).toContain("Start a new chat")
+})
+
+test("expired OAuth credentials offer sign-in again instead of claiming a live login", async () => {
+  await mount({ read: async () => ({ providers: [{
+    name: "xai_grok", label: "Grok", auth_type: "oauth", configured: true,
+    oauth_login_supported: true, oauth_expires_at: Date.now() - 1000,
+  }] }) })
+  await choose("Sign in with an account")
+  expect(setup.captureCharFrame()).toContain("Grok · Token expired")
+  expect(setup.captureCharFrame()).not.toContain("Signed in")
+  await choose("Grok")
+  expect(setup.captureCharFrame()).toContain("Sign in again")
+  expect(setup.captureCharFrame()).toContain("Continue with saved credentials")
+  await choose("Continue with saved credentials")
+  expect(setup.captureCharFrame()).toContain("3/4 Configure preset")
 })
 
 

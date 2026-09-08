@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test"
 import { configSnapshot } from "./config-editor-fixture"
-import { newSetupPreset, setupDraft } from "./setup-model"
+import { decodeSetupProviders, newSetupPreset, setupDraft, setupProviderStatus } from "./setup-model"
+
+test("local OAuth storage never proves a live login, even before token expiry", () => {
+  const [provider] = decodeSetupProviders({ providers: [{ name: "xai_grok", label: "Grok",
+    auth_type: "oauth", configured: true, oauth_expires_at: Date.now() + 60_000 }] })
+  expect(setupProviderStatus(provider!)).toBe("Saved · Not verified")
+  expect(setupProviderStatus({ ...provider!, expiresAt: 1 })).toBe("Token expired")
+  expect(setupProviderStatus({ ...provider!, expiresAt: null })).toBe("Saved · Not verified")
+})
 
 test("named preset saves preserve legacy defaults, secrets, and other presets", () => {
   const snapshot = configSnapshot()
