@@ -7,6 +7,9 @@ import time
 from pathlib import Path
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from nanobot.cli import desktop_target
 from nanobot.cli.desktop_target import (
@@ -206,6 +209,62 @@ def test_absent_desktop_selects_current_python(monkeypatch, capsys) -> None:
 
     assert dispatch_bare_desktop_target([]) is None
     assert "Using current Python environment:" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("keys", "expected"), [
+    ("\r", "desktop"),
+    ("\x1b[B\r", "python"),
+    ("\x1b[B\x1b[A\r", "desktop"),
+    ("\x1b[A\r", "python"),
+    ("2\r", "python"),
+    ("21\r", "desktop"),
+])
+def test_target_picker_accepts_real_navigation_keys(keys, expected):
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            pipe_input.send_text(keys)
+            assert desktop_target._choose_target(
+                DesktopReply("ready", frozenset({"webui", "tui"}))
+            ) == expected
+
+
+@pytest.mark.parametrize("args", [[], ["webui"]])
+@pytest.mark.parametrize("cancel", ["interrupt", "eof"])
+def test_target_picker_cancellation_exits_without_attachment(monkeypatch, capsys, args, cancel):
+    calls: list[str] = []
+
+    class Target:
+        def request(self, operation: str) -> DesktopReply:
+            calls.append(operation)
+            assert operation == "status", "cancellation must not request attachment credentials"
+            return DesktopReply("ready", frozenset({"webui", "tui"}))
+
+    monkeypatch.setattr(desktop_target, "_interactive_shell", lambda: True)
+    monkeypatch.setattr(desktop_target, "discover_desktop_target", Target)
+    monkeypatch.setattr(
+        "nanobot.cli.desktop_tui.launch_desktop_tui",
+        lambda *_: pytest.fail("cancellation started the TUI"),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.webui_support._launch_browser",
+        lambda *_: pytest.fail("cancellation opened a browser"),
+    )
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            if cancel == "interrupt":
+                # Cancel even after moving the highlight to the Python option.
+                pipe_input.send_text("\x1b[B\x03")
+            else:
+                pipe_input.close()
+            with pytest.raises(SystemExit) as exc:
+                dispatch_bare_desktop_target(args)
+
+    assert exc.value.code == 130
+    assert calls == ["status"]
+    output = capsys.readouterr()
+    assert "Using current Python environment:" not in output.out
+    assert "No backend was started" in output.err
 
 
 def test_python_choice_does_not_request_desktop_operation(monkeypatch, capsys) -> None:

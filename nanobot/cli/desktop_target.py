@@ -178,21 +178,30 @@ def _print_desktop_error(message: str) -> None:
 
 
 def _choose_target(status: DesktopReply) -> Literal["desktop", "python"]:
+    import questionary
+
     detail = "" if status.state == "ready" else f" ({status.state})"
-    print("Nanobot Desktop is running. Choose a target for this invocation:")
-    print(f"  1. Nanobot Desktop{detail}")
-    print(f"  2. Current Python environment ({_python_target_label()})")
-    while True:
-        try:
-            answer = input("Target [1/2]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt) as exc:
-            print(file=sys.stderr)
-            raise SystemExit(130) from exc
-        if answer in {"1", "desktop", "d"}:
-            return "desktop"
-        if answer in {"2", "python", "p"}:
-            return "python"
-        print("Enter 1 for Desktop or 2 for the current Python environment.")
+    try:
+        answer = questionary.select(
+            "Nanobot Desktop is running. Choose a target for this invocation:",
+            choices=[
+                questionary.Choice(f"Nanobot Desktop{detail}", value="desktop"),
+                questionary.Choice(
+                    f"Current Python environment ({_python_target_label()})", value="python"
+                ),
+            ],
+            default="desktop",
+            use_shortcuts=True,
+            instruction="(↑/↓ to move, Enter to confirm, Ctrl+C to cancel)",
+        ).unsafe_ask()
+    except (EOFError, KeyboardInterrupt):
+        answer = None
+    if answer == "desktop":
+        return "desktop"
+    if answer == "python":
+        return "python"
+    _print_desktop_error("Target selection cancelled.")
+    raise SystemExit(130)
 
 
 def _desktop_terminal_directory() -> Path | None:

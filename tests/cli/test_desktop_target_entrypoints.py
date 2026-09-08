@@ -1,6 +1,9 @@
 """The picker covers retained launchers without intercepting explicit commands."""
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 from typer.testing import CliRunner
 
 from nanobot.cli import commands, desktop_target, entry
@@ -24,6 +27,34 @@ def test_retained_launcher_attaches_without_starting_python(monkeypatch, args):
     result = CliRunner().invoke(commands.app, args)
     assert result.exit_code == 0, result.output
     assert seen == [args]
+
+
+@pytest.mark.parametrize("args", [[], ["webui"]])
+@pytest.mark.parametrize("launcher", ["modern", "retained"])
+def test_launcher_picker_ctrl_c_does_not_start_python(monkeypatch, args, launcher):
+    class Target:
+        def request(self, operation):
+            assert operation == "status", "cancelled picker must not request attachment"
+            return desktop_target.DesktopReply("ready", frozenset({"webui", "tui"}))
+
+    monkeypatch.setattr(desktop_target, "_interactive_shell", lambda: True)
+    monkeypatch.setattr(desktop_target, "discover_desktop_target", Target)
+    monkeypatch.setattr(entry, "_run_agent", lambda *_a, **_kw: pytest.fail("agent started"))
+    monkeypatch.setattr(
+        "nanobot.cli.webui._resolve_webui_config_path",
+        lambda *_a, **_kw: pytest.fail("Python WebUI started"),
+    )
+    monkeypatch.setattr(entry.sys, "argv", ["nanobot", *args])
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            pipe_input.send_text("\x03")
+            if launcher == "retained":
+                result = CliRunner().invoke(commands.app, args)
+                assert result.exit_code == 130, result.output
+            else:
+                with pytest.raises(SystemExit) as exc:
+                    entry.main()
+                assert exc.value.code == 130
 
 
 @pytest.mark.parametrize("args", [["agent", "--help"], ["--help"], ["--version"],
