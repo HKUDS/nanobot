@@ -65,8 +65,7 @@ ProviderCompactionConsolidator = Callable[
 ]
 
 SNIP_SAFETY_BUFFER = 1024
-# read_file owns its 128K/pagination bound and is the recovery path for persisted
-# results; exempting it prevents persist->read->persist loops.
+# read_file has its own bound; exempt it to avoid persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
@@ -718,9 +717,7 @@ class ContextGovernor:
                 config.session_key or "default",
             )
             return truncate_text(result, config.max_tool_result_chars) if isinstance(result, str) else result
-        # A complete reference is the minimum useful output: cutting its path
-        # loses access to the original. The helper bounds previews and keeps
-        # this indivisible metadata even for budgets smaller than the path.
+        # Persisted references must retain their complete paths.
         if config.workspace is None and isinstance(content, str):
             return truncate_text(content, config.max_tool_result_chars)
         return content

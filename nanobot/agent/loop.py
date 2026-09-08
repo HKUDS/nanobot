@@ -2266,9 +2266,7 @@ class AgentLoop:
                     )
                     continue
                 fulfilled_tool_call_ids.add(tool_call_id_str)
-                # The runner has already normalized this result for the model
-                # request. Keep that exact content for replay; only remove
-                # volatile inline image bytes from multimodal blocks.
+                # Preserve model-visible text for replay; redact only inline images.
                 if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(
                         cast(list[object], content),

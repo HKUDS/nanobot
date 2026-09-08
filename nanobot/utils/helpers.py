@@ -539,8 +539,6 @@ def _render_tool_result_reference(
         result += "\n...\nPreview is also truncated."
     result += f"\n{retrieval_hint}"
     if max_chars and len(result) > max_chars:
-        # Keep a usable path and an explicit truncation marker even when a very
-        # small test/runtime budget cannot fit the explanatory preview.
         result = (
             f"[truncated; read_file: {reference_path}]"
             if read_file_available is True
@@ -606,17 +604,15 @@ def maybe_persist_tool_result(
     max_chars: int,
     read_file_available: bool | None = None,
 ) -> Any:
-    """Offload oversized strings/text blocks; complete references are indivisible.
+    """Offload oversized strings and text blocks.
 
-    ``max_chars`` bounds each text preview, with a complete reference as the
-    minimum output when its path alone cannot fit the configured budget.
+    Complete references may exceed the per-block ``max_chars`` budget.
     """
     if workspace is None or max_chars <= 0:
         return content
 
     if isinstance(content, list):
-        # Normalize text blocks independently so replacing inline images with
-        # persistence placeholders cannot change the text's normalization.
+        # Per-block normalization stays stable when images become replay placeholders.
         blocks: list[Any] = []
         for index, raw_block in enumerate(cast(list[object], content)):
             block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None

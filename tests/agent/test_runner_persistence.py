@@ -231,8 +231,6 @@ async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_pa
     first_tools.get_definitions.return_value = []
     first_tools.execute = AsyncMock(return_value=raw_result)
 
-    # The first response intentionally requests a tool result, then the runner
-    # makes the next request with the normalized result in its transcript.
     first_provider.chat_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="working",
