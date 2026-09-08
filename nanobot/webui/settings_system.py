@@ -32,6 +32,8 @@ from nanobot.webui.settings_contracts import (
     query_first,
     query_first_alias,
 )
+from nanobot.webui.settings_dream import dream_prompt_payload, update_dream_prompt
+from nanobot.webui.settings_runtime import runtime_config_payload
 
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsServices
@@ -43,6 +45,7 @@ SettingsOperation = Callable[..., Any]
 
 @dataclass(frozen=True)
 class SystemSettingsOperations:
+    update_runtime_config: SettingsOperation
     cli_apps_payload: SettingsOperation
     cli_apps_action: SettingsOperation
     nanobot_features_payload: SettingsOperation
@@ -62,6 +65,8 @@ class SystemSettingsOperations:
 
 
 class SystemSettingsPayload(TypedDict):
+    dream_prompt: dict[str, Any]
+    runtime_config: dict[str, Any]
     runtime: dict[str, Any]
     usage: dict[str, Any]
     advanced: dict[str, Any]
@@ -106,6 +111,8 @@ def system_settings_payload(
         workspace=config.workspace_path,
     )
     return {
+        "dream_prompt": dream_prompt_payload(config),
+        "runtime_config": runtime_config_payload(config),
         "runtime": {
             "config_path": str(config_path.expanduser()),
             "workspace_path": str(config.workspace_path),
@@ -160,7 +167,6 @@ def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bo
             defaults.timezone = timezone
             defaults.timezone_mode = "manual"
             changed = True
-            restart_required = timezone_changed
 
     tool_hint_max_length = query_first_alias(
         query,
@@ -181,7 +187,6 @@ def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bo
         if defaults.tool_hint_max_length != parsed:
             defaults.tool_hint_max_length = parsed
             changed = True
-            restart_required = True
     return changed, restart_required
 
 
@@ -371,6 +376,36 @@ class SystemSettingsHandler:
         channel_name: str | None = None,
         connect_action: str | None = None,
     ) -> SettingsRouteResult:
+        if action == "dream-prompt-update":
+            if request.payload is None or "content" not in request.payload:
+                return SettingsRouteResult.failure(400, "Dream prompt content is required")
+            try:
+                payload = await asyncio.to_thread(
+                    self.settings.mutate, update_dream_prompt, request.payload["content"],
+                )
+            except WebUISettingsError as exc:
+                return SettingsRouteResult.failure(exc.status, exc.message)
+            return SettingsRouteResult.success(payload)
+        if action == "runtime-config-update":
+            values = (request.payload or {}).get("values")
+            if not isinstance(values, dict):
+                return SettingsRouteResult.failure(400, "Runtime settings must be an object")
+            try:
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    operations.update_runtime_config,
+                    values,
+                    local_browser=request.local_browser,
+                )
+            except WebUISettingsError as exc:
+                return SettingsRouteResult.failure(exc.status, exc.message)
+            if self.settings.refresh_runtime_config is not None:
+                refreshed = self.settings.refresh_runtime_config()
+                if inspect.isawaitable(refreshed):
+                    await refreshed
+            return SettingsRouteResult.success(
+                payload, decorate_restart=True, restart_section="runtime",
+            )
         if action == "cli-list":
             return await self._cli_apps(request, operations)
         if action.startswith("cli-"):

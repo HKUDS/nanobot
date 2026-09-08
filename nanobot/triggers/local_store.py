@@ -42,6 +42,10 @@ class LocalTriggerStore:
     """Persistent local triggers for one workspace."""
 
     def __init__(self, workspace_path: Path):
+        self.switch_workspace(workspace_path)
+
+    def switch_workspace(self, workspace_path: Path) -> None:
+        """Rebind the idle trigger queue without moving existing files."""
         self.workspace_path = Path(workspace_path)
         self.root = self.workspace_path / "triggers"
         self.store_path = self.root / "triggers.json"

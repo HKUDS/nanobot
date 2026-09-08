@@ -383,6 +383,7 @@ def _run_gateway(
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
 
+    port_override = port is not None
     port = port if port is not None else config.gateway.port
     webui_url = _webui_browser_url(config)
     gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
@@ -702,8 +703,68 @@ def _run_gateway(
     def _webui_runtime_model_name() -> str | None:
         return agent.model.strip() or None
 
-    def _webui_refresh_runtime_config() -> None:
+    health_rebind: Callable[[str, int], Coroutine[Any, Any, None]] | None = None
+    health_address = (config.gateway.host, port)
+    workspace_reload_pending = False
+
+    def _webui_refresh_runtime_config() -> asyncio.Task[None] | None:
+        nonlocal workspace_reload_pending
+        from nanobot.config.loader import load_config
+
+        latest = load_config(Path(config_path))
+        defaults = latest.agents.defaults
+        if latest.workspace_path.resolve() != agent.workspace.resolve():
+            if agent.has_active_work() or cron.has_active_jobs:
+                if not workspace_reload_pending:
+                    workspace_reload_pending = True
+
+                    async def refresh_when_idle() -> None:
+                        nonlocal workspace_reload_pending
+                        try:
+                            while agent.has_active_work() or cron.has_active_jobs:
+                                await asyncio.sleep(0.1)
+                            pending = _webui_refresh_runtime_config()
+                            if pending is not None:
+                                await pending
+                        finally:
+                            workspace_reload_pending = False
+
+                    agent.schedule_background(refresh_when_idle())
+                return None
+            agent.switch_workspace(latest.workspace_path)
+            cron.switch_workspace(latest.workspace_path)
+            trigger_store.switch_workspace(latest.workspace_path)
+        agent.apply_settings(latest)
+        cron.set_system_timezone(defaults.timezone)
+        from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+
+        schedules = {
+            "dream": defaults.dream.build_schedule(defaults.timezone) if defaults.dream.enabled else None,
+            "heartbeat": CronSchedule(kind="every", every_ms=latest.gateway.heartbeat.interval_s * 1000,
+                                      tz=defaults.timezone) if latest.gateway.heartbeat.enabled else None,
+        }
+        for name, schedule in schedules.items():
+            current = cron.get_job(name)
+            if schedule is None:
+                if current is not None:
+                    cron.remove_system_job(name)
+            elif current is None or current.schedule != schedule:
+                cron.register_system_job(CronJob(
+                    id=name, name=name, schedule=schedule,
+                    payload=CronPayload(kind="system_event"),
+                ))
+        config.agents.defaults = defaults.model_copy(deep=True)
+        config.tools = latest.tools.model_copy(deep=True)
+        config.gateway.heartbeat = latest.gateway.heartbeat.model_copy(deep=True)
+        channels.refresh_webui_workspace()
+        config.gateway.host = latest.gateway.host
+        config.gateway.port = latest.gateway.port
+        config.gateway.restart_mode = latest.gateway.restart_mode
         agent.refresh_runtime_config()
+        address = (latest.gateway.host, port if port_override else latest.gateway.port)
+        if health_rebind is not None and address != health_address:
+            return asyncio.create_task(health_rebind(*address))
+        return None
 
     def _webui_skill_state_action(disabled_skills: set[str]) -> None:
         config.agents.defaults.disabled_skills = sorted(disabled_skills)
@@ -810,10 +871,31 @@ def _run_gateway(
                 finally:
                     writer.close()
 
+        nonlocal health_rebind, health_address
         server = await asyncio.start_server(handle, host, health_port)
+        health_address = (host, health_port)
         _print_gateway_health_endpoint(host, health_port)
-        async with server:
-            await server.serve_forever()
+
+        async def rebind(next_host: str, next_port: int) -> None:
+            nonlocal server, health_address
+            previous = health_address
+            server.close()
+            await server.wait_closed()
+            try:
+                server = await asyncio.start_server(handle, next_host, next_port)
+            except OSError:
+                server = await asyncio.start_server(handle, *previous)
+                raise
+            health_address = (next_host, next_port)
+            gateway_runtime.publish_health_host(next_host)
+
+        health_rebind = rebind
+        try:
+            await asyncio.Future[None]()
+        finally:
+            health_rebind = None
+            server.close()
+            await server.wait_closed()
     # Register Dream system job (idempotent on restart)
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream

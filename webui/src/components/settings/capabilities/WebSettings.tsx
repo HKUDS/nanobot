@@ -1,3 +1,4 @@
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import type { Dispatch, SetStateAction } from "react";
 import { Eye, EyeOff, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -120,6 +121,8 @@ export function WebSettings({
       : selectedProvider?.credential === "base_url"
         ? !baseUrl
         : false;
+
+  useAutoSave(form, dirty, saving, onSave, !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
 
   return (
     <div className="space-y-7">

@@ -178,7 +178,7 @@ export function RestartRequiredNotice({
 
 export function SettingsSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+    <h2 className="settings-section-title text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
       {children}
     </h2>
   );
@@ -202,16 +202,16 @@ export function SettingsRow({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex min-h-[62px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="settings-row">
       <div className="min-w-0">
         <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
         {description ? (
-          <div className="mt-0.5 max-w-[28rem] text-[12px] leading-5 text-muted-foreground">
+          <div className="mt-1 max-w-[28rem] text-[12px] leading-5 text-muted-foreground">
             {description}
           </div>
         ) : null}
       </div>
-      {children ? <div className="min-w-0 sm:ml-6 sm:shrink-0">{children}</div> : null}
+      {children ? <div className="settings-control">{children}</div> : null}
     </div>
   );
 }
@@ -235,6 +235,7 @@ export function ReadOnlyRow({
 }
 
 export function RestartSettingsFooter({
+  autoSave = false,
   dirty,
   saving,
   pendingRestart,
@@ -247,6 +248,7 @@ export function RestartSettingsFooter({
   onReset,
   isRestarting,
 }: {
+  autoSave?: boolean;
   dirty: boolean;
   saving: boolean;
   pendingRestart: boolean;
@@ -269,7 +271,7 @@ export function RestartSettingsFooter({
     ? tx("app.system.restartingEngine", "Restarting engine...")
     : t("app.system.restarting");
   const statusMessage =
-    message ??
+    (saving ? t("settings.actions.saving") : undefined) ?? message ??
     (pendingRestart && !dirty
       ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
       : dirty
@@ -277,14 +279,17 @@ export function RestartSettingsFooter({
         : undefined);
   const statusTone = disabled ? "danger" : dirty || pendingRestart ? "accent" : undefined;
 
+  if (autoSave && !statusMessage && !pendingRestart) return null;
+
   return (
-    <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="settings-footer">
       <div className="min-w-0 text-[13px] leading-5 text-muted-foreground">
         <SettingsStatusMessage tone={statusTone}>{statusMessage}</SettingsStatusMessage>
       </div>
       <div className="flex w-full shrink-0 flex-wrap justify-end gap-2 sm:w-auto">
         {pendingRestart && !dirty && onRestart ? (
           <Button
+            type="button"
             size="sm"
             variant="ghost"
             onClick={onRestart}
@@ -299,8 +304,9 @@ export function RestartSettingsFooter({
             {isRestarting ? restartingLabel : restartLabel}
           </Button>
         ) : null}
-        {onReset ? (
+        {onReset && !autoSave ? (
           <Button
+            type="button"
             size="sm"
             variant="ghost"
             onClick={onReset}
@@ -310,7 +316,8 @@ export function RestartSettingsFooter({
             {t("settings.actions.cancel")}
           </Button>
         ) : null}
-        <Button
+        {!autoSave ? <Button
+            type="button"
           size="sm"
           variant="outline"
           onClick={onSave}
@@ -318,7 +325,7 @@ export function RestartSettingsFooter({
           className="rounded-full"
         >
           {saving ? t("settings.actions.saving") : t("settings.actions.save")}
-        </Button>
+        </Button> : null}
       </div>
     </div>
   );

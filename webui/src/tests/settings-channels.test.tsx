@@ -525,7 +525,7 @@ describe("Settings channels", () => {
       "true",
     );
     expect(screen.getAllByText("cli_def...ault").length).toBeGreaterThan(0);
-    expect(screen.getByText("Advanced")).toBeInTheDocument();
+    expect(screen.getByText("Advanced", { selector: "summary span" })).toBeInTheDocument();
     expect(screen.getByText("Topic isolation")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Product Helper/ }));
@@ -779,7 +779,7 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
 
     const behavior = screen.getByRole("radiogroup", { name: "Group behavior" });
     expect(within(behavior).getByRole("radio", { name: "Mention only" })).toHaveAttribute(
@@ -938,7 +938,7 @@ describe("Settings channels", () => {
     fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
       target: { value: "discord-token" },
     });
-    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     fireEvent.change(screen.getByLabelText("Allowed channels"), {
       target: { value: "123, 456" },
     });
@@ -1047,7 +1047,7 @@ describe("Settings channels", () => {
     expect(savedSecret.closest("form")).not.toBeNull();
     expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     expect(screen.getByLabelText("Allowed channels")).toHaveValue("123, 456");
     expect(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
       "radio",
@@ -1222,7 +1222,7 @@ describe("Settings channels", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
     fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
-    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     const region = screen.getByRole("radiogroup", { name: "Region" });
     expect(within(region).getByRole("radio", { name: "Feishu" })).toHaveAttribute(
       "aria-checked",
@@ -1231,7 +1231,7 @@ describe("Settings channels", () => {
     expect(within(region).getByRole("radio", { name: "Lark" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
-    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     const matrixBehavior = screen.getByRole("radiogroup", { name: "Group behavior" });
     expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
       "aria-checked",
@@ -1240,7 +1240,7 @@ describe("Settings channels", () => {
     expect(within(matrixBehavior).getByRole("radio", { name: "Allowlist" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
-    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     const format = screen.getByRole("radiogroup", { name: "Message format" });
     expect(within(format).getByRole("radio", { name: "Plain text" })).toHaveAttribute(
       "aria-checked",

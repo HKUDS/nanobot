@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import inspect
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, cast
@@ -13,7 +14,7 @@ from websockets.http11 import Response
 
 from nanobot.agent.tools.image_generation import request_image_generation_reload
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
-from nanobot.api.runtime import ApiRuntime, api_runtime_paths
+from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
@@ -54,6 +55,7 @@ from nanobot.webui.settings_api import (
     update_model_configuration,
     update_network_safety_settings,
     update_provider_settings,
+    update_runtime_config_settings,
     update_transcription_settings,
     update_web_search_settings,
 )
@@ -126,6 +128,8 @@ _CAPABILITY_ROUTES = {
 }
 
 _SYSTEM_ROUTES = {
+    "/api/settings/dream-prompt/update": "dream-prompt-update",
+    "/api/settings/runtime-config/update": "runtime-config-update",
     "/api/settings/cli-apps": "cli-list",
     "/api/settings/cli-apps/install": "cli-install",
     "/api/settings/cli-apps/update": "cli-update",
@@ -148,6 +152,8 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/dream-prompt/update",
+    "/api/settings/runtime-config/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
     "/api/settings/model-configurations/update",
@@ -295,6 +301,7 @@ class WebUISettingsRouter:
             needs_local_browser=(
                 action in {
                     "api-start",
+                    "runtime-config-update",
                     "features-enable",
                     "channel-configure",
                     "channel-connect",
@@ -322,6 +329,25 @@ class WebUISettingsRouter:
                 channel_name=(channel_connect[0] if channel_connect else None),
                 connect_action=(channel_connect[1] if channel_connect else None),
             )
+        if action in {"web-search-update", "transcription-update", "network-update", "image-update"} and result.status == 200:
+            if self.settings.refresh_runtime_config is not None:
+                refreshed = self.settings.refresh_runtime_config()
+                if inspect.isawaitable(refreshed):
+                    await refreshed
+            if result.payload is not None:
+                result.payload["requires_restart"] = False
+        if action == "runtime-config-update" and result.status == 200:
+            values = (domain_request.payload or {}).get("values", {})
+            if any(str(path).startswith("api.") for path in values):
+                runtime = self._api_runtime()
+                if runtime.status().running:
+                    config = self.settings.config.load()
+                    restarted = await asyncio.to_thread(runtime.restart, ApiStartOptions(
+                        host=config.api.host, port=config.api.port,
+                        workspace=str(config.workspace_path), config_path=str(self.settings.config.path),
+                    ))
+                    if not restarted.ok:
+                        return self._render_result(SettingsRouteResult.failure(500, restarted.message))
         return self._render_result(result)
 
     @staticmethod
@@ -462,6 +488,7 @@ class WebUISettingsRouter:
 
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
+            update_runtime_config=update_runtime_config_settings,
             cli_apps_payload=cli_apps_payload,
             cli_apps_action=cli_apps_action,
             nanobot_features_payload=nanobot_features_payload,

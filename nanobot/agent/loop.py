@@ -454,6 +454,8 @@ class AgentLoop:
         self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
+        self._provider_snapshot_loader = provider_snapshot_loader
+        self._loaded_tool_names: list[str] = []
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -532,6 +534,77 @@ class AgentLoop:
     def invalidate_runtime_config(self) -> None:
         """Invalidate runtime config for lazy refresh at the next admission."""
         self.runtime_resolver.invalidate()
+
+    def has_active_work(self) -> bool:
+        """Return whether changing workspace-owned dependencies must wait."""
+        return (any(not task.done() for tasks in self._active_tasks.values() for task in tasks)
+                or bool(self.subagents.get_running_count()) or bool(self.auto_compact._archiving))
+
+    def switch_workspace(self, workspace: Path) -> None:
+        """Replace workspace-owned dependencies after admitted work has finished."""
+        if self.has_active_work():
+            raise RuntimeError("Workspace changes must wait for active work to finish")
+        self.sessions.switch_workspace(workspace)
+        self.workspace = workspace
+        self.context = ContextBuilder(workspace, timezone=self.context.timezone,
+                                      disabled_skills=list(self.context.skills.disabled_skills))
+        self.workspace_scopes = WorkspaceScopeResolver(
+            default_workspace=workspace, default_restrict_to_workspace=self.restrict_to_workspace,
+        )
+        self.consolidator = Consolidator(
+            store=self.context.memory, sessions=self.sessions,
+            build_messages=self.context.build_messages, get_tool_definitions=self.tools.get_definitions,
+            resolve_prompt_context=PersistedPromptContextResolver(
+                workspace_scopes=self.workspace_scopes, unified_session=self._unified_session,
+            ),
+        )
+        self.auto_compact = AutoCompact(self.sessions, self.consolidator, bind_events=self._idle_events)
+        self.subagents.workspace = workspace
+        self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
+        self.sessions.set_delete_observer(self._file_state_store.discard)
+        self._register_default_tools(provider_snapshot_loader=self._provider_snapshot_loader)
+
+    def apply_settings(self, config: Config) -> None:
+        """Apply settings used by subsequent turns without stopping active work."""
+        defaults = config.agents.defaults
+        self.set_timezone(defaults.timezone)
+        self.max_iterations = defaults.max_tool_iterations
+        self.max_tool_result_chars = defaults.max_tool_result_chars
+        self.provider_retry_mode = defaults.provider_retry_mode
+        self.tool_hint_max_length = defaults.tool_hint_max_length
+        self.dream_model_preset = defaults.dream.model_override
+        self._unified_session = defaults.unified_session
+        self.auto_compact.set_idle_threshold(defaults.session_ttl_minutes)
+        self._idle_compact_check_interval_s = defaults.idle_compact_check_interval_seconds
+        self._next_idle_compact_check_at = time.monotonic()
+        self.subagents.max_iterations = defaults.max_tool_iterations
+        self.subagents.max_tool_result_chars = defaults.max_tool_result_chars
+        self.subagents.set_concurrency_limit(defaults.max_concurrent_subagents)
+        if self.tools_config != config.tools:
+            self.tools_config = config.tools.model_copy(deep=True)
+            self.web_config = self.tools_config.web
+            self.exec_config = self.tools_config.exec
+            self.restrict_to_workspace = config.tools.restrict_to_workspace
+            self.workspace_scopes = WorkspaceScopeResolver(
+                default_workspace=self.workspace,
+                default_restrict_to_workspace=self.restrict_to_workspace,
+            )
+            self.subagents.tools_config = self.tools_config
+            self.subagents.restrict_to_workspace = self.restrict_to_workspace
+            self._register_default_tools(provider_snapshot_loader=self._provider_snapshot_loader)
+
+        self.consolidator.archiver._resolve_prompt_context = PersistedPromptContextResolver(
+            workspace_scopes=self.workspace_scopes, unified_session=self._unified_session,
+        )
+
+    def set_timezone(self, timezone: str) -> None:
+        """Update time-aware context and future cron requests without restarting."""
+        from nanobot.agent.tools.cron import CronTool
+
+        self.context.timezone = timezone
+        tool = self.tools.get("cron")
+        if isinstance(tool, CronTool):
+            tool.set_default_timezone(timezone)
 
     def refresh_runtime_config(self) -> LLMRuntime:
         """Refresh runtime config now and publish the canonical selection."""
@@ -640,7 +713,10 @@ class AgentLoop:
             runtime_control=AgentRuntimeControl(self),
         )
         loader = ToolLoader()
+        for name in self._loaded_tool_names:
+            self.tools.unregister(name)
         registered = loader.load(ctx, self.tools)
+        self._loaded_tool_names = registered
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 

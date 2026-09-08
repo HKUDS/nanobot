@@ -1,3 +1,4 @@
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -73,6 +74,7 @@ export function TranscriptionSettings({
   requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const selectedProvider =

@@ -145,9 +145,6 @@ export function useCapabilitySettingsActions({
     setWebSearchSaving(true);
     try {
       if (provider.name === "olostep" && !(await installCapabilities(["olostep"]))) return;
-      const webFetchRestartRequired =
-        (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
-        settings.web.fetch.use_jina_reader;
       const update: WebSearchSettingsUpdate = {
         provider: webSearchForm.provider,
         maxResults: webSearchForm.maxResults,
@@ -163,7 +160,7 @@ export function useCapabilitySettingsActions({
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(client, update);
       applyPayload(payload);
-      if (payload.requires_restart || webFetchRestartRequired) {
+      if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);

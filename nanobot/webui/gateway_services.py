@@ -60,7 +60,7 @@ def build_gateway_services(
     default_restrict_to_workspace: bool,
     config_path: Path | None = None,
     runtime_model_name: Callable[[], str | None] | None,
-    refresh_runtime_config: Callable[[], None] | None = None,
+    refresh_runtime_config: Callable[[], Any] | None = None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
     disabled_skills: set[str] | None = None,

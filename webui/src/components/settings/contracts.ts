@@ -10,6 +10,7 @@ export type SettingsSectionKey =
   | "channels"
   | "apps"
   | "automations"
+  | "memory"
   | "skills"
   | "runtime"
   | "advanced";
@@ -26,7 +27,7 @@ export type RestartAwarePayload = {
 
 export type ApplySettingsPayload = (
   payload: SettingsPayload,
-  options?: { preserveAgentForm?: boolean },
+  options?: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean },
 ) => void;
 
 export type MaybeRestartHostEngine = (payload: RestartAwarePayload) => Promise<void>;

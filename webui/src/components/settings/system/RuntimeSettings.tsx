@@ -91,11 +91,11 @@ export function RuntimeSettings({
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   useEffect(() => {
     if (!apiService) return;
-    setApiHost(apiService.host);
-    setApiPort(apiService.port);
+    setApiHost(settings.api?.host ?? apiService.host);
+    setApiPort(settings.api?.port ?? apiService.port);
     setApiKey("");
     setApiKeyVisible(false);
-  }, [apiService]);
+  }, [apiService, settings.api?.host, settings.api?.port]);
   const apiNetworkAccess = !isLoopbackHost(apiHost);
   const apiMissingNetworkKey = apiNetworkAccess && !apiKey.trim() && !apiDefaults.api_key_hint;
   const engineState = isRestarting
@@ -238,7 +238,7 @@ export function RuntimeSettings({
                       : {
                           host: apiHost,
                           port: apiPort,
-                          timeout: apiDefaults.timeout,
+                          timeout: settings.api?.timeout ?? apiDefaults.timeout,
                           apiKey: apiKey.trim() || undefined,
                         },
                   )
@@ -284,8 +284,7 @@ export function RuntimeSettings({
               <SettingsRow title={tx("settings.api.port", "Port")}>
                 <NumberInput value={apiPort} min={1} max={65535} onChange={setApiPort} />
               </SettingsRow>
-              {apiNetworkAccess ? (
-                <SettingsRow
+              <SettingsRow
                   title={tx("settings.api.apiKey", "API key")}
                   description={
                     apiMissingNetworkKey
@@ -312,8 +311,7 @@ export function RuntimeSettings({
                       {apiKeyVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </Button>
                   </div>
-                </SettingsRow>
-              ) : null}
+              </SettingsRow>
             </>
           ) : null}
         </SettingsGroup>
@@ -372,8 +370,12 @@ export function RuntimeSettings({
             />
           ) : null}
           <ReadOnlyRow title={t("settings.rows.configPath")} value={settings.runtime.config_path} />
-          <ReadOnlyRow title={tx("settings.rows.workspacePath", "Default workspace")} value={settings.runtime.workspace_path} />
-          <ReadOnlyRow title={tx("settings.rows.timezone", "Timezone")} value={form.timezone} />
+          {!settings.runtime_config ? (
+            <ReadOnlyRow title={tx("settings.rows.workspacePath", "Default workspace")} value={settings.runtime.workspace_path} />
+          ) : null}
+          {!settings.runtime_config ? (
+            <ReadOnlyRow title={tx("settings.rows.timezone", "Timezone")} value={form.timezone} />
+          ) : null}
           {onRestart ? (
             <SettingsRow
               title={t("settings.rows.restart")}

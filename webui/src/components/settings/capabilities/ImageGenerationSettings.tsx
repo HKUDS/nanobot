@@ -1,3 +1,4 @@
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -66,6 +67,7 @@ export function ImageGenerationSettings({
   requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const selectedProvider =
     settings.image_generation.providers.find((provider) => provider.name === form.provider) ??
@@ -189,7 +191,9 @@ export function ImageGenerationSettings({
               }
             />
           </SettingsRow>
-          <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
+          {!settings.runtime_config ? (
+            <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
+          ) : null}
           <RestartSettingsFooter
             dirty={dirty}
             saving={saving}

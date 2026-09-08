@@ -526,3 +526,81 @@ async def test_version_check_route_enforces_auth_and_bounds_failures(
     assert failed.status_code == 500
     assert json.loads(failed.body) == {"error": "version check failed"}
     assert "upstream secret body" not in failed.body.decode()
+
+
+async def test_runtime_config_route_authentication_validation_and_restart(tmp_path):
+    from nanobot.config.loader import load_config
+
+    path = "/api/settings/runtime-config/update"
+    config_path = tmp_path / "config.json"
+    request = _mutation_request(path, {"values": {"tools.exec.timeout": 19}})
+    unauthorized = await _router(authorized=False, config_path=config_path).dispatch(None, request, path)
+    assert unauthorized.status_code == 401
+    assert not config_path.exists()
+    router = _router(config_path=config_path)
+    http_request = SimpleNamespace(path=path, headers=Headers())
+    assert (await router.dispatch(None, http_request, path)).status_code == 405
+    invalid = _mutation_request(path, {"values": {"channels.send_progress": False}})
+    assert (await router.dispatch(None, invalid, path)).status_code == 400
+    assert not config_path.exists()
+    result = await router.dispatch(None, request, path)
+    assert result.status_code == 200
+    assert load_config(config_path).tools.exec.timeout == 19
+    body = json.loads(result.body)
+    assert body["runtime_config"]["tools.exec.timeout"] == 19
+    assert body["restart_required_sections"] == []
+    refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
+    assert json.loads(refreshed.body)["restart_required_sections"] == []
+
+
+async def test_dream_prompt_route_requires_mutation_and_persists_without_restart(tmp_path):
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config_path = tmp_path / "config.json"
+    save_config(config, config_path)
+    path = "/api/settings/dream-prompt/update"
+    request = _mutation_request(path, {"content": "Custom Dream prompt"})
+    unauthorized = await _router(authorized=False, config_path=config_path).dispatch(None, request, path)
+    assert unauthorized.status_code == 401
+    router = _router(config_path=config_path)
+    assert (await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)).status_code == 405
+    missing = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert missing.status_code == 400
+    result = await router.dispatch(None, request, path)
+    assert result.status_code == 200
+    assert json.loads(result.body)["content"] == "Custom Dream prompt"
+    refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
+    payload = json.loads(refreshed.body)
+    assert payload["dream_prompt"]["custom"]
+    assert not payload.get("restart_required_sections")
+    reset = await router.dispatch(None, _mutation_request(path, {"content": None}), path)
+    assert reset.status_code == 200
+    assert not json.loads(reset.body)["custom"]
+
+
+async def test_runtime_settings_wait_for_hot_apply_without_restart(tmp_path):
+    refresh = AsyncMock()
+    router = _router(config_path=tmp_path / "config.json", refresh_runtime_config=refresh)
+    path = "/api/settings/runtime-config/update"
+    response = await router.dispatch(None, _mutation_request(path, {
+        "values": {"agents.defaults.timezone_mode": "manual", "agents.defaults.timezone": "Asia/Shanghai"},
+    }), path)
+    assert response.status_code == 200
+    refresh.assert_awaited_once()
+    assert not json.loads(response.body)["requires_restart"]
+
+
+async def test_api_runtime_settings_rebind_running_service(tmp_path, monkeypatch):
+    runtime = MagicMock()
+    runtime.status.return_value = SimpleNamespace(running=True)
+    runtime.restart.return_value = SimpleNamespace(ok=True)
+    monkeypatch.setattr(WebUISettingsRouter, "_api_runtime", lambda _self: runtime)
+    router = _router(config_path=tmp_path / "config.json")
+    path = "/api/settings/runtime-config/update"
+    result = await router.dispatch(None, _mutation_request(path, {"values": {"api.timeout": 45}}), path)
+    assert result.status_code == 200
+    runtime.restart.assert_called_once()
+    assert not json.loads(result.body)["requires_restart"]

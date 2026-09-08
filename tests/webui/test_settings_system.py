@@ -25,14 +25,14 @@ def test_system_domain_owns_runtime_dto_and_agent_updates(tmp_path) -> None:
     )
 
     assert changed is True
-    assert restart_required is True
+    assert restart_required is False
     assert config.agents.defaults.timezone == "Asia/Shanghai"
     assert config.agents.defaults.timezone_mode == "manual"
     assert config.agents.defaults.tool_hint_max_length == 120
     assert payload["runtime"]["config_path"] == str(tmp_path / "config.json")
     assert payload["version"] == {"current": "0.3.0"}
     assert payload["docs"]["version"] == "0.3.0"
-    assert set(payload) == {"runtime", "usage", "advanced", "version", "docs"}
+    assert set(payload) == {"dream_prompt", "runtime", "runtime_config", "usage", "advanced", "version", "docs"}
 
 
 def test_system_domain_validates_channel_field_values() -> None:

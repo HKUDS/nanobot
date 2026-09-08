@@ -1,3 +1,4 @@
+import { DreamPromptSettings } from "@/components/settings/system/DreamPromptSettings";
 import { ChevronLeft, Loader2 } from "lucide-react";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -28,6 +29,8 @@ import {
   AutomationsSettings,
 } from "@/components/settings/system/AutomationsSettings";
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
+import type { RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
+import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SkillSummary } from "@/lib/types";
@@ -216,6 +219,27 @@ export function SettingsPage({
     webSearchSaving,
   } = controller;
 
+  const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
+    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
+      onRestart={restartViaSettingsSurface} isRestarting={isRestarting || hostEngineApplying}
+      remoteBrowserAccess={remoteBrowserAccess}>
+      {page === "memory" ? <DreamPromptSettings state={controller.dreamPromptState} /> : null}
+      {page === "advanced" ? (
+        <AdvancedSettings
+          form={networkSafetyForm}
+          dirty={networkSafetyDirty}
+          saving={networkSafetySaving}
+          isNativeHostSurface={(settings.surface ?? settings.runtime_surface) === "native"}
+          onChangeForm={setNetworkSafetyForm}
+          onSave={saveNetworkSafetySettings}
+          onRestart={restartViaSettingsSurface}
+          isRestarting={isRestarting || hostEngineApplying}
+          requiresRestartPending={pendingRestartSections.runtime}
+        />
+      ) : null}
+    </RuntimeConfigSettings>
+  );
+
   const renderSection = () => {
     if (!settings) return null;
     switch (activeSection) {
@@ -239,7 +263,7 @@ export function SettingsPage({
         );
       case "models":
         return (
-          <div className="space-y-8">
+          <div className="settings-stack">
             <ModelsSettings
               token={token}
               form={form}
@@ -313,20 +337,23 @@ export function SettingsPage({
         );
       case "image":
         return (
-          <ImageGenerationSettings
-            token={token}
-            settings={settings}
-            form={imageGenerationForm}
-            dirty={imageGenerationDirty}
-            saving={imageGenerationSaving}
-            onChangeForm={setImageGenerationForm}
-            onSave={saveImageGenerationSettings}
-            onOpenProviders={() => selectSection("models")}
-            showBrandLogos={localPrefs.brandLogos}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
-            requiresRestartPending={pendingRestartSections.image}
-          />
+          <div className="settings-stack">
+            <ImageGenerationSettings
+              token={token}
+              settings={settings}
+              form={imageGenerationForm}
+              dirty={imageGenerationDirty}
+              saving={imageGenerationSaving}
+              onChangeForm={setImageGenerationForm}
+              onSave={saveImageGenerationSettings}
+              onOpenProviders={() => selectSection("models")}
+              showBrandLogos={localPrefs.brandLogos}
+              onRestart={restartViaSettingsSurface}
+              isRestarting={isRestarting || hostEngineApplying}
+              requiresRestartPending={pendingRestartSections.image}
+            />
+            {runtimeConfiguration("image")}
+          </div>
         );
       case "voice":
         return (
@@ -346,30 +373,33 @@ export function SettingsPage({
         );
       case "browser":
         return (
-          <WebSettings
-            settings={settings}
-            form={webSearchForm}
-            keyVisible={webSearchKeyVisible}
-            keyEditing={webSearchKeyEditing}
-            saving={webSearchSaving}
-            onChangeForm={setWebSearchForm}
-            onChangeProvider={handleWebSearchProviderChange}
-            onToggleKey={() => setWebSearchKeyVisible((visible) => !visible)}
-            onToggleKeyEditing={() => {
-              setWebSearchKeyEditing((editing) => !editing);
-              setWebSearchKeyVisible(false);
-              setWebSearchForm((prev) => ({ ...prev, apiKey: "" }));
-            }}
-            onReset={resetWebSearchDraft}
-            onSave={saveWebSearch}
-            showBrandLogos={localPrefs.brandLogos}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
-            requiresRestartPending={pendingRestartSections.browser}
-            olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
-            olostepInstalling={nanobotFeatureAction === "enable:olostep"}
-            capabilityError={nanobotFeaturesError}
-          />
+          <div className="settings-stack">
+            {runtimeConfiguration("browser")}
+            <WebSettings
+              settings={settings}
+              form={webSearchForm}
+              keyVisible={webSearchKeyVisible}
+              keyEditing={webSearchKeyEditing}
+              saving={webSearchSaving}
+              onChangeForm={setWebSearchForm}
+              onChangeProvider={handleWebSearchProviderChange}
+              onToggleKey={() => setWebSearchKeyVisible((visible) => !visible)}
+              onToggleKeyEditing={() => {
+                setWebSearchKeyEditing((editing) => !editing);
+                setWebSearchKeyVisible(false);
+                setWebSearchForm((prev) => ({ ...prev, apiKey: "" }));
+              }}
+              onReset={resetWebSearchDraft}
+              onSave={saveWebSearch}
+              showBrandLogos={localPrefs.brandLogos}
+              onRestart={restartViaSettingsSurface}
+              isRestarting={isRestarting || hostEngineApplying}
+              requiresRestartPending={pendingRestartSections.browser}
+              olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
+              olostepInstalling={nanobotFeatureAction === "enable:olostep"}
+              capabilityError={nanobotFeaturesError}
+            />
+          </div>
         );
       case "channels":
         return (
@@ -395,122 +425,121 @@ export function SettingsPage({
         );
       case "apps":
         return (
-          <AppsCatalogSettings
-            cliApps={cliApps}
-            mcpPresets={mcpPresets}
-            cliAppsLoading={cliAppsLoading}
-            mcpPresetsLoading={mcpPresetsLoading}
-            query={appsQuery}
-            filter={appsKindFilter}
-            cliActionKey={cliAppsAction}
-            mcpActionKey={mcpPresetAction}
-            mcpOAuthFlow={mcpOAuthFlow}
-            mcpOAuthPopupBlocked={mcpOAuthPopupBlocked}
-            mcpOAuthCallbackUrl={mcpOAuthCallbackUrl}
-            mcpOAuthCompleting={mcpOAuthCompleting}
-            mcpOAuthCallbackError={mcpOAuthCallbackError}
-            cliMessage={cliAppsMessage}
-            cliError={cliAppsError}
-            cliFocusName={cliAppsFocusName}
-            mcpMessage={mcpMessage}
-            mcpError={mcpError}
-            mcpFieldValues={mcpFieldValues}
-            customMcpForm={customMcpForm}
-            mcpConfigImport={mcpConfigImport}
-            showBrandLogos={localPrefs.brandLogos}
-            requiresRestartPending={pendingRestartSections.runtime}
-            onQueryChange={setAppsQuery}
-            onFilterChange={setAppsKindFilter}
-            onCliAction={handleCliAppAction}
-            onMcpAction={handleMcpPresetAction}
-            onMcpOAuthConnect={handleMcpOAuthConnect}
-            onMcpOAuthCancel={() => void handleMcpOAuthCancel()}
-            onMcpOAuthOpen={handleMcpOAuthOpen}
-            onMcpOAuthCallbackUrlChange={(value) => {
-              setMcpOAuthCallbackUrl(value);
-              setMcpOAuthCallbackError(null);
-            }}
-            onMcpOAuthComplete={() => void handleMcpOAuthComplete()}
-            onDismissStatus={() => {
-              setCliAppsMessage(null);
-              setCliAppsError(null);
-              setMcpMessage(null);
-              setMcpError(null);
-            }}
-            onBackToChat={onBackToChat}
-            onMcpFieldChange={(presetName, fieldName, value) => {
-              setMcpFieldValues((prev) => ({
-                ...prev,
-                [presetName]: {
-                  ...(prev[presetName] ?? {}),
-                  [fieldName]: value,
-                },
-              }));
-            }}
-            onCustomMcpFormChange={setCustomMcpForm}
-            onMcpConfigImportChange={setMcpConfigImport}
-            onSaveCustomMcp={handleSaveCustomMcp}
-            onImportMcpConfig={handleImportMcpConfig}
-            onMcpToolsChange={handleMcpToolsChange}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
-          />
+          <div className="settings-stack">
+            {runtimeConfiguration("apps")}
+            <AppsCatalogSettings
+              cliApps={cliApps}
+              mcpPresets={mcpPresets}
+              cliAppsLoading={cliAppsLoading}
+              mcpPresetsLoading={mcpPresetsLoading}
+              query={appsQuery}
+              filter={appsKindFilter}
+              cliActionKey={cliAppsAction}
+              mcpActionKey={mcpPresetAction}
+              mcpOAuthFlow={mcpOAuthFlow}
+              mcpOAuthPopupBlocked={mcpOAuthPopupBlocked}
+              mcpOAuthCallbackUrl={mcpOAuthCallbackUrl}
+              mcpOAuthCompleting={mcpOAuthCompleting}
+              mcpOAuthCallbackError={mcpOAuthCallbackError}
+              cliMessage={cliAppsMessage}
+              cliError={cliAppsError}
+              cliFocusName={cliAppsFocusName}
+              mcpMessage={mcpMessage}
+              mcpError={mcpError}
+              mcpFieldValues={mcpFieldValues}
+              customMcpForm={customMcpForm}
+              mcpConfigImport={mcpConfigImport}
+              showBrandLogos={localPrefs.brandLogos}
+              requiresRestartPending={pendingRestartSections.runtime}
+              onQueryChange={setAppsQuery}
+              onFilterChange={setAppsKindFilter}
+              onCliAction={handleCliAppAction}
+              onMcpAction={handleMcpPresetAction}
+              onMcpOAuthConnect={handleMcpOAuthConnect}
+              onMcpOAuthCancel={() => void handleMcpOAuthCancel()}
+              onMcpOAuthOpen={handleMcpOAuthOpen}
+              onMcpOAuthCallbackUrlChange={(value) => {
+                setMcpOAuthCallbackUrl(value);
+                setMcpOAuthCallbackError(null);
+              }}
+              onMcpOAuthComplete={() => void handleMcpOAuthComplete()}
+              onDismissStatus={() => {
+                setCliAppsMessage(null);
+                setCliAppsError(null);
+                setMcpMessage(null);
+                setMcpError(null);
+              }}
+              onBackToChat={onBackToChat}
+              onMcpFieldChange={(presetName, fieldName, value) => {
+                setMcpFieldValues((prev) => ({
+                  ...prev,
+                  [presetName]: {
+                    ...(prev[presetName] ?? {}),
+                    [fieldName]: value,
+                  },
+                }));
+              }}
+              onCustomMcpFormChange={setCustomMcpForm}
+              onMcpConfigImportChange={setMcpConfigImport}
+              onSaveCustomMcp={handleSaveCustomMcp}
+              onImportMcpConfig={handleImportMcpConfig}
+              onMcpToolsChange={handleMcpToolsChange}
+              onRestart={restartViaSettingsSurface}
+              isRestarting={isRestarting || hostEngineApplying}
+            />
+          </div>
         );
       case "automations":
         return (
-          <AutomationsSettings
-            payload={automations}
-            loading={automationsLoading}
-            query={automationsQuery}
-            filter={automationsFilter}
-            sort={automationsSort}
-            actionKey={automationAction}
-            error={automationsError}
-            onQueryChange={setAutomationsQuery}
-            onFilterChange={setAutomationsFilter}
-            onSortChange={setAutomationsSort}
-            onAction={handleAutomationAction}
-            onRequestEdit={setAutomationPendingEdit}
-            onRequestDelete={setAutomationPendingDelete}
-            onBackToChat={onBackToChat}
-          />
+          <div className="settings-stack">
+            {runtimeConfiguration("automations")}
+            <AutomationsSettings
+              payload={automations}
+              loading={automationsLoading}
+              query={automationsQuery}
+              filter={automationsFilter}
+              sort={automationsSort}
+              actionKey={automationAction}
+              error={automationsError}
+              onQueryChange={setAutomationsQuery}
+              onFilterChange={setAutomationsFilter}
+              onSortChange={setAutomationsSort}
+              onAction={handleAutomationAction}
+              onRequestEdit={setAutomationPendingEdit}
+              onRequestDelete={setAutomationPendingDelete}
+              onBackToChat={onBackToChat}
+            />
+          </div>
         );
       case "skills":
         return <SkillsCatalogSettings skills={skills} />;
       case "runtime":
         return (
-          <RuntimeSettings
-            form={form}
-            settings={settings}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
-            requiresRestartPending={pendingRestartSections.runtime}
-            apiService={apiService}
-            apiServiceLoading={apiServiceLoading}
-            apiServiceAction={apiServiceAction}
-            apiServiceError={apiServiceError}
-            langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
-            capabilitiesLoading={nanobotFeaturesLoading}
-            capabilityAction={nanobotFeatureAction}
-            capabilityError={nanobotFeaturesError}
-            onApiServiceAction={handleApiServiceAction}
-            onInstallCapability={(name) => void installCapabilities([name])}
-          />
+          <div className="settings-stack">
+            {runtimeConfiguration("runtime")}
+            <RuntimeSettings
+              form={form}
+              settings={settings}
+              onRestart={restartViaSettingsSurface}
+              isRestarting={isRestarting || hostEngineApplying}
+              requiresRestartPending={pendingRestartSections.runtime}
+              apiService={apiService}
+              apiServiceLoading={apiServiceLoading}
+              apiServiceAction={apiServiceAction}
+              apiServiceError={apiServiceError}
+              langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
+              capabilitiesLoading={nanobotFeaturesLoading}
+              capabilityAction={nanobotFeatureAction}
+              capabilityError={nanobotFeaturesError}
+              onApiServiceAction={handleApiServiceAction}
+              onInstallCapability={(name) => void installCapabilities([name])}
+            />
+          </div>
         );
+      case "memory":
+        return runtimeConfiguration("memory");
       case "advanced":
-        return (
-          <AdvancedSettings
-            form={networkSafetyForm}
-            dirty={networkSafetyDirty}
-            saving={networkSafetySaving}
-            isNativeHostSurface={(settings.surface ?? settings.runtime_surface) === "native"}
-            onChangeForm={setNetworkSafetyForm}
-            onSave={saveNetworkSafetySettings}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
-            requiresRestartPending={pendingRestartSections.runtime}
-          />
-        );
+        return runtimeConfiguration("advanced");
       default:
         return null;
     }
@@ -604,9 +633,9 @@ export function SettingsPage({
           data-testid="settings-section-transition"
           data-settings-section={activeSection}
           className={cn(
-            "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 px-4 py-6 duration-200 ease-out",
-            "motion-reduce:animate-none sm:px-8 sm:py-8 lg:py-12",
-            activeSection === "channels" ? "max-w-[1240px] xl:px-10" : "max-w-[920px]",
+            "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
+            "motion-reduce:animate-none sm:py-8 lg:py-12",
+            activeSection === "channels" ? "max-w-[1240px] px-4 sm:px-8 xl:px-10" : "settings-grid",
             activeSection === "channels" && "flex min-h-full flex-col xl:h-full xl:min-h-0",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
@@ -643,7 +672,7 @@ export function SettingsPage({
           ) : settings ? (
             <div
               className={cn(
-                "space-y-5",
+                "settings-stack",
                 activeSection === "channels" &&
                   "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}

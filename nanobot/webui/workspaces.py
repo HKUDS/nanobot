@@ -191,6 +191,14 @@ class WebUIWorkspaceController:
         self._default_restrict_to_workspace = default_restrict_to_workspace
         self._draft_scopes: OrderedDict[str, WorkspaceScope] = OrderedDict()
 
+    def set_default_workspace(self, workspace: Path, restrict: bool) -> None:
+        """Refresh the default scope for subsequently admitted WebUI requests."""
+        if self._default_workspace == workspace and self._default_restrict_to_workspace == restrict:
+            return
+        self._default_workspace = workspace
+        self._default_restrict_to_workspace = restrict
+        self._draft_scopes.clear()
+
     def default_scope(self) -> WorkspaceScope:
         return default_scope_for_webui(
             self._default_workspace,

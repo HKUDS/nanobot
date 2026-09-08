@@ -1,3 +1,4 @@
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ChevronDown,
@@ -227,6 +228,7 @@ export function ModelsSettings({
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave, !creating && !!form.model.trim());
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);

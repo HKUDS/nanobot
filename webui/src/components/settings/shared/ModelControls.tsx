@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Bot,
   Brain,
@@ -93,28 +93,31 @@ export function settingsProviderConfigured(
 export function ProviderPicker({
   providers,
   value,
+  triggerProps,
   emptyLabel,
   showProviderLogos = false,
   onChange,
 }: {
   providers: Array<{ name: string; label: string }>;
   value: string;
+  triggerProps?: Pick<ComponentProps<typeof Button>, "id" | "aria-label" | "aria-describedby" | "aria-invalid" | "disabled">;
   emptyLabel: string;
   showProviderLogos?: boolean;
   onChange: (provider: string) => void;
 }) {
   const selectedProvider = providers.find((provider) => provider.name === value) ?? null;
-  const disabled = providers.length === 0;
+  const disabled = !!triggerProps?.disabled || providers.length === 0;
 
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild disabled={disabled}>
         <Button
+          {...triggerProps}
           type="button"
           variant="outline"
           disabled={disabled}
           className={cn(
-            "h-8 w-[210px] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "h-8 w-[210px] max-w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
             "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
           )}
@@ -133,7 +136,7 @@ export function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
+        className="max-h-[18rem] w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
         {providers.map((provider) => {
           const selected = provider.name === value;

@@ -1,3 +1,4 @@
+import { useDreamPromptSettings } from "@/components/settings/system/DreamPromptSettings";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -27,6 +28,7 @@ import {
 } from "@/components/settings/models/useModelSettingsEffects";
 import { useModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
+import { useRuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { createSystemSettingsActions } from "@/components/settings/system/createSystemSettingsActions";
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
@@ -145,7 +147,7 @@ export function useSettingsController({
   const applyPayload: ApplySettingsPayload = useCallback(
     (
       payload: SettingsPayload,
-      options: { preserveAgentForm?: boolean } = {},
+      options: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean } = {},
     ) => {
       setSettings(payload);
       if (!options.preserveAgentForm) {
@@ -153,12 +155,16 @@ export function useSettingsController({
         setForm(nextForm);
         setModelPresetEditingName(nextForm.modelPreset);
         setModelPresetCreating(false);
+      } else {
+        setForm((current) => ({ ...current, timezone: payload.agent.timezone }));
       }
       setModelCallOrder(payload.model_call_order ?? []);
-      setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
-      setImageGenerationForm(imageGenerationFormFromPayload(payload));
-      setTranscriptionForm(transcriptionFormFromPayload(payload));
-      setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      if (!options.preserveCapabilityForms) {
+        setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
+        setImageGenerationForm(imageGenerationFormFromPayload(payload));
+        setTranscriptionForm(transcriptionFormFromPayload(payload));
+        setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      }
       if (payload.restart_required_sections) {
         setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
       }
@@ -166,6 +172,11 @@ export function useSettingsController({
     },
     [onSettingsChange],
   );
+
+  const dreamPromptState = useDreamPromptSettings(settings, client, (prompt) => {
+    setSettings((current) => current ? { ...current, dream_prompt: prompt } : current);
+  });
+  const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
 
   const closeProviderOAuthFlow = useCallback(() => {
     providerOAuthFlowRef.current = null;
@@ -458,7 +469,9 @@ export function useSettingsController({
   } = systemActions;
 
   return {
+    dreamPromptState,
     activeSection,
+    runtimeConfigState,
     apiService,
     apiServiceAction,
     apiServiceError,

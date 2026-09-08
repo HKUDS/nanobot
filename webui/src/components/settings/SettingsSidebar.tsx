@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import {
   Activity,
+  Brain,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -39,8 +40,9 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "voice", icon: Mic, fallback: "Voice" },
   { key: "browser", icon: Globe2, fallback: "Web" },
   { key: "channels", icon: MessageCircle, fallback: "Channels" },
+  { key: "memory", icon: Brain, fallback: "Memory" },
   { key: "runtime", icon: Server, fallback: "System" },
-  { key: "advanced", icon: ShieldCheck, fallback: "Security" },
+  { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
 ];
 
 export function standaloneSectionTitle(section: SettingsSectionKey): string {

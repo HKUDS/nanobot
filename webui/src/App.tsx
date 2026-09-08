@@ -170,6 +170,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "channels",
   "apps",
   "automations",
+  "memory",
   "skills",
   "runtime",
   "advanced",

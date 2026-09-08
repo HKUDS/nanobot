@@ -975,3 +975,61 @@
     outline-offset: 2px;
   }
 }
+
+/* Settings grid: 4px baseline; 920px frame; 12 columns / 24px gutter on
+   desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
+@layer components {
+  .settings-grid {
+    --settings-baseline: 4px;
+    --settings-columns: 4;
+    --settings-gutter: 16px;
+    --settings-margin: 16px;
+    --settings-inset: 16px;
+    --settings-module-gap: 32px;
+    container-type: inline-size;
+    max-inline-size: 920px;
+    padding-inline: var(--settings-margin);
+  }
+  .settings-stack > :not([hidden]) ~ :not([hidden]) {
+    margin-block-start: var(--settings-module-gap, 32px);
+  }
+  .settings-section-title {
+    margin-block-end: 8px;
+    padding-inline: var(--settings-inset, 16px);
+    line-height: 20px;
+  }
+  .settings-row, .settings-footer {
+    display: grid;
+    grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));
+    column-gap: var(--settings-gutter, 16px);
+    row-gap: 12px;
+    align-items: center;
+    padding: 12px var(--settings-inset, 16px);
+    min-block-size: 72px;
+  }
+  .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
+  .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
+  .settings-control > * { max-inline-size: 100%; }
+  .settings-control input, .settings-control textarea { max-inline-size: 100%; }
+  .settings-control input[type="number"] { text-align: end; font-variant-numeric: tabular-nums; }
+  .settings-control button[aria-haspopup="menu"] { inline-size: 100%; }
+  .settings-footer { min-block-size: 64px; }
+  .settings-editor { padding: 16px var(--settings-inset, 16px); }
+  @media (min-width: 640px) {
+    .settings-grid { --settings-margin: 32px; }
+  }
+  @container (min-width: 640px) {
+    .settings-grid .settings-row, .settings-grid .settings-footer {
+      --settings-columns: 12;
+      --settings-gutter: 24px;
+    }
+    .settings-grid .settings-control { justify-content: flex-end; }
+    .settings-grid .settings-row > :first-child,
+    .settings-grid .settings-footer > :first-child { grid-column: 1 / 8; }
+    .settings-grid .settings-row > :nth-child(2),
+    .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
+  }
+  @media (min-width: 768px) {
+    .settings-grid { --settings-inset: 24px; }
+  }
+}
