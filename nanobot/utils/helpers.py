@@ -503,15 +503,13 @@ def stringify_text_blocks(content: list[object]) -> str | None:
 
 
 def _render_tool_result_reference(
-    filepath: Path,
+    reference_path: str,
     *,
     original_size: int,
     preview: str,
     truncated_preview: bool,
     max_chars: int | None = None,
-    display_path: str | None = None,
 ) -> str:
-    reference_path = display_path or str(filepath)
     result = (
         f"[tool output persisted]\n"
         f"Full output saved to workspace path: {reference_path}\n"
@@ -630,12 +628,11 @@ def maybe_persist_tool_result(
     except ValueError:
         display_path = str(path)
     return _render_tool_result_reference(
-        path,
+        display_path,
         original_size=len(text_payload),
         preview=preview,
         truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
         max_chars=max_chars,
-        display_path=display_path,
     )
 
 
