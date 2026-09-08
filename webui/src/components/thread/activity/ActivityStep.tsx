@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 import { StreamingLabelSheen } from "@/components/MessageBubble";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type ActivityStepTone = "neutral" | "active" | "success" | "error";
@@ -33,6 +34,25 @@ export function ActivityStep({
   markerClassName,
   style,
 }: ActivityStepProps) {
+  const line = (
+    <div
+      data-testid="activity-line"
+      tabIndex={typeof label === "string" ? 0 : undefined}
+      className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
+    >
+      <StreamingLabelSheen
+        active={active}
+        className={cn(
+          "min-w-0 flex-1 truncate font-medium",
+          tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
+          labelClassName,
+        )}
+      >
+        {label}
+      </StreamingLabelSheen>
+    </div>
+  );
+
   return (
     <div
       data-testid="activity-step"
@@ -65,22 +85,16 @@ export function ActivityStep({
         )}
       </span>
       <div className={cn("min-w-0", contentClassName)}>
-        <div
-          data-testid="activity-line"
-          title={typeof label === "string" ? label : undefined}
-          className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
-        >
-          <StreamingLabelSheen
-            active={active}
-            className={cn(
-              "min-w-0 flex-1 truncate font-medium",
-              tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
-              labelClassName,
-            )}
-          >
-            {label}
-          </StreamingLabelSheen>
-        </div>
+        {typeof label === "string" ? (
+          <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+            <Tooltip>
+              <TooltipTrigger asChild>{line}</TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words">
+                {label}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : line}
       </div>
     </div>
   );
