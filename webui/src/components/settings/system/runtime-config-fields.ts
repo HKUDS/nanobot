@@ -1,8 +1,9 @@
 export interface RuntimeConfigField {
   group: string;
   path: string;
-  kind: "toggle" | "text" | "nullable" | "number" | "boolean" | "select" | "list" | "preset";
+  kind: "duration-toggle" | "toggle" | "text" | "nullable" | "number" | "boolean" | "select" | "list" | "preset";
   options?: string[];
+  enabledValue?: number;
   when?: { path: string; value: string | boolean };
   manual?: boolean;
   min?: number;
@@ -34,7 +35,8 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage }[] = 
 export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "identity", path: "agents.defaults.timezone_mode", kind: "toggle", options: ["manual", "auto"] },
   { group: "identity", path: "agents.defaults.timezone", kind: "text", when: { path: "agents.defaults.timezone_mode", value: "manual" } },
-  { group: "memory", path: "agents.defaults.session_ttl_minutes", kind: "number", min: 0 },
+  { group: "memory", path: "agents.defaults.session_ttl_minutes", kind: "duration-toggle", enabledValue: 15 },
+  { group: "memory", path: "agents.defaults.long_term_memory_enabled", kind: "boolean" },
   { group: "memory", path: "agents.defaults.dream.enabled", kind: "boolean" },
   { group: "memory", path: "agents.defaults.dream.interval_h", kind: "number", min: 1, when: { path: "agents.defaults.dream.enabled", value: true } },
   { group: "memory", path: "agents.defaults.dream.model_override", kind: "preset", when: { path: "agents.defaults.dream.enabled", value: true } },

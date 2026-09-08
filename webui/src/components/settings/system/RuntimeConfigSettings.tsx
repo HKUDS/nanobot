@@ -49,7 +49,7 @@ export function useRuntimeConfigSettings(
     setInvalidField(null);
   };
   const change = (field: RuntimeConfigField, next: Draft) => {
-    delay.current = ["boolean", "toggle", "select", "preset"].includes(field.kind) ? 0 : 600;
+    delay.current = ["boolean", "duration-toggle", "toggle", "select", "preset"].includes(field.kind) ? 0 : 600;
     setDrafts((prev) => ({ ...prev, [field.path]: next }));
     setSaved((prev) => ({ ...prev, [field.group]: false }));
     setErrors((prev) => ({ ...prev, [field.group]: "" }));
@@ -62,7 +62,7 @@ export function useRuntimeConfigSettings(
     const values: Record<string, RuntimeConfigValue> = {};
     for (const field of changed) {
       const raw = value(field.path);
-      if (field.kind === "number") {
+      if (field.kind === "number" || field.kind === "duration-toggle") {
         const parsed = Number(raw);
         if (String(raw).trim() === "" || !Number.isFinite(parsed)
           || (field.path !== "api.timeout" && !Number.isInteger(parsed))
@@ -165,9 +165,9 @@ export function RuntimeConfigSettings({
                     return (
                       <SettingsRow key={field.path} title={text} description={help}>
                         <span id={`${id}-help`} className="sr-only">{help}</span>
-                        {field.kind === "boolean" || field.kind === "toggle" ? (
-                          <ToggleButton {...common} checked={field.kind === "toggle" ? current === field.options?.[1] : current === true} label={text}
-                            onChange={(next) => state.change(field, field.kind === "toggle" ? field.options![next ? 1 : 0] : next)} />
+                        {field.kind === "boolean" || field.kind === "toggle" || field.kind === "duration-toggle" ? (
+                          <ToggleButton {...common} checked={field.kind === "duration-toggle" ? Number(current) > 0 : field.kind === "toggle" ? current === field.options?.[1] : current === true} label={text}
+                            onChange={(next) => state.change(field, field.kind === "duration-toggle" ? String(next ? field.enabledValue : 0) : field.kind === "toggle" ? field.options![next ? 1 : 0] : next)} />
                         ) : (
                           <div className={field.kind === "number" ? "w-24" : "w-full"}>
                             {field.kind === "list" ? (

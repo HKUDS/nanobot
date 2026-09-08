@@ -56,6 +56,23 @@ describe("Runtime configuration settings", () => {
     expect(document.getElementById("runtime-gateway.heartbeat.enabled")).toBeVisible();
   });
 
+  it("autosaves idle compaction and long-term memory as independent switches", async () => {
+    const payload = runtimeSettings();
+    Object.assign(payload.runtime_config, {
+      "agents.defaults.session_ttl_minutes": 15,
+      "agents.defaults.long_term_memory_enabled": true,
+    });
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "memory", initialSettings: payload });
+    expect(screen.getByRole("switch", { name: "Idle compaction" })).toBeChecked();
+    expect(document.getElementById("runtime-agents.defaults.session_ttl_minutes")).not.toHaveAttribute("type", "number");
+    fireEvent.click(screen.getByRole("switch", { name: "Idle compaction" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "agents.defaults.session_ttl_minutes": 0 } }, 20_000));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Long-term memory" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("switch", { name: "Long-term memory" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith("settings.runtime_config.update", { values: { "agents.defaults.long_term_memory_enabled": false } }, 20_000));
+  });
+
   it("groups all memory controls in a dedicated settings page", () => {
     renderSettingsView({ initialSection: "runtime", initialSettings: runtimeSettings() });
     expect(document.getElementById("runtime-agents.defaults.bot_name")).not.toBeInTheDocument();

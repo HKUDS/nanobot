@@ -28,6 +28,7 @@ RUNTIME_CONFIG_PATHS = (
     "agents.defaults.provider_retry_mode",
     "agents.defaults.tool_hint_max_length",
     "agents.defaults.session_ttl_minutes",
+    "agents.defaults.long_term_memory_enabled",
     "agents.defaults.idle_compact_check_interval_seconds",
     "agents.defaults.dream.enabled",
     "agents.defaults.dream.interval_h",

@@ -91,9 +91,13 @@
           "label": "Timezone",
           "help": "IANA timezone, for example Asia/Shanghai. Editable in manual mode."
         },
+        "agents_defaults_long_term_memory_enabled": {
+          "label": "Long-term memory",
+          "help": "Use and automatically record long-term memories. Turning this off pauses Dream; existing memories are kept."
+        },
         "agents_defaults_session_ttl_minutes": {
-          "label": "Compact idle sessions after (minutes)",
-          "help": "Summarize idle conversations after this time. Set 0 to disable."
+          "label": "Idle compaction",
+          "help": "Automatically summarize idle conversations."
         },
         "agents_defaults_dream_enabled": {
           "label": "Memory consolidation",

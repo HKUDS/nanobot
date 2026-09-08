@@ -91,9 +91,13 @@
           "label": "时区",
           "help": "IANA 时区，例如 Asia/Shanghai。手动模式下可编辑。"
         },
+        "agents_defaults_long_term_memory_enabled": {
+          "label": "长期记忆",
+          "help": "使用并自动记录长期记忆。关闭后暂停 Dream 整理，已有记忆会保留。"
+        },
         "agents_defaults_session_ttl_minutes": {
-          "label": "空闲压缩阈值（分钟）",
-          "help": "会话空闲达到此时长后进行压缩，0 表示关闭。"
+          "label": "空闲压缩",
+          "help": "自动压缩空闲会话的上下文。"
         },
         "agents_defaults_dream_enabled": {
           "label": "记忆整理",

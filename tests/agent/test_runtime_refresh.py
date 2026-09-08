@@ -409,3 +409,24 @@ async def test_system_timezone_reschedules_cron_without_changing_user_timezone(t
     assert cron.get_job("dream").state.next_run_at_ms != before
     assert cron.get_job("heartbeat").state.next_run_at_ms == heartbeat_next
     assert next(job for job in cron.list_jobs() if job.name == "user").schedule.tz == "Europe/London"
+
+
+def test_long_term_memory_toggle_preserves_files_and_session_compaction(tmp_path: Path) -> None:
+    loop = AgentLoop(bus=MessageBus(), provider=_provider("model"), workspace=tmp_path)
+    store = loop.context.memory
+    store.write_memory("Remember the violet orchard")
+    store.append_history("Existing history")
+    history = store.history_file.read_bytes()
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path)
+    config.agents.defaults.long_term_memory_enabled = False
+    loop.apply_settings(config)
+    assert "Remember the violet orchard" not in loop.context.build_system_prompt()
+    store.append_history("Do not retain this new memory")
+    store.write_memory("Do not overwrite")
+    assert store.history_file.read_bytes() == history
+    assert store.memory_file.read_text() == "Remember the violet orchard"
+    assert loop.auto_compact._ttl == config.agents.defaults.session_ttl_minutes
+    config.agents.defaults.long_term_memory_enabled = True
+    loop.apply_settings(config)
+    assert "Remember the violet orchard" in loop.context.build_system_prompt()
