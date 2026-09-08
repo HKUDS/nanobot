@@ -6,11 +6,28 @@ import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+@pytest.mark.parametrize("invalid_block", [42, ["nested"], {}, {"type": "text", "text": 42}])
+def test_unrecognized_result_list_is_not_partially_offloaded(tmp_path, invalid_block):
+    from nanobot.agent.context_governance import ContextGovernanceConfig, ContextGovernor
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    result = [{"type": "text", "text": "x" * 20_000}, invalid_block]
+    config = ContextGovernanceConfig(
+        provider=MagicMock(), model="test", tools=ToolRegistry(), workspace=tmp_path,
+        session_key="invalid", max_tool_result_chars=2048,
+    )
+    assert ContextGovernor.normalize_tool_result(config, "call", "custom", result) is result
+    assert list(tmp_path.iterdir()) == []
+
 
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.loop import AgentLoop

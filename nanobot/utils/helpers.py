@@ -574,43 +574,16 @@ def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
     tool_call_id: str,
-    content: Any,
+    content: str,
     *,
     max_chars: int,
-) -> Any:
-    """Offload oversized strings and text blocks.
+) -> str:
+    """Offload oversized text.
 
     Complete references may exceed the per-block ``max_chars`` budget.
     """
-    if workspace is None or max_chars <= 0:
+    if workspace is None or max_chars <= 0 or len(content) <= max_chars:
         return content
-
-    if isinstance(content, list):
-        # Per-block normalization stays stable when images become replay placeholders.
-        blocks: list[Any] = []
-        for index, raw_block in enumerate(cast(list[object], content)):
-            block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
-            if block is not None and block.get("type") == "text" and isinstance(block.get("text"), str):
-                blocks.append({
-                    **block,
-                    "text": maybe_persist_tool_result(
-                        workspace, session_key, f"{tool_call_id}_text_{index}", block["text"],
-                        max_chars=max_chars,
-                    ),
-                })
-            else:
-                blocks.append(raw_block)
-        return blocks
-
-    text_payload: str | None = None
-    suffix = "txt"
-    if isinstance(content, str):
-        text_payload = content
-    else:
-        return content
-
-    if len(text_payload) <= max_chars:
-        return cast(Any, content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -618,20 +591,20 @@ def maybe_persist_tool_result(
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
         logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    path = bucket / f"{safe_filename(tool_call_id)}.txt"
     if not path.exists():
-        _write_text_atomic(path, text_payload)
+        _write_text_atomic(path, content)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
     try:
         display_path = str(path.relative_to(workspace))
     except ValueError:
         display_path = str(path)
     return _render_tool_result_reference(
         display_path,
-        original_size=len(text_payload),
+        original_size=len(content),
         preview=preview,
-        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=len(content) > _TOOL_RESULT_PREVIEW_CHARS,
         max_chars=max_chars,
     )
 
