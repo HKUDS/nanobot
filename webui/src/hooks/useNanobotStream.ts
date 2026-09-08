@@ -50,6 +50,7 @@ import type {
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas (cleared when its segment closes). */
   messageId: string;
+  mergeReasoning?: boolean;
 }
 
 interface ActiveAssistantCursor {
@@ -513,7 +514,10 @@ export function useNanobotStream(
       };
       closedAssistantStreamIdsRef.current.delete(merged.id);
       activeAssistantRef.current = { id: merged.id, index: targetIndex };
-      buffer.current = { messageId: merged.id };
+      buffer.current = {
+        messageId: merged.id,
+        mergeReasoning: buffer.current?.messageId === merged.id && buffer.current.mergeReasoning,
+      };
       return replaceMessageAt(next, targetIndex, merged);
     },
     [resolveActiveAssistantIndex],
@@ -540,6 +544,21 @@ export function useNanobotStream(
         if (event.kind === "delta") {
           next = appendAnswerChunk(next, text, turn, event.source);
         } else {
+          const continuationIndex = buffer.current?.mergeReasoning
+            ? resolveActiveAssistantIndex(next, turn)
+            : null;
+          if (continuationIndex !== null) {
+            // Length continuation keeps one Markdown answer and its reasoning
+            // together. Ordinary reasoning still opens a new activity surface.
+            const target = next[continuationIndex];
+            const separator = target.reasoning && !target.reasoningStreaming ? "\n\n" : "";
+            next = replaceMessageAt(next, continuationIndex, {
+              ...target,
+              reasoning: (target.reasoning ?? "") + separator + text,
+              reasoningStreaming: true,
+            });
+            continue;
+          }
           if (closeActiveAssistantStream()) clearActivitySegment();
           next = attachReasoningChunk(
             next,
@@ -551,11 +570,15 @@ export function useNanobotStream(
       }
       return next;
     },
-    [appendAnswerChunk, clearActivitySegment, closeActiveAssistantStream, ensureActivitySegmentId],
+    [
+      appendAnswerChunk, clearActivitySegment, closeActiveAssistantStream,
+      ensureActivitySegmentId, resolveActiveAssistantIndex,
+    ],
   );
 
   const flushPendingStreamEvents = useCallback((options?: {
     closeAnswerSegment?: boolean;
+    mergeReasoning?: boolean;
     finalAnswerText?: string;
     turn?: UIMessageTurnFields;
     source?: UIMessage["source"];
@@ -572,7 +595,8 @@ export function useNanobotStream(
     const finalAnswerText = options?.finalAnswerText;
     const turn = options?.turn ?? {};
     const source = options?.source;
-    if (events.length === 0 && finalAnswerText === undefined && source === undefined) {
+    if (events.length === 0 && finalAnswerText === undefined && source === undefined
+      && !options?.mergeReasoning) {
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return;
     }
@@ -632,6 +656,7 @@ export function useNanobotStream(
           });
         }
       }
+      if (options?.mergeReasoning && buffer.current) buffer.current.mergeReasoning = true;
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return next;
     });
@@ -880,6 +905,7 @@ export function useNanobotStream(
         const mergeNext = ev.resuming === true && ev.merge_next === true;
         flushPendingStreamEvents({
           closeAnswerSegment: !mergeNext,
+          mergeReasoning: mergeNext,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
           turn,
           source: ev.source,

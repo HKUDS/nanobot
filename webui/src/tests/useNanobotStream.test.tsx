@@ -3434,18 +3434,53 @@ describe("useNanobotStream", () => {
 
 describe("live/replay projection before canonical-event revision migration", () => {
   it.each(PROJECTION_FIXTURE_CASES)("matches the shared $name fixture", (fixtureCase) => {
+    // Keep client-only elapsed-time estimates out of the transport contract.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(
+        () => useNanobotStream(fixtureCase.chat_id, fixtureCase.initial_messages),
+        { wrapper: wrap(fake.client) },
+      );
+
+      for (const event of fixtureCase.live_events) {
+        act(() => {
+          fake.emit(fixtureCase.chat_id, event);
+        });
+      }
+
+      expect(normalizeProjection(result.current.messages)).toEqual(fixtureCase.expected);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([true, false])("keeps continuation reasoning before its answer across frames (text snapshots: %s)", async (snapshots) => {
+    const fixture = PROJECTION_FIXTURE_CASES.find(
+      (candidate) => candidate.name === "length_continuation_reasoning_then_new_recovery_turn",
+    )!;
     const fake = fakeClient();
     const { result } = renderHook(
-      () => useNanobotStream(fixtureCase.chat_id, fixtureCase.initial_messages),
+      () => useNanobotStream(fixture.chat_id, fixture.initial_messages),
       { wrapper: wrap(fake.client) },
     );
-
-    for (const event of fixtureCase.live_events) {
+    for (const event of fixture.live_events) {
       act(() => {
-        fake.emit(fixtureCase.chat_id, event);
+        fake.emit(fixture.chat_id, event.event === "stream_end" && !snapshots
+          ? { ...event, text: undefined }
+          : event);
       });
+      await flushStreamFrame();
     }
-
-    expect(normalizeProjection(result.current.messages)).toEqual(fixtureCase.expected);
+    const units = normalizeActivityTimeline(result.current.messages);
+    expect(units.map((unit) => unit.type === "activity"
+      ? unit.messages.map((message) => message.reasoning).join("")
+      : unit.message.content)).toEqual([
+      "Write long code.",
+      "Plan.\n\nContinue code.\n\nFinish code.",
+      "```python\nfirst\nsecond",
+      "Recover.\n\nContinue recovery.",
+      "Recovered answer.",
+    ]);
   });
 });
