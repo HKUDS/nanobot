@@ -107,7 +107,6 @@ from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
-from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.progress_events import output_events
 from nanobot.utils.runtime import (
@@ -2104,8 +2103,6 @@ class AgentLoop:
     def _sanitize_persisted_blocks(
         self,
         content: list[object],
-        *,
-        should_truncate_text: bool = False,
     ) -> list[object]:
         """Strip volatile multimodal payloads before writing session history."""
         filtered: list[object] = []
@@ -2124,16 +2121,6 @@ class AgentLoop:
                 filtered.append(
                     {"type": "text", "text": image_placeholder_text(path)}
                 )
-                continue
-
-            if block_data.get("type") == "text" and isinstance(
-                block_data.get("text"),
-                str,
-            ):
-                text = cast(str, block_data["text"])
-                if should_truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text_fn(text, self.max_tool_result_chars)
-                filtered.append({**block_data, "text": text})
                 continue
 
             filtered.append(block_data)
@@ -2279,12 +2266,12 @@ class AgentLoop:
                     )
                     continue
                 fulfilled_tool_call_ids.add(tool_call_id_str)
-                if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
-                elif isinstance(content, list):
+                # The runner has already normalized this result for the model
+                # request. Keep that exact content for replay; only remove
+                # volatile inline image bytes from multimodal blocks.
+                if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(
                         cast(list[object], content),
-                        should_truncate_text=True,
                     )
                     if not filtered:
                         # Preserve the tool_call/result pair after block filtering.

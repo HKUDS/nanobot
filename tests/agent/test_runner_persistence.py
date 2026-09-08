@@ -13,7 +13,9 @@ from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
+    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.runner import AgentRunner
+    from nanobot.session.manager import Session
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -33,6 +35,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
+    tools.has.return_value = True
     tools.execute = AsyncMock(return_value="x" * 20_000)
 
     runner = AgentRunner()
@@ -48,9 +51,53 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
 
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
+    assert len(tool_message["content"]) <= 2048
     assert "[tool output persisted]" in tool_message["content"]
+    assert "Result was truncated before this model request" in tool_message["content"]
+    assert "Use the available read_file tool" in tool_message["content"]
     assert "tool-results" in tool_message["content"]
-    assert (tmp_path / ".nanobot" / "tool-results" / "test_runner" / "call_big.txt").exists()
+    persisted_path = tmp_path / ".nanobot" / "tool-results" / "test_runner" / "call_big.txt"
+    assert persisted_path.read_text(encoding="utf-8") == "x" * 20_000
+
+    from nanobot.agent.tools.filesystem import ReadFileTool
+
+    readback = await ReadFileTool(workspace=tmp_path).execute(
+        path=".nanobot/tool-results/test_runner/call_big.txt"
+    )
+    assert "x" * 20_000 in readback
+
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.max_tool_result_chars = 2048
+    session = Session(key="test:runner")
+    loop._save_turn(session, result.messages, skip=1)
+    persisted_tool = next(message for message in session.messages if message.get("role") == "tool")
+    assert persisted_tool["content"] == tool_message["content"]
+
+    replay_provider = MagicMock()
+    replay_provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="replayed", tool_calls=[], usage=None)
+    )
+    replay_tools = MagicMock()
+    replay_tools.get_definitions.return_value = []
+    replay_result = await AgentRunner().run(make_run_spec(replay_provider,
+        initial_messages=[
+            *session.get_history(),
+            {"role": "user", "content": "continue"},
+        ],
+        tools=replay_tools,
+        model="test-model",
+        max_iterations=1,
+        workspace=tmp_path,
+        session_key="test:runner",
+        max_tool_result_chars=2048,
+    ))
+    replay_tool = next(
+        message
+        for message in replay_provider.chat_with_retry.await_args.kwargs["messages"]
+        if message.get("role") == "tool"
+    )
+    assert replay_result.final_content == "replayed"
+    assert replay_tool["content"] == tool_message["content"]
 
 
 def test_persist_tool_result_prunes_old_session_buckets(tmp_path):
@@ -76,7 +123,8 @@ def test_persist_tool_result_prunes_old_session_buckets(tmp_path):
         max_chars=64,
     )
 
-    assert "[tool output persisted]" in persisted
+    assert "truncated" in persisted
+    assert ".nanobot" in persisted
     assert not old_bucket.exists()
     assert recent_bucket.exists()
     assert (root / "current_session" / "call_big.txt").exists()
@@ -120,7 +168,8 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
         max_chars=64,
     )
 
-    assert "[tool output persisted]" in persisted
+    assert "truncated" in persisted
+    assert ".nanobot" in persisted
     assert warnings and "Failed to clean stale tool result buckets" in warnings[0]
 
 
@@ -168,6 +217,82 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
     # no file should have been written for this read_file call
     offload_dir = tmp_path / ".nanobot" / "tool-results"
     assert not any(offload_dir.rglob("call_rf.txt")) if offload_dir.exists() else True
+
+
+async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_path):
+    """The content sent after a tool call must survive the session round trip unchanged."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.session.manager import Session
+
+    raw_result = "start-" + ("x" * 20_000) + "-end-marker"
+    first_provider = MagicMock()
+    first_tools = MagicMock()
+    first_tools.get_definitions.return_value = []
+    first_tools.execute = AsyncMock(return_value=raw_result)
+
+    # The first response intentionally requests a tool result, then the runner
+    # makes the next request with the normalized result in its transcript.
+    first_provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(
+                id="call_replay",
+                name="read_file",
+                arguments={"path": "large.txt"},
+            )],
+            usage=None,
+        ),
+        LLMResponse(content="done", tool_calls=[], usage=None),
+    ])
+    result = await AgentRunner().run(make_run_spec(first_provider,
+        initial_messages=[{"role": "user", "content": "read large file"}],
+        tools=first_tools,
+        model="test-model",
+        max_iterations=2,
+        workspace=tmp_path,
+        session_key="test:replay",
+        max_tool_result_chars=2048,
+    ))
+    request_tool = next(
+        message for message in first_provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        if message.get("role") == "tool"
+    )
+
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.max_tool_result_chars = 2048
+    session = Session(key="test:replay")
+    loop._save_turn(session, result.messages, skip=1)
+    persisted_tool = next(message for message in session.messages if message.get("role") == "tool")
+
+    assert request_tool["content"] == raw_result
+    assert persisted_tool["content"] == request_tool["content"]
+
+    replay_provider = MagicMock()
+    replay_provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="replayed", tool_calls=[], usage=None)
+    )
+    replay_tools = MagicMock()
+    replay_tools.get_definitions.return_value = []
+    replay_result = await AgentRunner().run(make_run_spec(replay_provider,
+        initial_messages=[
+            *session.get_history(),
+            {"role": "user", "content": "continue"},
+        ],
+        tools=replay_tools,
+        model="test-model",
+        max_iterations=1,
+        workspace=tmp_path,
+        session_key="test:replay",
+        max_tool_result_chars=2048,
+    ))
+    replay_request_tool = next(
+        message for message in replay_provider.chat_with_retry.await_args.kwargs["messages"]
+        if message.get("role") == "tool"
+    )
+
+    assert replay_result.final_content == "replayed"
+    assert replay_request_tool["content"] == request_tool["content"]
 
 
 async def test_runner_keeps_going_when_tool_result_persistence_fails():

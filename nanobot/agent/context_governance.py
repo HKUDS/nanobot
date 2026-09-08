@@ -65,7 +65,8 @@ ProviderCompactionConsolidator = Callable[
 ]
 
 SNIP_SAFETY_BUFFER = 1024
-# read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
+# read_file owns its 128K/pagination bound and is the recovery path for persisted
+# results; exempting it prevents persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
@@ -708,6 +709,7 @@ class ContextGovernor:
                 tool_call_id,
                 result,
                 max_chars=config.max_tool_result_chars,
+                read_file_available=config.tools.has("read_file"),
             )
         except Exception:
             logger.exception(
