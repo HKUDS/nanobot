@@ -1043,6 +1043,135 @@ async def test_send_delta_rich_stream_end_persists_draft_with_send_rich_message(
 
 
 @pytest.mark.asyncio
+async def test_send_delta_rich_stream_end_timeout_is_not_retried() -> None:
+    from telegram.error import TimedOut
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text="final answer",
+        draft_id=17,
+        last_edit=0.0,
+        stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(side_effect=TimedOut("ambiguous timeout"))
+
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
+
+    channel._app.bot.do_api_request.assert_awaited_once()
+    assert channel._app.bot.do_api_request.call_args.args[0] == "sendRichMessage"
+    assert channel._app.bot.sent_messages == []
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rich_error", [None, "can't parse rich message", "method not found"])
+async def test_rich_stream_final_retry_keeps_only_unsent_chunks(
+    rich_error: str | None,
+) -> None:
+    from telegram.error import BadRequest, NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    delivered: list[str] = []
+    failed = False
+
+    async def deliver(text):
+        nonlocal failed
+        if text.startswith("B") and not failed:
+            failed = True
+            raise NetworkError("second chunk connection failed")
+        delivered.append(text)
+        return SimpleNamespace(message_id=len(delivered))
+
+    async def api(method, *, api_kwargs):
+        if method == "sendRichMessage":
+            if rich_error:
+                raise BadRequest(rich_error)
+            return await deliver(api_kwargs["rich_message"]["markdown"])
+        return True
+
+    async def send_message(**kwargs):
+        return await deliver(kwargs["text"])
+
+    channel._app.bot.do_api_request = AsyncMock(side_effect=api)
+    channel._app.bot.send_message = AsyncMock(side_effect=send_message)
+    metadata = {"is_group": False}
+    await channel.send_delta("123", "A", metadata, stream_id="s:0")
+    delta = "A" * (TELEGRAM_RICH_MAX_LEN - 1) + "\n" + "B" * TELEGRAM_RICH_MAX_LEN + "\nC"
+    await channel.send_delta("123", delta, metadata, stream_id="s:0")
+
+    with pytest.raises(NetworkError, match="second chunk"):
+        await channel.send_delta(
+            "123", "", metadata, stream_id="s:0", stream_end=True,
+        )
+    assert "".join(delivered) == "A" * TELEGRAM_RICH_MAX_LEN
+    assert channel._stream_bufs["123"].text.replace("\n", "") == (
+        "B" * TELEGRAM_RICH_MAX_LEN + "C"
+    )
+
+    await channel.send_delta(
+        "123", "", metadata, stream_id="s:0", stream_end=True,
+    )
+
+    assert "".join(delivered).replace("\n", "") == (
+        "A" * TELEGRAM_RICH_MAX_LEN + "B" * TELEGRAM_RICH_MAX_LEN + "C"
+    )
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_rich_stream_overflow_failure_does_not_drop_same_text_next_delta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from telegram.error import NetworkError
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.TELEGRAM_RICH_MAX_LEN", 4)
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    delivered: list[str] = []
+    failed = False
+
+    async def api(method, *, api_kwargs):
+        nonlocal failed
+        if method == "sendRichMessage":
+            text = api_kwargs["rich_message"]["markdown"]
+            if text == "BBBB" and not failed:
+                failed = True
+                raise NetworkError("second chunk connection failed")
+            delivered.append(text)
+        return True
+
+    channel._app.bot.do_api_request = AsyncMock(side_effect=api)
+    metadata = {"is_group": False}
+    await channel.send_delta("123", "A", metadata, stream_id="s:0")
+    channel._stream_bufs["123"].last_edit = 0.0
+    repeated_delta = "AAA\nBBBB\nC"
+
+    await channel.send_delta("123", repeated_delta, metadata, stream_id="s:0")
+
+    assert delivered == ["AAAA"]
+    assert channel._stream_bufs["123"].text == "BBBB\nC"
+
+    await channel.send_delta("123", repeated_delta, metadata, stream_id="s:0")
+    await channel.send_delta("123", "", metadata, stream_id="s:0", stream_end=True)
+
+    assert "".join(delivered).replace("\n", "") == (
+        "A" + repeated_delta + repeated_delta
+    ).replace("\n", "")
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
 async def test_send_delta_rich_does_not_flush_at_legacy_limit() -> None:
     channel = TelegramChannel(
         TelegramConfig(
@@ -1159,22 +1288,30 @@ async def test_send_delta_rich_draft_rate_is_limited_to_40_per_30_seconds() -> N
 
 
 @pytest.mark.asyncio
-async def test_send_delta_rich_group_uses_persistent_legacy_preview() -> None:
+async def test_send_delta_rich_group_uses_legacy_preview_and_finalization() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
         MessageBus(),
     )
     _install_ready_app(channel)
     channel._app.bot.do_api_request = AsyncMock(return_value=True)
+    channel._app.bot.edit_message_text = AsyncMock()
+    metadata = {"is_group": True}
 
     await channel.send_delta(
-        "-100123", "hello", {"is_group": True}, stream_id="s:0",
+        "-100123", "**hello**", metadata, stream_id="s:0",
     )
+    await channel.send_delta("-100123", "", metadata, stream_id="s:0", stream_end=True)
 
     channel._app.bot.do_api_request.assert_not_awaited()
     assert channel._app.bot.sent_messages[0]["text"] == "hello"
-    assert channel._stream_bufs["-100123"].draft_id is None
-    assert channel._stream_bufs["-100123"].message_id == 1
+    channel._app.bot.edit_message_text.assert_awaited_once_with(
+        chat_id=-100123,
+        message_id=1,
+        text="<b>hello</b>",
+        parse_mode="HTML",
+    )
+    assert "-100123" not in channel._stream_bufs
 
 
 @pytest.mark.asyncio
@@ -3009,63 +3146,6 @@ def test_markdown_to_html_code_block_same_line_no_newline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_stream_end_upgrades_preview_to_rich_in_place() -> None:
-    """Rich messages finally work with streaming: the preview is upgraded via
-    editMessageText rich_message (in place), not delete-and-resend (issue #5516)."""
-    from telegram.error import BadRequest
-
-    channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
-        MessageBus(),
-    )
-    _install_ready_app(channel)
-    channel._app.bot.do_api_request = AsyncMock()
-    channel._app.bot.edit_message_text = AsyncMock(side_effect=BadRequest("should not be reached"))
-    channel._stream_bufs["123"] = _StreamBuf(text="**hello**", message_id=7, last_edit=0.0)
-
-    await channel.send_delta("123", "", stream_end=True)
-
-    # editMessageText with rich_message payload, in place (same message_id)
-    channel._app.bot.do_api_request.assert_awaited_once()
-    args, kwargs = channel._app.bot.do_api_request.await_args
-    assert args[0] == "editMessageText"
-    assert kwargs["api_kwargs"]["chat_id"] == 123
-    assert kwargs["api_kwargs"]["message_id"] == 7
-    assert kwargs["api_kwargs"]["rich_message"] == {"markdown": "**hello**"}
-    # No delete-and-resend, no legacy HTML edit
-    channel._app.bot.edit_message_text.assert_not_awaited()
-    assert "123" not in channel._stream_bufs
-
-
-@pytest.mark.asyncio
-async def test_send_delta_stream_end_rich_capability_error_latches_and_falls_back() -> None:
-    """On a pre-10.1 Bot API server the rich edit fails, the latch trips, and the
-    legacy HTML edit handles the final output."""
-    from telegram.error import BadRequest
-
-    channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
-        MessageBus(),
-    )
-    _install_ready_app(channel)
-    # Before Bot API 10.1, editMessageText ignores rich_message and requires text.
-    channel._app.bot.do_api_request = AsyncMock(
-        side_effect=BadRequest("Message text is empty")
-    )
-    channel._app.bot.edit_message_text = AsyncMock()
-    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
-
-    await channel.send_delta("123", "", stream_end=True)
-
-    channel._app.bot.do_api_request.assert_awaited_once()
-    # Latch tripped: subsequent sends skip the rich path entirely
-    assert channel._rich_send_disabled is True
-    # Legacy HTML edit handled the final message
-    channel._app.bot.edit_message_text.assert_awaited_once()
-    assert "123" not in channel._stream_bufs
-
-
-@pytest.mark.asyncio
 async def test_send_delta_stream_end_rich_disabled_uses_legacy_html() -> None:
     """rich_messages=False (the default) keeps the legacy HTML path untouched."""
     channel = TelegramChannel(
@@ -3081,55 +3161,4 @@ async def test_send_delta_stream_end_rich_disabled_uses_legacy_html() -> None:
 
     channel._app.bot.do_api_request.assert_not_called()
     channel._app.bot.edit_message_text.assert_awaited_once()
-    assert "123" not in channel._stream_bufs
-
-
-@pytest.mark.asyncio
-async def test_send_delta_stream_end_rich_network_error_propagates_for_retry() -> None:
-    """A transport failure on the rich edit must propagate so ChannelManager
-    retries the buffered send — not fall through to an immediate legacy edit
-    that doubles connection demand during pool exhaustion."""
-    from telegram.error import NetworkError
-
-    channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
-        MessageBus(),
-    )
-    _install_ready_app(channel)
-    channel._app.bot.do_api_request = AsyncMock(side_effect=NetworkError("pool exhausted"))
-    channel._app.bot.edit_message_text = AsyncMock()
-    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
-
-    with pytest.raises(NetworkError):
-        await channel.send_delta("123", "", stream_end=True)
-
-    # No legacy fallback edit: the buffered state stays for the manager retry.
-    channel._app.bot.edit_message_text.assert_not_awaited()
-    assert "123" in channel._stream_bufs
-
-
-@pytest.mark.asyncio
-async def test_send_delta_stream_end_rich_not_modified_after_timeout_is_success() -> None:
-    """Ambiguous success: the rich edit applied server-side but its response
-    timed out, so the retry hit "message is not modified". That is a completed
-    rich upgrade — the legacy edit must not overwrite it."""
-    from telegram.error import BadRequest, TimedOut
-
-    channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
-        MessageBus(),
-    )
-    _install_ready_app(channel)
-    # First attempt (inside _call_with_retry) times out, retry reports the
-    # edit as already applied.
-    channel._app.bot.do_api_request = AsyncMock(
-        side_effect=[TimedOut(), BadRequest("Message is not modified")]
-    )
-    channel._app.bot.edit_message_text = AsyncMock(side_effect=AssertionError("must not overwrite rich result"))
-    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
-
-    await channel.send_delta("123", "", stream_end=True)
-
-    assert channel._app.bot.do_api_request.await_count == 2
-    channel._app.bot.edit_message_text.assert_not_awaited()
     assert "123" not in channel._stream_bufs
