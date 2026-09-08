@@ -191,7 +191,6 @@ def _choose_target(status: DesktopReply) -> Literal["desktop", "python"]:
                 ),
             ],
             default="desktop",
-            use_shortcuts=True,
             instruction="(↑/↓ to move, Enter to confirm, Ctrl+C to cancel)",
         ).unsafe_ask()
     except (EOFError, KeyboardInterrupt):

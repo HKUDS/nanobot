@@ -39,9 +39,8 @@ The Python package and Nanobot Desktop keep separate runtimes, configuration,
 workspaces, and state. When a running Desktop release publishes its private
 terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui`
 asks which installation to use after authenticating a ready Desktop target.
-Use `Up`/`Down` to highlight an installation and `Enter` to confirm; `1`/`2`
-also move the highlight. `Ctrl+C` cancels with exit code 130 without attaching
-to Desktop or starting a Python backend.
+Use `Up`/`Down` to highlight an installation and `Enter` to confirm.
+`Ctrl+C` cancels with exit code 130 without attaching to Desktop or starting a Python backend.
 If Desktop is absent, busy, unavailable, or cannot be authenticated, the command
 reports the current Python executable and continues normally. A virtual
 environment's executable is shown without resolving it to its base interpreter.

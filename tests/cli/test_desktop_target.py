@@ -216,8 +216,8 @@ def test_absent_desktop_selects_current_python(monkeypatch, capsys) -> None:
     ("\x1b[B\r", "python"),
     ("\x1b[B\x1b[A\r", "desktop"),
     ("\x1b[A\r", "python"),
-    ("2\r", "python"),
-    ("21\r", "desktop"),
+    ("2\r", "desktop"),  # Numeric keys no longer move the highlight.
+    ("\x1b[B1\r", "python"),
 ])
 def test_target_picker_accepts_real_navigation_keys(keys, expected):
     with create_pipe_input() as pipe_input:
