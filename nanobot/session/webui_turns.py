@@ -772,13 +772,8 @@ class WebuiTurnCoordinator:
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
         title_context = _validated_llm_runtime(event.runtime)
-        # Event metadata may lack the webui flag (frontend envelope
-        # does not always include webui: true), but the session object
-        # may already have it set via mark_webui_session(). Check both.
-        session = self.sessions.get_or_create(event.context.session_key)
         if (
-            ((event.context.metadata.get("webui") is not True)
-             and (session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True))
+            event.context.metadata.get("webui") is not True
             or title_context is None
         ):
             return
