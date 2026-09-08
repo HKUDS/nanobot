@@ -68,7 +68,8 @@ def test_windows_uses_pipe_not_argv_or_browser_override(launcher, capsys, url):
 @pytest.mark.parametrize("url", [
     "javascript:alert(1)", "file:///tmp/secret", "http:///", "http://[invalid/",
     "http://localhost/\nsecret", "http://localhost/\rsecret", "http://localhost/\x00",
-    "http://localhost/\ud800", "http://localhost/" + "x" * browser._MAX_URL_BYTES,
+    "http://localhost/\ud800",
+    pytest.param("http://localhost/" + "x" * browser._MAX_URL_BYTES, id="oversized-url"),
 ])
 def test_invalid_input_does_not_spawn_a_helper(launcher, url, capsys):
     _, spawn = launcher
@@ -205,7 +206,10 @@ def test_helper_owns_file_until_expiry_and_cleans_every_exit(helper_file, monkey
     assert ("retained" in events) == (failure in {None, "interrupted"})
 
 
-@pytest.mark.parametrize("data", [b"", b"http://localhost/", b"x" * 65537 + b"\n"])
+@pytest.mark.parametrize("data", [
+    b"", b"http://localhost/",
+    pytest.param(b"x" * 65537 + b"\n", id="oversized-message"),
+])
 def test_helper_rejects_incomplete_or_oversized_pipe_message(helper_file, data):
     assert browser._serve(io.BytesIO(data), io.BytesIO()) == 1
     assert helper_file == []

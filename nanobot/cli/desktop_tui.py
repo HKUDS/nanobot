@@ -45,8 +45,8 @@ def _connection(target: DesktopTarget, gateway_id: str | None = None) -> dict[st
         uuid.UUID(identity)
     except ValueError as exc:
         raise DesktopTargetError("Invalid gateway identity") from exc
-    api = _endpoint(value.get("apiUrl"), websocket=False)
-    ws = _endpoint(value.get("wsUrl"), websocket=True)
+    api = _endpoint(value.get("apiUrl"), use_ws=False)
+    ws = _endpoint(value.get("wsUrl"), use_ws=True)
     if (api.hostname, api.port or 80) != (ws.hostname, ws.port or 80) or api.path not in {"", "/"}:
         raise DesktopTargetError("Terminal endpoints must share the same loopback listener")
     for key in ("wsToken", "apiToken"):
@@ -61,7 +61,7 @@ def _connection(target: DesktopTarget, gateway_id: str | None = None) -> dict[st
     )}
 
 
-def _endpoint(value: object, *, websocket: bool):
+def _endpoint(value: object, *, use_ws: bool):
     if not isinstance(value, str) or "\\" in value or any(
         ord(char) < 33 or ord(char) == 127 for char in value
     ):
@@ -72,7 +72,7 @@ def _endpoint(value: object, *, websocket: bool):
     except ValueError as exc:
         raise DesktopTargetError("Invalid terminal endpoint") from exc
     if (
-        parsed.scheme != ("ws" if websocket else "http")
+        parsed.scheme != ("ws" if use_ws else "http")
         or parsed.hostname not in {"127.0.0.1", "::1"}
         or port == 0
         or parsed.username is not None or parsed.password is not None

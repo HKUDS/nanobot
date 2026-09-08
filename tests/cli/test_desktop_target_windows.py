@@ -133,7 +133,7 @@ def test_native_windows_pipe_roundtrip():
         rf"\\.\pipe\{address}",
         winapi.PIPE_ACCESS_DUPLEX | winapi.FILE_FLAG_OVERLAPPED,
         0,  # PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT
-        1, 8192, 8192, 1000, None,
+        1, 8192, 8192, 1000, 0,
     )
     connected = winapi.ConnectNamedPipe(handle, overlapped=True)
     received = []
