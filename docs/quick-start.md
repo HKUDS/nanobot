@@ -4,7 +4,7 @@ This guide has one goal: get a normal nanobot reply in your browser. Do not add 
 
 If terminals, Python, or API keys are unfamiliar, use the [beginner walkthrough](./start-without-technical-background.md), which explains each term and screen.
 
-These repository docs follow current `main`. The recommended installer uses the stable package, so a newly documented WebUI screen may not appear until the next release. Each advanced guide also provides a CLI or manual config path.
+These repository docs describe `main`, which can be newer than the released package. The installer below installs the latest stable release. Check `nanobot --version` and use the [matching stable guide](https://nanobot.wiki/docs/latest/getting-started/quick-start) if its setup screens differ from this page.
 
 ## What You Need
 
