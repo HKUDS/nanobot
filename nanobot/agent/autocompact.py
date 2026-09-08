@@ -10,7 +10,11 @@ from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
-from nanobot.session.summary import SessionSummary, session_summary_from_metadata
+from nanobot.session.summary import (
+    SessionSummary,
+    is_summary_checkpoint,
+    session_summary_from_metadata,
+)
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
@@ -54,7 +58,7 @@ class AutoCompact:
     def _has_unarchived_messages(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
         return any(
-            not message.get("_command")
+            not message.get("_command") and not is_summary_checkpoint(message)
             for message in session.messages[session.last_archived:]
         )
 

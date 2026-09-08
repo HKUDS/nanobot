@@ -24,6 +24,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -841,9 +842,9 @@ class TestCompactIdleSession:
         assert reloaded.metadata["_last_summary"]["text"] == "Existing checkpoint."
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("retain_recent", [True, False])
+    @pytest.mark.parametrize("max_suffix", [8, 0])
     async def test_concurrent_append_remains_unarchived(
-        self, real_consolidator, mock_provider, runtime, retain_recent
+        self, real_consolidator, mock_provider, runtime, max_suffix
     ):
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:concurrent")
@@ -861,18 +862,18 @@ class TestCompactIdleSession:
         mock_provider.chat_with_retry.side_effect = append_during_archive
 
         await real_consolidator.compact_idle_session(
-            "cli:concurrent", runtime=runtime, retain_recent=retain_recent,
+            "cli:concurrent", runtime=runtime, max_suffix=max_suffix,
         )
 
         sessions.invalidate("cli:concurrent")
         reloaded = sessions.get_or_create("cli:concurrent")
-        assert len(reloaded.messages) == 4
+        assert len(reloaded.messages) == (5 if max_suffix == 0 else 4)
         assert reloaded.last_archived == 2
         assert reloaded.provider_state is None
         assert reloaded.get_history()[-1]["content"] == "late assistant"
-        if not retain_recent:
+        if max_suffix == 0:
             assert [m["content"] for m in reloaded.get_history()] == [
-                "late user", "late assistant",
+                SUMMARY_CONTINUATION_TEXT, "late user", "late assistant",
             ]
 
     @pytest.mark.asyncio

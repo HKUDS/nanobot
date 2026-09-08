@@ -215,7 +215,7 @@ class RuntimeClient:
         await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,
-            retain_recent=False,
+            max_suffix=0,
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 

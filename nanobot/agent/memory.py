@@ -30,7 +30,11 @@ from nanobot.session.manager import (
     Session,
     SessionManager,
 )
-from nanobot.session.summary import session_summary_from_metadata
+from nanobot.session.summary import (
+    SUMMARY_CONTINUATION_TEXT,
+    is_summary_checkpoint,
+    session_summary_from_metadata,
+)
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
@@ -1188,17 +1192,14 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
         max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
-        retain_recent: bool = True,
         events: EventSink = NO_EVENTS,
     ) -> str | None:
         """Archive the full idle tail while keeping recent messages replayable.
 
-        ``max_suffix`` remains accepted for SDK compatibility. Replay retention
-        is now derived independently from archive progress using the project-wide
-        compacted-session window. Manual compaction sets ``retain_recent=False``
-        to exclude the archived transcript from future prompts.
+        ``max_suffix=0`` commits a replacement checkpoint for manual compaction.
+        Other values retain the fixed recent window for SDK compatibility.
         """
-        if max_suffix != MIN_COMPACTED_REPLAY_MESSAGES:
+        if max_suffix not in (0, MIN_COMPACTED_REPLAY_MESSAGES):
             logger.debug(
                 "Idle-session compact for {} uses the fixed replay window ({}, requested {})",
                 session_key,
@@ -1212,14 +1213,20 @@ class Consolidator:
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
-            has_new_messages = any(not message.get("_command") for message in messages_to_archive)
+            has_new_messages = any(
+                not message.get("_command") and not is_summary_checkpoint(message)
+                for message in messages_to_archive
+            )
             previous_summary = session_summary_from_metadata(
                 session.metadata, fallback_last_active=session.updated_at,
             )
             if not has_new_messages and (
-                retain_recent
+                max_suffix != 0
                 or previous_summary is None
-                or not session.get_history()
+                or not any(
+                    message.get("content") != SUMMARY_CONTINUATION_TEXT
+                    for message in session.get_history()
+                )
             ):
                 return ""
 
@@ -1239,17 +1246,15 @@ class Consolidator:
                         runtime=runtime,
                     )
                 if summary is not None:
-                    self._set_last_summary(
-                        session,
-                        summary,
-                        last_active=last_active,
-                    )
-
-                    # A turn can append while the provider call is in flight. Advance only
-                    # through the captured batch so new messages remain eligible next time.
-                    session.last_archived = archive_end
-                    if not retain_recent:
-                        session.metadata["_manual_compact_end"] = archive_end
+                    # Capture the boundary before awaiting the provider so concurrent
+                    # appends remain after the checkpoint and eligible for archival.
+                    if max_suffix == 0:
+                        session.commit_summary_checkpoint(
+                            summary, insert_at=archive_end, last_active=last_active,
+                        )
+                    else:
+                        self._set_last_summary(session, summary, last_active=last_active)
+                        session.last_archived = archive_end
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
                     self.sessions.save(session)

@@ -14,6 +14,8 @@ from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.command.builtin import cmd_stop
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import GenerationSettings, LLMResponse, ProviderConversationState
+from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
 @pytest.fixture
@@ -73,9 +75,10 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     loop.sessions.invalidate("cli:test")
     reloaded = loop.sessions.get_or_create("cli:test")
     assert reloaded.provider_state is None
-    assert reloaded.messages == session.messages
+    assert reloaded.messages[:-1] == session.messages
+    assert is_hidden_history_message(reloaded.messages[-1])
     assert reloaded.last_archived == 2
-    assert reloaded.get_history() == []
+    assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
     assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
     assert len(loop.consolidator.store.read_unprocessed_history(0)) == 1
 
@@ -83,6 +86,13 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert response is None
     assert bus.outbound_size == 0
     loop.provider.chat_with_retry.assert_awaited_once()
+
+    reloaded.updated_at = datetime.now() - timedelta(minutes=30)
+    loop.sessions.save(reloaded)
+    loop.auto_compact._ttl = 1
+    schedule = MagicMock()
+    loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
+    schedule.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -236,8 +246,9 @@ async def test_manual_compact_discards_idle_suffix_and_persists_boundary(loop) -
     assert loop.bus.outbound_size == 2
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)
-    assert len(reloaded.messages) == 42
-    assert reloaded.get_history() == []
+    assert len(reloaded.messages) == 43
+    assert is_hidden_history_message(reloaded.messages[-1])
+    assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
     assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
 
     reloaded.add_message("user", "next question")
@@ -246,4 +257,6 @@ async def test_manual_compact_discards_idle_suffix_and_persists_boundary(loop) -
     await loop.consolidator.compact_idle_session(key, runtime=runtime)
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)
-    assert [m["content"] for m in reloaded.get_history()] == ["next question", "next answer"]
+    assert [m["content"] for m in reloaded.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT, "next question", "next answer",
+    ]

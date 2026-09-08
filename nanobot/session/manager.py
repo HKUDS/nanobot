@@ -27,9 +27,9 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
-from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -321,6 +321,27 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    def commit_summary_checkpoint(
+        self,
+        summary: str,
+        *,
+        insert_at: int | None = None,
+        last_active: datetime | None = None,
+    ) -> None:
+        """Replace replay before a hidden boundary while preserving the transcript."""
+        boundary = len(self.messages) if insert_at is None else insert_at
+        self.messages.insert(boundary, {
+            "role": "user",
+            "content": SUMMARY_CONTINUATION_TEXT,
+            HIDDEN_HISTORY_META: True,
+            "timestamp": datetime.now().isoformat(),
+        })
+        self.metadata["_last_summary"] = {
+            "text": summary,
+            "last_active": (last_active or self.updated_at).isoformat(),
+        }
+        self.last_archived = boundary
+
     def get_history(
         self,
         max_messages: int = 0,
@@ -336,12 +357,10 @@ class Session:
         ``max_messages`` applies an additional caller-owned count limit.
         """
         replay_start = self.last_archived
-        resumes_from_checkpoint = (
+        if replay_start and not (
             replay_start < len(self.messages)
-            and is_hidden_history_message(self.messages[replay_start])
-            and self.messages[replay_start].get("content") == SUMMARY_CONTINUATION_TEXT
-        )
-        if replay_start and not resumes_from_checkpoint:
+            and is_summary_checkpoint(self.messages[replay_start])
+        ):
             recent_start = recent_message_start_index(
                 self.messages,
                 MIN_COMPACTED_REPLAY_MESSAGES,
@@ -349,11 +368,12 @@ class Session:
             )
             replay_start = min(replay_start, recent_start)
 
-        # Idle compaction may retain recent history, but never resurrect messages
-        # explicitly removed from replay by a manual compaction.
-        manual_end = self.metadata.get("_manual_compact_end")
-        if type(manual_end) is int and 0 <= manual_end <= self.last_archived:
-            replay_start = max(replay_start, manual_end)
+        # A later idle archive must not pull its retained suffix across an
+        # earlier replacement checkpoint, whether manual or in-turn.
+        for index in range(min(self.last_archived, len(self.messages) - 1), replay_start - 1, -1):
+            if is_summary_checkpoint(self.messages[index]):
+                replay_start = index
+                break
 
         replayable = self.messages[replay_start:]
         if max_messages <= 0:
@@ -487,7 +507,6 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
-        self.metadata.pop("_manual_compact_end", None)
 
 class SessionPayload(TypedDict):
     key: str
@@ -1928,7 +1947,6 @@ class SessionManager:
         last_consolidated = min(source.last_archived, len(copied))
         if source.last_archived > len(copied):
             metadata.pop("_last_summary", None)
-            metadata.pop("_manual_compact_end", None)
             last_consolidated = 0
 
         now = datetime.now()
