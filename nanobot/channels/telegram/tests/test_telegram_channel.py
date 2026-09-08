@@ -2444,7 +2444,7 @@ async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() 
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "/dream-log deadbeef"
+    assert handled[0]["content"] == "/dream_log deadbeef"
 
 
 @pytest.mark.asyncio
@@ -2465,7 +2465,7 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "/dream-restore deadbeef"
+    assert handled[0]["content"] == "/dream_restore deadbeef"
 
     handled.clear()
     update = _make_telegram_update(text="/dream_prompt@nanobot_test init", reply_to_message=None)
@@ -2473,7 +2473,7 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "/dream-prompt init"
+    assert handled[0]["content"] == "/dream_prompt init"
 
 
 def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
@@ -2491,9 +2491,18 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/new@nanobot_bot")
     assert pat.fullmatch("/goal@nanobot_bot refine objective")
     assert pat.fullmatch("/trigger@nanobot_bot CI summary")
+    # Underscore command names (Telegram-safe) route through the bus regex.
+    assert pat.fullmatch("/dream_log deadbeef")
+    assert pat.fullmatch("/dream_restore deadbeef")
+    assert pat.fullmatch("/dream_prompt init")
+    assert pat.fullmatch("/evaluator_prompt")
+    assert pat.fullmatch("/evaluator_prompt init")
+    # Legacy hyphen spellings stay on the separate legacy handler.
+    assert pat.fullmatch("/dream_log@nanobot_bot deadbeef")
     assert pat.fullmatch("/dream-log deadbeef") is None
     assert pat.fullmatch("/dream-restore deadbeef") is None
     assert pat.fullmatch("/dream-prompt init") is None
+    assert pat.fullmatch("/evaluator-prompt") is None
 
 
 @pytest.mark.asyncio
@@ -2513,13 +2522,13 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/status" in help_text
     assert "/skill" in help_text
     assert "/dream" in help_text
-    assert "/dream-log" in help_text
-    assert "/dream-prompt" in help_text
+    assert "/dream_log" in help_text
+    assert "/dream_prompt" in help_text
     assert "/goal" in help_text
     assert "/trigger" in help_text
     assert "/pairing" in help_text
     assert "/model" in help_text
-    assert "/dream-restore" in help_text
+    assert "/dream_restore" in help_text
 
 
 @pytest.mark.asyncio

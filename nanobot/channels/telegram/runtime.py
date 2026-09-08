@@ -494,9 +494,12 @@ class TelegramChannel(BaseChannel):
     ]
 
     # Regex for slash commands routed to AgentLoop via ``_forward_command``.
-    # Hyphenated ``dream-*`` commands stay on a separate handler (below).
+    # Command names use underscores because Telegram only accepts ``[a-z0-9_]``
+    # names as commands. Legacy hyphenated spellings stay on a separate handler
+    # (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
-        r"^/(?:new|stop|restart|status|dream|history|goal|trigger|pairing|model|skill)(?:@\w+)?(?:\s+.*)?$"
+        r"^/(?:new|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
+        r"|dream_log|dream_restore|dream_prompt|evaluator_prompt)(?:@\w+)?(?:\s+.*)?$"
     )
 
     @classmethod
@@ -549,15 +552,17 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
-        """Map Telegram-safe command aliases back to canonical nanobot commands."""
+        """Map legacy hyphenated command spellings to canonical underscore names."""
         if not content.startswith("/"):
             return content
-        if content == "/dream_log" or content.startswith("/dream_log "):
-            return content.replace("/dream_log", "/dream-log", 1)
-        if content == "/dream_restore" or content.startswith("/dream_restore "):
-            return content.replace("/dream_restore", "/dream-restore", 1)
-        if content == "/dream_prompt" or content.startswith("/dream_prompt "):
-            return content.replace("/dream_prompt", "/dream-prompt", 1)
+        if content == "/dream-log" or content.startswith("/dream-log "):
+            return content.replace("/dream-log", "/dream_log", 1)
+        if content == "/dream-restore" or content.startswith("/dream-restore "):
+            return content.replace("/dream-restore", "/dream_restore", 1)
+        if content == "/dream-prompt" or content.startswith("/dream-prompt "):
+            return content.replace("/dream-prompt", "/dream_prompt", 1)
+        if content == "/evaluator-prompt" or content.startswith("/evaluator-prompt "):
+            return content.replace("/evaluator-prompt", "/evaluator_prompt", 1)
         return content
 
     async def start(self) -> None:
@@ -655,7 +660,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(
             MessageHandler(
                 filters.Regex(
-                    r"^/(dream-log|dream_log|dream-restore|dream_restore|dream-prompt|dream_prompt)(?:@\w+)?(?:\s+.*)?$"
+                    r"^/(?:dream-log|dream-restore|dream-prompt)(?:@\w+)?(?:\s+.*)?$"
                 ),
                 self._forward_command,
             )

@@ -103,6 +103,6 @@ For [SKILL] entries:
 - Batch changes into as few calls as possible. Surgical edits only.
 
 ## Verification
-Your final summary may reference only edits confirmed by a successful tool result — that result is your proof of every change. Do not narrate edits you did not make. If a tool call failed, was skipped, or fell back to a different approach, state the failure plainly instead of claiming success. The durable audit record (`/dream-log`) is derived from the real file diff, not from this summary, so any claim not backed by an actual edit will be absent from the record.
+Your final summary may reference only edits confirmed by a successful tool result — that result is your proof of every change. Do not narrate edits you did not make. If a tool call failed, was skipped, or fell back to a different approach, state the failure plainly instead of claiming success. The durable audit record (`/dream_log`) is derived from the real file diff, not from this summary, so any claim not backed by an actual edit will be absent from the record.
 
 Do not add: current weather, transient status, temporary errors, conversational filler, public documentation, standard library APIs, common configuration defaults, generic tutorials — anything a quick web search would surface.
