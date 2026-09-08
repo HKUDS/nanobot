@@ -514,10 +514,7 @@ export function useNanobotStream(
       };
       closedAssistantStreamIdsRef.current.delete(merged.id);
       activeAssistantRef.current = { id: merged.id, index: targetIndex };
-      buffer.current = {
-        messageId: merged.id,
-        mergeReasoning: buffer.current?.messageId === merged.id && buffer.current.mergeReasoning,
-      };
+      if (buffer.current?.messageId !== merged.id) buffer.current = { messageId: merged.id };
       return replaceMessageAt(next, targetIndex, merged);
     },
     [resolveActiveAssistantIndex],

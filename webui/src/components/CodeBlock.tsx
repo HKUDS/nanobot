@@ -223,12 +223,12 @@ export function CodeBlock({
   const copyLabel = copied ? t("code.copied") : t("code.copyAria");
 
   const onCopy = useCallback(() => {
-    void copyTextToClipboard(renderAnsi ? stripAnsi(code) : code).then((ok) => {
+    void copyTextToClipboard(plainCode).then((ok) => {
       if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1_500);
     });
-  }, [code, renderAnsi]);
+  }, [plainCode]);
 
   return (
     <div
