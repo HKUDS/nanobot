@@ -349,6 +349,12 @@ class Session:
             )
             replay_start = min(replay_start, recent_start)
 
+        # Idle compaction may retain recent history, but never resurrect messages
+        # explicitly removed from replay by a manual compaction.
+        manual_end = self.metadata.get("_manual_compact_end")
+        if type(manual_end) is int and 0 <= manual_end <= self.last_archived:
+            replay_start = max(replay_start, manual_end)
+
         replayable = self.messages[replay_start:]
         if max_messages <= 0:
             start_idx = 0
@@ -481,6 +487,7 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop("_manual_compact_end", None)
 
 class SessionPayload(TypedDict):
     key: str
@@ -1921,6 +1928,7 @@ class SessionManager:
         last_consolidated = min(source.last_archived, len(copied))
         if source.last_archived > len(copied):
             metadata.pop("_last_summary", None)
+            metadata.pop("_manual_compact_end", None)
             last_consolidated = 0
 
         now = datetime.now()

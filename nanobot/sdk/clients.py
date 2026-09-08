@@ -209,12 +209,13 @@ class RuntimeClient:
         return self._loop.bus.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
-        """Archive one session through the shared idle-compaction path."""
+        """Summarize one session and exclude its archived messages from replay."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
         await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,
+            retain_recent=False,
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 

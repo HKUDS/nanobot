@@ -1188,13 +1188,15 @@ class Consolidator:
         *,
         runtime: LLMRuntime,
         max_suffix: int = MIN_COMPACTED_REPLAY_MESSAGES,
+        retain_recent: bool = True,
         events: EventSink = NO_EVENTS,
     ) -> str | None:
         """Archive the full idle tail while keeping recent messages replayable.
 
         ``max_suffix`` remains accepted for SDK compatibility. Replay retention
         is now derived independently from archive progress using the project-wide
-        compacted-session window.
+        compacted-session window. Manual compaction sets ``retain_recent=False``
+        to exclude the archived transcript from future prompts.
         """
         if max_suffix != MIN_COMPACTED_REPLAY_MESSAGES:
             logger.debug(
@@ -1210,7 +1212,15 @@ class Consolidator:
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
-            if not any(not message.get("_command") for message in messages_to_archive):
+            has_new_messages = any(not message.get("_command") for message in messages_to_archive)
+            previous_summary = session_summary_from_metadata(
+                session.metadata, fallback_last_active=session.updated_at,
+            )
+            if not has_new_messages and (
+                retain_recent
+                or previous_summary is None
+                or not session.get_history()
+            ):
                 return ""
 
             compaction_id = uuid4().hex
@@ -1220,11 +1230,14 @@ class Consolidator:
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
             try:
-                summary = await self.archive_session(
-                    session,
-                    archive_end=archive_end,
-                    runtime=runtime,
-                )
+                if not has_new_messages and previous_summary:
+                    summary = previous_summary["text"]
+                else:
+                    summary = await self.archive_session(
+                        session,
+                        archive_end=archive_end,
+                        runtime=runtime,
+                    )
                 if summary is not None:
                     self._set_last_summary(
                         session,
@@ -1235,6 +1248,8 @@ class Consolidator:
                     # A turn can append while the provider call is in flight. Advance only
                     # through the captured batch so new messages remain eligible next time.
                     session.last_archived = archive_end
+                    if not retain_recent:
+                        session.metadata["_manual_compact_end"] = archive_end
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
                     self.sessions.save(session)

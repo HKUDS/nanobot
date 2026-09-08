@@ -841,8 +841,9 @@ class TestCompactIdleSession:
         assert reloaded.metadata["_last_summary"]["text"] == "Existing checkpoint."
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("retain_recent", [True, False])
     async def test_concurrent_append_remains_unarchived(
-        self, real_consolidator, mock_provider, runtime
+        self, real_consolidator, mock_provider, runtime, retain_recent
     ):
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:concurrent")
@@ -859,7 +860,9 @@ class TestCompactIdleSession:
 
         mock_provider.chat_with_retry.side_effect = append_during_archive
 
-        await real_consolidator.compact_idle_session("cli:concurrent", runtime=runtime)
+        await real_consolidator.compact_idle_session(
+            "cli:concurrent", runtime=runtime, retain_recent=retain_recent,
+        )
 
         sessions.invalidate("cli:concurrent")
         reloaded = sessions.get_or_create("cli:concurrent")
@@ -867,6 +870,10 @@ class TestCompactIdleSession:
         assert reloaded.last_archived == 2
         assert reloaded.provider_state is None
         assert reloaded.get_history()[-1]["content"] == "late assistant"
+        if not retain_recent:
+            assert [m["content"] for m in reloaded.get_history()] == [
+                "late user", "late assistant",
+            ]
 
     @pytest.mark.asyncio
     async def test_summarizes_retained_suffix_not_just_dropped_prefix(

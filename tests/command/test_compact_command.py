@@ -75,6 +75,8 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert reloaded.provider_state is None
     assert reloaded.messages == session.messages
     assert reloaded.last_archived == 2
+    assert reloaded.get_history() == []
+    assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
     assert len(loop.consolidator.store.read_unprocessed_history(0)) == 1
 
     response = await loop._process_message(msg, runtime=loop.llm_runtime())
@@ -206,3 +208,42 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
     reloaded = loop.sessions.get_or_create(key)
     assert reloaded.messages == session.messages
     assert reloaded.last_archived == 0
+    assert reloaded.get_history() == session.get_history()
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_discards_idle_suffix_and_persists_boundary(loop) -> None:
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "large tool turn")
+    for i in range(20):
+        session.add_message("assistant", "", tool_calls=[{
+            "id": f"tool-{i}", "type": "function",
+            "function": {"name": "exec", "arguments": "{}"},
+        }])
+        session.add_message("tool", "x" * 10_000, tool_call_id=f"tool-{i}")
+    session.add_message("assistant", "done")
+    loop.sessions.save(session)
+    runtime = loop.llm_runtime()
+    await loop.consolidator.compact_idle_session(key, runtime=runtime)
+    assert len(loop.sessions.get_or_create(key).get_history()) == 42
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact"),
+        runtime=runtime,
+    )
+    loop.provider.chat_with_retry.assert_awaited_once()
+    assert loop.bus.outbound_size == 2
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert len(reloaded.messages) == 42
+    assert reloaded.get_history() == []
+    assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
+
+    reloaded.add_message("user", "next question")
+    reloaded.add_message("assistant", "next answer")
+    loop.sessions.save(reloaded)
+    await loop.consolidator.compact_idle_session(key, runtime=runtime)
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert [m["content"] for m in reloaded.get_history()] == ["next question", "next answer"]

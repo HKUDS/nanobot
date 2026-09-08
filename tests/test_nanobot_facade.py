@@ -1630,6 +1630,7 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     compact_session.assert_awaited_once_with(
         "sdk:history",
         runtime=runtime,
+        retain_recent=False,
     )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path
