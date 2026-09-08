@@ -128,11 +128,13 @@ async def _archive(
 
 
 class TestTurnTranscriptSummary:
+    @pytest.mark.parametrize("summary", ["replacement checkpoint", "(nothing)"])
     async def test_uses_exact_accepted_prefix_and_existing_archiver(
         self,
         consolidator,
         mock_provider,
         runtime,
+        summary,
     ):
         accepted = [
             {"role": "system", "content": "stable system"},
@@ -140,7 +142,7 @@ class TestTurnTranscriptSummary:
         ]
         tools = [{"type": "function", "function": {"name": "inspect"}}]
         mock_provider.chat_with_retry.return_value = LLMResponse(
-            content="replacement checkpoint",
+            content=summary,
         )
 
         result = await consolidator.summarize_transcript(
@@ -151,7 +153,7 @@ class TestTurnTranscriptSummary:
             tools=tools,
         )
 
-        assert result == "replacement checkpoint"
+        assert result == summary
         call = mock_provider.chat_with_retry.await_args.kwargs
         assert call["messages"][:-1] == accepted
         assert call["messages"][-1]["role"] == "user"
@@ -357,7 +359,7 @@ class TestConsolidatorPromptContract:
         assert "working-state handoff" in prompt
         assert "- [mark] fact" in prompt
         assert "[skip]" not in prompt
-        assert "the latest user request and its answer or result" in prompt
+        assert "(nothing)" in prompt
         assert "history.jsonl" not in prompt
 
 
@@ -828,7 +830,7 @@ class TestCompactIdleSession:
         assert reloaded.metadata["_last_summary"]["text"] == fallback
 
     @pytest.mark.asyncio
-    async def test_nothing_keeps_previous_replacement_checkpoint(
+    async def test_nothing_replaces_previous_checkpoint(
         self,
         real_consolidator,
         mock_provider,
@@ -857,8 +859,7 @@ class TestCompactIdleSession:
             runtime=runtime,
         )
 
-        assert "Existing checkpoint." in result
-        assert "thanks" in result
+        assert result == "(nothing)"
         sessions.invalidate("cli:nothing-after-summary")
         reloaded = sessions.get_or_create("cli:nothing-after-summary")
         assert reloaded.last_archived == 5
@@ -1005,10 +1006,10 @@ class TestCompactIdleSession:
         assert reloaded.metadata == {}
 
     @pytest.mark.asyncio
-    async def test_nothing_uses_raw_checkpoint_once(
+    async def test_nothing_commits_checkpoint_once_without_raw_archive(
         self, real_consolidator, mock_provider, runtime
     ):
-        """An empty summary falls back to preserved content before replacing replay."""
+        """A model's decision to retain nothing is a successful replacement."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="(nothing)", finish_reason="stop"
         )
@@ -1025,12 +1026,14 @@ class TestCompactIdleSession:
         second = await real_consolidator.compact_idle_session(
             "cli:nothing", runtime=runtime, max_suffix=4
         )
-        assert result.startswith("[RAW] 20 messages")
+        assert result == "(nothing)"
         assert second == ""
 
         reloaded = sessions.get_or_create("cli:nothing")
         assert reloaded.metadata["_last_summary"]["text"] == result
-        assert len(real_consolidator.store.read_unprocessed_history(0)) == 1
+        assert real_consolidator.store.read_unprocessed_history(0) == []
+        assert reloaded.last_archived == 20
+        assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
         mock_provider.chat_with_retry.assert_awaited_once()
 
     @pytest.mark.asyncio

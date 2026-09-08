@@ -928,9 +928,8 @@ class MemoryArchiver:
         if not summary:
             logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
             return raw_fallback()
-        if summary == "(nothing)":
-            return raw_fallback()
-        self.store.append_history(summary, session_key=session_key)
+        if summary != "(nothing)":
+            self.store.append_history(summary, session_key=session_key)
         return summary
 
     async def archive_session(

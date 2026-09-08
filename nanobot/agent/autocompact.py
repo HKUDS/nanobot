@@ -100,7 +100,7 @@ class AutoCompact:
                 runtime=runtime,
                 events=self._bind_events(key) if self._bind_events else NO_EVENTS,
             )
-            if summary and summary != "(nothing)":
+            if summary:
                 session = self.sessions.get_or_create(key)
                 stored = session_summary_from_metadata(
                     session.metadata,
