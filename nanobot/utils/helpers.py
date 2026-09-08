@@ -358,6 +358,8 @@ def timestamp() -> str:
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 _TOOL_RESULT_PREVIEW_CHARS = 1200
+_TOOL_RESULT_SUMMARY_MAX_FIELDS = 64
+_TOOL_RESULT_SUMMARY_SCALAR_CHARS = 240
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -502,6 +504,51 @@ def stringify_text_blocks(content: list[object]) -> str | None:
     return "\n".join(parts)
 
 
+def _tool_result_json_summary(text: str) -> str | None:
+    """Summarize oversized JSON without copying nested payloads into context."""
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(payload, dict):
+        scalars: list[tuple[str, Any]] = []
+        containers: list[tuple[str, str]] = []
+        # JSON objects always have string keys; values remain dynamic here.
+        for key, value in cast(dict[str, Any], payload).items():
+            if isinstance(value, dict):
+                containers.append((key, f"<object: {len(cast(dict[str, Any], value))} fields>"))
+            elif isinstance(value, list):
+                containers.append((key, f"<array: {len(cast(list[Any], value))} items>"))
+            elif isinstance(value, str) and len(value) > _TOOL_RESULT_SUMMARY_SCALAR_CHARS:
+                scalars.append(
+                    (
+                        key,
+                        value[:_TOOL_RESULT_SUMMARY_SCALAR_CHARS]
+                        + f"... <{len(value)} chars>",
+                    )
+                )
+            else:
+                scalars.append((key, value))
+
+        # Keep mechanically useful root metadata visible even when a large
+        # nested payload appears first in the original document.
+        selected = (scalars + containers)[:_TOOL_RESULT_SUMMARY_MAX_FIELDS]
+        summary = dict(selected)
+        omitted = len(scalars) + len(containers) - len(selected)
+        if omitted:
+            summary["<omitted root fields>"] = omitted
+    elif isinstance(payload, list):
+        summary = {"<root>": f"array with {len(cast(list[Any], payload))} items"}
+    else:
+        return None
+
+    prefix = "[JSON structure summary]\n"
+    rendered = json.dumps(summary, ensure_ascii=False, indent=2)
+    return prefix + truncate_text(rendered, _TOOL_RESULT_PREVIEW_CHARS - len(prefix))
+
+
 def _render_tool_result_reference(
     filepath: Path,
     *,
@@ -606,7 +653,9 @@ def maybe_persist_tool_result(
         else:
             _write_text_atomic(path, text_payload)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    preview = _tool_result_json_summary(text_payload)
+    if preview is None:
+        preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
     return _render_tool_result_reference(
         path,
         original_size=len(text_payload),
