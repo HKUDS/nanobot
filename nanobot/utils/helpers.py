@@ -596,12 +596,8 @@ def maybe_persist_tool_result(
         _write_text_atomic(path, content)
 
     preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
-    try:
-        display_path = str(path.relative_to(workspace))
-    except ValueError:
-        display_path = str(path)
     return _render_tool_result_reference(
-        display_path,
+        str(path.resolve()),
         original_size=len(content),
         preview=preview,
         truncated_preview=len(content) > _TOOL_RESULT_PREVIEW_CHARS,

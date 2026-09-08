@@ -410,3 +410,32 @@ async def test_tiny_budget_keeps_complete_readable_reference(tmp_path):
     assert raw in await reader.execute(path=path)
     assert ContextGovernor.normalize_tool_result(config, call_id, "exec", reference) == reference
     assert (tmp_path / path).read_text(encoding="utf-8") == raw
+
+
+async def test_result_reference_survives_workspace_switch_without_bypassing_restriction(tmp_path):
+    import re
+
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.security.workspace_access import (
+        bind_workspace_scope,
+        build_workspace_scope,
+        reset_workspace_scope,
+    )
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    raw = "x" * 20_000
+    reference = maybe_persist_tool_result(first, "session", "call", raw, max_chars=2048)
+    match = re.search(r"workspace path: (.+)", reference)
+    assert match is not None
+    reader = ReadFileTool(workspace=first)
+    for mode, expected in [("full", raw), ("restricted", "Error")]:
+        token = bind_workspace_scope(build_workspace_scope(second, mode))
+        try:
+            result = await reader.execute(path=match[1], force=True)
+            assert expected in result
+        finally:
+            reset_workspace_scope(token)
