@@ -154,8 +154,7 @@ export class ConfigEditor {
       id: "nanobot-tui-config-detail",
       content: "",
       width: "100%",
-      minHeight: 1,
-      maxHeight: 2,
+      height: 2,
       flexShrink: 0,
       fg: theme.faint,
       wrapMode: "word",
@@ -371,7 +370,7 @@ export class ConfigEditor {
     this.root.paddingLeft = width >= 96 ? 3 : 1
     this.root.paddingRight = width >= 96 ? 3 : 1
     this.intro.visible = height >= 13
-    this.detail.maxHeight = height >= 18 ? 2 : 1
+    this.detail.height = height >= 18 ? 2 : 1
     this.footer.content = width >= 72
       ? "↑/↓ move · enter edit · / search · ctrl+s save · esc back/close"
       : "↑/↓ · enter · / search · ctrl+s · esc"

@@ -33,6 +33,34 @@ describe("ConfigEditor", () => {
     editor = undefined
   })
 
+  test.each([[64, 24], [88, 24], [64, 16]])(
+    "keeps menu rows anchored when help wraps at %i × %i",
+    async (width, height) => {
+      setup = await createTestRenderer({ width, height, screenMode: "alternate-screen" })
+      editor = new ConfigEditor(setup.renderer, theme, {
+        load: async () => configSnapshot(),
+        save: async () => configSnapshot(),
+      })
+      setup.renderer.root.add(editor.root)
+      setup.renderer.keyInput.on("keypress", (key) => {
+        if (editor?.handleKey(key)) key.preventDefault()
+      })
+      editor.resize(width!, height!)
+      await editor.show()
+      await setup.renderOnce()
+      const menuRow = () => setup!.captureCharFrame().split("\n")
+        .findIndex((line) => line.includes("Quick start"))
+      const initialRow = menuRow()
+      expect(initialRow).toBeGreaterThan(0)
+
+      for (const key of ["\u001b[B", "\u001b[B", "\u001b[A", "\u001b[A"]) {
+        setup.mockInput.pressKey(key)
+        await setup.renderOnce()
+        expect(menuRow()).toBe(initialRow)
+      }
+    },
+  )
+
   test("starts with guided setup and finds folded advanced settings", async () => {
     setup = await createTestRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     editor = new ConfigEditor(setup.renderer, theme, {
