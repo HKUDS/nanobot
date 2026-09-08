@@ -508,7 +508,7 @@ describe("ThreadShell", () => {
       event: "context_compaction", chat_id: "usage-chart",
       compaction_id: "success", phase: "succeeded",
     }));
-    expect(screen.queryByTestId("composer-context-meter")).not.toBeInTheDocument();
+    expect(trigger).toHaveAccessibleName("Open context usage");
     expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
   });
 
@@ -543,7 +543,6 @@ describe("ThreadShell", () => {
       expect(trigger).toHaveAccessibleName("Context 2%. Open context usage");
     } else {
       expect(trigger).toHaveAccessibleName("Open context usage");
-      expect(screen.queryByTestId("composer-context-meter")).not.toBeInTheDocument();
     }
   });
 

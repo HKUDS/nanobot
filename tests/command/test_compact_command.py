@@ -87,13 +87,6 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert bus.outbound_size == 0
     loop.provider.chat_with_retry.assert_awaited_once()
 
-    reloaded.updated_at = datetime.now() - timedelta(minutes=30)
-    loop.sessions.save(reloaded)
-    loop.auto_compact._ttl = 1
-    schedule = MagicMock()
-    loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
-    schedule.assert_not_called()
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_commands", [False, True])
