@@ -99,6 +99,44 @@ class TestReadFileTool:
         assert "Use offset=" in result
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("suffix", [".txt", ".docx"])
+    async def test_long_line_can_be_read_completely(self, tool, tmp_path, suffix):
+        import re
+
+        raw = "开始" + "x" * 260_000 + "结束"
+        path = tmp_path / f"long{suffix}"
+        if suffix == ".docx":
+            from docx import Document
+
+            document = Document()
+            document.add_paragraph(raw)
+            document.save(str(path))
+        else:
+            path.write_text(raw, encoding="utf-8")
+        pieces = []
+        char_offset = 0
+        for _ in range(4):
+            result = await tool.execute(path=str(path), offset=1, char_offset=char_offset)
+            assert len(result) < tool._MAX_CHARS + 200
+            pieces.append(result.split("\n\n", 1)[0].removeprefix("1| "))
+            continuation = re.search(r"Use offset=1, char_offset=(\d+) to continue", result)
+            if continuation is None:
+                break
+            next_offset = int(continuation[1])
+            assert next_offset > char_offset
+            char_offset = next_offset
+        assert "".join(pieces) == raw
+        assert "开始" in await tool.execute(path=str(path), offset=1)
+
+    @pytest.mark.asyncio
+    async def test_char_offset_validation_and_workspace_guard(self, tool, sample_file, tmp_path):
+        assert "non-negative" in await tool.execute(path=str(sample_file), char_offset=-1)
+        assert "beyond end of line" in await tool.execute(path=str(sample_file), char_offset=1000)
+        restricted = ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path)
+        result = await restricted.execute(path=str(tmp_path.parent / "outside.txt"), char_offset=1)
+        assert "Error" in result
+
+    @pytest.mark.asyncio
     async def test_oversized_file_is_rejected_before_read(self, tool, tmp_path, monkeypatch):
         f = tmp_path / "huge.txt"
         with f.open("wb") as stream:

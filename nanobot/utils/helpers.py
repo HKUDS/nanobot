@@ -510,25 +510,8 @@ def _render_tool_result_reference(
     truncated_preview: bool,
     max_chars: int | None = None,
     display_path: str | None = None,
-    read_file_available: bool | None = None,
 ) -> str:
     reference_path = display_path or str(filepath)
-    if read_file_available is True:
-        retrieval_hint = (
-            "Result was truncated before this model request. Use the available "
-            "read_file tool with this path if you need the complete output."
-        )
-    elif read_file_available is False:
-        retrieval_hint = (
-            "Result was truncated before this model request. No permitted read_file tool is "
-            "available in this turn; an authorized caller can retrieve the saved workspace file."
-        )
-    else:
-        retrieval_hint = (
-            "Result was truncated before this model request. If a permitted read_file tool is "
-            "available in this turn, use it with this path to retrieve the "
-            "complete output."
-        )
     result = (
         f"[tool output persisted]\n"
         f"Full output saved to workspace path: {reference_path}\n"
@@ -537,15 +520,9 @@ def _render_tool_result_reference(
     )
     if truncated_preview:
         result += "\n...\nPreview is also truncated."
-    result += f"\n{retrieval_hint}"
+    result += "\nResult truncated. Read the saved file if you need the complete output."
     if max_chars and len(result) > max_chars:
-        result = (
-            f"[truncated; read_file: {reference_path}]"
-            if read_file_available is True
-            else f"[truncated: {reference_path}]"
-        )
-        if len(result) > max_chars:
-            result = f"[truncated: {reference_path}]"
+        result = f"[truncated: {reference_path}]"
     return result
 
 
@@ -602,7 +579,6 @@ def maybe_persist_tool_result(
     content: Any,
     *,
     max_chars: int,
-    read_file_available: bool | None = None,
 ) -> Any:
     """Offload oversized strings and text blocks.
 
@@ -621,7 +597,7 @@ def maybe_persist_tool_result(
                     **block,
                     "text": maybe_persist_tool_result(
                         workspace, session_key, f"{tool_call_id}_text_{index}", block["text"],
-                        max_chars=max_chars, read_file_available=read_file_available,
+                        max_chars=max_chars,
                     ),
                 })
             else:
@@ -660,7 +636,6 @@ def maybe_persist_tool_result(
         truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
         max_chars=max_chars,
         display_path=display_path,
-        read_file_available=read_file_available,
     )
 
 

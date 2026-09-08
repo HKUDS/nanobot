@@ -35,7 +35,6 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     provider.chat_with_retry = chat_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    tools.has.return_value = True
     tools.execute = AsyncMock(return_value="x" * 20_000)
 
     runner = AgentRunner()
@@ -53,8 +52,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
     assert len(tool_message["content"]) <= 2048
     assert "[tool output persisted]" in tool_message["content"]
-    assert "Result was truncated before this model request" in tool_message["content"]
-    assert "Use the available read_file tool" in tool_message["content"]
+    assert "Result truncated. Read the saved file" in tool_message["content"]
     assert "tool-results" in tool_message["content"]
     persisted_path = tmp_path / ".nanobot" / "tool-results" / "test_runner" / "call_big.txt"
     assert persisted_path.read_text(encoding="utf-8") == "x" * 20_000

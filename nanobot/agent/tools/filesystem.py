@@ -259,6 +259,10 @@ def _builtin_skill_read_path(path: str) -> Path | None:
             minimum=1,
         ),
         pages=StringSchema("PDF page number or range, e.g. '7' or '1-5' (max 20 pages)"),
+        char_offset=IntegerSchema(
+            description="0-based character offset within the first text or extracted-document line",
+            minimum=0,
+        ),
         force=BooleanSchema(
             description="Return an unchanged range again",
             default=False,
@@ -297,11 +301,14 @@ class ReadFileTool(_FsTool):
         limit: int | None = None,
         pages: str | None = None,
         force: bool = False,
+        char_offset: int = 0,
         **kwargs: Any,
     ) -> Any:
         try:
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
+            if char_offset < 0:
+                return ToolResult.error("Error: char_offset must be non-negative")
 
             # Device path blacklist
             if _is_blocked_device(path):
@@ -332,7 +339,7 @@ class ReadFileTool(_FsTool):
 
             # Office document support
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-                return self._read_office_doc(fp, offset, limit)
+                return self._read_office_doc(fp, offset, limit, char_offset)
 
             raw = fp.read_bytes()
             if not raw:
@@ -351,6 +358,7 @@ class ReadFileTool(_FsTool):
                 current_mtime = 0.0
             if (
                 not force
+                and char_offset == 0
                 and entry
                 and entry.can_dedup
                 and entry.offset == offset
@@ -419,25 +427,42 @@ class ReadFileTool(_FsTool):
 
             start = offset - 1
             end = min(start + (limit or self._DEFAULT_LIMIT), total)
-            numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
+            if char_offset > len(all_lines[start]):
+                return ToolResult.error(f"Error: char_offset is beyond end of line {offset}")
+            selected = all_lines[start:end]
+            selected[0] = selected[0][char_offset:]
+            numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(selected)]
             result = "\n".join(numbered)
+            next_char_offset = None
 
             if len(result) > self._MAX_CHARS:
                 trimmed: list[str] = []
                 chars = 0
                 for line in numbered:
-                    chars += len(line) + 1
+                    chars += len(line) + (1 if trimmed else 0)
                     if chars > self._MAX_CHARS:
                         break
                     trimmed.append(line)
                 end = start + len(trimmed)
                 result = "\n".join(trimmed)
+                if not trimmed:
+                    prefix = f"{offset}| "
+                    available = self._MAX_CHARS - len(prefix)
+                    result = prefix + selected[0][:available]
+                    next_char_offset = char_offset + available
 
-            if end < total:
+            if next_char_offset is not None:
+                result += (
+                    f"\n\n(Result truncated within line {offset}. "
+                    f"Use offset={offset}, char_offset={next_char_offset} to continue.)"
+                )
+            elif end < total:
                 result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
             else:
                 result += f"\n\n(End of file — {total} lines total)"
             self._file_states.record_read(fp, offset=offset, limit=limit)
+            if char_offset and (state := self._file_states.get(fp)) is not None:
+                state.can_dedup = False
             return result
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
@@ -479,6 +504,7 @@ class ReadFileTool(_FsTool):
         fp: Path,
         offset: int,
         limit: int | None,
+        char_offset: int = 0,
     ) -> str:
         from nanobot.utils.document import open_document_line_source
 
@@ -496,6 +522,7 @@ class ReadFileTool(_FsTool):
             end = offset - 1
             has_more = False
             line_was_clipped = False
+            next_char_offset = 0
 
             for line in source_iterator:
                 total_seen = line.extracted_line
@@ -505,15 +532,21 @@ class ReadFileTool(_FsTool):
                     has_more = True
                     break
 
-                rendered = f"{line.extracted_line}| {line.text}"
+                text = line.text
+                if line.extracted_line == offset:
+                    if char_offset > len(text):
+                        return ToolResult.error(f"Error: char_offset is beyond end of line {offset}")
+                    text = text[char_offset:]
+                rendered = f"{line.extracted_line}| {text}"
                 extra = 1 if numbered else 0
                 if output_chars + extra + len(rendered) > self._MAX_CHARS:
                     if numbered:
                         has_more = True
                         break
                     prefix = f"{line.extracted_line}| "
-                    available = max(0, self._MAX_CHARS - len(prefix) - 3)
-                    rendered = f"{prefix}{line.text[:available]}..."
+                    available = max(0, self._MAX_CHARS - len(prefix))
+                    rendered = f"{prefix}{text[:available]}"
+                    next_char_offset = (char_offset if line.extracted_line == offset else 0) + available
                     line_was_clipped = True
                     has_more = True
                 numbered.append(rendered)
@@ -536,8 +569,8 @@ class ReadFileTool(_FsTool):
             if has_more:
                 if line_was_clipped:
                     output += (
-                        "\n\n(Document text truncated at ~128K chars; line clipped. "
-                        f"Use offset={end + 1} to continue.)"
+                        "\n\n(Document text truncated at ~128K chars. "
+                        f"Use offset={end}, char_offset={next_char_offset} to continue.)"
                     )
                 else:
                     output += (

@@ -708,7 +708,6 @@ class ContextGovernor:
                 tool_call_id,
                 result,
                 max_chars=config.max_tool_result_chars,
-                read_file_available=config.tools.has("read_file"),
             )
         except Exception:
             logger.exception(
