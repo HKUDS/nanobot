@@ -156,6 +156,20 @@ def _seatbelt_ancestors(*paths: Path) -> list[str]:
     return out
 
 
+def _seatbelt_is_within(path: Path, root: Path) -> bool:
+    """Match existing path aliases without lowercasing case-sensitive volumes."""
+    if path.is_relative_to(root):
+        return True
+    for ancestor in (path, *path.parents):
+        try:
+            if ancestor.samefile(root):
+                return True
+        except OSError:
+            # Missing/inaccessible paths retain conservative lexical matching.
+            continue
+    return False
+
+
 def _sbpl_quote(path: str) -> str:
     """Render *path* as an SBPL string literal.
 
@@ -258,8 +272,25 @@ def _seatbelt(
     for p in rw_binds:
         rules.append(f"(allow file-read* file-write* (subpath {_sbpl_quote(p)}))")
 
-    # sandbox-exec(1) has no --chdir, so the working directory is entered by
-    # the wrapped shell.  `&&` keeps the command from running if cd is denied.
+    # Path-based read-only rules do not follow a renamed ancestor. Keep those
+    # directory entries fixed without denying writes to their other children.
+    # A RW bind covering the entire RO root intentionally overrides protection;
+    # a writable descendant must not unlock the rest of the read-only tree.
+    writable_roots = [Path(p) for p in rw_binds]
+    protected_roots = [
+        root for root in (media, *(Path(p) for p in ro_binds))
+        if not any(_seatbelt_is_within(root, writable) for writable in writable_roots)
+    ]
+    ancestors = _seatbelt_ancestors(*protected_roots)
+    if ancestors:
+        rules.append(
+            "(deny file-write-unlink "
+            + " ".join(f"(literal {_sbpl_quote(p)})" for p in ancestors)
+            + ")"
+        )
+
+    # sandbox-exec(1) has no --chdir. Exit on failure before evaluating any of
+    # the submitted shell list; `cd ... && a; b` would still execute b on failure.
     args = [
         # Resolve the security boundary before consulting operator tool PATHs.
         "/usr/bin/sandbox-exec",
@@ -270,7 +301,7 @@ def _seatbelt(
         f"TMPDIR={ws}",
         "sh",
         "-c",
-        f"cd {shlex.quote(sandbox_cwd)} && {command}",
+        f"cd {shlex.quote(sandbox_cwd)} || exit\n{command}",
     ]
     return shlex.join(args)
 

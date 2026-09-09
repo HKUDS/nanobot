@@ -1,10 +1,11 @@
 """Tests for nanobot.agent.tools.sandbox."""
 
 import shlex
+from pathlib import Path
 
 import pytest
 
-from nanobot.agent.tools.sandbox import _sbpl_quote, wrap_command
+from nanobot.agent.tools.sandbox import _sbpl_quote, _seatbelt_is_within, wrap_command
 
 
 def _parse(cmd: str) -> list[str]:
@@ -357,14 +358,14 @@ class TestSeatbeltBackend:
         sub = ws / "src" / "lib"
         result = wrap_command("seatbelt", "pwd", str(ws), str(sub))
 
-        assert _parse(result)[-1] == f"cd {shlex.quote(str(sub))} && pwd"
+        assert _parse(result)[-1] == f"cd {shlex.quote(str(sub))} || exit\npwd"
 
     def test_cwd_outside_workspace_falls_back(self, tmp_path):
         ws = (tmp_path / "project").resolve()
         outside = tmp_path / "other"
         result = wrap_command("seatbelt", "pwd", str(ws), str(outside))
 
-        assert _parse(result)[-1] == f"cd {shlex.quote(str(ws))} && pwd"
+        assert _parse(result)[-1] == f"cd {shlex.quote(str(ws))} || exit\npwd"
 
     def test_custom_read_only_binds(self, tmp_path):
         ws = (tmp_path / "project").resolve()
@@ -389,6 +390,55 @@ class TestSeatbeltBackend:
         assert profile.index(f"(allow file-read* file-write* (subpath {self._quote(ws)}))") < (
             profile.index(f"(deny file-write* (subpath {self._quote(ro)}))")
         )
+
+    @pytest.mark.parametrize("source", ["bind", "media"])
+    def test_readonly_ancestors_cannot_be_unlinked(self, tmp_path, monkeypatch, source):
+        ws = (tmp_path / "workspace").resolve()
+        ro = ws / 'tree with "quotes' / "branch" / "readonly"
+        media = ro if source == "media" else tmp_path / "media"
+        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: media)
+        profile = self._profile(wrap_command(
+            "seatbelt", "ls", str(ws), str(ws),
+            sandbox_ro_binds=[str(ro)] if source == "bind" else [],
+        ))
+
+        rule = profile.splitlines()[-1]
+        assert rule.startswith("(deny file-write-unlink ")
+        for parent in ro.parents:
+            assert f"(literal {self._quote(parent)})" in rule
+        assert "subpath" not in rule
+
+    @pytest.mark.parametrize("override", ["root", "parent", "child"])
+    def test_rw_override_only_unlocks_fully_covered_roots(self, tmp_path, monkeypatch, override):
+        ws = (tmp_path / "workspace").resolve()
+        ro = ws / "tree" / "readonly"
+        rw = {"root": ro, "parent": ro.parent, "child": ro / "cache"}[override]
+        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: ro)
+        profile = self._profile(wrap_command(
+            "seatbelt", "ls", str(ws), str(ws),
+            sandbox_ro_binds=[str(ro)], sandbox_rw_binds=[str(rw)],
+        ))
+
+        if override == "child":
+            assert profile.splitlines()[-1].startswith("(deny file-write-unlink ")
+            assert f"(literal {self._quote(ro.parent)})" in profile.splitlines()[-1]
+        else:
+            assert "(deny file-write-unlink " not in profile
+
+    @pytest.mark.parametrize("same_directory", [True, False])
+    def test_rw_coverage_uses_filesystem_identity(self, tmp_path, monkeypatch, same_directory):
+        ro = tmp_path / "Tree" / "ReadOnly"
+        rw = tmp_path / "tree"
+        monkeypatch.setattr(
+            Path, "samefile",
+            lambda path, other: same_directory and path == ro.parent and other == rw,
+        )
+        assert _seatbelt_is_within(ro, rw) is same_directory
+
+    def test_missing_rw_alias_does_not_unlock_readonly_root(self, tmp_path):
+        ro = tmp_path / "missing" / "readonly"
+        assert not _seatbelt_is_within(ro, tmp_path / "MISSING")
+        assert _seatbelt_is_within(ro, ro.parent)
 
     def test_custom_read_write_binds(self, tmp_path):
         ws = (tmp_path / "project").resolve()

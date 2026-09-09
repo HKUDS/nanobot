@@ -140,3 +140,127 @@ async def test_native_network_remains_available(layout):
         finally:
             server.shutdown()
             thread.join(timeout=3)
+
+
+@pytest.mark.parametrize("target", ["ro", "media"])
+@pytest.mark.parametrize("ancestor", ["tree", "tree/branch"])
+async def test_native_readonly_ancestor_cannot_be_renamed(layout, target, ancestor):
+    workspace = layout["workspace"]
+    protected = workspace / "tree" / "branch" / "readonly"
+    protected.mkdir(parents=True)
+    sentinel = protected / "sentinel"
+    sentinel.write_text("synthetic-readonly")
+    layout[target] = protected
+    moved_sentinel = Path("shifted") / protected.relative_to(workspace / ancestor) / "sentinel"
+
+    result = await run_script(
+        layout,
+        f"mv {ancestor} shifted && printf changed > {shlex.quote(str(moved_sentinel))}",
+    )
+
+    assert "Operation not permitted" in result
+    assert sentinel.read_text() == "synthetic-readonly"
+    assert not (workspace / "shifted").exists()
+
+
+async def test_native_readonly_ancestor_keeps_other_children_writable(layout):
+    workspace = layout["workspace"]
+    protected = workspace / "tree" / "readonly"
+    protected.mkdir(parents=True)
+    layout["ro"] = protected
+
+    result = await run_script(
+        layout,
+        "mkdir tree/sibling && printf writable > tree/sibling/file && "
+        "mv tree/sibling tree/renamed && rm tree/renamed/file && rmdir tree/renamed",
+    )
+
+    assert result == "\nExit code: 0"
+    assert protected.is_dir()
+    assert not (workspace / "tree" / "renamed").exists()
+
+
+@pytest.mark.parametrize("override", ["root", "parent", "child"])
+async def test_native_rw_override_preserves_readonly_ancestor_policy(layout, override):
+    workspace = layout["workspace"]
+    protected = workspace / "tree" / "readonly"
+    writable = protected / "cache"
+    writable.mkdir(parents=True)
+    layout["ro"] = protected
+    layout["rw"] = {"root": protected, "parent": protected.parent, "child": writable}[override]
+
+    result = await run_script(layout, "printf writable > tree/readonly/cache/file")
+    assert result == "\nExit code: 0"
+    assert (writable / "file").read_text() == "writable"
+
+    result = await run_script(layout, "mv tree shifted")
+    if override == "child":
+        assert "Operation not permitted" in result
+        assert protected.is_dir()
+    else:
+        assert result == "\nExit code: 0"
+        assert (workspace / "shifted" / "readonly" / "cache" / "file").read_text() == "writable"
+
+
+@pytest.mark.parametrize("cwd_kind", ["missing", "file"])
+@pytest.mark.parametrize("separator", ["; ", "\n", " || "])
+async def test_native_failed_cwd_does_not_execute_shell_list(layout, cwd_kind, separator):
+    workspace = layout["workspace"]
+    cwd = workspace / "unusable"
+    if cwd_kind == "file":
+        cwd.write_text("not-a-directory")
+    tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt")
+
+    result = str(await tool.execute(
+        command=f"printf first > first{separator}printf second > second",
+        working_dir=str(cwd), timeout=5,
+    ))
+
+    assert "cd:" in result
+    assert not result.endswith("Exit code: 0")
+    assert not (workspace / "first").exists()
+    assert not (workspace / "second").exists()
+
+
+async def test_native_nested_cwd_runs_complete_shell_list(layout):
+    workspace = layout["workspace"]
+    cwd = workspace / "nested 'directory"
+    cwd.mkdir()
+    tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt")
+
+    result = str(await tool.execute(
+        command="printf first > first; printf second > second",
+        working_dir=str(cwd), timeout=5,
+    ))
+
+    assert result == "\nExit code: 0"
+    assert (cwd / "first").read_text() == "first"
+    assert (cwd / "second").read_text() == "second"
+    assert not (workspace / "second").exists()
+
+
+@pytest.mark.parametrize("override", ["root", "parent"])
+async def test_native_rw_override_respects_volume_case_sensitivity(layout, override):
+    workspace = layout["workspace"]
+    protected = workspace / "Tree" / "ReadOnly"
+    protected.mkdir(parents=True)
+    sentinel = protected / "sentinel"
+    sentinel.write_text("synthetic-readonly")
+    alias = workspace / "tree" / "readonly"
+    alias.mkdir(parents=True, exist_ok=True)
+    same_directory = alias.samefile(protected)
+    layout["ro"] = protected
+    layout["rw"] = alias if override == "root" else alias.parent
+
+    result = await run_script(layout, "printf writable > tree/readonly/other")
+    assert result == "\nExit code: 0"
+    result = await run_script(layout, "mv Tree shifted")
+
+    if same_directory:
+        assert result == "\nExit code: 0"
+        assert (workspace / "shifted" / "ReadOnly" / "other").read_text() == "writable"
+    else:
+        # On a case-sensitive volume the distinct RW directory must not remove
+        # protection from Tree/ReadOnly, even though its spelling differs only by case.
+        assert "Operation not permitted" in result
+        assert sentinel.read_text() == "synthetic-readonly"
