@@ -84,13 +84,14 @@ export function SettingsSidebar({
       <button
         type="button"
         onClick={onBackToChat}
+        aria-label={t("settings.backToChat")}
+        title={t("settings.backToChat")}
         className={cn(
-          "touch-target mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3",
+          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3",
           hostChromeInset && "-ml-1",
         )}
       >
         <ChevronLeft className="h-[1em] w-[1em]" aria-hidden />
-        {t("settings.backToChat")}
       </button>
 
       <nav
