@@ -89,7 +89,7 @@ export function SettingsSidebar({
           hostChromeInset && "-ml-1",
         )}
       >
-        <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+        <ChevronLeft className="h-[1em] w-[1em]" aria-hidden />
         {t("settings.backToChat")}
       </button>
       <div className="mb-3 px-1 lg:mb-4 lg:px-2">
@@ -109,9 +109,9 @@ export function SettingsSidebar({
               aria-label={`${t("settings.sidebar.title")}: ${activeLabel}`}
               className="touch-target flex h-11 w-full items-center gap-2.5 rounded-control bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-accent/80 lg:hidden"
             >
-              <ActiveIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+              <ActiveIcon className="h-[1em] w-[1em] shrink-0" strokeWidth={2} aria-hidden />
               <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <ChevronDown className="h-[1em] w-[1em] shrink-0 text-muted-foreground" aria-hidden />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -131,11 +131,11 @@ export function SettingsSidebar({
                     active && "bg-sidebar-accent text-foreground focus:bg-sidebar-accent",
                   )}
                 >
-                  <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                  <Icon className="h-[1em] w-[1em] shrink-0" strokeWidth={2} aria-hidden />
                   <span className="min-w-0 flex-1 truncate">
                     {t(`settings.nav.${key}`, { defaultValue: fallback })}
                   </span>
-                  {active ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : null}
+                  {active ? <Check className="h-[1em] w-[1em] shrink-0" aria-hidden /> : null}
                 </DropdownMenuItem>
               );
             })}
@@ -165,7 +165,7 @@ export function SettingsSidebar({
                     : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                <Icon className="h-[1em] w-[1em] shrink-0" strokeWidth={2} aria-hidden />
                 <span className="truncate">
                   {t(`settings.nav.${key}`, { defaultValue: fallback })}
                 </span>
@@ -183,7 +183,7 @@ export function SettingsSidebar({
             onClick={onLogout}
             className="h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
           >
-            <LogOut className="h-4 w-4" aria-hidden />
+            <LogOut className="h-[1em] w-[1em]" aria-hidden />
             {t("app.account.logout")}
           </Button>
         ) : null}
