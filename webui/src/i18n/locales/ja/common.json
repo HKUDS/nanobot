@@ -25,6 +25,7 @@
     "system": {
       "section": "システム",
       "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
+      "restartAction": "再起動",
       "restart": "nanobot を再起動",
       "restarting": "再起動中...",
       "restartEngine": "エンジンを再起動",

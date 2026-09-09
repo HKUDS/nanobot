@@ -25,6 +25,7 @@
     "system": {
       "section": "시스템",
       "restartHint": "런타임 변경 사항을 적용하려면 nanobot을 다시 시작하세요.",
+      "restartAction": "다시 시작",
       "restart": "nanobot 다시 시작",
       "restarting": "다시 시작 중...",
       "restartEngine": "엔진 다시 시작",

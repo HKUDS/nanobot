@@ -70,6 +70,9 @@ export function SettingsSidebar({
   isNativeHost?: boolean;
 }) {
   const { t } = useTranslation();
+  const restartLabel = isRestarting
+    ? t(isNativeHost ? "app.system.restartingEngine" : "app.system.restarting")
+    : t("app.system.restartAction");
   activeSection = isCapabilitySection(activeSection) ? "capabilities" : activeSection;
   const activeNavItemRef = useRef<HTMLButtonElement>(null);
   const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
@@ -192,9 +195,7 @@ export function SettingsSidebar({
             >
               {isRestarting ? <Loader2 className="h-[1em] w-[1em] animate-spin" aria-hidden />
                 : <RotateCcw className="h-[1em] w-[1em]" aria-hidden />}
-              {t(isNativeHost
-                ? isRestarting ? "app.system.restartingEngine" : "app.system.restartEngine"
-                : isRestarting ? "app.system.restarting" : "app.system.restart")}
+              {restartLabel}
             </Button>
           </div>
         ) : null}

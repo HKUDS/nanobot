@@ -51,11 +51,11 @@ describe("Settings system domains", () => {
       },
     });
     const sidebar = screen.getByRole("complementary");
-    const restart = within(sidebar).getByRole("button", { name: "Restart nanobot" });
+    const restart = within(sidebar).getByRole("button", { name: "Restart", exact: true });
     for (const section of ["Capabilities", "Models", "Advanced", "System"]) {
       fireEvent.click(within(sidebar).getByRole("button", { name: section, exact: true }));
       await waitFor(() => {
-        expect(screen.getAllByRole("button", { name: "Restart nanobot" })).toEqual([restart]);
+        expect(screen.getAllByRole("button", { name: "Restart", exact: true })).toEqual([restart]);
         expect(screen.getAllByText("Saved. Restart when ready.")).toHaveLength(1);
         expect(within(sidebar).getByText("Saved. Restart when ready.")).toBeVisible();
       });

@@ -25,6 +25,7 @@
     "system": {
       "section": "系统",
       "restartHint": "重启 nanobot 以应用运行时更改。",
+      "restartAction": "重启",
       "restart": "重启 nanobot",
       "restarting": "正在重启...",
       "restartEngine": "重启引擎",

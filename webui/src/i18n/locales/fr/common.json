@@ -25,6 +25,7 @@
     "system": {
       "section": "Système",
       "restartHint": "Redémarrez nanobot pour appliquer les changements d’exécution.",
+      "restartAction": "Redémarrer",
       "restart": "Redémarrer nanobot",
       "restarting": "Redémarrage...",
       "restartEngine": "Redémarrer le moteur",

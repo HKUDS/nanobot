@@ -25,6 +25,7 @@
     "system": {
       "section": "Hệ thống",
       "restartHint": "Khởi động lại nanobot để áp dụng thay đổi thời gian chạy.",
+      "restartAction": "Khởi động lại",
       "restart": "Khởi động lại nanobot",
       "restarting": "Đang khởi động lại...",
       "restartEngine": "Khởi động lại bộ máy",

@@ -25,6 +25,7 @@
     "system": {
       "section": "Sistem",
       "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
+      "restartAction": "Mulai ulang",
       "restart": "Mulai ulang nanobot",
       "restarting": "Memulai ulang...",
       "restartEngine": "Mulai ulang mesin",

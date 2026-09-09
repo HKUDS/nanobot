@@ -25,6 +25,7 @@
     "system": {
       "section": "系統",
       "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
+      "restartAction": "重新啟動",
       "restart": "重新啟動 nanobot",
       "restarting": "正在重新啟動…",
       "restartEngine": "重新啟動引擎",

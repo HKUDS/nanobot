@@ -25,6 +25,7 @@
     "system": {
       "section": "System",
       "restartHint": "Restart nanobot to apply runtime changes.",
+      "restartAction": "Restart",
       "restart": "Restart nanobot",
       "restarting": "Restarting...",
       "restartEngine": "Restart engine",
