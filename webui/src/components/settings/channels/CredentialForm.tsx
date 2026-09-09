@@ -200,7 +200,7 @@ export function CredentialForm({
                 value={values[field.key] ?? ""}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={cn(
-                  "h-9 rounded-control border-border/60 bg-muted/35 text-[13px]",
+                  "h-9 rounded-full border-border/60 bg-muted/35 text-[13px]",
                   showSecretToggle && "pr-9",
                 )}
               />

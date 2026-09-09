@@ -208,7 +208,7 @@ export function SkillsMarketplace({
             aria-label={t("settings.skills.marketplaceSearchLabel", {
               defaultValue: "Search skills",
             })}
-            className="h-11 rounded-control bg-settings-surface pl-9"
+            className="h-11 rounded-full bg-settings-surface pl-9"
           />
           {loading ? (
             <span

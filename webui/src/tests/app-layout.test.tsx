@@ -3266,6 +3266,19 @@ describe("App layout", () => {
   });
 
   it.each([
+    ["apps", "1", "Digit1", true],
+    ["skills", "2", "Digit2", true],
+    ["automations", "3", "Digit3", true],
+    ["settings", ",", "Comma", false],
+  ])("opens %s using its sidebar shortcut", async (route, key, code, shiftKey) => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key, code, shiftKey, ctrlKey: true });
+    await waitFor(() => expect(window.location.hash).toContain("#/" + route));
+  });
+
+  it.each([
     ["Command", { metaKey: true }],
     ["Control", { ctrlKey: true }],
   ])("starts a new chat from the %s keyboard shortcut", async (_label, modifier) => {
@@ -3314,34 +3327,35 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/new");
   });
 
-  it("exposes the new chat keyboard shortcut in the sidebar title", async () => {
+  it("exposes the new chat keyboard shortcut in the sidebar tooltip", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
-    expect(newChatButton).toHaveAttribute(
-      "title",
-      "New topic (Ctrl+Shift+O)",
-    );
+    expect(newChatButton).toHaveTextContent("");
+    await userEvent.setup().hover(newChatButton);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New topic");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent("Ctrl+Shift+O");
     expect(newChatButton).toHaveAttribute(
       "aria-keyshortcuts",
       "Meta+Shift+O Control+Shift+O",
     );
   });
 
-  it("uses macOS shortcut glyphs in the sidebar title", async () => {
+  it("uses macOS shortcut glyphs in the sidebar tooltip", async () => {
     setNavigatorPlatform("MacIntel");
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
-    expect(within(sidebar).getByRole("button", { name: "New topic" })).toHaveAttribute(
-      "title",
-      "New topic (⌘⇧O)",
-    );
+    await userEvent.setup().hover(within(sidebar).getByRole("button", { name: "New topic" }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New topic");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent("⌘⇧O");
   });
 
   it("keeps large sidebars light while search still covers every chat", async () => {

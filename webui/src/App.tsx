@@ -12,6 +12,7 @@ import { Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
+import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
@@ -1911,28 +1912,6 @@ function Shell({
     updateWorkbenchState,
   ]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const commandShiftO =
-        (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-      if (commandShiftO && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        onNewChat();
-        return;
-      }
-      const plainCommandK =
-        (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
-      if (!plainCommandK) return;
-      if (event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      onOpenSessionSearch();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onOpenSessionSearch]);
-
   const onSelectSearchResult = useCallback(
     (key: string) => {
       setSessionSearchOpen(false);
@@ -1972,6 +1951,19 @@ function Shell({
     navigate({ view: "skills", activeKey, settingsSection: "skills" });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
+
+  useEffect(() => {
+    const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
+      skills: onOpenSkills, automations: onOpenAutomations, settings: () => onOpenSettings() };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const action = matchSidebarShortcut(event);
+      if (!action) return;
+      event.preventDefault();
+      actions[action]();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {

@@ -166,7 +166,7 @@ export function AutomationsSettings({
                     "Search task, message, linked chat, or schedule",
                   )}
                   className={cn(
-                    "h-9 w-full rounded-control pl-9 text-[13px]",
+                    "h-9 w-full rounded-full pl-9 text-[13px]",
                     SETTINGS_SEARCH_INPUT_CLASS,
                   )}
                 />
