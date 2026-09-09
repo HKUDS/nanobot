@@ -6,12 +6,16 @@ import { cn } from "@/lib/utils";
 type Usage = NonNullable<SettingsPayload["usage"]>;
 const COLORS = ["bg-orange-500", "bg-amber-500", "bg-stone-500", "bg-orange-300", "bg-zinc-400", "bg-neutral-200 dark:bg-neutral-600"];
 
-export function TokenUsageModelTrend({ days, modelDays }: {
+export function TokenUsageModelTrend({ days, modelDays, models }: {
   days: { date: string; usage?: Usage["days"][number] }[];
   modelDays: NonNullable<Usage["model_days_30d"]>;
+  models?: Usage["providers_30d"];
 }) {
   const { t, i18n } = useTranslation();
   const number = new Intl.NumberFormat(i18n.language);
+  const percent = new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 1 });
+  const total = days.reduce((sum, day) => sum + (day.usage?.total_tokens ?? 0), 0);
+  const modelUsage = new Map((models ?? []).map(model => [JSON.stringify([model.provider, model.model]), model]));
   const compact = new Intl.NumberFormat(i18n.language, { notation: "compact", maximumFractionDigits: 1 });
   const dates = new Set(days.map(day => day.date));
   const totals = new Map<string, { label: string; total: number }>();
@@ -46,7 +50,7 @@ export function TokenUsageModelTrend({ days, modelDays }: {
       <div className="pointer-events-none absolute inset-y-0 left-0 right-0 flex flex-col justify-between pb-6" aria-hidden>
         {[peak, peak / 2, 0].map((value, index) => <div key={index} className="flex items-center gap-2"><span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{compact.format(value)}</span><span className="flex-1 border-t border-border/40" /></div>)}
       </div>
-      <div role="group" aria-label={title} className="relative grid h-36 grid-cols-[repeat(30,minmax(0,1fr))] gap-px">
+      <div role="group" aria-label={title} className="relative grid h-[clamp(144px,30vh,280px)] grid-cols-[repeat(30,minmax(0,1fr))] gap-px">
         <TooltipProvider delayDuration={120}>
           {columns.map(column => <Tooltip key={column.date}>
             <TooltipTrigger asChild>
@@ -71,8 +75,30 @@ export function TokenUsageModelTrend({ days, modelDays }: {
       </div>
       <div className="relative mt-2 flex justify-between text-[10px] tabular-nums text-muted-foreground"><span>{days[0].date.slice(5)}</span><span>{days[14].date.slice(5)}</span><span>{days[days.length - 1].date.slice(5)}</span></div>
     </div>
-    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-muted-foreground">
-      {labels.map((label, index) => (index < series.length || hasOther) && <span key={index} title={label} className="flex min-w-0 items-center gap-1.5"><span aria-hidden className={cn("size-2 shrink-0 rounded-sm", color(index))} /><span className="truncate">{label}</span></span>)}
-    </div>
+    <TooltipProvider delayDuration={120}>
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-muted-foreground sm:grid-cols-3">
+        {labels.map((label, index) => {
+          if (index === series.length && !hasOther) return null;
+          const model = index < series.length ? modelUsage.get(series[index][0]) : undefined;
+          const tokens = columns.reduce((sum, column) => sum + column.values[index], 0);
+          const rate = model?.cache_read_observed_input_tokens ? percent.format(model.cache_read_tokens / model.cache_read_observed_input_tokens) : "—";
+          const parts = [
+            [t("settings.usage.totalTokens"), `${number.format(tokens)} · ${percent.format(tokens / total)}`],
+            [t("settings.usage.cacheHitRate"), rate],
+          ];
+          return <Tooltip key={index}>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} aria-label={`${label}: ${parts.map(([name, value]) => `${name}: ${value}`).join(", ")}`} className="flex min-w-0 items-center gap-1.5 rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500">
+                <span aria-hidden className={cn("size-2 shrink-0 rounded-sm", color(index))} /><span className="truncate">{label}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[85vw] p-3">
+              <p className="mb-2 break-all text-xs font-medium">{label}</p>
+              <dl className="space-y-2">{parts.map(([name, value]) => <div key={name} className="flex justify-between gap-6 text-xs"><dt className="text-muted-foreground">{name}</dt><dd className="tabular-nums">{value}</dd></div>)}</dl>
+            </TooltipContent>
+          </Tooltip>;
+        })}
+      </div>
+    </TooltipProvider>
   </section>;
 }

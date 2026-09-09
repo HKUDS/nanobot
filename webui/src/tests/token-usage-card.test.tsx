@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
-import { TokenUsageModels } from "@/components/settings/TokenUsageModels";
 import { TokenUsageModelTrend } from "@/components/settings/TokenUsageModelTrend";
 import type { SettingsPayload } from "@/lib/types";
 
@@ -72,31 +71,6 @@ describe("Token usage card", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
-  it("ranks model usage without merging providers or hiding unattributed tokens", () => {
-    const model = (provider: string, tokens: number): NonNullable<Usage["providers_30d"]>[number] => ({
-      ...day("2026-09-09", tokens), provider, model: "shared-model", reported_tokens: tokens,
-      estimated_tokens: 0, successful_requests: 1, failed_requests: 0, reported_requests: 1,
-      estimated_requests: 0, generation_ms: 0, measured_output_tokens: 0, ttft_ms: 0,
-      timed_requests: 0, duration_ms: 0,
-    });
-    const view = render(<TokenUsageModels total={1000} models={[model("provider-a", 200), model("provider-b", 600), model("unused-provider", 0)]} />);
-    const rows = screen.getAllByRole("img");
-    expect(rows).toHaveLength(2);
-    expect(screen.queryByText("unused-provider")).not.toBeInTheDocument();
-    expect(rows[0]).toHaveAccessibleName(/shared-model: 600 tokens/);
-    expect(rows[1]).toHaveAccessibleName(/shared-model: 200 tokens/);
-    expect(screen.queryByText("provider-b")).not.toBeInTheDocument();
-    expect(screen.getByText("60%")).toBeInTheDocument();
-    expect(screen.getByText("Other / unattributed")).toBeInTheDocument();
-    expect(screen.getByText("200 · 20%")).toBeInTheDocument();
-    view.rerender(<TokenUsageModels total={2100} models={Array.from({ length: 6 }, (_, i) => model(`provider-${i}`, (i + 1) * 100))} />);
-    expect(screen.getAllByRole("img")).toHaveLength(5);
-    expect(screen.queryByText("provider-0")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getAllByRole("img")).toHaveLength(1);
-    expect(screen.getByRole("img")).toHaveAccessibleName(/shared-model: 100 tokens/);
-  });
-
   it("keeps the five leading model series and reconciles the rest to the daily total", () => {
     const days = Array.from({ length: 30 }, (_, index) => {
       const date = new Date("2026-09-09T00:00:00Z");
@@ -105,11 +79,18 @@ describe("Token usage card", () => {
       return { date: key, usage: day(key, index === 29 ? 2200 : 0) };
     });
     render(<TokenUsageModelTrend days={days}
+      models={[{ ...day("2026-09-09", 600), provider: "provider", model: "model-5",
+        cache_read_tokens: 120, cache_read_observed_input_tokens: 150,
+        reported_tokens: 600, estimated_tokens: 0, successful_requests: 1, failed_requests: 0,
+        reported_requests: 1, estimated_requests: 0, generation_ms: 0, measured_output_tokens: 0,
+        ttft_ms: 0, timed_requests: 0, duration_ms: 0 }]}
       modelDays={Array.from({ length: 6 }, (_, index) => ({ date: "2026-09-09", provider: "provider", model: `model-${index}`, total_tokens: (index + 1) * 100 }))} />);
     const column = screen.getAllByRole("img")[29];
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
     expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
     expect(screen.queryByText("model-0")).not.toBeInTheDocument();
+    const legend = screen.getByLabelText("model-5: Total tokens: 600 · 27.3%, Cache hit rate: 80%");
+    expect(legend).toHaveAttribute("tabindex", "0");
   });
 });
