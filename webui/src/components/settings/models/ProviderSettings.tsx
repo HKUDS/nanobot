@@ -789,11 +789,6 @@ export function ProvidersSettings({
               <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
                 {provider.label}
               </span>
-              {provider.api_base ? (
-                <span className="block truncate text-[12px] text-muted-foreground">
-                  {provider.api_base}
-                </span>
-              ) : null}
             </span>
           </span>
           <ChevronDown

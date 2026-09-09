@@ -529,8 +529,8 @@ describe("Settings models", () => {
     const codexRow = await screen.findByTestId("model-call-order-row-codex");
     expect(codexRow).toHaveTextContent("codex");
     expect(codexRow).not.toHaveTextContent("Codex");
-    expect(codexRow).toHaveTextContent("openai-codex/gpt-5.5");
-    expect(codexRow).toHaveTextContent("Disabled");
+    expect(codexRow).not.toHaveTextContent("openai-codex/gpt-5.5");
+    expect(codexRow).not.toHaveTextContent("Disabled");
     expect(codexRow).toHaveAttribute("draggable", "false");
     expect(screen.queryByRole("button", { name: "Add preset" })).not.toBeInTheDocument();
 
@@ -832,7 +832,7 @@ describe("Settings models", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    expect((await screen.findAllByText("MiniMax-M3")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("MiniMax-M3")).not.toBeInTheDocument();
     expect(screen.getAllByText("fast").length).toBeGreaterThan(0);
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(screen.queryByText("openai-codex/gpt-5.5")).not.toBeInTheDocument();
@@ -879,7 +879,7 @@ describe("Settings models", () => {
       }),
     });
 
-    expect((await screen.findAllByText("companyProxy/gpt-4o")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("companyProxy/gpt-4o")).not.toBeInTheDocument();
     expect(screen.getAllByText("Company Proxy").length).toBeGreaterThan(0);
     expect(screen.queryByText("Provider setup required")).not.toBeInTheDocument();
   });
@@ -897,7 +897,7 @@ describe("Settings models", () => {
       }),
     });
 
-    expect((await screen.findAllByText("companyProxy/gpt-4o")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("companyProxy/gpt-4o")).not.toBeInTheDocument();
     expect(screen.getByText("Provider setup required")).toBeInTheDocument();
     expect(
       screen.queryByText("Configure this provider before saving the preset."),

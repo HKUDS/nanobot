@@ -773,10 +773,6 @@ export function ModelsSettings({
                               <StatusPill tone="success">
                                 {tx("settings.models.primary", "Primary")}
                               </StatusPill>
-                            ) : !ordered ? (
-                              <StatusPill tone="neutral">
-                                {tx("settings.models.disabled", "Disabled")}
-                              </StatusPill>
                             ) : null}
                             {!presetConfigured ? (
                               <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
@@ -786,9 +782,6 @@ export function ModelsSettings({
                                 )}
                               </span>
                             ) : null}
-                          </span>
-                          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                            {preset?.model ?? name}
                           </span>
                         </span>
                         <ChevronRight
