@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { fetchSkills } from "@/lib/api";
-import { isSkillsPayload, SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
+import { isSkillsPayload, SKILLS_CHANGED_EVENT, SKILLS_REFRESH_EVENT } from "@/lib/skill-events";
 import type { SkillSummary } from "@/lib/types";
 
 export function useSkills(getToken: () => string): SkillSummary[] {
@@ -10,14 +10,20 @@ export function useSkills(getToken: () => string): SkillSummary[] {
   useEffect(() => {
     let cancelled = false;
     let payloadVersion = 0;
+    let refreshing = false;
     const refresh = () => {
+      if (cancelled || refreshing) return;
+      refreshing = true;
       const version = payloadVersion;
       fetchSkills(getToken())
         .then(({ skills: nextSkills }) => {
           if (!cancelled && version === payloadVersion) setSkills(nextSkills);
         })
         .catch(() => {
-          if (!cancelled && version === payloadVersion) setSkills([]);
+          // Keep the last known list usable during transient refresh failures.
+        })
+        .finally(() => {
+          refreshing = false;
         });
     };
     const onSkillsChanged = (event: Event) => {
@@ -30,9 +36,11 @@ export function useSkills(getToken: () => string): SkillSummary[] {
 
     refresh();
     window.addEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
+    window.addEventListener(SKILLS_REFRESH_EVENT, refresh);
     return () => {
       cancelled = true;
       window.removeEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
+      window.removeEventListener(SKILLS_REFRESH_EVENT, refresh);
     };
   }, [getToken]);
 

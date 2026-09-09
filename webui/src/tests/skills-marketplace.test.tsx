@@ -2,13 +2,14 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   searchMarketplaceSkills,
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
-import { SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
+import { requestSkillsRefresh, SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { useSkills } from "@/hooks/useSkills";
 
@@ -37,6 +38,101 @@ function marketplace(token: string) {
 }
 
 describe("useSkills", () => {
+  it("discovers skills added after page load when opening the $ menu, not on each keystroke", async () => {
+    const installed = {
+      name: "simple-pr-review",
+      description: "Review pull requests.",
+      source: "workspace",
+      enabled: true,
+      available: true,
+    };
+    vi.mocked(fetchSkills).mockReset().mockResolvedValueOnce({ skills: [] })
+      .mockResolvedValue({ skills: [installed] });
+    const getToken = () => "tok";
+    function Composer() {
+      const skills = useSkills(getToken);
+      return <ThreadComposer onSend={vi.fn()} skills={skills} />;
+    }
+    render(<Composer />);
+    await act(async () => {});
+    expect(fetchSkills).toHaveBeenCalledTimes(1);
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/", selectionStart: 1 } });
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    expect(fetchSkills).toHaveBeenCalledTimes(1);
+    fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
+    expect(await screen.findByRole("option", { name: /simple-pr-review/ })).toBeInTheDocument();
+    expect(fetchSkills).toHaveBeenCalledTimes(2);
+
+    fireEvent.change(input, { target: { value: "$simple", selectionStart: 7 } });
+    await act(async () => {});
+    expect(fetchSkills).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input).toHaveValue("$simple-pr-review ");
+
+    // A later open must also refresh removals without remounting the page.
+    vi.mocked(fetchSkills).mockResolvedValue({ skills: [] });
+    fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
+    await act(async () => {});
+    expect(fetchSkills).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+  });
+
+  it("coalesces in-flight refreshes and stops listening after unmount", async () => {
+    let resolveSkills!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
+    vi.mocked(fetchSkills).mockReset().mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSkills = resolve;
+      }),
+    );
+    const getToken = () => "tok";
+    const { result, unmount } = renderHook(() => useSkills(getToken));
+
+    act(() => {
+      requestSkillsRefresh();
+      requestSkillsRefresh();
+    });
+    expect(fetchSkills).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveSkills({ skills: [] });
+    });
+    expect(result.current).toEqual([]);
+
+    unmount();
+    requestSkillsRefresh();
+    expect(fetchSkills).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps existing skills on refresh failure and retries on the next open", async () => {
+    const installed = {
+      name: "simple-pr-review",
+      description: "Review pull requests.",
+      source: "workspace",
+      available: true,
+    };
+    vi.mocked(fetchSkills).mockReset()
+      .mockResolvedValueOnce({ skills: [installed] })
+      .mockRejectedValueOnce(new Error("Temporarily offline"))
+      .mockResolvedValueOnce({ skills: [] });
+    const getToken = () => "tok";
+    const { result } = renderHook(() => useSkills(getToken));
+    await act(async () => {});
+    expect(result.current).toEqual([installed]);
+
+    await act(async () => {
+      requestSkillsRefresh();
+    });
+    expect(fetchSkills).toHaveBeenCalledTimes(2);
+    expect(result.current).toEqual([installed]);
+
+    await act(async () => {
+      requestSkillsRefresh();
+    });
+    expect(fetchSkills).toHaveBeenCalledTimes(3);
+    expect(result.current).toEqual([]);
+  });
+
   it("does not let an older request overwrite a newer skill event", async () => {
     let resolveSkills!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
     vi.mocked(fetchSkills).mockReset().mockImplementationOnce(
