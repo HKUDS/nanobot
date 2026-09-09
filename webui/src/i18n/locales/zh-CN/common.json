@@ -128,8 +128,8 @@
           "help": "限制工具向会话发送消息的频率。"
         },
         "agents_defaults_unified_session": {
-          "label": "跨渠道共享会话",
-          "help": "单用户在不同渠道间共享一个会话。"
+          "label": "跨平台共享会话",
+          "help": "单用户在不同聊天平台间共享一个会话。"
         },
         "tools_exec_enable": {
           "label": "Shell 工具",
@@ -225,7 +225,7 @@
         },
         "gateway_host": {
           "label": "网关绑定地址",
-          "help": "网关配置；WebSocket/WebUI 的监听地址由渠道配置单独管理。"
+          "help": "网关配置；WebSocket/WebUI 的监听地址由聊天平台配置单独管理。"
         },
         "gateway_port": {
           "label": "网关端口",
@@ -271,7 +271,7 @@
         },
         "sessions": {
           "title": "会话",
-          "help": "设置跨渠道的会话共享。"
+          "help": "设置跨平台的会话共享。"
         },
         "tools": {
           "title": "内置工具",
@@ -352,7 +352,7 @@
       "image": "图片",
       "voice": "语音",
       "browser": "网络",
-      "channels": "渠道",
+      "channels": "聊天平台",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
       "runtime": "系统",
@@ -518,13 +518,13 @@
       "cliAppsFilter": "按应用、类别或能力搜索。",
       "localServiceAccess": "允许完全访问权限下的 shell 命令访问 localhost 服务。",
       "webuiDefaultAccess": "用于没有单独项目权限的 Web 聊天。",
-      "securityManagedControls": "网页抓取始终保护本机、内网和元数据服务。核心渠道安全仍由 config.json 管理。",
+      "securityManagedControls": "网页抓取始终保护本机、内网和元数据服务。聊天平台的安全设置仍由 config.json 管理。",
       "logs": "打开原生引擎日志文件夹。",
       "diagnostics": "导出一份用于支持排查的小型运行报告。",
       "localServiceAccessNative": "允许完全访问权限下的 shell 命令访问这台 Mac 上的服务。",
       "webuiDefaultAccessNative": "用于没有单独项目权限的原生聊天。",
       "contextWindow": "选择此模型配置的默认上下文预算。",
-      "transcription": "发送前先把麦克风输入转写到输入框。聊天渠道里的语音消息也使用同一套设置。",
+      "transcription": "发送前先把麦克风输入转写到输入框。聊天平台里的语音消息也使用同一套设置。",
       "transcriptionProvider": "使用「提供商」中对应提供商的凭据。",
       "transcriptionProviderStatus": "API 密钥仍保存在“提供商”配置中，不写入“语音转写”设置。",
       "transcriptionModel": "除非提供商需要自定义模型 ID，否则保持解析后的默认值即可。",
@@ -908,7 +908,7 @@
       "description": "将工具接入 nanobot，然后在对话中通过 @ 调用。",
       "cliLabel": "应用",
       "mcpLabel": "MCP",
-      "channelLabel": "渠道",
+      "channelLabel": "聊天平台",
       "featureLabel": "能力",
       "filterAll": "可用",
       "filterPlugins": "插件",
@@ -932,20 +932,20 @@
     },
     "channels": {
       "description": "把聊天应用、邮箱和 WebUI 连接到 nanobot。",
-      "caption": "{{enabled}} 个运行中 · 共 {{total}} 个渠道",
-      "searchPlaceholder": "搜索渠道",
-      "backToChannels": "所有渠道",
-      "catalog": "渠道",
-      "loading": "正在加载渠道...",
-      "empty": "没有匹配的渠道。",
-      "restartRequired": "重启 nanobot 以应用更新后的渠道支持。",
+      "caption": "{{enabled}} 个运行中 · 共 {{total}} 个平台",
+      "searchPlaceholder": "搜索聊天平台",
+      "backToChannels": "所有平台",
+      "catalog": "聊天平台",
+      "loading": "正在加载聊天平台...",
+      "empty": "没有匹配的聊天平台。",
+      "restartRequired": "重启 nanobot 以应用更新后的聊天平台支持。",
       "requires": "需要：{{requirements}}",
       "setUp": "设置",
       "setupGuide": "配置指南",
-      "setupSummary": "启用只会开启 nanobot 对该渠道的支持。请补充平台凭据，然后重启 nanobot。",
+      "setupSummary": "启用后，请填写此平台的连接信息，然后重启 nanobot。",
       "configKeys": "配置字段",
-      "enable": "启用渠道",
-      "disable": "禁用渠道",
+      "enable": "启用",
+      "disable": "停用",
       "needsConfig": "需要配置",
       "connect": "连接",
       "reconnect": "重新连接",
@@ -985,7 +985,7 @@
       "selectChannel": "查看 {{name}} 设置",
       "setupSteps": "后续步骤",
       "showSecret": "显示密钥",
-      "toggleChannel": "{{name}} 渠道",
+      "toggleChannel": "启用 {{name}}",
       "toggleInstance": "{{name}} 实例",
       "tryIt": "试一试",
       "validationFailed": "启用前请检查必需配置。",
@@ -1008,7 +1008,7 @@
       "installConfirmDescription": "将安装并启用 {{name}} 支持。是否继续？",
       "installConfirmAction": "安装并启用",
       "websocketRequired": "WebUI 必需",
-      "channelDisabled": "渠道已禁用",
+      "channelDisabled": "此平台已停用",
       "notEnabled": "未启用"
     },
     "automations": {
@@ -1538,7 +1538,7 @@
           },
           "status": {
             "title": "查看状态",
-            "description": "显示运行时、提供商和渠道状态。"
+            "description": "显示运行时、提供商和聊天平台状态。"
           },
           "model": {
             "title": "模型",
