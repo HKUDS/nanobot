@@ -81,7 +81,7 @@ export function OverviewSettings({
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section className="rounded-panel bg-settings-surface px-4 py-4 sm:px-5">
         <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
@@ -271,7 +271,7 @@ export function AppearanceSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
         <SettingsGroup>

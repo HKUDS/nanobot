@@ -131,7 +131,7 @@ export function WebSettings({
   useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         {enabled && !embedded ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
         <div hidden={!embedded && !enabled}>

@@ -773,7 +773,7 @@ export function ProvidersSettings({
         <DialogTrigger asChild>
         <button
           type="button"
-          className="settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors settings-hover"
+          className="settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon
@@ -1182,7 +1182,7 @@ export function ProvidersSettings({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors settings-hover"
+                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
                 >
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">

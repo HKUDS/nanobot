@@ -348,7 +348,7 @@ function SidebarActionButton({
         SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
         collapsed
           ? "w-9 justify-center gap-0 px-0"
-          : "w-full justify-start gap-2 px-3 text-[12.5px]",
+          : "w-full justify-start gap-2 px-3 text-[14px] leading-5",
         active
           ? "text-sidebar-accent-foreground"
           : "text-sidebar-foreground/85 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",

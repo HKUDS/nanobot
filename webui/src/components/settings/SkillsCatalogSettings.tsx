@@ -77,7 +77,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const disabledCount = skills.filter((skill) => skill.enabled === false).length;
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <SegmentedControl
         value={view}
         mode="tabs"

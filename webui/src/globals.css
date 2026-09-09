@@ -995,20 +995,19 @@
     --settings-gutter: 16px;
     --settings-margin: 16px;
     --settings-inset: 16px;
-    --settings-module-gap: 32px;
+    --settings-module-gap: 20px;
     container-type: inline-size;
     max-inline-size: 720px;
     padding-inline: var(--settings-margin);
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
-    margin-block-start: var(--settings-module-gap, 32px);
+    margin-block-start: var(--settings-module-gap, 20px);
   }
   .settings-section-title {
-    margin-block-end: 8px;
+    margin-block-end: 20px;
     padding-inline: var(--settings-inset, 16px);
     line-height: 20px;
   }
-  .settings-grid[data-settings-section="models"] .settings-list-row { min-block-size: 56px; }
   .settings-section-heading {
     display: flex;
     flex-wrap: wrap;
@@ -1018,7 +1017,7 @@
     padding-inline: var(--settings-inset, 16px);
   }
   .settings-section-heading > .settings-section-title { margin: 0; padding: 0; }
-  .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 8px; }
+  .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 20px; }
   .settings-row, .settings-footer {
     display: grid;
     grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));
@@ -1026,14 +1025,14 @@
     row-gap: 12px;
     align-items: center;
     padding: 12px var(--settings-inset, 16px);
-    min-block-size: 72px;
+    min-block-size: 60px;
   }
   .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
   .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
   .settings-control > * { max-inline-size: 100%; }
   .settings-control input, .settings-control textarea { max-inline-size: 100%; }
   .settings-control input[type="number"] { text-align: end; font-variant-numeric: tabular-nums; }
-  .settings-footer { min-block-size: 64px; }
+  .settings-footer { min-block-size: 60px; }
   .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
   .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
   .settings-footer-auto > :nth-child(2):empty { display: none; }
@@ -1057,7 +1056,7 @@
   .settings-disclosure[open] > summary { margin-block-end: 8px; }
 
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
-  .settings-list-row { min-block-size: 76px; border-radius: 12px; }
+  .settings-list-row { min-block-size: 60px; border-radius: 12px; }
   .sidebar-action-label:lang(zh) {
     display: inline-block;
     min-inline-size: var(--sidebar-label-width, 3em);

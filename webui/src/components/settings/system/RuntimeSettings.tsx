@@ -131,7 +131,7 @@ export function RuntimeSettings({
     }
   };
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       {isNativeHost ? (
         <section>
           <SettingsSectionTitle>{tx("settings.sections.nativeHost", "Native host")}</SettingsSectionTitle>

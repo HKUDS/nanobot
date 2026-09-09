@@ -99,7 +99,7 @@ export function ImageGenerationSettings({
   };
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         {!embedded ? <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle> : null}
         <SettingsGroup>

@@ -64,7 +64,7 @@ export function AdvancedSettings({
   useAutoSave(form, dirty, saving, onSave);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>
           {isNativeHostSurface

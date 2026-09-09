@@ -602,7 +602,7 @@ export function ModelsSettings({
   );
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>
           {tx("settings.models.presets", "Model presets")}
@@ -644,7 +644,7 @@ export function ModelsSettings({
             </div>
           ) : (
             <>
-              <div role="list" className="space-y-1">
+              <div role="list">
                 {presetRows.map(({ key, name, orderIndex, preset }) => {
                   const ordered = orderIndex >= 0;
                   const provider = preset
@@ -689,7 +689,7 @@ export function ModelsSettings({
                         dragStartY.current = event.clientY;
                         setDraggedOffset(0);
                         const wrapper = event.currentTarget.parentElement;
-                        setDraggedRowHeight((wrapper?.getBoundingClientRect().height ?? 56) + 4);
+                        setDraggedRowHeight(wrapper?.getBoundingClientRect().height || 60);
                       }}
                       onPointerMove={(event) => {
                         if (!event.buttons) { pendingDrag.current = null; return; }

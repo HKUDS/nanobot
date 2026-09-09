@@ -81,7 +81,7 @@ export function ChannelCatalogRow({
   const busy = actionKey === `enable:${feature.name}` || actionKey === `disable:${feature.name}`;
 
   return (
-    <div className="settings-list-row flex items-center gap-3 py-3 transition-colors settings-hover">
+    <div className="settings-list-row flex items-center gap-3 py-2.5 transition-colors settings-hover">
     <button
       type="button"
       aria-label={t("settings.channels.selectChannel", {
