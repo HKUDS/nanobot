@@ -50,7 +50,9 @@ describe("Settings system domains", () => {
     const dialog = screen.getByRole("dialog", { name: "Restart before leaving?" });
     expect(leave).not.toHaveBeenCalled();
     expect(within(dialog).getByText("Your changes are saved. Restart to apply them.")).toBeVisible();
-    expect(within(dialog).queryByText("Continue settings")).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Restart later", "Restart",
+    ]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Restart later" }));
     expect(leave).toHaveBeenCalledTimes(1);
     expect(requestMutationMock).not.toHaveBeenCalled();

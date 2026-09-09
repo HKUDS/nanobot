@@ -616,7 +616,7 @@ export function SettingsPage({
     <DialogLayoutContext.Provider value={dialogLayoutAnchor}>
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row">
       <Dialog open={pendingExit !== null} onOpenChange={(open) => { if (!open) setPendingExit(null); }}>
-        <DialogContent>
+        <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>{t("settings.exit.title")}</DialogTitle>
             <DialogDescription>{t("settings.exit.description")}</DialogDescription>
