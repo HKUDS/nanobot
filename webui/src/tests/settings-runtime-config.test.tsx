@@ -73,6 +73,18 @@ describe("Runtime configuration settings", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith("settings.runtime_config.update", { values: { "agents.defaults.long_term_memory_enabled": false } }, 20_000));
   });
 
+  it("explains unavailable memory settings instead of rendering a blank page", () => {
+    renderSettingsView({ initialSection: "memory", initialSettings: settingsPayload() });
+    expect(screen.getByRole("status")).toHaveTextContent("Update the gateway to edit these settings.");
+  });
+
+  it("keeps the Dream editor collapsed until requested", () => {
+    renderSettingsView({ initialSection: "memory", initialSettings: runtimeSettings() });
+    expect(document.getElementById("dream-prompt")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Dream prompt", { selector: "summary" }));
+    expect(screen.getByRole("textbox", { name: "Memory consolidation instructions" })).toBeVisible();
+  });
+
   it("groups all memory controls in a dedicated settings page", () => {
     renderSettingsView({ initialSection: "runtime", initialSettings: runtimeSettings() });
     expect(document.getElementById("runtime-agents.defaults.bot_name")).not.toBeInTheDocument();
@@ -90,6 +102,7 @@ describe("Runtime configuration settings", () => {
     const payload = runtimeSettings();
     requestMutationMock.mockResolvedValue({ ...payload.dream_prompt, custom: true, content: "Custom Dream instructions" });
     renderSettingsView({ initialSection: "memory", initialSettings: payload });
+    fireEvent.click(screen.getByText("Dream prompt", { selector: "summary" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Memory consolidation instructions" }), { target: { value: "Custom Dream instructions" } });
     const section = within(screen.getByRole("region", { name: "Dream prompt" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.dream_prompt.update", { content: "Custom Dream instructions" }, 20_000));

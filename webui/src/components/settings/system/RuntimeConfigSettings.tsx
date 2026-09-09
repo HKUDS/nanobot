@@ -127,7 +127,10 @@ export function RuntimeConfigSettings({
 }) {
   const { t } = useTranslation();
   const tr = (key: string) => t(`settings.runtimeConfig.${key}`);
-  if (!settings.runtime_config) return <>{children}</>;
+  if (!settings.runtime_config) return <div className="settings-stack">
+    <p role="status" className="settings-editor text-[13px] leading-5 text-muted-foreground">{tr("unavailable")}</p>
+    {children}
+  </div>;
   const groups = RUNTIME_CONFIG_GROUPS.filter((group) => group.page === page);
   return (
     <div className="settings-stack">
@@ -208,8 +211,8 @@ export function RuntimeConfigSettings({
         return group.id === "maintenance" ? (
           <div key={group.id} className="settings-stack">
           {children}
-          <details className="group">
-            <summary className="cursor-pointer rounded-full px-1 text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <details className="settings-disclosure">
+            <summary>
               {tr("advancedOptions")}
             </summary>
             <div className="mt-4">{section}</div>

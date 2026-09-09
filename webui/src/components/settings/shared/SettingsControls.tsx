@@ -282,7 +282,7 @@ export function RestartSettingsFooter({
   if (autoSave && !statusMessage && !pendingRestart) return null;
 
   return (
-    <div className="settings-footer">
+    <div className={cn("settings-footer", autoSave && "settings-footer-auto")}>
       <div className="min-w-0 text-[13px] leading-5 text-muted-foreground">
         <SettingsStatusMessage tone={statusTone}>{statusMessage}</SettingsStatusMessage>
       </div>

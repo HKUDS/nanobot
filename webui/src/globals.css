@@ -1014,6 +1014,28 @@
   .settings-control input[type="number"] { text-align: end; font-variant-numeric: tabular-nums; }
   .settings-control button[aria-haspopup="menu"] { inline-size: 100%; }
   .settings-footer { min-block-size: 64px; }
+  .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
+  .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
+  .settings-footer-auto > :nth-child(2):empty { display: none; }
+  .settings-row:has(> .settings-control > [role="switch"]) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 24px;
+  }
+  .settings-row:has(> .settings-control > [role="switch"]) > :first-child { grid-column: 1; }
+  .settings-row:has(> .settings-control > [role="switch"]) > :nth-child(2) { grid-column: 2; }
+  .settings-disclosure > summary {
+    cursor: pointer;
+    padding: 12px var(--settings-inset, 16px);
+    border-radius: var(--radius-control, 12px);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    color: hsl(var(--muted-foreground));
+  }
+  .settings-disclosure > summary:hover { color: hsl(var(--foreground)); }
+  .settings-disclosure > summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+  .settings-disclosure[open] > summary { margin-block-end: 8px; }
+
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {
     .settings-grid { --settings-margin: 32px; }
@@ -1028,6 +1050,7 @@
     .settings-grid .settings-footer > :first-child { grid-column: 1 / 8; }
     .settings-grid .settings-row > :nth-child(2),
     .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
+    .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
   }
   @media (min-width: 768px) {
     .settings-grid { --settings-inset: 24px; }

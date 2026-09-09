@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { SettingsGroup, SettingsSectionTitle, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
+import { SettingsGroup, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
 import type { DreamPromptSettings as DreamPromptPayload, SettingsPayload } from "@/lib/types";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import { updateDreamPrompt } from "@/lib/api";
@@ -42,7 +42,8 @@ export function DreamPromptSettings({ state }: { state: ReturnType<typeof useDre
   if (!state.data) return null;
   const invalid = !state.content.trim() || state.content.length > 32000;
   return <section aria-label={tr("title")}>
-    <SettingsSectionTitle>{tr("title")}</SettingsSectionTitle>
+    <details className="settings-disclosure">
+      <summary>{tr("title")}</summary>
     <SettingsGroup>
       <div className="settings-editor space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -52,7 +53,10 @@ export function DreamPromptSettings({ state }: { state: ReturnType<typeof useDre
             onClick={() => state.change(null)}>{tr("restore")}</Button>
         </div>
         <p id="dream-prompt-help" className="text-[12px] leading-5 text-muted-foreground">{tr("help")}</p>
-        <p className="break-all text-[12px] text-muted-foreground">{tr("workspace")}: {state.data.workspace}</p>
+        <details className="text-[12px] text-muted-foreground">
+          <summary className="cursor-pointer">{tr("workspace")}</summary>
+          <p className="mt-2 break-all">{state.data.workspace}</p>
+        </details>
         <Textarea id="dream-prompt" value={state.content} rows={14}
           aria-describedby="dream-prompt-help dream-prompt-status" aria-invalid={invalid || !!state.error || undefined}
           disabled={state.saving || !state.data.editable} spellCheck={false}
@@ -67,5 +71,6 @@ export function DreamPromptSettings({ state }: { state: ReturnType<typeof useDre
         disabled={invalid || !state.data.editable} message={state.saved ? tr("saved") : undefined}
         onSave={() => void state.save()} onReset={() => state.change(undefined)} />
     </SettingsGroup>
+    </details>
   </section>;
 }
