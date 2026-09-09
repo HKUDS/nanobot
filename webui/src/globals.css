@@ -998,6 +998,16 @@
     padding-inline: var(--settings-inset, 16px);
     line-height: 20px;
   }
+  .settings-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 24px;
+    padding-inline: var(--settings-inset, 16px);
+  }
+  .settings-section-heading > .settings-section-title { margin: 0; padding: 0; }
+  .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 8px; }
   .settings-row, .settings-footer {
     display: grid;
     grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));

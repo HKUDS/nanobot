@@ -198,7 +198,7 @@ export function RuntimeConfigSettings({
                             ) : (
                               <Input {...common} type={field.kind === "number" ? "number" : "text"}
                                 min={field.min} max={field.max} step={field.path === "api.timeout" ? "any" : 1}
-                                value={String(current)} className="h-8 rounded-full text-[13px]" autoComplete="off"
+                                value={String(current)} className="h-9 rounded-full text-[13px]" autoComplete="off"
                                 onChange={(event) => state.change(field, event.target.value)} />
                             )}
                           </div>

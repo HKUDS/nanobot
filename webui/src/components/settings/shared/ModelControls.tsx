@@ -117,7 +117,7 @@ export function ProviderPicker({
           variant="outline"
           disabled={disabled}
           className={cn(
-            "h-8 w-[210px] max-w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "h-9 w-[210px] max-w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
             "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
           )}

@@ -165,7 +165,7 @@ export function SettingsSidebar({
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
-                    : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
+                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
                 )}
               >
                 <Icon className="h-[1em] w-[1em] shrink-0" strokeWidth={2} aria-hidden />

@@ -138,7 +138,7 @@ export function TranscriptionSettings({
           <Input
             value={form.model}
             onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
-            className="h-8 w-[min(300px,70vw)] rounded-full text-[13px]"
+            className="h-9 w-[min(300px,70vw)] rounded-full text-[13px]"
           />
         </SettingsRow>
         <SettingsRow
@@ -149,7 +149,7 @@ export function TranscriptionSettings({
             value={form.language}
             onChange={(event) => onChangeForm((prev) => ({ ...prev, language: event.target.value }))}
             placeholder={tx("settings.voice.languageAuto", "Auto")}
-            className="h-8 w-[min(180px,60vw)] rounded-full text-[13px]"
+            className="h-9 w-[min(180px,60vw)] rounded-full text-[13px]"
           />
         </SettingsRow>
         <SettingsAdvancedOptions>

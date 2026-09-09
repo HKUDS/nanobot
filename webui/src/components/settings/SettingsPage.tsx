@@ -259,7 +259,7 @@ export function SettingsPage({
         const busy = isRestarting || hostEngineApplying;
         return (
           <section className="settings-stack">
-            <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 [&_.settings-section-title]:m-0 [&_.settings-section-title]:p-0">
+            <div className="settings-section-heading">
               <SettingsSectionTitle>{t("settings.nav.capabilities")}</SettingsSectionTitle>
               {!showSidebar && settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
                 onRestart={restartViaSettingsSurface} isRestarting={busy} /> : null}
@@ -288,7 +288,7 @@ export function SettingsPage({
               enabled={state.value("agents.defaults.dream.enabled") === true}
               disabled={busy || state.saving === "memory" || !settings.runtime_config} error={state.errors.memory}
               onChange={(enabled) => toggleRuntime("agents.defaults.dream.enabled", enabled)} />
-            {!settings.runtime_config ? <p className="px-6 text-[13px] text-muted-foreground">{t("settings.runtimeConfig.unavailable")}</p> : null}
+            {!settings.runtime_config ? <p className="settings-list-inset text-[13px] text-muted-foreground">{t("settings.runtimeConfig.unavailable")}</p> : null}
           </section>
         );
       }
