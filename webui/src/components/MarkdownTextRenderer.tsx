@@ -287,6 +287,9 @@ const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
 ];
 const rehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [rehypeKatex];
 
+// Remend mistakes math comparisons like `j<i` for incomplete HTML and truncates
+// the remaining text. HTML is handled by remarkSafeHtmlSubset, not raw rendering.
+const REMEND_OPTIONS = { htmlTags: false } as const;
 const DIRECT_LINKS = { enabled: false } as const;
 const SAFE_MARKDOWN_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
 
@@ -797,6 +800,7 @@ export default function MarkdownTextRenderer({
     <Streamdown
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
+      remend={REMEND_OPTIONS}
       isAnimating={false}
       animated={false}
       linkSafety={DIRECT_LINKS}
