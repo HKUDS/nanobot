@@ -316,7 +316,11 @@ function writeShellRoute(route: ShellRoute, replace = false): void {
     );
     return;
   }
-  window.location.hash = nextHash;
+  window.history.pushState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${nextHash}`,
+  );
 }
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
@@ -1135,7 +1139,11 @@ function Shell({
       }
     };
     window.addEventListener("hashchange", applyRoute);
-    return () => window.removeEventListener("hashchange", applyRoute);
+    window.addEventListener("popstate", applyRoute);
+    return () => {
+      window.removeEventListener("hashchange", applyRoute);
+      window.removeEventListener("popstate", applyRoute);
+    };
   }, []);
 
   useEffect(() => {
