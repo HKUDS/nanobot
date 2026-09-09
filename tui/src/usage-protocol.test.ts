@@ -194,6 +194,51 @@ describe("fetchSessionUsage", () => {
     ])
   })
 
+  test("does not issue a request when already aborted", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchMock = mockResponses()
+    const reauthenticate = mock(async () => ({ apiUrl, apiToken: "fresh" }))
+    await expect(fetchSessionUsage(apiUrl, apiToken, chatId, reauthenticate, controller.signal))
+      .rejects.toHaveProperty("name", "AbortError")
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(reauthenticate).not.toHaveBeenCalled()
+  })
+
+  test("preserves the abort signal through authenticated retry", async () => {
+    const controller = new AbortController()
+    const fetchMock = mockResponses(new Response(null, { status: 401 }), thread([]))
+    const reauthenticate = mock(async () => ({ apiUrl, apiToken: "fresh" }))
+    expect(await fetchSessionUsage(apiUrl, apiToken, chatId, reauthenticate, controller.signal))
+      .toEqual({ context: null, rounds: [] })
+    expect(fetchMock.mock.calls.map(([, init]) => init?.signal))
+      .toEqual([controller.signal, controller.signal])
+  })
+
+  test("does not reauthenticate a request cancelled before its 401 arrives", async () => {
+    const controller = new AbortController()
+    const fetchMock = mockResponses(new Response(null, { status: 401 }))
+    const reauthenticate = mock(async () => ({ apiUrl, apiToken: "fresh" }))
+    const result = fetchSessionUsage(apiUrl, apiToken, chatId, reauthenticate, controller.signal)
+    controller.abort()
+    await expect(result).rejects.toHaveProperty("name", "AbortError")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(reauthenticate).not.toHaveBeenCalled()
+  })
+
+  test("does not retry when cancelled during shared reauthentication", async () => {
+    const controller = new AbortController()
+    const fetchMock = mockResponses(new Response(null, { status: 401 }))
+    const reauthenticate = mock(async () => {
+      controller.abort()
+      return { apiUrl, apiToken: "fresh" }
+    })
+    await expect(fetchSessionUsage(apiUrl, apiToken, chatId, reauthenticate, controller.signal))
+      .rejects.toHaveProperty("name", "AbortError")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(reauthenticate).toHaveBeenCalledTimes(1)
+  })
+
   test("rejects 401 without reauthentication and stops after one rejected refresh", async () => {
     const fetchMock = mockResponses(...Array.from({ length: 3 }, () =>
       new Response("unauthorized", { status: 401 })))

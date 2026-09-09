@@ -108,6 +108,7 @@ export class UsagePanel {
   }
 
   private render(): void {
+    if (!this.visible) return
     const { theme, width } = this
     const compact = this.height < 20
     const tiny = this.height < 14

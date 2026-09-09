@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { RGBA } from "@opentui/core"
+import { RGBA, type TextRenderable } from "@opentui/core"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
 import { UsagePanel, type UsagePanelTheme } from "./usage-panel"
@@ -176,6 +176,31 @@ describe("UsagePanel", () => {
     expect(frame).toContain("100%")
     expect(frame).toContain("In 2,000 · Out ?")
     expect(frame).toContain("Cache 100%")
+  })
+
+  test("does not rebuild hidden content and uses the latest dimensions and theme when reopened", async () => {
+    setup = await createTestRenderer({ width: 80, height: 30, screenMode: "alternate-screen" })
+    const panel = new UsagePanel(setup.renderer, theme)
+    setup.renderer.root.add(panel.root)
+    const body = panel.root.getChildren()[0] as TextRenderable
+    const empty = body.content
+    panel.resize(80, 30)
+    panel.setTheme(theme)
+    expect(body.content).toBe(empty)
+    panel.show(snapshot)
+    const content = body.content
+    panel.hide()
+    setup.resize(56, 18)
+    panel.resize(56, 18)
+    panel.setTheme({ ...theme, text: "#18181B", accent: "#B94D0B", cached: "#0F766E" })
+    expect(body.content).toBe(content)
+    panel.show(snapshot)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Context 9k / 262k")
+    expect(panel.root.height).toBeLessThanOrEqual(6)
+    const bars = setup.captureSpans().lines.flatMap((line) => line.spans)
+      .filter((span) => /[▁▂▃▄▅▆▇█]/u.test(span.text))
+    expect(bars.some((span) => span.fg.equals(RGBA.fromHex("#0F766E")))).toBe(true)
   })
 
   test("collapses vertically in short terminals and retains data across resize and theme changes", async () => {

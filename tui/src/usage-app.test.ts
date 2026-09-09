@@ -40,7 +40,7 @@ describe("TUI /usage", () => {
     globalThis.fetch = originalFetch
   })
 
-  async function mount(history: () => Promise<Response> = async () => Response.json(page())) {
+  async function mount(history: (init?: RequestInit) => Promise<Response> = async () => Response.json(page())) {
     const sent: string[] = []
     const client = {
       activeChatId: "chat", connect() {}, close() {},
@@ -50,9 +50,9 @@ describe("TUI /usage", () => {
       setWorkspaceScope() {},
       async updateRecovery(): Promise<RecoveryState> { return { status: "recovered", recovery_id: "r" } },
     }
-    globalThis.fetch = (async (input: string | URL | Request) => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
-      if (url.includes("/webui-thread")) return history()
+      if (url.includes("/webui-thread")) return history(init)
       return Response.json({ commands: [], sessions: [], skills: [], candidates: [] })
     }) as typeof fetch
     setup = await createTestRenderer({ width: 80, height: 30, screenMode: "alternate-screen", consoleMode: "disabled" })
@@ -142,6 +142,102 @@ describe("TUI /usage", () => {
     expect(frame).toContain("Round 2/2 · In 12,000 · Out 200")
     expect(frame).not.toContain("Round 4/4")
     expect(sent).toEqual([])
+  })
+
+  test("coalesces a burst into one trailing request without displaying a stale snapshot", async () => {
+    const pending: Array<(response: Response) => void> = []
+    const { app, ui } = await mount(() => new Promise((resolve) => pending.push(resolve)))
+    await open(ui)
+    for (let index = 0; index < 10; index++) {
+      app.accept({ event: "turn_end", chat_id: "chat", turn_id: `turn-${index}` })
+    }
+    app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "c", phase: "succeeded" })
+    expect(pending.length).toBe(1)
+    pending[0]!(Response.json(page()))
+    await waitUntil(() => pending.length === 2)
+    await setup!.flush()
+    expect(setup!.captureCharFrame()).toContain("Loading usage")
+    pending[1]!(Response.json(page(12000)))
+    await setup!.flush()
+    expect(setup!.captureCharFrame()).toContain("In 12,000")
+    expect(pending.length).toBe(2)
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "later" })
+    expect(pending.length).toBe(3)
+    pending[2]!(Response.json(page(15000)))
+    await setup!.flush()
+    expect(setup!.captureCharFrame()).toContain("In 15,000")
+  })
+
+  test("retries a queued refresh after failure and stays idle while hidden or streaming", async () => {
+    const pending: Array<(response: Response) => void> = []
+    const { app, ui } = await mount(() => new Promise((resolve) => pending.push(resolve)))
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "hidden" })
+    expect(pending.length).toBe(0)
+    await open(ui)
+    for (let index = 0; index < 10; index++) {
+      app.accept({ event: "delta", chat_id: "chat", turn_id: "active", text: "token " })
+    }
+    app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "c", phase: "started" })
+    expect(pending.length).toBe(1)
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "active" })
+    pending[0]!(new Response(null, { status: 503 }))
+    await waitUntil(() => pending.length === 2)
+    pending[1]!(Response.json(page(12000)))
+    await setup!.flush()
+    expect(setup!.captureCharFrame()).toContain("In 12,000")
+    await close(ui)
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "hidden-again" })
+    app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "c", phase: "succeeded" })
+    expect(pending.length).toBe(2)
+  })
+
+  test("aborts dismissed requests and drops queued refreshes without disrupting a reopened panel", async () => {
+    const pending: Array<{ signal: AbortSignal | null | undefined; finish: (response: Response) => void }> = []
+    const { app, ui } = await mount((init) => new Promise((finish) => pending.push({ signal: init?.signal, finish })))
+    await open(ui)
+    expect(pending[0]!.signal?.aborted).toBe(false)
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "queued" })
+    await close(ui)
+    expect(pending[0]!.signal?.aborted).toBe(true)
+    await open(ui)
+    expect(pending.length).toBe(2)
+    pending[0]!.finish(Response.json(page()))
+    await setup!.flush()
+    expect(setup!.captureCharFrame()).toContain("Loading usage")
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "queued-new" })
+    expect(pending.length).toBe(2)
+    pending[1]!.finish(Response.json(page(12000)))
+    await waitUntil(() => pending.length === 3)
+    pending[2]!.finish(Response.json(page(15000)))
+    await setup!.flush()
+    expect(setup!.captureCharFrame()).toContain("In 15,000")
+    expect(pending.length).toBe(3)
+  })
+
+  test.each(["typing", "attach", "destroy"])("aborts usage and queued refreshes on %s", async (action) => {
+    let signal: AbortSignal | null | undefined
+    let requests = 0
+    const { app, ui, client } = await mount((init) => {
+      requests++
+      // Session hydration is independent of the usage request.
+      if (requests > 1) return Promise.resolve(Response.json({ messages: [] }))
+      signal = init?.signal
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal!.reason), { once: true })
+      })
+    })
+    await open(ui)
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "queued" })
+    if (action === "typing") await setup!.mockInput.typeText("hello")
+    else if (action === "attach") {
+      client.attach("other-chat")
+      app.accept({ event: "attached", chat_id: "other-chat" })
+      await waitUntil(() => ui.ready)
+    } else setup!.renderer.destroy()
+    await Bun.sleep(20)
+    expect(signal?.aborted).toBe(true)
+    expect(requests).toBe(action === "attach" ? 2 : 1)
+    if (action !== "destroy") expect(ui.usagePanel.visible).toBe(false)
   })
 
   test("ignores an in-flight response after Escape and a newer request supersedes it", async () => {

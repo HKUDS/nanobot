@@ -492,7 +492,8 @@ export class NanobotTui {
   private readonly runtimeControls: RuntimeControls
   private readonly contextPanel: ContextPanel
   private readonly usagePanel: UsagePanel
-  private usageRequestId = 0
+  private usageRequest: AbortController | null = null
+  private usageRefreshPending = false
   private readonly diffViewer: DiffViewer
   private readonly queuePreview: QueuePreview
   private readonly recoveryNotice: RecoveryNotice
@@ -1091,8 +1092,7 @@ export class NanobotTui {
     if (event.event === "attached") {
       const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
       this.currentChatId = event.chat_id
-      this.usagePanel.hide()
-      this.usageRequestId += 1
+      this.closeUsage()
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
         this.applyModelPreset(event.model_preset)
@@ -1728,7 +1728,7 @@ export class NanobotTui {
     }
     if (this.usagePanel.visible && !key.ctrl && !key.meta) {
       if (key.name === "escape") {
-        this.usagePanel.hide()
+        this.closeUsage()
         if (this.activeTurn) this.renderActiveStatus()
         else this.status.content = this.readyStatus()
         this.updateMeta()
@@ -2259,7 +2259,7 @@ export class NanobotTui {
     if (clearedUnsent) this.unsentSubmit = false
     this.runtimeControls.hide()
     if (this.contextPanel.visible && value) this.contextPanel.hide()
-    if (this.usagePanel.visible && value) this.usagePanel.hide()
+    if (this.usagePanel.visible && value) this.closeUsage()
     this.syncComposerPlaceholder()
     if (this.sessionMenu.visible) this.syncSessionMenu()
     else if (this.branchMenu.visible) this.syncBranchMenu()
@@ -2389,7 +2389,7 @@ export class NanobotTui {
     this.skillMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
-    this.usagePanel.hide()
+    this.closeUsage()
     this.activeMentionQuery = null
     this.activeSkillQuery = null
   }
@@ -2446,7 +2446,7 @@ export class NanobotTui {
   }
 
   private async openBranch(): Promise<void> {
-    this.usagePanel.hide()
+    this.closeUsage()
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2517,7 +2517,7 @@ export class NanobotTui {
   }
 
   private async openSessions(): Promise<void> {
-    this.usagePanel.hide()
+    this.closeUsage()
     this.commandMenu.hide()
     this.dismissRuntimeControls()
     this.mentionMenu.hide()
@@ -2602,7 +2602,7 @@ export class NanobotTui {
   }
 
   private startNewChat(): void {
-    this.usagePanel.hide()
+    this.closeUsage()
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2780,28 +2780,52 @@ export class NanobotTui {
     void this.refreshUsage()
   }
 
+  private closeUsage(): void {
+    this.usagePanel.hide()
+    this.usageRequest?.abort()
+    this.usageRequest = null
+    this.usageRefreshPending = false
+  }
+
   private async refreshUsage(): Promise<void> {
-    const requestId = ++this.usageRequestId
+    if (this.quitting || !this.usagePanel.visible) return
+    if (this.usageRequest) {
+      // Events during a fetch need one later snapshot, not parallel thread replays.
+      this.usageRefreshPending = true
+      return
+    }
+    const request = new AbortController()
+    this.usageRequest = request
     const chatId = this.client.activeChatId
     const current = () => !this.quitting && this.usagePanel.visible
-      && requestId === this.usageRequestId && chatId === this.client.activeChatId
+      && request === this.usageRequest && chatId === this.client.activeChatId
     try {
       const snapshot = await fetchSessionUsage(
         this.options.apiUrl,
         this.options.apiToken,
         chatId,
         this.apiReauthenticator,
+        request.signal,
       )
-      if (!current()) return
+      if (!current() || this.usageRefreshPending) return
       this.usagePanel.show(snapshot)
     } catch {
-      if (!current()) return
+      if (!current() || this.usageRefreshPending) return
       this.usagePanel.showMessage("Usage unavailable · reopen /usage to retry")
+    } finally {
+      // A dismissed request must not clear a reopened panel's request or queued refresh.
+      if (request === this.usageRequest) {
+        this.usageRequest = null
+        if (this.usageRefreshPending) {
+          this.usageRefreshPending = false
+          void this.refreshUsage()
+        }
+      }
     }
   }
 
   private async openContext(): Promise<void> {
-    this.usagePanel.hide()
+    this.closeUsage()
     this.commandMenu.hide()
     this.hideSessionMenu()
     this.mentionMenu.hide()
@@ -2875,7 +2899,7 @@ export class NanobotTui {
   }
 
   private openDiff(): void {
-    this.usagePanel.hide()
+    this.closeUsage()
     this.commandMenu.hide()
     this.hideSessionMenu()
     this.mentionMenu.hide()
@@ -2953,6 +2977,7 @@ export class NanobotTui {
 
   private handleDestroy = (): void => {
     this.quitting = true
+    this.usageRequest?.abort()
     this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.stopSessionRefresh()
