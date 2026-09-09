@@ -29,6 +29,7 @@ export function SettingsFeature({
   error?: string;
   children?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(initialOpen && enabled);
   const section = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -49,6 +50,12 @@ export function SettingsFeature({
           </button>
           </DialogTrigger>
         ) : title}>
+          {children ? <DialogTrigger asChild>
+            <button type="button"
+              className="mr-3 shrink-0 rounded-lg px-2 py-1 text-[13px] leading-5 text-muted-foreground settings-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {t("settings.configure")}
+            </button>
+          </DialogTrigger> : null}
           <ToggleButton checked={enabled} disabled={disabled} ariaLabel={title} label={title}
             onChange={(next) => { setOpen(next); onChange(next); }} />
         </SettingsRow>

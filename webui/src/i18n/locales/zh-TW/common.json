@@ -81,6 +81,7 @@
     }
   },
   "settings": {
+    "configure": "設定…",
     "exit": {
       "title": "離開前重新啟動？",
       "description": "變更已儲存，重新啟動後生效。",

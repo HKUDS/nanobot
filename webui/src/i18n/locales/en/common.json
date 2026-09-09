@@ -81,6 +81,7 @@
     }
   },
   "settings": {
+    "configure": "Configure…",
     "exit": {
       "title": "Restart before leaving?",
       "description": "Your changes are saved. Restart to apply them.",

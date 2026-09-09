@@ -81,6 +81,7 @@
     }
   },
   "settings": {
+    "configure": "Configurer…",
     "exit": {
       "title": "Redémarrer avant de quitter ?",
       "description": "Vos modifications sont enregistrées. Redémarrez pour les appliquer.",

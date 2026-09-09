@@ -81,6 +81,7 @@
     }
   },
   "settings": {
+    "configure": "Configurar…",
     "exit": {
       "title": "Reiniciar antes de sair?",
       "description": "As alterações foram salvas. Reinicie para aplicá-las.",

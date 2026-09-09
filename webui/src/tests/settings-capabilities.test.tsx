@@ -16,7 +16,7 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
     for (const name of ["Image generation", "Transcription", "Web access"]) {
       expect(screen.getByRole("switch", { name })).not.toBeChecked();
-      fireEvent.click(screen.getByRole("button", { name, exact: true }));
+      fireEvent.click(within(screen.getByRole("region", { name })).getByRole("button", { name: "Configure…" }));
       const dialog = screen.getByRole("dialog", { name });
       expect(within(dialog).getAllByRole("combobox").length).toBeGreaterThan(0);
       fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));

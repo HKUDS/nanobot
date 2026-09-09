@@ -81,6 +81,7 @@
     }
   },
   "settings": {
+    "configure": "Konfigurasi…",
     "exit": {
       "title": "Mulai ulang sebelum keluar?",
       "description": "Perubahan sudah disimpan. Mulai ulang untuk menerapkannya.",
