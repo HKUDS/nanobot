@@ -301,7 +301,7 @@ async def maybe_generate_webui_title_after_turn(
     provider: LLMProvider,
     model: str,
 ) -> bool:
-    if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+    if channel != "websocket":
         return False
     origin_session_key = f"{channel}:{chat_id}"
     return await maybe_generate_webui_title(
@@ -794,8 +794,12 @@ class WebuiTurnCoordinator:
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
         title_context = _validated_llm_runtime(event.runtime)
+        session = self.sessions.get_or_create(event.context.session_key)
         if (
-            event.context.metadata.get("webui") is not True
+            (
+                event.context.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+                and session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+            )
             or title_context is None
         ):
             return

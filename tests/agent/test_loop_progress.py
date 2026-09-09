@@ -1161,6 +1161,9 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
+        session = loop.sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        loop.sessions.save(session)
 
         captured: dict[str, object] = {}
 
@@ -1188,7 +1191,7 @@ class TestToolEventProgress:
             sender_id="u1",
             chat_id="chat1",
             content="say hello",
-            metadata={"webui": True},
+            metadata={},
         ))
 
         assert len(scheduled_title) == 1
@@ -1208,7 +1211,7 @@ class TestToolEventProgress:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
-    async def test_webui_title_requires_inbound_opt_in(
+    async def test_webui_title_uses_persisted_session_marker(
         self,
         tmp_path: Path,
         metadata: dict[str, object],
@@ -1235,9 +1238,9 @@ class TestToolEventProgress:
             model="test-model",
         )
 
-        assert generated is False
-        provider.chat_with_retry.assert_not_awaited()
-        assert "title" not in session.metadata
+        assert generated is True
+        provider.chat_with_retry.assert_awaited_once()
+        assert session.metadata["title"] == "Greeting"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
@@ -1254,7 +1257,6 @@ class TestToolEventProgress:
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         session = loop.sessions.get_or_create("websocket:chat1")
-        session.metadata["webui"] = True
         loop.sessions.save(session)
         scheduled: list[object] = []
 
