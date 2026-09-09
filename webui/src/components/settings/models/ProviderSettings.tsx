@@ -381,17 +381,14 @@ function ProviderRequestOptions({
 
   return (
     <div className="overflow-hidden rounded-floating border border-border/45 bg-background/75">
-      {options.map((option, index) => {
+      {options.map((option) => {
         const title = tx(option.titleKey, option.title);
         const Icon = option.kind === "priority" ? Zap : Globe2;
         const checked = providerRequestOptionEnabled(option, extraBody);
         return (
           <div
             key={option.titleKey}
-            className={cn(
-              "flex items-center justify-between gap-4 px-4 py-3",
-              index > 0 && "border-t border-border/45",
-            )}
+            className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 transition-colors hover:bg-sidebar-accent/60 focus-within:bg-sidebar-accent/60"
           >
             <div className="flex min-w-0 items-start gap-3">
               <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
@@ -444,7 +441,7 @@ function ProviderAdvancedOptions({
   ];
 
   return (
-    <div className="border-y border-border/45">
+    <div className="space-y-1">
       <button
         type="button"
         aria-expanded={open}
@@ -463,7 +460,7 @@ function ProviderAdvancedOptions({
         />
       </button>
       {open ? (
-        <div className="border-t border-border/45 py-3">
+        <div className="py-3">
           <div className="grid gap-3 md:grid-cols-2">
             {enabled.has("api_type") ? (
               <label className="block space-y-1.5">
@@ -635,7 +632,7 @@ function ProviderAdvancedOptions({
         </div>
       ) : null}
       {footer ? (
-        <div className="flex items-center justify-end gap-2 border-t border-border/45 py-3">
+        <div className="flex items-center justify-end gap-2 py-3">
           {footer}
         </div>
       ) : null}
@@ -776,7 +773,7 @@ export function ProvidersSettings({
       ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
       : null;
     return (
-      <div key={provider.name} className="divide-y divide-border/45">
+      <div key={provider.name} className="space-y-1">
         <button
           type="button"
           aria-expanded={expanded}
@@ -1061,7 +1058,7 @@ export function ProvidersSettings({
     );
   };
   const customProviderForm = creatingCustomProvider ? (
-    <div className="divide-y divide-border/45">
+    <div className="space-y-1">
       <button
         type="button"
         aria-expanded
@@ -1200,7 +1197,7 @@ export function ProvidersSettings({
   return (
     <div className="space-y-6">
       {imageProviderRestartPending && onRestart ? (
-        <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
+        <div className="flex min-h-[48px] items-center justify-between gap-3 py-3">
           <p className="text-[13px] leading-5 text-muted-foreground">
             {tx("settings.status.imageProviderRestart", "Provider support changed. Restart when ready.")}
           </p>

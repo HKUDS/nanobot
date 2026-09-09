@@ -187,7 +187,7 @@ export function SettingsSectionTitle({ children }: { children: ReactNode }) {
 export function SettingsGroup({ children }: { children: ReactNode }) {
   return (
     <div className="overflow-hidden rounded-panel bg-settings-surface">
-      <div className="divide-y divide-border/45">{children}</div>
+      <div className="space-y-1">{children}</div>
     </div>
   );
 }
@@ -202,7 +202,7 @@ export function SettingsRow({
   children?: ReactNode;
 }) {
   return (
-    <div className="settings-row">
+    <div className="settings-row rounded-xl transition-colors hover:bg-sidebar-accent/60 focus-within:bg-sidebar-accent/60">
       <div className="min-w-0">
         <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
         {description ? (

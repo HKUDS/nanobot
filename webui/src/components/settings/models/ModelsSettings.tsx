@@ -376,7 +376,7 @@ export function ModelsSettings({
       id="model-preset-editor"
       data-testid="model-preset-editor"
       className={cn(
-        "mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-floating border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl",
+        "mx-3 mb-3 space-y-1 overflow-hidden rounded-floating bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl",
         creating && "mt-3",
       )}
     >
@@ -648,7 +648,7 @@ export function ModelsSettings({
             </div>
           ) : (
             <>
-              <div role="list" className="divide-y divide-border/45">
+              <div role="list" className="space-y-1">
                 {presetRows.map(({ key, name, orderIndex, preset }) => {
                   const ordered = orderIndex >= 0;
                   const provider = preset
