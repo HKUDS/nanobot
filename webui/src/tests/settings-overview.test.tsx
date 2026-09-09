@@ -111,7 +111,7 @@ describe("Settings overview and appearance", () => {
       usage: {
         days: [
           {
-            date: "2026-06-03",
+            date: new Date().toISOString().slice(0, 10),
             input_tokens: 1200,
             output_tokens: 300,
             cache_read_tokens: 500,
@@ -150,7 +150,7 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview" });
 
-    expect(await screen.findByLabelText("Token activity")).toBeInTheDocument();
+    expect(await screen.findByLabelText("1,500 tokens")).toBeInTheDocument();
     expect(screen.getByText("Token Usage")).toBeInTheDocument();
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
@@ -243,6 +243,6 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview", initialSettings: payload });
 
-    expect(screen.getByLabelText("2026-06-03: 1.5K tokens, 2 requests")).toBeInTheDocument();
+    expect(screen.getByLabelText(/2026-06-03: 1,500 tokens, 2 requests/)).toBeInTheDocument();
   });
 });

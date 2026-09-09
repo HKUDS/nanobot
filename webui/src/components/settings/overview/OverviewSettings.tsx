@@ -25,7 +25,7 @@ import {
   SettingsRow,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
-import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
+import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -82,8 +82,8 @@ export function OverviewSettings({
     : tx("settings.values.disabled", "Disabled");
   return (
     <div className="settings-stack">
-      <section className="rounded-panel bg-settings-surface px-4 py-4 sm:px-5">
-        <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
+      <section className="rounded-panel bg-settings-surface p-6">
+        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>
