@@ -5,7 +5,10 @@ import {
   agentDraftFromPayload,
   type AgentSettingsDraft,
 } from "@/components/settings/models/ModelsSettings";
-import type { ProviderForm } from "@/components/settings/models/ProviderSettings";
+import type {
+  ProviderApiType,
+  ProviderForm,
+} from "@/components/settings/models/ProviderSettings";
 import type { ProviderOAuthAuthorizationRequired, SettingsPayload } from "@/lib/types";
 
 export function useModelSettingsState(initialSettings: SettingsPayload | null) {
@@ -30,6 +33,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const [providerOAuthDialogError, setProviderOAuthDialogError] = useState<string | null>(null);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, ProviderForm>>({});
+  const providerApiTypesBeforeResponsesRef = useRef<Record<string, ProviderApiType>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState<AgentSettingsDraft>(initialForm);
@@ -53,6 +57,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     modelPresetEditingName,
     modelPresetNameError,
     modelPresetPendingDelete,
+    providerApiTypesBeforeResponsesRef,
     providerForms,
     providerOAuthCompleting,
     providerOAuthDialogError,

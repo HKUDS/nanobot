@@ -11,6 +11,27 @@ async function chooseProviderToConfigure(label: string) {
   fireEvent.click(await screen.findByRole("menuitem", { name: label }));
 }
 
+function openAiSettingsPayload(
+  apiType: "auto" | "chat_completions" | "responses" = "chat_completions",
+  extraBody: Record<string, unknown> | null = null,
+): SettingsPayload {
+  const base = settingsPayload();
+  return {
+    ...base,
+    providers: [{
+      name: "openai",
+      label: "OpenAI",
+      configured: true,
+      api_key_required: true,
+      api_key_hint: "sk-••••test",
+      api_base: "https://chat-only.example/v1",
+      api_type: apiType,
+      advanced_fields: ["api_type", "extra_body"],
+      extra_body: extraBody,
+    }],
+  };
+}
+
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
 
@@ -706,6 +727,222 @@ describe("Settings providers", () => {
         metadata: { owner: "legacy-config" },
         tools: [{ type: "file_search", vector_store_ids: ["vs_legacy"] }],
       });
+    });
+  });
+
+  it("restores the provider API type after a section switch", async () => {
+    const payload = openAiSettingsPayload();
+    requestMutationMock.mockResolvedValue(payload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+
+    const restoredSearchSwitch = await screen.findByRole("switch", {
+      name: "OpenAI web search",
+    });
+    fireEvent.click(restoredSearchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
+      );
+      expect(updateCall).toBeTruthy();
+      const values = updateCall?.[1] as { apiType: string; extraBody: string };
+      expect(values.apiType).toBe("chat_completions");
+      expect(values.extraBody).toBe("");
+    });
+  });
+
+  it("keeps an explicit API type change when disabling web search", async () => {
+    const payload = openAiSettingsPayload();
+    requestMutationMock.mockResolvedValue(payload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "API type" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Auto" }));
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
+      );
+      expect(updateCall).toBeTruthy();
+      const values = updateCall?.[1] as { apiType: string; extraBody: string };
+      expect(values.apiType).toBe("auto");
+      expect(values.extraBody).toBe("");
+    });
+  });
+
+  it("keeps the previous API type available after a failed provider save", async () => {
+    const payload = openAiSettingsPayload();
+    let updateAttempts = 0;
+    requestMutationMock.mockImplementation(async (action: string) => {
+      if (action === "settings.provider.update") {
+        updateAttempts += 1;
+        if (updateAttempts === 1) throw new Error("Provider update failed");
+      }
+      return payload;
+    });
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+    const saveButton = screen.getByRole("button", { name: "Save provider" });
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(updateAttempts).toBe(1));
+    await waitFor(() => expect(saveButton).toBeEnabled());
+
+    fireEvent.click(searchSwitch);
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(updateAttempts).toBe(2);
+      const updateCalls = requestMutationMock.mock.calls.filter(
+        ([action]) => action === "settings.provider.update",
+      );
+      const values = updateCalls[1]?.[1] as { apiType: string; extraBody: string };
+      expect(values.apiType).toBe("chat_completions");
+      expect(values.extraBody).toBe("");
+    });
+  });
+
+  it("does not reuse a temporary API type after saving and reopening web search", async () => {
+    let payload = openAiSettingsPayload();
+    requestMutationMock.mockImplementation(async (
+      action: string,
+      values: { apiType?: "auto" | "chat_completions" | "responses"; extraBody?: string },
+    ) => {
+      if (action === "settings.provider.update") {
+        const provider = payload.providers[0];
+        payload = openAiSettingsPayload(
+          values.apiType ?? provider.api_type ?? "auto",
+          values.extraBody ? JSON.parse(values.extraBody) as Record<string, unknown> : null,
+        );
+      }
+      return payload;
+    });
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const updateCalls = () => requestMutationMock.mock.calls.filter(
+      ([action]) => action === "settings.provider.update",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(updateCalls()).toHaveLength(1));
+    await waitFor(() => expect(
+      screen.queryByRole("switch", { name: "OpenAI web search" }),
+    ).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const values = updateCalls()[1]?.[1] as { apiType: string; extraBody: string };
+      expect(values.apiType).toBe("responses");
+      expect(values.extraBody).toBe("");
+    });
+  });
+
+  it("preserves a saved Responses type when disabling preconfigured web search", async () => {
+    const payload = openAiSettingsPayload("responses", {
+      tools: [{ type: "web_search_preview" }],
+    });
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    expect(searchSwitch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
+      );
+      expect(updateCall?.[1]).toMatchObject({ apiType: "responses", extraBody: "" });
+    });
+  });
+
+  it("preserves an explicit Responses choice when disabling web search after a prior change", async () => {
+    const payload = openAiSettingsPayload();
+    requestMutationMock.mockResolvedValue(payload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+
+    // Change API type away from responses, then explicitly back to responses.
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "API type" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Auto" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "API type" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Responses" }));
+
+    // Disable web search — the explicit Responses choice must not be silently
+    // changed back to the previous non-Responses value.
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
+      );
+      expect(updateCall).toBeTruthy();
+      const values = updateCall?.[1] as { apiType: string; extraBody: string };
+      expect(values.apiType).toBe("responses");
+      expect(values.extraBody).toBe("");
+    });
+  });
+
+  it("preserves a directly selected Responses type when disabling web search", async () => {
+    const payload = openAiSettingsPayload();
+    requestMutationMock.mockResolvedValue(payload);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+
+    // Search auto-selects Responses. Selecting that already active option is
+    // still an explicit user choice and must be remembered.
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "API type" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Responses" }));
+
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
+      );
+      expect(updateCall).toBeTruthy();
+      const values = updateCall?.[1] as { apiType: string; extraBody: string };
+      expect(values.apiType).toBe("responses");
+      expect(values.extraBody).toBe("");
     });
   });
 
