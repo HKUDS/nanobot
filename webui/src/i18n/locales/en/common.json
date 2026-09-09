@@ -81,7 +81,7 @@
   },
   "settings": {
     "runtimeConfig": {
-      "apiSaved": "Saved. The API service applies changes automatically.",
+      "apiSaved": "Saved. Restart the API service to apply changes.",
       "fields": {
         "agents_defaults_timezone_mode": {
           "label": "Use system timezone",
@@ -237,11 +237,11 @@
         },
         "api_host": {
           "label": "API bind address",
-          "help": "Set an API key in System before binding to a network address. A running API service reloads automatically after saving."
+          "help": "Set an API key in System before binding to a network address. Restart the API service to apply changes."
         },
         "api_timeout": {
           "label": "API request timeout (seconds)",
-          "help": "Request timeout in seconds. A running API service reloads automatically."
+          "help": "Request timeout in seconds. Restart the API service to apply changes."
         },
         "tools_image_generation_save_dir": {
           "label": "Generated image directory",
@@ -255,11 +255,11 @@
         },
         "identity": {
           "title": "Timezone",
-          "help": "Personalize terminal prompts and choose the timezone for scheduled work."
+          "help": "Choose the timezone for scheduled work."
         },
         "memory": {
           "title": "Memory",
-          "help": "Manage idle compaction and periodic memory consolidation."
+          "help": "Enable or disable automatic memory consolidation."
         },
         "heartbeat": {
           "title": "Heartbeat schedule",
@@ -323,7 +323,7 @@
       "discard": "Discard changes",
       "saved": "Saved.",
       "restart": "Restart nanobot",
-      "restartHelp": "Settings apply automatically. Command-line and environment overrides may take precedence.",
+      "restartHelp": "Restart to apply changes. Command-line and environment overrides may take precedence.",
       "search": "Find an advanced setting",
       "noResults": "No matching settings.",
       "pending": "Unsaved changes",

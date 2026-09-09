@@ -81,7 +81,7 @@
   },
   "settings": {
     "runtimeConfig": {
-      "apiSaved": "已保存，API 服务会自动应用配置。",
+      "apiSaved": "已保存，重启 API 服务后生效。",
       "fields": {
         "agents_defaults_timezone_mode": {
           "label": "自动使用系统时区",
@@ -237,11 +237,11 @@
         },
         "api_host": {
           "label": "API 绑定地址",
-          "help": "绑定网络地址前请先在系统设置中配置 API 密钥。保存后，运行中的 API 服务会自动重新加载。"
+          "help": "绑定网络地址前请先在系统设置中配置 API 密钥，重启 API 服务后生效。"
         },
         "api_timeout": {
           "label": "API 请求超时（秒）",
-          "help": "API 请求超时秒数，运行中的 API 服务会自动重新加载。"
+          "help": "API 请求超时秒数，重启 API 服务后生效。"
         },
         "tools_image_generation_save_dir": {
           "label": "生成图片保存目录",
@@ -255,11 +255,11 @@
         },
         "identity": {
           "title": "时区",
-          "help": "设置终端显示和计划任务使用的时区。"
+          "help": "选择计划任务使用的时区。"
         },
         "memory": {
           "title": "记忆",
-          "help": "管理空闲压缩和定期记忆整理。"
+          "help": "开启或关闭自动记忆整理。"
         },
         "heartbeat": {
           "title": "心跳计划",
@@ -323,7 +323,7 @@
       "discard": "放弃修改",
       "saved": "已保存。",
       "restart": "重启 nanobot",
-      "restartHelp": "配置自动应用；命令行和环境变量的覆盖设置可能优先生效。",
+      "restartHelp": "重启后应用配置；命令行和环境变量的设置可能优先生效。",
       "search": "搜索高级设置",
       "noResults": "没有匹配的设置。",
       "pending": "未保存修改",
