@@ -85,7 +85,6 @@ export function SettingsSidebar({
         type="button"
         onClick={onBackToChat}
         aria-label={t("settings.backToChat")}
-        title={t("settings.backToChat")}
         className={cn(
           "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3",
           hostChromeInset && "-ml-1",
