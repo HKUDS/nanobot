@@ -1087,9 +1087,3 @@ export async function updateRuntimeConfigSettings(
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
 }
-
-export async function updateDreamPrompt(
-  transport: WebUIMutationTransport, content: string | null,
-): Promise<import("@/lib/types").DreamPromptSettings> {
-  return mutation(transport, "settings.dream_prompt.update", { content });
-}

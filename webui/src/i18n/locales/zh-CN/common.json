@@ -325,7 +325,7 @@
       "save": "保存修改",
       "saving": "正在保存…",
       "discard": "放弃修改",
-      "saved": "已保存，配置会自动应用。",
+      "saved": "已保存。",
       "restart": "重启 nanobot",
       "restartHelp": "配置自动应用；命令行和环境变量的覆盖设置可能优先生效。",
       "search": "搜索高级设置",
@@ -339,9 +339,7 @@
       "standard": "标准",
       "persistent": "持续",
       "unavailable": "更新网关后可编辑这些设置。",
-      "advancedOptions": "高级选项",
-      "applied": "已保存并生效。",
-      "nextTask": "已保存，后续任务使用新设置；正在执行的任务会先完成。"
+      "advancedOptions": "高级选项"
     },
     "backToChat": "返回聊天",
     "sidebar": {
@@ -1264,33 +1262,6 @@
       "selectProvider": "选择提供商",
       "configureProvider": "配置提供商",
       "languageAuto": "自动"
-    },
-    "dreamPrompt": {
-      "title": "Dream 提示词",
-      "label": "记忆整理指令",
-      "restore": "恢复默认",
-      "help": "自定义 Dream 整理记忆的方式。会话历史会自动附加；保存后下次 Dream 即生效，无需重启。",
-      "workspace": "默认工作区",
-      "unreadable": "无法读取提示词文件，请检查文件权限后再编辑。",
-      "invalid": "请输入 1–32000 个字符。如需移除自定义内容，请使用「恢复默认」。",
-      "saved": "已保存，下次 Dream 时生效。"
-    }
-  },
-  "chat": {
-    "fallbackTitle": "话题 {{id}}",
-    "forkTitle": "分叉：{{title}}",
-    "loading": "加载中…",
-    "noSessions": "还没有话题。",
-    "showMore": "再显示 {{count}} 个",
-    "collapsed": "已折叠 {{count}} 个话题",
-    "showLess": "收起",
-    "actions": "“{{title}}” 的话题操作",
-    "newInProject": "在 {{project}} 中开始新话题",
-    "activity": {
-      "running": "智能体正在运行",
-      "complete": "智能体已完成",
-      "updated": "有新内容",
-      "recovery": "此对话需要你的处理"
     },
     "pin": "置顶",
     "unpin": "取消置顶",

@@ -1662,17 +1662,6 @@ class SessionManager:
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
 
-    def switch_workspace(self, workspace: Path) -> None:
-        """Switch idle runtime storage without moving either workspace's sessions."""
-        store = JsonlSessionStore(workspace, sessions_root=self.sessions_dir.parent)
-        self.workspace = workspace
-        self._jsonl_store = store
-        self._store = store
-        self.sessions_dir = store.sessions_dir
-        self.legacy_sessions_dir = store.legacy_sessions_dir
-        self._cache.clear()
-        self._overflow_cache.clear()
-
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
         self._overflow_cache.pop(session.key, None)

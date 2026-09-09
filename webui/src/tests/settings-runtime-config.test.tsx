@@ -5,7 +5,7 @@ import { DEFAULT_AGENT_SETTINGS_DRAFT } from "@/components/settings/models/Model
 import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
 
 function runtimeSettings() {
-  return { ...settingsPayload(), dream_prompt: { content: "Default Dream instructions", default_content: "Default Dream instructions", custom: false, workspace: "/workspace", editable: true }, runtime_config: {
+  return { ...settingsPayload(), runtime_config: {
     "agents.defaults.bot_name": "nanobot",
     "agents.defaults.bot_icon": "🐈",
     "agents.defaults.timezone_mode": "auto",
@@ -73,7 +73,7 @@ describe("Runtime configuration settings", () => {
 
   it("explains unavailable memory settings instead of rendering a blank page", () => {
     renderSettingsView({ initialSection: "memory", initialSettings: settingsPayload() });
-    expect(screen.getByRole("status")).toHaveTextContent("Update the gateway to edit these settings.");
+    expect(screen.getByText("Update the gateway to edit these settings.")).toBeVisible();
   });
 
 
@@ -121,7 +121,8 @@ describe("Runtime configuration settings", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.exec.timeout": 90 } }, 20_000,
     ));
-    expect(await screen.findByText("Saved and applied.")).toBeInTheDocument();
+    expect(await screen.findByText("Saved. Restart when ready.")).toBeInTheDocument();
+    expect(screen.queryByText("Saved and applied.")).not.toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Shell and sandbox" })).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 

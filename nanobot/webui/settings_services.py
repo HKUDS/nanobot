@@ -119,7 +119,7 @@ class WebUISettingsServices:
     config: WebUISettingsConfig
     oauth_flows: WebUIOAuthFlowRegistry
     rename_model_preset: Callable[[str, str], int] | None = None
-    refresh_runtime_config: Callable[[], Any] | None = None
+    refresh_runtime_config: Callable[[], None] | None = None
 
     @classmethod
     def create(
@@ -127,7 +127,7 @@ class WebUISettingsServices:
         config_path: Path,
         *,
         rename_model_preset: Callable[[str, str], int] | None = None,
-        refresh_runtime_config: Callable[[], Any] | None = None,
+        refresh_runtime_config: Callable[[], None] | None = None,
     ) -> WebUISettingsServices:
         return cls(
             config=WebUISettingsConfig(config_path),

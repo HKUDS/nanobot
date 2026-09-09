@@ -61,10 +61,6 @@ class CronTool(Tool):
         self._default_timezone = default_timezone
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_default_timezone(self, timezone: str) -> None:
-        """Apply the default for subsequently created schedules."""
-        self._default_timezone = timezone
-
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.cron_service is not None

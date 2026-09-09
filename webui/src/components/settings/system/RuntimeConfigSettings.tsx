@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ToggleButton } from "@/components/settings/ToggleButton";
-import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
+import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -128,12 +128,16 @@ export function RuntimeConfigSettings({
   const { t } = useTranslation();
   const tr = (key: string) => t(`settings.runtimeConfig.${key}`);
   if (!settings.runtime_config) return <div className="settings-stack">
-    <p role="status" className="settings-editor text-[13px] leading-5 text-muted-foreground">{tr("unavailable")}</p>
+    <p className="settings-editor text-[13px] leading-5 text-muted-foreground">{tr("unavailable")}</p>
     {children}
   </div>;
   const groups = RUNTIME_CONFIG_GROUPS.filter((group) => group.page === page);
+  const restartPending = settings.restart_required_sections?.includes("runtime")
+    || (settings.requires_restart && Object.values(state.saved).some(Boolean));
   return (
     <div className="settings-stack">
+      {restartPending ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
+        onRestart={onRestart} isRestarting={isRestarting} /> : null}
       {groups.map((group) => {
         if (group.id === "chat") return <div key={group.id}>{children}</div>;
         const fields = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id);
@@ -199,7 +203,7 @@ export function RuntimeConfigSettings({
                   <RestartSettingsFooter autoSave={!state.errors[group.id] && !fields.some((field) => field.manual && state.dirty(field))} dirty={dirty} saving={state.saving === group.id}
                     disabled={state.saving !== null || isRestarting}
                     pendingRestart={false}
-                    message={state.saved[group.id] && !dirty ? tr(group.id === "sessions" ? "nextTask" : "applied") : undefined}
+                    message={state.saved[group.id] && !dirty ? tr("saved") : undefined}
                     onSave={() => void state.save(group.id)} onReset={() => state.discard(group.id)}
                     onRestart={onRestart} isRestarting={isRestarting} />
                 </SettingsGroup>

@@ -98,7 +98,7 @@ class ChannelManager:
         cron_service: CronService | None = None,
         local_trigger_store: LocalTriggerStore | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
-        webui_refresh_runtime_config: Callable[[], Any] | None = None,
+        webui_refresh_runtime_config: Callable[[], None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         webui_local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         webui_static_dist: bool = True,
@@ -170,19 +170,6 @@ class ChannelManager:
             if default is not None:
                 default_sections[name] = default
         return default_sections.get(name)
-
-    def refresh_webui_workspace(self) -> None:
-        """Refresh workspace dependencies without disconnecting WebUI clients."""
-        from nanobot.channels.websocket.runtime import WebSocketChannel
-
-        for channel in self.channels.values():
-            if isinstance(channel, WebSocketChannel):
-                gateway = channel.gateway
-                gateway.workspaces.set_default_workspace(
-                    self.config.workspace_path, self.config.tools.restrict_to_workspace,
-                )
-                gateway.http.skills_workspace_path = self.config.workspace_path
-                gateway.media.workspace_path = self.config.workspace_path
 
     def _build_channel(
         self,

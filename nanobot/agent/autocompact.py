@@ -36,10 +36,6 @@ class AutoCompact:
         self._summaries: dict[str, SessionSummary] = {}
         self._bind_events = bind_events
 
-    def set_idle_threshold(self, minutes: int) -> None:
-        """Update the idle threshold for subsequent scans."""
-        self._ttl = minutes
-
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
         if self._ttl <= 0 or not ts:

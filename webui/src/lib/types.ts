@@ -573,16 +573,8 @@ export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPendi
 
 export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
-export interface DreamPromptSettings {
-  content: string;
-  default_content: string;
-  custom: boolean;
-  workspace: string;
-  editable: boolean;
-}
 
 export interface SettingsPayload {
-  dream_prompt?: DreamPromptSettings;
   runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
   runtime_surface?: RuntimeSurface;

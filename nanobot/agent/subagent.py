@@ -148,8 +148,7 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
-        self._active_slots = 0
-        self._capacity_changed = asyncio.Event()
+        self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
@@ -369,11 +368,7 @@ class SubagentManager:
     ) -> str:
         """Wait for capacity, then execute one subagent task."""
         status.phase = "queued"
-        while self._active_slots >= self.max_concurrent_subagents:
-            await self._capacity_changed.wait()
-            self._capacity_changed.clear()
-        self._active_slots += 1
-        try:
+        async with self._run_slots:
             status.phase = "initializing"
             return await self._run_admitted_subagent(
                 task_id,
@@ -386,14 +381,6 @@ class SubagentManager:
                 workspace_scope,
                 announce=announce,
             )
-        finally:
-            self._active_slots -= 1
-            self._capacity_changed.set()
-
-    def set_concurrency_limit(self, limit: int) -> None:
-        """Resize admission capacity without interrupting existing subagents."""
-        self.max_concurrent_subagents = limit
-        self._capacity_changed.set()
 
     async def _run_admitted_subagent(
         self,

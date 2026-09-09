@@ -470,6 +470,6 @@ def update_runtime_config_settings(
     if changed:
         _save_settings_config(config, config_path)
     return settings_payload(
-        requires_restart=False,
+        requires_restart=changed,
         config_path=config_path,
     )

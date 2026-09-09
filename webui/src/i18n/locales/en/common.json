@@ -325,7 +325,7 @@
       "save": "Save changes",
       "saving": "Saving…",
       "discard": "Discard changes",
-      "saved": "Saved. Changes apply automatically.",
+      "saved": "Saved.",
       "restart": "Restart nanobot",
       "restartHelp": "Settings apply automatically. Command-line and environment overrides may take precedence.",
       "search": "Find an advanced setting",
@@ -339,9 +339,7 @@
       "standard": "Standard",
       "persistent": "Persistent",
       "unavailable": "Update the gateway to edit these settings.",
-      "advancedOptions": "Advanced options",
-      "applied": "Saved and applied.",
-      "nextTask": "Saved. Applies to subsequent tasks; active tasks finish first."
+      "advancedOptions": "Advanced options"
     },
     "backToChat": "Back to chat",
     "sidebar": {
@@ -1264,33 +1262,6 @@
       "selectProvider": "Select provider",
       "configureProvider": "Configure provider",
       "languageAuto": "Auto"
-    },
-    "dreamPrompt": {
-      "title": "Dream prompt",
-      "label": "Memory consolidation instructions",
-      "restore": "Restore default",
-      "help": "Customize how Dream organizes memory. Conversation history is appended automatically. Saving applies to the next Dream run without a restart.",
-      "workspace": "Default workspace",
-      "unreadable": "The prompt file cannot be read. Check its permissions before editing.",
-      "invalid": "Enter 1–32000 characters. Use Restore default to remove the override.",
-      "saved": "Saved. Applies to the next Dream run."
-    }
-  },
-  "chat": {
-    "fallbackTitle": "Topic {{id}}",
-    "forkTitle": "Fork: {{title}}",
-    "loading": "Loading…",
-    "noSessions": "No sessions yet.",
-    "showMore": "Show {{count}} more",
-    "collapsed": "{{count}} hidden topics",
-    "showLess": "Show less",
-    "actions": "Topic actions for {{title}}",
-    "newInProject": "Start a new topic in {{project}}",
-    "activity": {
-      "running": "Agent running",
-      "complete": "Agent finished",
-      "updated": "New activity",
-      "recovery": "This conversation needs your attention"
     },
     "pin": "Pin",
     "unpin": "Unpin",

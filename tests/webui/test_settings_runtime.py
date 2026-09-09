@@ -39,7 +39,7 @@ def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
     assert saved.tools.exec.allowed_env_keys == ["MY_TOKEN"]
     assert saved.providers.openai.api_key == "${PRIVATE_API_KEY}"
     assert saved.channels.telegram == {"token": "keep-me", "streaming": False}
-    assert not payload["requires_restart"]
+    assert payload["requires_restart"]
     assert payload["runtime_config"]["tools.image_generation.save_dir"] == "images"
     assert "api.api_key" not in runtime_config_payload(saved)
     assert "PRIVATE_API_KEY" not in json.dumps(runtime_config_payload(saved))
@@ -108,11 +108,11 @@ def test_timezone_auto_and_nullable_fields():
     assert not update_runtime_config(config, {}, local_browser=True)
 
 
-def test_api_changes_require_api_restart_not_gateway_restart(tmp_path):
+def test_api_changes_require_explicit_restart(tmp_path):
     path = tmp_path / "config.json"
     payload = update_runtime_config_settings({"api.timeout": 222.5}, config_path=path)
     assert payload["api"]["timeout"] == 222.5
-    assert not payload["requires_restart"]
+    assert payload["requires_restart"]
 
 
 def test_every_exposed_runtime_setting_has_a_frontend_control():

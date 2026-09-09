@@ -736,41 +736,6 @@ class CronService:
         logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
         return job
 
-    @property
-    def has_active_jobs(self) -> bool:
-        return self._active_executions > 0
-
-    def switch_workspace(self, workspace: Path) -> None:
-        """Bind an idle scheduler to the target workspace's existing jobs."""
-        if self._active_executions:
-            raise RuntimeError("Cannot switch cron storage during job execution")
-        if self._store_dirty:
-            self._save_store()
-        self.store_path = workspace / "cron" / "jobs.json"
-        self._action_path = self.store_path.parent / "action.jsonl"
-        self._run_records_dir = self.store_path.parent / "runs"
-        self._lock = FileLock(str(self._action_path.parent) + ".lock")
-        self._store = None
-        self._load_store()
-        self._arm_timer()
-
-    def set_system_timezone(self, timezone: str) -> None:
-        """Refresh system schedules while preserving user-selected timezones."""
-        store = self._require_store()
-        changed = False
-        now = _now_ms()
-        for job in store.jobs:
-            if job.payload.kind != "system_event" or job.schedule.tz == timezone:
-                continue
-            job.schedule.tz = timezone
-            if job.schedule.kind == "cron" and job.enabled:
-                job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
-            job.updated_at_ms = now
-            changed = True
-        if changed:
-            self._save_store()
-            self._arm_timer()
-
     def remove_system_job(self, job_id: str) -> bool:
         """Remove a protected system job during startup reconciliation."""
         store = self._require_store()
