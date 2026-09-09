@@ -495,7 +495,6 @@ export function SettingsPage({
       case "apps":
         return (
           <div className="settings-stack">
-            {runtimeConfiguration("apps")}
             <AppsCatalogSettings
               cliApps={cliApps}
               mcpPresets={mcpPresets}

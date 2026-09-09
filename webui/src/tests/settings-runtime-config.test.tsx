@@ -61,9 +61,9 @@ describe("Runtime configuration settings", () => {
     expect(screen.getByRole("switch", { name: "Web access" })).toBeInTheDocument();
   });
 
-  it("exposes the CLI switch on the apps page", () => {
+  it("keeps the CLI switch out of the apps page", () => {
     renderSettingsView({ initialSection: "apps", initialSettings: runtimeSettings() });
-    expect(document.getElementById("runtime-tools.cli_apps.enable")).toBeInTheDocument();
+    expect(document.getElementById("runtime-tools.cli_apps.enable")).not.toBeInTheDocument();
   });
 
   it("keeps runtime configuration out of the automations page", () => {

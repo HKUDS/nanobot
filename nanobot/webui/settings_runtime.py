@@ -29,8 +29,6 @@ RUNTIME_CONFIG_PATHS = (
     "gateway.host",
     "gateway.port",
     "gateway.restart_mode",
-    "gateway.heartbeat.enabled",
-    "gateway.heartbeat.interval_s",
     "tools.exec.enable",
     "tools.exec.timeout",
     "tools.exec.path_prepend",
@@ -119,7 +117,6 @@ def update_runtime_config(
         "agents.defaults.max_tool_iterations": 1,
         "agents.defaults.max_tool_result_chars": 1,
         "gateway.port": 1,
-        "gateway.heartbeat.interval_s": 1,
         "api.timeout": 1,
     }
     for path, minimum in numeric_minima.items():

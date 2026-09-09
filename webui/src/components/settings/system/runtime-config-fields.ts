@@ -9,7 +9,7 @@ export interface RuntimeConfigField {
   max?: number;
 }
 
-export type RuntimeConfigPage = "memory" | "runtime" | "advanced" | "browser" | "image" | "apps";
+export type RuntimeConfigPage = "memory" | "runtime" | "advanced" | "browser" | "image";
 
 export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabledBy?: string }[] = [
   { id: "identity", page: "runtime" },
@@ -19,7 +19,6 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabl
   { id: "sessions", page: "runtime" },
   { id: "tools", page: "runtime" },
   { id: "web", page: "browser" },
-  { id: "applications", page: "apps" },
   { id: "shell", page: "advanced", enabledBy: "tools.exec.enable" },
   { id: "network", page: "advanced", enabledBy: "tools.web.enable" },
   { id: "safety", page: "advanced" },
@@ -43,7 +42,6 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "tools", path: "tools.exec.enable", kind: "boolean" },
   { group: "tools", path: "tools.file.enable", kind: "boolean" },
   { group: "web", path: "tools.web.enable", kind: "boolean" },
-  { group: "applications", path: "tools.cli_apps.enable", kind: "boolean" },
   { group: "tools", path: "tools.my.enable", kind: "boolean" },
   { group: "tools", path: "tools.my.allow_set", kind: "boolean", when: { path: "tools.my.enable", value: true } },
   { group: "shell", path: "tools.exec.timeout", kind: "number", min: 0 },

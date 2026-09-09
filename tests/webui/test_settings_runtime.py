@@ -116,11 +116,13 @@ def test_api_changes_require_explicit_restart(tmp_path):
     assert payload["requires_restart"]
 
 
-def test_every_exposed_runtime_setting_has_a_frontend_control():
+def test_every_exposed_runtime_setting_has_a_frontend_use():
     fields = Path(__file__).parents[2] / "webui/src/components/settings/system/runtime-config-fields.ts"
     paths = re.findall(r'group: "[^"]+", path: "([^"]+)"', fields.read_text(encoding="utf-8"))
     assert len(paths) == len(set(paths))
-    assert set(paths) == set(RUNTIME_CONFIG_PATHS)
+    # The CLI enable flag controls visibility of its advanced fields, without an editor.
+    visibility_only = {"tools.cli_apps.enable"}
+    assert set(paths) | visibility_only == set(RUNTIME_CONFIG_PATHS)
 
 
 def test_disabling_memory_consolidation_preserves_other_memory_settings():
