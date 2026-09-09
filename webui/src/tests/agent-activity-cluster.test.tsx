@@ -645,6 +645,67 @@ describe("AgentActivityCluster", () => {
     assertBetween(screen.getByText("Edited"));
   });
 
+  it.each(["diff", "collapsed_diff"] as const)(
+    "keeps %s edits outside reasoning folds in live and replayed activity",
+    (fileEditDisplayMode) => {
+      localStorage.setItem(
+        "nanobot-webui.settings-preferences",
+        JSON.stringify({ fileEditDisplayMode }),
+      );
+      const messages: UIMessage[] = [
+        { id: "before", role: "assistant", content: "", reasoning: "Before edit", createdAt: 1 },
+        {
+          id: "edit", role: "tool", kind: "trace", content: "edit_file()", createdAt: 2,
+          traces: ["edit_file()"],
+          fileEdits: [{
+            call_id: "edit-call", tool: "edit_file", path: "src/app.tsx", phase: "end",
+            added: 1, deleted: 1, approximate: false, status: "done",
+            diff: unifiedFileDiff([
+              "--- a/src/app.tsx", "+++ b/src/app.tsx", "@@ -1 +1 @@", "-old", "+new",
+            ]),
+          }],
+        },
+        {
+          id: "after", role: "assistant", content: "After edit",
+          activityKind: "model", createdAt: 3,
+        },
+      ];
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+      );
+      try {
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        const assertIndependentDiff = () => {
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-scroll"]'))
+            .toBeNull();
+          expect(screen.getByText("Before edit").compareDocumentPosition(diff)
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          expect(diff.compareDocumentPosition(screen.getByText("After edit"))
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(1);
+        };
+        assertIndependentDiff();
+        for (const toggle of document.querySelectorAll<HTMLButtonElement>("[data-thread-disclosure]")) {
+          fireEvent.click(toggle);
+          assertIndependentDiff();
+        }
+        rerender(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        assertIndependentDiff();
+        unmount();
+        render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        assertIndependentDiff();
+      } finally {
+        localStorage.removeItem("nanobot-webui.settings-preferences");
+      }
+    },
+  );
+
   it("renders file edit diffs and responds to preference changes", () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",

@@ -156,11 +156,65 @@ interface AgentActivityClusterProps {
   onOpenFilePreview?: (path: string) => void;
 }
 
-/**
- * One fold wrapping the complete middle of a turn: reasoning, model segments,
- * tool traces, and file edits. The final assistant answer stays outside it.
- */
-export function AgentActivityCluster({
+export function AgentActivityCluster(props: AgentActivityClusterProps) {
+  const displayMode = useFileEditDisplayMode();
+  const messages = useMemo(() => coalesceActivityMessages(props.messages), [props.messages]);
+  const editsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
+    [messages, props.isTurnStreaming],
+  );
+  if (displayMode === "summary" || !editsByMessage.size) {
+    return <FoldedAgentActivity {...props} />;
+  }
+
+  // Diff rows break the fold so they stay visible in their original timeline position.
+  const items: ReactNode[] = [];
+  let pending: UIMessage[] = [];
+  const flush = (last: boolean) => {
+    if (!pending.length) return;
+    items.push(
+      <FoldedAgentActivity
+        {...props}
+        key={pending[0].id}
+        messages={pending}
+        isTurnStreaming={last && props.isTurnStreaming}
+        retryStatus={last ? props.retryStatus : null}
+        hasBodyBelow={false}
+      />,
+    );
+    pending = [];
+  };
+  for (const message of messages) {
+    const edits = editsByMessage.get(message.id);
+    if (message.fileEdits?.length) {
+      const traces = traceLines(message).filter((line) => !isFileEditTraceLine(line));
+      if (traces.some((line) => line.trim())) {
+        pending.push({ ...message, traces, content: traces.at(-1) ?? "", fileEdits: undefined });
+      }
+    } else {
+      pending.push(message);
+    }
+    if (edits?.length) {
+      flush(false);
+      items.push(
+        <FileEditGroup
+          key={`${message.id}:edits`}
+          edits={edits}
+          displayMode={displayMode}
+          onOpenFilePreview={props.onOpenFilePreview}
+        />,
+      );
+    }
+  }
+  flush(true);
+  return (
+    <div className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+      {items}
+    </div>
+  );
+}
+
+function FoldedAgentActivity({
   messages,
   isTurnStreaming,
   hasBodyBelow,
