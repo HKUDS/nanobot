@@ -38,6 +38,7 @@ export function visibleWebuiDefaultAccessMode(mode: string | null | undefined): 
 }
 
 export function AdvancedSettings({
+  error,
   form,
   dirty,
   saving,
@@ -48,6 +49,7 @@ export function AdvancedSettings({
   onRestart,
   isRestarting,
 }: {
+  error?: string;
   form: NetworkSafetySettingsUpdate;
   dirty: boolean;
   saving: boolean;
@@ -112,6 +114,9 @@ export function AdvancedSettings({
             />
           </SettingsRow>
           <RestartSettingsFooter
+            autoSave
+            error={Boolean(error)}
+            message={error}
             dirty={dirty}
             saving={saving}
             pendingRestart={requiresRestartPending}

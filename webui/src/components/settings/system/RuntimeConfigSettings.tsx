@@ -33,6 +33,7 @@ export function useRuntimeConfigSettings(
   const delay = useRef(600);
   const saveLatest = useRef<(group: string) => Promise<void>>(async () => {});
   const pendingGroups = useRef<string[]>([]);
+  const queuedSaves = useRef<string[]>([]);
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (invalidField && saving === null) document.getElementById(`runtime-${invalidField}`)?.focus();
@@ -56,7 +57,11 @@ export function useRuntimeConfigSettings(
     setInvalidField(null);
   };
   const save = async (group: string) => {
-    if (saving || !settings?.runtime_config) return;
+    if (!settings?.runtime_config) return;
+    if (saving) {
+      if (!queuedSaves.current.includes(group)) queuedSaves.current.push(group);
+      return;
+    }
     const changed = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group && visible(field) && dirty(field));
     if (!changed.length) return;
     const values: Record<string, RuntimeConfigValue> = {};
@@ -104,7 +109,7 @@ export function useRuntimeConfigSettings(
   useEffect(() => {
     if (saving) return;
     const timer = window.setTimeout(() => {
-      const group = pendingGroups.current[0];
+      const group = queuedSaves.current.shift() ?? pendingGroups.current[0];
       if (group) void saveLatest.current(group);
     }, delay.current);
     return () => window.clearTimeout(timer);
@@ -149,7 +154,7 @@ export function RuntimeConfigSettings({
           <section key={group.id} aria-label={title}>
             <SettingsSectionTitle>{title}</SettingsSectionTitle>
             <form noValidate onSubmit={(event) => { event.preventDefault(); void state.save(group.id); }}>
-              <fieldset disabled={state.saving !== null || isRestarting} className="min-w-0">
+              <fieldset disabled={state.saving === group.id || isRestarting} className="min-w-0">
                 <legend className="sr-only">{title}</legend>
                 <button type="submit" hidden />
                 <SettingsGroup>
@@ -183,7 +188,7 @@ export function RuntimeConfigSettings({
                                 onChange={(event) => state.change(field, event.target.value)}
                                 className="resize-y rounded-xl text-[13px]" />
                             ) : field.kind === "select" || field.kind === "preset" ? (
-                              <ProviderPicker triggerProps={{ ...common, disabled: disabled || state.saving !== null || isRestarting }}
+                              <ProviderPicker triggerProps={{ ...common, disabled: disabled || state.saving === group.id || isRestarting }}
                                 value={String(current)} emptyLabel={tr("none")}
                                 providers={options.map((option) => ({ name: option, label:
                                   !option ? tr(field.kind === "preset" ? "activeModel" : "none")
@@ -201,8 +206,9 @@ export function RuntimeConfigSettings({
                       </SettingsRow>
                     );
                   })}
-                  <RestartSettingsFooter autoSave={!state.errors[group.id] && !fields.some((field) => field.manual && state.dirty(field))} dirty={dirty} saving={state.saving === group.id}
-                    disabled={state.saving !== null || isRestarting}
+                  <RestartSettingsFooter autoSave={!fields.some((field) => field.manual && state.dirty(field))} dirty={dirty} saving={state.saving === group.id}
+                    error={Boolean(state.errors[group.id])}
+                    disabled={state.saving === group.id || isRestarting}
                     pendingRestart={false}
                     message={state.saved[group.id] && !dirty ? tr("saved") : undefined}
                     onSave={() => void state.save(group.id)} onReset={() => state.discard(group.id)}

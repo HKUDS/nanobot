@@ -1,4 +1,7 @@
 import { ChevronLeft, Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
+import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
@@ -20,6 +23,8 @@ import {
   NanobotFeatureInstallDialog,
   SettingsGroup,
   SettingsRow,
+  SettingsSectionTitle,
+  RestartRequiredNotice,
 } from "@/components/settings/shared/SettingsControls";
 import { AppsCatalogSettings } from "@/components/settings/system/AppsSettings";
 import {
@@ -28,7 +33,7 @@ import {
   AutomationsSettings,
 } from "@/components/settings/system/AutomationsSettings";
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
-import type { RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
+import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
@@ -223,6 +228,7 @@ export function SettingsPage({
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
         <AdvancedSettings
+          error={controller.capabilityErrors.safety}
           form={networkSafetyForm}
           dirty={networkSafetyDirty}
           saving={networkSafetySaving}
@@ -237,9 +243,51 @@ export function SettingsPage({
     </RuntimeConfigSettings>
   );
 
-  const renderSection = () => {
+  const renderSection = (section: SettingsSectionKey, embedded = false): ReactNode => {
     if (!settings) return null;
-    switch (activeSection) {
+    switch (section) {
+      case "capabilities": {
+        const state = controller.runtimeConfigState;
+        const toggleRuntime = (path: string, enabled: boolean) => {
+          const field = RUNTIME_CONFIG_FIELDS.find((item) => item.path === path);
+          if (field) state.change(field, enabled);
+        };
+        const busy = isRestarting || hostEngineApplying;
+        return (
+          <section className="settings-stack">
+            <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 [&_.settings-section-title]:m-0 [&_.settings-section-title]:p-0">
+              <SettingsSectionTitle>{t("settings.nav.capabilities")}</SettingsSectionTitle>
+              {settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
+                onRestart={restartViaSettingsSurface} isRestarting={busy} /> : null}
+            </div>
+            <SettingsFeature title={t("settings.rows.imageGeneration")} enabled={imageGenerationForm.enabled}
+              error={imageGenerationForm.enabled && !settings.image_generation.providers.find((provider) => provider.name === imageGenerationForm.provider)?.configured
+                ? t("settings.image.missingCredential") : controller.capabilityErrors.image}
+              disabled={busy || imageGenerationSaving} initialOpen={activeSection === "image"}
+              onChange={(enabled) => setImageGenerationForm((prev) => ({ ...prev, enabled }))}>
+              {renderSection("image", true)}
+            </SettingsFeature>
+            <SettingsFeature title={t("settings.rows.transcription")} enabled={transcriptionForm.enabled}
+              error={controller.capabilityErrors.voice}
+              disabled={busy || transcriptionSaving} initialOpen={activeSection === "voice"}
+              onChange={(enabled) => setTranscriptionForm((prev) => ({ ...prev, enabled }))}>
+              {renderSection("voice", true)}
+            </SettingsFeature>
+            <SettingsFeature title={t("settings.runtimeConfig.groups.web.title")}
+              enabled={settings.runtime_config ? state.value("tools.web.enable") === true : settings.web.enable}
+              disabled={busy || state.saving === "web" || !settings.runtime_config}
+              initialOpen={activeSection === "browser"} error={state.errors.web || controller.capabilityErrors.web}
+              onChange={(enabled) => toggleRuntime("tools.web.enable", enabled)}>
+              {renderSection("browser", true)}
+            </SettingsFeature>
+            <SettingsFeature title={t("settings.runtimeConfig.fields.agents_defaults_dream_enabled.label")}
+              enabled={state.value("agents.defaults.dream.enabled") === true}
+              disabled={busy || state.saving === "memory" || !settings.runtime_config} error={state.errors.memory}
+              onChange={(enabled) => toggleRuntime("agents.defaults.dream.enabled", enabled)} />
+            {!settings.runtime_config ? <p className="px-6 text-[13px] text-muted-foreground">{t("settings.runtimeConfig.unavailable")}</p> : null}
+          </section>
+        );
+      }
       case "overview":
         return (
           <OverviewSettings
@@ -325,9 +373,6 @@ export function SettingsPage({
               onCreateCustomProvider={createCustomProvider}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
-              imageProviderRestartPending={pendingRestartSections.image || pendingRestartSections.runtime}
-              onRestart={restartViaSettingsSurface}
-              isRestarting={isRestarting || hostEngineApplying}
             />
           </div>
         );
@@ -335,6 +380,8 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <ImageGenerationSettings
+              error={controller.capabilityErrors.image}
+              embedded={embedded}
               token={token}
               settings={settings}
               form={imageGenerationForm}
@@ -347,13 +394,16 @@ export function SettingsPage({
               onRestart={restartViaSettingsSurface}
               isRestarting={isRestarting || hostEngineApplying}
               requiresRestartPending={pendingRestartSections.image}
-            />
-            {imageGenerationForm.enabled ? runtimeConfiguration("image") : null}
+            >
+              {imageGenerationForm.enabled ? runtimeConfiguration("image") : null}
+            </ImageGenerationSettings>
           </div>
         );
       case "voice":
         return (
           <TranscriptionSettings
+            error={controller.capabilityErrors.voice}
+            embedded={embedded}
             settings={settings}
             form={transcriptionForm}
             dirty={transcriptionDirty}
@@ -370,8 +420,10 @@ export function SettingsPage({
       case "browser":
         return (
           <div className="settings-stack">
-            {runtimeConfiguration("browser")}
+            {!embedded ? runtimeConfiguration("browser") : null}
             <WebSettings
+              error={controller.capabilityErrors.web || controller.runtimeConfigState.errors.web}
+              embedded={embedded}
               enabled={settings.runtime_config
                 ? controller.runtimeConfigState.value("tools.web.enable") !== false
                 : settings.web.enable}
@@ -681,7 +733,7 @@ export function SettingsPage({
                   {error}
                 </div>
               ) : null}
-              {renderSection()}
+              {renderSection(isCapabilitySection(activeSection) ? "capabilities" : activeSection)}
             </div>
           ) : null}
         </div>

@@ -157,6 +157,7 @@
       "ariaLabel": "Sections des réglages"
     },
     "nav": {
+      "capabilities": "Fonctionnalités",
       "general": "Général",
       "byok": "BYOK",
       "overview": "Aperçu",

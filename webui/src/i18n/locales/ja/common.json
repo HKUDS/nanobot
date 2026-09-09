@@ -157,6 +157,7 @@
       "ariaLabel": "設定セクション"
     },
     "nav": {
+      "capabilities": "機能",
       "general": "一般",
       "byok": "BYOK",
       "overview": "概要",

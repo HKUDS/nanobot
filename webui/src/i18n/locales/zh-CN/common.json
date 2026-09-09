@@ -343,6 +343,7 @@
       "ariaLabel": "设置分区"
     },
     "nav": {
+      "capabilities": "能力",
       "general": "通用",
       "byok": "BYOK",
       "overview": "概览",

@@ -4,6 +4,7 @@ export type SettingsSectionKey =
   | "overview"
   | "appearance"
   | "models"
+  | "capabilities"
   | "image"
   | "voice"
   | "browser"
@@ -14,6 +15,10 @@ export type SettingsSectionKey =
   | "skills"
   | "runtime"
   | "advanced";
+
+export function isCapabilitySection(section: SettingsSectionKey): boolean {
+  return ["capabilities", "image", "voice", "browser", "memory"].includes(section);
+}
 
 type PendingRestartSection = "runtime" | "browser" | "image";
 export type PendingRestartSections = Record<PendingRestartSection, boolean>;

@@ -10,7 +10,6 @@ import {
   Loader2,
   Pencil,
   Plus,
-  RotateCcw,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -660,9 +659,6 @@ export function ProvidersSettings({
   onCreateCustomProvider,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
-  imageProviderRestartPending,
-  onRestart,
-  isRestarting,
 }: {
   settings: SettingsPayload;
   nanobotFeatures: NanobotFeaturesPayload | null;
@@ -683,9 +679,6 @@ export function ProvidersSettings({
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
-  imageProviderRestartPending: boolean;
-  onRestart?: () => void;
-  isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1191,29 +1184,6 @@ export function ProvidersSettings({
   ) : null;
   return (
     <div className="space-y-6">
-      {imageProviderRestartPending && onRestart ? (
-        <div className="flex min-h-[48px] items-center justify-between gap-3 py-3">
-          <p className="text-[13px] leading-5 text-muted-foreground">
-            {tx("settings.status.imageProviderRestart", "Provider support changed. Restart when ready.")}
-          </p>
-          <div className="shrink-0">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onRestart}
-              disabled={isRestarting}
-              className="rounded-full"
-            >
-              {isRestarting ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              )}
-              {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <section>
         <SettingsSectionTitle>
           {tx("settings.providers.title", "Model providers")}

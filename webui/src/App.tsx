@@ -161,6 +161,7 @@ function SurfaceLoadingFallback({ label }: { label?: string }) {
 }
 
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
+  "capabilities",
   "overview",
   "appearance",
   "models",

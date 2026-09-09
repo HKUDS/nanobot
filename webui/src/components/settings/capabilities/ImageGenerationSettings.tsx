@@ -1,5 +1,6 @@
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction, ReactNode } from "react";
+import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import { useTranslation } from "react-i18next";
 
 import { ModelIdPicker, ProviderPicker, optionRowsWithCurrent } from "@/components/settings/shared/ModelControls";
@@ -40,6 +41,9 @@ export function imageGenerationFormFromPayload(payload: SettingsPayload): ImageG
 }
 
 export function ImageGenerationSettings({
+  embedded = false,
+  error,
+  children,
   token,
   settings,
   form,
@@ -53,6 +57,9 @@ export function ImageGenerationSettings({
   isRestarting,
   requiresRestartPending,
 }: {
+  embedded?: boolean;
+  error?: string;
+  children?: ReactNode;
   token: string;
   settings: SettingsPayload;
   form: ImageGenerationSettingsUpdate;
@@ -67,13 +74,13 @@ export function ImageGenerationSettings({
   requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
-  useAutoSave(form, dirty, saving, onSave);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const selectedProvider =
     settings.image_generation.providers.find((provider) => provider.name === form.provider) ??
     settings.image_generation.providers[0];
   const providerConfigured = !!selectedProvider?.configured;
   const missingCredential = form.enabled && !providerConfigured;
+  useAutoSave(form, dirty, saving, onSave, !missingCredential);
   const aspectOptions = optionRowsWithCurrent(
     IMAGE_ASPECT_RATIO_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultAspectRatio,
@@ -94,8 +101,9 @@ export function ImageGenerationSettings({
   return (
     <div className="space-y-7">
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle>
+        {!embedded ? <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle> : null}
         <SettingsGroup>
+          {!embedded ? (
           <SettingsRow title={tx("settings.rows.imageGeneration", "Image generation")}>
             <ToggleButton
               checked={form.enabled}
@@ -104,6 +112,7 @@ export function ImageGenerationSettings({
               label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          ) : null}
           {form.enabled ? <>
           <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}>
             <ProviderPicker
@@ -176,6 +185,7 @@ export function ImageGenerationSettings({
               }
             />
           </SettingsRow>
+          <SettingsAdvancedOptions>
           <SettingsRow title={tx("settings.rows.maxImagesPerTurn", "Max images per turn")}>
             <NumberInput
               value={form.maxImagesPerTurn}
@@ -189,17 +199,20 @@ export function ImageGenerationSettings({
           {!settings.runtime_config ? (
             <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
           ) : null}
+          {children}
+          </SettingsAdvancedOptions>
           </> : null}
           <RestartSettingsFooter
-            autoSave={!form.enabled}
+            error={missingCredential || Boolean(error)}
+            autoSave
             dirty={dirty}
             saving={saving}
-            pendingRestart={requiresRestartPending}
+            pendingRestart={!embedded && requiresRestartPending}
             disabled={missingCredential}
             message={
               missingCredential
                 ? tx("settings.image.missingCredential", "Configure this provider before enabling image generation.")
-                : undefined
+                : error
             }
             dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
             pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}

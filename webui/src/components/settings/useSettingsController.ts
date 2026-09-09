@@ -410,7 +410,6 @@ export function useSettingsController({
     applyPayload,
     maybeRestartHostEngine,
     setPendingRestartSections,
-    setError,
     installCapabilities,
     imageGenerationDirty,
     transcriptionDirty,
@@ -457,6 +456,7 @@ export function useSettingsController({
 
   return {
     activeSection,
+    capabilityErrors: capabilityState.capabilityErrors,
     runtimeConfigState,
     apiService,
     apiServiceAction,

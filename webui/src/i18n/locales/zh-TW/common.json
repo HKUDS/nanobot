@@ -157,6 +157,7 @@
       "ariaLabel": "設定區段"
     },
     "nav": {
+      "capabilities": "能力",
       "general": "一般",
       "byok": "BYOK",
       "overview": "概覽",

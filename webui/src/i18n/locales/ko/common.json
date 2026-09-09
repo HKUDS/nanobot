@@ -157,6 +157,7 @@
       "ariaLabel": "설정 섹션"
     },
     "nav": {
+      "capabilities": "기능",
       "general": "일반",
       "byok": "BYOK",
       "overview": "개요",

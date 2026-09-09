@@ -157,6 +157,7 @@
       "ariaLabel": "Mục cài đặt"
     },
     "nav": {
+      "capabilities": "Tính năng",
       "general": "Chung",
       "byok": "BYOK",
       "overview": "Tổng quan",

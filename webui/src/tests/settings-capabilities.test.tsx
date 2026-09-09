@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -6,6 +6,80 @@ import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView,
 
 describe("Settings capabilities", () => {
   installSettingsViewTestHooks();
+
+  it("keeps other capability switches stable while saving and queues their edits", async () => {
+    const payload = { ...settingsPayload(), runtime_config: {
+      "tools.web.enable": true, "agents.defaults.dream.enabled": true,
+    } };
+    const memorySaved = { ...payload, runtime_config: { ...payload.runtime_config, "agents.defaults.dream.enabled": false } };
+    let finishMemory!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finishMemory = resolve; }))
+      .mockResolvedValueOnce({ ...memorySaved, runtime_config: { ...memorySaved.runtime_config, "tools.web.enable": false } });
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    const memory = screen.getByRole("switch", { name: "Memory consolidation" });
+    const web = screen.getByRole("switch", { name: "Web access" });
+    const webStyle = web.className;
+    fireEvent.click(memory);
+    await waitFor(() => expect(memory).toBeDisabled());
+    expect(web).toBeEnabled();
+    expect(web).toBeChecked();
+    expect(web.className).toBe(webStyle);
+    fireEvent.click(web);
+    expect(web).not.toBeChecked();
+    await act(async () => finishMemory(memorySaved));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.enable": false } }, 20_000,
+    ));
+    await waitFor(() => expect(web).toBeEnabled());
+    expect(memory).not.toBeChecked();
+    expect(web).not.toBeChecked();
+  });
+
+  it("keeps missing image credentials local and does not submit an invalid draft", async () => {
+    renderSettingsView({ initialSection: "capabilities", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    const image = within(screen.getByRole("region", { name: "Image generation" }));
+    expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation.");
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("image generation provider is not configured")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("keeps a rejected image save attached to the feature when its editor is collapsed", async () => {
+    const payload = settingsPayload();
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    requestMutationMock.mockRejectedValue(new Error("image generation provider is not configured"));
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    const image = within(screen.getByRole("region", { name: "Image generation" }));
+    await waitFor(() => expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
+    expect(screen.queryByText("image generation provider is not configured")).not.toBeInTheDocument();
+    fireEvent.click(image.getByRole("button", { name: "Image generation", exact: true }));
+    expect(image.getByRole("alert")).toBeVisible();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("keeps capabilities together and separates expanding settings from enabling a feature", () => {
+    const payload = settingsPayload();
+    payload.image_generation.enabled = true;
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    payload.runtime_config = { "tools.web.enable": true, "agents.defaults.dream.enabled": true };
+    renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
+    expect(screen.getAllByRole("switch")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Capabilities", exact: true })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("button", { name: "Image", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "OpenRouter", exact: true })).not.toBeInTheDocument();
+    const editor = screen.getByRole("button", { name: "Image generation", exact: true });
+    expect(editor).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(editor);
+    expect(editor).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "OpenRouter", exact: true })).toBeVisible();
+    fireEvent.click(editor);
+    expect(screen.queryByRole("button", { name: "OpenRouter", exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Image generation" })).toBeChecked();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
 
   it("reveals image settings only after enabling and preserves them when disabled", async () => {
     const payload = settingsPayload();
@@ -44,7 +118,7 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "browser", initialSettings: payload });
     expect(screen.queryByRole("button", { name: "DuckDuckGo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("switch", { name: "Web tools" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Web access" }));
     expect(screen.getByRole("button", { name: "DuckDuckGo" })).toBeVisible();
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.web.enable": true } }, 20_000,
@@ -163,7 +237,7 @@ describe("Settings capabilities", () => {
     expect(screen.getByRole("button", { name: "Full Access" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -210,11 +284,7 @@ describe("Settings capabilities", () => {
 
     fireEvent.pointerDown(await screen.findByRole("button", { name: /DuckDuckGo/ }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Keenable" }));
-    const saveButton = screen
-      .getAllByRole("button", { name: "Save" })
-      .find((button) => !(button as HTMLButtonElement).disabled);
-    if (!saveButton) throw new Error("enabled Save button was not found");
-    fireEvent.click(saveButton);
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -299,7 +369,7 @@ describe("Settings capabilities", () => {
 
     expect(await screen.findByText("App safety")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
     await waitFor(() =>

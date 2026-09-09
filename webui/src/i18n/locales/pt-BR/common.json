@@ -157,6 +157,7 @@
       "ariaLabel": "Seções de configurações"
     },
     "nav": {
+      "capabilities": "Recursos",
       "general": "Geral",
       "byok": "BYOK",
       "overview": "Visão geral",

@@ -1,4 +1,5 @@
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import type { Dispatch, SetStateAction } from "react";
 import { Eye, EyeOff, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -56,6 +57,8 @@ export function webSearchProviderRequiresApiKey(provider?: WebSearchProviderOpti
 }
 
 export function WebSettings({
+  embedded = false,
+  error,
   enabled = true,
   settings,
   form,
@@ -76,6 +79,8 @@ export function WebSettings({
   olostepInstalling,
   capabilityError,
 }: {
+  embedded?: boolean;
+  error?: string;
   enabled?: boolean;
   settings: SettingsPayload;
   form: WebSearchSettingsUpdate;
@@ -129,7 +134,7 @@ export function WebSettings({
   return (
     <div className="space-y-7">
       <section>
-        {enabled ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
+        {enabled && !embedded ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
         <div hidden={!enabled}>
         {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
           <div className="mb-3">
@@ -239,6 +244,7 @@ export function WebSettings({
               />
             </SettingsRow>
           ) : null}
+          <SettingsAdvancedOptions>
           <SettingsRow title={tx("settings.rows.maxResults", "Max results")}>
             <NumberInput
               value={form.maxResults ?? settings.web_search.max_results}
@@ -267,23 +273,26 @@ export function WebSettings({
               label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          </SettingsAdvancedOptions>
           </div>
           <RestartSettingsFooter
-            autoSave={!enabled}
+            error={missingCredential || Boolean(error)}
+            autoSave={form.provider !== "olostep" || olostepFeature?.installed === true}
+            saveLabel={t("settings.nanobotFeatures.installConfirmAction")}
             dirty={dirty}
             saving={saving}
-            pendingRestart={requiresRestartPending}
+            pendingRestart={!embedded && requiresRestartPending}
             disabled={missingCredential}
             message={
               missingCredential
                 ? t("settings.byok.webSearch.missingCredential")
-                : requiresRestartPending && !dirty
+                : error || (!embedded && requiresRestartPending && !dirty
                   ? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
                   : jinaReaderDirty
                     ? tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
                     : dirty
                       ? t("settings.byok.webSearch.saveHint")
-                      : undefined
+                      : undefined)
             }
             onSave={onSave}
             onRestart={onRestart}

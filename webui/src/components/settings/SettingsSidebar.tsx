@@ -1,15 +1,12 @@
 import { useRef } from "react";
 import {
   Activity,
-  Brain,
   Check,
   ChevronDown,
   ChevronLeft,
-  Globe2,
-  ImageIcon,
   LogOut,
   MessageCircle,
-  Mic,
+  Blocks,
   Palette,
   Server,
   ShieldCheck,
@@ -22,7 +19,7 @@ import {
   SIDEBAR_SELECTION_ITEM_CLASS,
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
-import type { SettingsSectionKey } from "@/components/settings/contracts";
+import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,11 +33,8 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "overview", icon: Activity, fallback: "Overview" },
   { key: "appearance", icon: Palette, fallback: "Appearance" },
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
-  { key: "image", icon: ImageIcon, fallback: "Image" },
-  { key: "voice", icon: Mic, fallback: "Voice" },
-  { key: "browser", icon: Globe2, fallback: "Web" },
+  { key: "capabilities", icon: Blocks, fallback: "Capabilities" },
   { key: "channels", icon: MessageCircle, fallback: "Channels" },
-  { key: "memory", icon: Brain, fallback: "Memory" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
 ];
@@ -66,6 +60,7 @@ export function SettingsSidebar({
   hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
+  activeSection = isCapabilitySection(activeSection) ? "capabilities" : activeSection;
   const activeNavItemRef = useRef<HTMLButtonElement>(null);
   const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
     ?? SETTINGS_NAV_ITEMS[0];

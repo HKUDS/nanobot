@@ -1,4 +1,5 @@
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -49,6 +50,8 @@ export function transcriptionFormFromPayload(payload: SettingsPayload): Transcri
 }
 
 export function TranscriptionSettings({
+  embedded = false,
+  error,
   settings,
   form,
   dirty,
@@ -61,6 +64,8 @@ export function TranscriptionSettings({
   isRestarting,
   requiresRestartPending,
 }: {
+  embedded?: boolean;
+  error?: string;
   settings: SettingsPayload;
   form: TranscriptionSettingsUpdate;
   dirty: boolean;
@@ -84,8 +89,9 @@ export function TranscriptionSettings({
 
   return (
     <section>
-      <SettingsSectionTitle>{tx("settings.sections.voiceInput", "Voice input")}</SettingsSectionTitle>
+      {!embedded ? <SettingsSectionTitle>{tx("settings.sections.voiceInput", "Voice input")}</SettingsSectionTitle> : null}
       <SettingsGroup>
+        {!embedded ? (
         <SettingsRow
           title={tx("settings.rows.transcription", "Transcription")}
           description={tx("settings.help.transcription", "Transcribe microphone input before sending it. Chat channel voice messages use the same settings.")}
@@ -97,6 +103,7 @@ export function TranscriptionSettings({
             label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
           />
         </SettingsRow>
+        ) : null}
         {form.enabled ? <>
         <SettingsRow title={tx("settings.rows.transcriptionProvider", "Provider")}>
           <ProviderPicker
@@ -145,6 +152,7 @@ export function TranscriptionSettings({
             className="h-8 w-[min(180px,60vw)] rounded-full text-[13px]"
           />
         </SettingsRow>
+        <SettingsAdvancedOptions>
         <SettingsRow title={tx("settings.rows.voiceLimits", "Limits")}>
           <div className="flex flex-wrap justify-end gap-2">
             <NumberInput
@@ -163,12 +171,15 @@ export function TranscriptionSettings({
             />
           </div>
         </SettingsRow>
+        </SettingsAdvancedOptions>
         </> : null}
         <RestartSettingsFooter
-          autoSave={!form.enabled}
+          error={Boolean(error)}
+          message={error}
+          autoSave
           dirty={dirty}
           saving={saving}
-          pendingRestart={requiresRestartPending}
+          pendingRestart={!embedded && requiresRestartPending}
           dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
           pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
           onSave={onSave}

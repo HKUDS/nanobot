@@ -619,7 +619,7 @@ describe("Settings providers", () => {
       screen.queryByRole("switch", { name: "DeepSeek web search" }),
     ).not.toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(
@@ -690,7 +690,7 @@ describe("Settings providers", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "OpenAI", exact: true }));
     const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
     expect(searchSwitch).toHaveAttribute("aria-checked", "true");
     fireEvent.click(searchSwitch);

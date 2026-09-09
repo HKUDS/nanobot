@@ -53,12 +53,11 @@ describe("Runtime configuration settings", () => {
     expect(document.getElementById("runtime-tools.exec.enable")).not.toBeInTheDocument();
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).not.toBeInTheDocument();
     expect(document.getElementById("runtime-tools.exec.sandbox")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Web" }));
-    expect(document.getElementById("runtime-tools.web.enable")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Web access" })).toBeInTheDocument();
   });
 
   it("exposes the CLI switch on the apps page", () => {
@@ -78,10 +77,11 @@ describe("Runtime configuration settings", () => {
     const payload = runtimeSettings();
     requestMutationMock.mockResolvedValue({ ...payload, runtime_config: { ...payload.runtime_config, "agents.defaults.dream.enabled": false } });
     renderSettingsView({ initialSection: "memory", initialSettings: payload });
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
-    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByText("Advanced options")).not.toBeInTheDocument();
+    const memory = within(screen.getByRole("region", { name: "Memory consolidation" }));
+    expect(memory.getAllByRole("switch")).toHaveLength(1);
+    expect(memory.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(memory.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(memory.queryByText("Advanced options")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Memory consolidation" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "agents.defaults.dream.enabled": false } }, 20_000));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Memory consolidation" })).not.toBeChecked());
@@ -153,7 +153,7 @@ describe("Runtime configuration settings", () => {
     fireEvent.change(field, { target: { value: "17" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save settings");
     expect(field).toHaveValue(17);
-    expect(within(screen.getByRole("group", { name: "Shell and sandbox" })).getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(within(screen.getByRole("group", { name: "Shell and sandbox" })).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
   it("preserves drafts when navigating away and supports explicit clearing", async () => {

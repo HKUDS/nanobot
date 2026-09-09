@@ -343,6 +343,7 @@
       "ariaLabel": "Settings sections"
     },
     "nav": {
+      "capabilities": "Capabilities",
       "general": "General",
       "byok": "BYOK",
       "overview": "Overview",

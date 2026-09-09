@@ -153,16 +153,16 @@ export function RestartRequiredNotice({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-3 rounded-control border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-      <span>{message}</span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+      <span role="status">{message}</span>
       {onRestart ? (
         <Button
           type="button"
           size="sm"
-          variant="outline"
+          variant="ghost"
           onClick={onRestart}
           disabled={isRestarting}
-          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
+          className="h-8 rounded-full px-2 text-[12px] font-medium text-muted-foreground hover:text-foreground"
         >
           {isRestarting ? (
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -197,7 +197,7 @@ export function SettingsRow({
   description,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   description?: string;
   children?: ReactNode;
 }) {
@@ -235,6 +235,8 @@ export function ReadOnlyRow({
 }
 
 export function RestartSettingsFooter({
+  saveLabel,
+  error = false,
   autoSave = false,
   dirty,
   saving,
@@ -248,6 +250,8 @@ export function RestartSettingsFooter({
   onReset,
   isRestarting,
 }: {
+  saveLabel?: string;
+  error?: boolean;
   autoSave?: boolean;
   dirty: boolean;
   saving: boolean;
@@ -275,15 +279,17 @@ export function RestartSettingsFooter({
     (pendingRestart && !dirty
       ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
       : dirty
-        ? dirtyMessage ?? t("settings.status.unsaved")
+        ? autoSave
+          ? error ? undefined : t("settings.actions.saving")
+          : dirtyMessage ?? t("settings.status.unsaved")
         : undefined);
-  const statusTone = disabled ? "danger" : dirty || pendingRestart ? "accent" : undefined;
+  const statusTone = error || disabled ? "danger" : dirty || pendingRestart ? "accent" : undefined;
 
   if (autoSave && !statusMessage && !pendingRestart) return null;
 
   return (
     <div className={cn("settings-footer", autoSave && "settings-footer-auto")}>
-      <div className="min-w-0 text-[13px] leading-5 text-muted-foreground">
+      <div role={error ? "alert" : "status"} className="min-w-0 text-[13px] leading-5 text-muted-foreground">
         <SettingsStatusMessage tone={statusTone}>{statusMessage}</SettingsStatusMessage>
       </div>
       <div className="flex w-full shrink-0 flex-wrap justify-end gap-2 sm:w-auto">
@@ -324,7 +330,7 @@ export function RestartSettingsFooter({
           disabled={!dirty || disabled || saving}
           className="rounded-full"
         >
-          {saving ? t("settings.actions.saving") : t("settings.actions.save")}
+          {saving ? t("settings.actions.saving") : saveLabel ?? t("settings.actions.save")}
         </Button> : null}
       </div>
     </div>

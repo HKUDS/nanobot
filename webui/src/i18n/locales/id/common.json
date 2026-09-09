@@ -157,6 +157,7 @@
       "ariaLabel": "Bagian pengaturan"
     },
     "nav": {
+      "capabilities": "Fitur",
       "general": "Umum",
       "byok": "BYOK",
       "overview": "Ikhtisar",
