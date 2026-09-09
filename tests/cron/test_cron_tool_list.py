@@ -448,3 +448,87 @@ def test_list_excludes_disabled_jobs(tmp_path) -> None:
     result = tool._list_jobs()
     assert "Paused job" not in result
     assert result == "No scheduled jobs."
+
+
+def test_add_job_stores_and_lists_explicit_delivery_target(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    with request_context(
+        RequestContext(channel="websocket", chat_id="origin", session_key="websocket:origin")
+    ):
+        result = tool._add_job(
+            "ops",
+            "check health",
+            60,
+            None,
+            None,
+            None,
+            "slack",
+            "C123",
+        )
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.delivery_channel == "slack"
+    assert job.payload.delivery_chat_id == "C123"
+    assert "Delivery: slack:C123" in tool._list_jobs()
+
+
+def test_new_one_shot_job_is_retained_for_archive(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    with request_context(
+        RequestContext(channel="websocket", chat_id="origin", session_key="websocket:origin")
+    ):
+        result = tool._add_job(
+            "once",
+            "remind me",
+            None,
+            None,
+            None,
+            "2099-01-01T10:00:00",
+        )
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.schedule.kind == "at"
+    assert job.delete_after_run is False
+
+
+def test_list_archived_view_and_batch_archive_output(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    first = tool._cron.add_job(
+        name="first",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat("first"),
+    )
+    second = tool._cron.add_job(
+        name="second",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat("second"),
+    )
+
+    output = tool._archive_jobs(f"{first.id},{second.id},missing")
+    archived = tool._list_jobs(view="archived")
+
+    assert "Archived:" in output
+    assert first.id in output and second.id in output
+    assert "Not found: missing" in output
+    assert "first" in archived and "second" in archived
+    assert tool._list_jobs() == "No scheduled jobs."
+
+
+def test_validate_params_checks_archive_and_delivery_pair(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    assert "job_ids is required when action='archive'" in tool.validate_params(
+        {"action": "archive"}
+    )
+    errors = tool.validate_params(
+        {
+            "action": "add",
+            "message": "check",
+            "delivery_channel": "slack",
+        }
+    )
+    assert any("delivery_channel and delivery_chat_id" in error for error in errors)

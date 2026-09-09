@@ -57,8 +57,21 @@ scheduled tasks. Cron expressions can include an IANA timezone such as
 `America/Vancouver`; otherwise nanobot uses the runtime default timezone.
 
 Scheduled automations normally deliver the result back to the session where they
-were created. Use them for work that should run on a predictable schedule and
-report each run.
+were created. A scheduled automation can instead set both `delivery_channel`
+and `delivery_chat_id` to send visible results to another registered channel,
+such as a Slack channel or Feishu group. The original session still owns the
+automation's history, workspace, and execution context. Leave both delivery
+fields empty to keep the origin-session behavior; providing only one is rejected.
+
+You can set or clear the delivery target in the WebUI automation editor. The
+cron tool also accepts the two fields when creating a job. A destination is a
+registered nanobot channel plus its channel-specific chat ID, not an arbitrary
+webhook URL.
+
+Use scheduled automations for work that should run on a predictable schedule
+and report each run. New one-time jobs remain as completed, disabled jobs after
+they run so their history can be inspected and archived. Existing stored jobs
+with `deleteAfterRun=true` keep the legacy delete-after-run behavior.
 
 For background checks that should stay quiet unless there is something useful to
 report, use heartbeat instead of a user-created scheduled automation.
@@ -119,14 +132,21 @@ Heartbeat is enabled by default when `nanobot gateway` starts. Configure it in
 
 Use the WebUI Automations view to:
 
-- filter by all, active, paused, needs-attention, or system jobs;
+- filter by all, active, paused, needs-attention, system, or archived jobs;
 - search by task name, message, trigger command, linked topic, schedule, or
   status;
 - sort by next run, last run, updated time, or name;
 - run scheduled automations now;
 - pause or resume, rename, or delete user-created automations;
+- edit a scheduled automation's result delivery target;
+- select and archive multiple scheduled automations in one action;
 - copy the CLI command for local triggers;
 - inspect protected system automations without changing them.
+
+Archiving is a soft removal: it disables the job, removes its next run, and
+keeps its last result and run history. Archived jobs cannot be edited, resumed,
+or run, but they can still be inspected or permanently deleted. System jobs and
+local triggers cannot be archived.
 
 Local triggers do not have a WebUI "Run now" action because each run needs a
 message. Copy the `nanobot trigger ...` command from the WebUI and replace
@@ -189,7 +209,7 @@ config as the gateway.
 If a trigger message appears twice after a restart, treat it as expected
 at-least-once delivery and make the external message idempotent.
 
-If you need to edit, pause, resume, rename, delete, or inspect automations, use
+If you need to edit, pause, resume, archive, delete, or inspect automations, use
 the WebUI Automations view.
 
 ## Related Docs

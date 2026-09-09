@@ -444,6 +444,7 @@ export function useSettingsController({
   const {
     handleApiServiceAction,
     handleAutomationAction,
+    handleAutomationArchive,
     handleAutomationEdit,
     handleCliAppAction,
     handleImportMcpConfig,
@@ -495,6 +496,7 @@ export function useSettingsController({
     form,
     handleApiServiceAction,
     handleAutomationAction,
+    handleAutomationArchive,
     handleAutomationEdit,
     handleCliAppAction,
     handleDeleteModelConfiguration,

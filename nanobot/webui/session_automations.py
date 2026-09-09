@@ -14,7 +14,12 @@ AutomationJob = CronJob | LocalTrigger
 
 
 class _CronServiceLike(Protocol):
-    def list_jobs(self, include_disabled: bool = False) -> list[CronJob]: ...
+    def list_jobs(
+        self,
+        include_disabled: bool = False,
+        *,
+        include_archived: bool = False,
+    ) -> list[CronJob]: ...
 
     def list_bound_cron_jobs_for_session(
         self,
@@ -94,7 +99,12 @@ def all_automations_payload(
     """Return all cron jobs visible to the WebUI automation manager."""
     jobs: list[AutomationJob] = []
     if cron_service is not None:
-        jobs.extend(cron_service.list_jobs(include_disabled=True))
+        jobs.extend(
+            cron_service.list_jobs(
+                include_disabled=True,
+                include_archived=True,
+            )
+        )
     if local_trigger_store is not None:
         jobs.extend(local_trigger_store.list_triggers(include_disabled=True))
     return {
@@ -144,6 +154,7 @@ def _serialize_job(
         "id": job.id,
         "name": job.name,
         "enabled": job.enabled,
+        "archived_at_ms": job.archived_at_ms,
         "schedule": {
             "kind": job.schedule.kind,
             "at_ms": job.schedule.at_ms,
@@ -153,6 +164,8 @@ def _serialize_job(
         },
         "payload": {
             "message": job.payload.message,
+            "delivery_channel": job.payload.delivery_channel,
+            "delivery_chat_id": job.payload.delivery_chat_id,
         },
         "state": {
             "next_run_at_ms": job.state.next_run_at_ms,

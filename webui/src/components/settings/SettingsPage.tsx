@@ -94,6 +94,7 @@ export function SettingsPage({
     form,
     handleApiServiceAction,
     handleAutomationAction,
+    handleAutomationArchive,
     handleAutomationEdit,
     handleCliAppAction,
     handleDeleteModelConfiguration,
@@ -470,6 +471,7 @@ export function SettingsPage({
             onFilterChange={setAutomationsFilter}
             onSortChange={setAutomationsSort}
             onAction={handleAutomationAction}
+            onArchive={handleAutomationArchive}
             onRequestEdit={setAutomationPendingEdit}
             onRequestDelete={setAutomationPendingDelete}
             onBackToChat={onBackToChat}
