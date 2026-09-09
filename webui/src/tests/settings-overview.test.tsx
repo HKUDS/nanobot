@@ -26,7 +26,7 @@ describe("Settings overview and appearance", () => {
     });
   });
 
-  it("shows the third-party brand notice only with the brand logo preference", () => {
+  it("keeps the brand logo explanation out of the visual settings row", () => {
     renderSettingsView({
       initialSection: "appearance",
       initialSettings: settingsPayload(),
@@ -41,6 +41,7 @@ describe("Settings overview and appearance", () => {
       within(brandLogosRow as HTMLElement).getByText(thirdPartyBrandNotice),
     ).toBeInTheDocument();
     expect(screen.getAllByText(thirdPartyBrandNotice)).toHaveLength(1);
+    expect(screen.getByText(thirdPartyBrandNotice)).toHaveClass("sr-only");
   });
 
   it.each(["apps", "channels"] as const)(

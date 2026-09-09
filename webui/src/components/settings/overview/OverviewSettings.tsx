@@ -467,7 +467,7 @@ function OverviewListRow({
       <OverviewRowIcon icon={Icon} />
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] font-medium leading-5 text-foreground">{title}</span>
-        {caption ? <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{caption}</span> : null}
+        {caption ? <span className="sr-only">{caption}</span> : null}
       </span>
       <span className="ml-auto flex min-w-0 max-w-[48%] items-center gap-2">
         <OverviewValueLogo provider={valueLogoProvider} showBrandLogos={showBrandLogos} />

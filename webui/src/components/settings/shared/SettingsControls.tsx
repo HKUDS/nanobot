@@ -206,7 +206,7 @@ export function SettingsRow({
       <div className="min-w-0">
         <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
         {description ? (
-          <div className="mt-1 max-w-[28rem] text-[12px] leading-5 text-muted-foreground">
+          <div className="sr-only">
             {description}
           </div>
         ) : null}
