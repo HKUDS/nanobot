@@ -428,7 +428,9 @@ class TestSeatbeltBackend:
     @pytest.mark.parametrize("same_directory", [True, False])
     def test_rw_coverage_uses_filesystem_identity(self, tmp_path, monkeypatch, same_directory):
         ro = tmp_path / "Tree" / "ReadOnly"
-        rw = tmp_path / "tree"
+        # Keep the lexical paths distinct even on Windows; this test controls
+        # filesystem identity, while native tests cover volume case sensitivity.
+        rw = tmp_path / "aliased-tree"
         monkeypatch.setattr(
             Path, "samefile",
             lambda path, other: same_directory and path == ro.parent and other == rw,
@@ -437,7 +439,7 @@ class TestSeatbeltBackend:
 
     def test_missing_rw_alias_does_not_unlock_readonly_root(self, tmp_path):
         ro = tmp_path / "missing" / "readonly"
-        assert not _seatbelt_is_within(ro, tmp_path / "MISSING")
+        assert not _seatbelt_is_within(ro, tmp_path / "missing-alias")
         assert _seatbelt_is_within(ro, ro.parent)
 
     def test_custom_read_write_binds(self, tmp_path):
