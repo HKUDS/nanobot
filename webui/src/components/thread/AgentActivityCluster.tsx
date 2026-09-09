@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -53,6 +54,7 @@ import {
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
@@ -67,6 +69,8 @@ import type {
 } from "@/lib/types";
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
+const EMPTY_CLI_APPS: CliAppInfo[] = [];
+const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
 export { isAgentActivityMember };
 
@@ -156,24 +160,80 @@ interface AgentActivityClusterProps {
   onOpenFilePreview?: (path: string) => void;
 }
 
-/**
- * One fold wrapping the complete middle of a turn: reasoning, model segments,
- * tool traces, and file edits. The final assistant answer stays outside it.
- */
-export function AgentActivityCluster({
+export function AgentActivityCluster(props: AgentActivityClusterProps) {
+  const displayMode = useFileEditDisplayMode();
+  const messages = useMemo(() => coalesceActivityMessages(props.messages), [props.messages]);
+  const editsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
+    [messages, props.isTurnStreaming],
+  );
+  if (displayMode === "summary" || !editsByMessage.size) {
+    return <FoldedAgentActivity {...props} />;
+  }
+
+  // Diff rows break the fold so they stay visible in their original timeline position.
+  const items: ReactNode[] = [];
+  let pending: UIMessage[] = [];
+  const flush = (last: boolean) => {
+    // A live turn still needs its status header when the last row is a diff.
+    if (!pending.length && !(last && props.isTurnStreaming)) return;
+    items.push(
+      <FoldedAgentActivity
+        {...props}
+        key={pending[0]?.id ?? "tail-status"}
+        messages={pending}
+        isTurnStreaming={last && props.isTurnStreaming}
+        retryStatus={last ? props.retryStatus : null}
+        hasBodyBelow={false}
+      />,
+    );
+    pending = [];
+  };
+  for (const message of messages) {
+    const edits = editsByMessage.get(message.id);
+    if (message.fileEdits?.length) {
+      const traces = traceLines(message).filter((line) => !isFileEditTraceLine(line));
+      if (traces.some((line) => line.trim())) {
+        pending.push({ ...message, traces, content: traces.at(-1) ?? "", fileEdits: undefined });
+      }
+    } else {
+      pending.push(message);
+    }
+    if (edits?.length) {
+      flush(false);
+      items.push(
+        <FileEditGroup
+          key={`${message.id}:edits`}
+          edits={edits}
+          displayMode={displayMode}
+          onOpenFilePreview={props.onOpenFilePreview}
+        />,
+      );
+    }
+  }
+  flush(true);
+  return (
+    <div className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+      {items}
+    </div>
+  );
+}
+
+function FoldedAgentActivity({
   messages,
   isTurnStreaming,
   hasBodyBelow,
   turnLatencyMs,
   startedAtMs,
   retryStatus = null,
-  cliApps = [],
-  mcpPresets = [],
+  cliApps = EMPTY_CLI_APPS,
+  mcpPresets = EMPTY_MCP_PRESETS,
   onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
   const pageVisible = usePageVisibility();
+  const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
   const fileEditsByMessage = useMemo(
     () => summarizeFileEditsByMessage(activityMessages, isTurnStreaming),
@@ -338,11 +398,11 @@ export function AgentActivityCluster({
   useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
   useEffect(() => {
-    if (!isTurnStreaming || !pageVisible) return undefined;
+    if (!isTurnStreaming || !pageVisible || !threadVisible) return undefined;
     setNow(Date.now());
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
-  }, [isTurnStreaming, pageVisible]);
+  }, [isTurnStreaming, pageVisible, threadVisible]);
 
   useEffect(() => {
     const wasStreaming = wasTurnStreamingRef.current;
@@ -454,7 +514,7 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function ActivityMessageTimeline({
+const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
   messages,
   active,
   cliAppsByName,
@@ -515,7 +575,7 @@ function ActivityMessageTimeline({
     }
   });
   return <>{items}</>;
-}
+});
 
 /**
  * Keep an intermediate assistant segment as normal Markdown. The activity

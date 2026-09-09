@@ -9,8 +9,12 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
-from nanobot.session.manager import MIN_COMPACTED_REPLAY_MESSAGES, Session, SessionManager
-from nanobot.session.summary import SessionSummary, session_summary_from_metadata
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.summary import (
+    SessionSummary,
+    is_summary_checkpoint,
+    session_summary_from_metadata,
+)
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
@@ -20,7 +24,6 @@ SessionEventFactory = Callable[[str], EventSink]
 
 
 class AutoCompact:
-    _RECENT_SUFFIX_MESSAGES = MIN_COMPACTED_REPLAY_MESSAGES
     _INTERNAL_SESSION_PREFIXES = ("dream:",)
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
@@ -54,7 +57,7 @@ class AutoCompact:
     def _has_unarchived_messages(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
         return any(
-            not message.get("_command")
+            not message.get("_command") and not is_summary_checkpoint(message)
             for message in session.messages[session.last_archived:]
         )
 
@@ -95,10 +98,9 @@ class AutoCompact:
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,
-                max_suffix=self._RECENT_SUFFIX_MESSAGES,
                 events=self._bind_events(key) if self._bind_events else NO_EVENTS,
             )
-            if summary and summary != "(nothing)":
+            if summary:
                 session = self.sessions.get_or_create(key)
                 stored = session_summary_from_metadata(
                     session.metadata,

@@ -12,56 +12,94 @@ import type { UIMessage } from "@/lib/types";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("ThreadMessages", () => {
-  it("shows optimistic turn progress in the thread before the first agent output", () => {
+  it.each([0, -13_000, -14_000, -15_000, 15_000])(
+    "keeps the optimistic timer through acknowledgement and output with %i ms server clock skew",
+    (clockSkewMs) => {
+      vi.useFakeTimers();
+      const now = new Date("2026-08-13T10:00:05.000Z").getTime();
+      vi.setSystemTime(now);
+      const prompt: UIMessage = {
+        id: "u-optimistic",
+        role: "user",
+        content: "check this",
+        turnId: "turn-optimistic",
+        turnPhase: "user",
+        deliveryStatus: "sending",
+        createdAt: now,
+      };
+      const { rerender } = render(
+        <ThreadMessages
+          messages={[prompt]}
+          isStreaming
+          activeTurnId="turn-optimistic"
+        />,
+      );
+
+      expect(screen.getByRole("status", { name: "Working for 0s" })).toBeInTheDocument();
+
+      rerender(
+        <ThreadMessages
+          messages={[{ ...prompt, deliveryStatus: "accepted" }]}
+          isStreaming
+          activeTurnId="turn-optimistic"
+          runStartedAt={(now + clockSkewMs) / 1000}
+        />,
+      );
+      expect(screen.getByRole("status", { name: "Working for 0s" })).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(1000); });
+
+      rerender(
+        <ThreadMessages
+          messages={[
+            { ...prompt, deliveryStatus: "accepted" },
+            {
+              id: "t-optimistic",
+              role: "tool",
+              kind: "trace",
+              content: "web_search()",
+              traces: ["web_search()"],
+              turnId: "turn-optimistic",
+              turnPhase: "activity",
+              createdAt: now,
+            },
+          ]}
+          isStreaming
+          activeTurnId="turn-optimistic"
+          runStartedAt={(now + clockSkewMs) / 1000}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Working for 1s" })).toBeInTheDocument();
+    },
+  );
+
+  it("restores pending progress from the original prompt when guidance arrives", () => {
     vi.useFakeTimers();
-    const now = new Date("2026-08-13T10:00:05.000Z").getTime();
+    const now = 1_800_000_000_000;
     vi.setSystemTime(now);
-    const prompt: UIMessage = {
-      id: "u-optimistic",
-      role: "user",
-      content: "check this",
-      turnId: "turn-optimistic",
-      turnPhase: "user",
-      deliveryStatus: "sending",
-      createdAt: now - 5_000,
-    };
-    const { rerender } = render(
-      <ThreadMessages
-        messages={[prompt]}
-        isStreaming
-        activeTurnId="turn-optimistic"
-        runStartedAt={(now - 5_000) / 1000}
-      />,
-    );
-
-    expect(screen.getByRole("status", { name: "Working for 5s" })).toBeInTheDocument();
-
-    rerender(
+    render(
       <ThreadMessages
         messages={[
-          { ...prompt, deliveryStatus: "accepted" },
           {
-            id: "t-optimistic",
-            role: "tool",
-            kind: "trace",
-            content: "web_search()",
-            traces: ["web_search()"],
-            turnId: "turn-optimistic",
-            turnPhase: "activity",
-            createdAt: now,
+            id: "original", role: "user", content: "research this",
+            turnId: "original-turn", createdAt: now - 30_000,
+          },
+          {
+            id: "guidance", role: "user", content: "also check this",
+            turnId: "guidance-turn", createdAt: now,
           },
         ]}
         isStreaming
-        activeTurnId="turn-optimistic"
-        runStartedAt={(now - 5_000) / 1000}
+        activeTurnId="original-turn"
+        runStartedAt={(now - 43_000) / 1000}
       />,
     );
-
-    expect(screen.getByRole("button", { name: "Working for 5s" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working for 30s" })).toBeInTheDocument();
   });
 
   it("does not move a mounted tail answer into offscreen rendering on the next turn", () => {
@@ -88,19 +126,26 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
   });
 
-  it("still defers historical non-tail answers on their initial render", () => {
-    render(
-      <ThreadMessages
-        messages={[
-          { id: "u1", role: "user", content: "old question", createdAt: 1 },
-          { id: "a1", role: "assistant", content: "historical answer", createdAt: 2 },
-          { id: "u2", role: "user", content: "latest question", createdAt: 3 },
-        ]}
-        isStreaming={false}
-      />,
-    );
-
-    expect(screen.getByText("historical answer").closest(".thread-render-unit")).not.toBeNull();
+  it("recycles offscreen historical content while preserving its measured space", () => {
+    let notify: (entries: Array<{ isIntersecting: boolean }>) => void = () => {};
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: typeof notify) { notify = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    const view = render(<ThreadMessages messages={[
+      { id: "u1", role: "user", content: "old question", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "historical answer", createdAt: 2 },
+      { id: "u2", role: "user", content: "latest question", createdAt: 3 },
+    ]} isStreaming={false} />);
+    const unit = screen.getByText("historical answer").closest<HTMLElement>("[data-thread-display-unit]")!;
+    vi.spyOn(unit, "getBoundingClientRect").mockReturnValue({ height: 240 } as DOMRect);
+    act(() => notify([{ isIntersecting: false }]));
+    expect(unit.style.height).toBe("240px");
+    expect(unit.childElementCount).toBe(0);
+    act(() => notify([{ isIntersecting: true }]));
+    expect(screen.getByText("historical answer")).toBeVisible();
+    expect(view.container).toHaveTextContent("old question");
   });
 
   it("preserves an answer's markdown tree across completion and the next prompt", async () => {

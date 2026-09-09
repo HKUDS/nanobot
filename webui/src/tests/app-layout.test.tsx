@@ -766,6 +766,45 @@ describe("App layout", () => {
     expect(screen.queryByText("connection-sensitive message")).not.toBeInTheDocument();
   });
 
+  it("keeps the context-menu project through navigation and first-message creation", async () => {
+    const projectScope = {
+      project_path: "/tmp/selected-project",
+      project_name: "selected-project",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    mockSessions = [{
+      key: "websocket:existing-chat",
+      channel: "websocket",
+      chatId: "existing-chat",
+      preview: "Existing topic",
+      workspaceScope: projectScope,
+    }];
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "full",
+        default_scope: { ...projectScope, project_path: "/tmp/workspace", project_name: "workspace" },
+        controls: { can_change_project: true, can_use_full_access: true },
+      },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const projectSection = screen.getByRole("region", { name: "selected-project" });
+    fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New topic" }));
+    expect(window.location.hash).toBe("#/new");
+    // Let queued browser navigation events settle before sending the first message.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(await screen.findByRole("button", { name: "Choose project" })).toHaveTextContent("selected-project");
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "project topic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledWith(projectScope));
+  });
+
   it("uses the restricted default scope without offering project selection", async () => {
     mockFetchRoutes({
       "/api/workspaces": {

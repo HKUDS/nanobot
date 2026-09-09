@@ -86,7 +86,7 @@ def launch_tui(
     """Run the native TUI against the shared local gateway."""
     chat_id = _initial_tui_chat_id(session_id)
     tui_workspace = _initial_tui_workspace(workspace_override)
-    command = _resolve_tui_command()
+    command = resolve_tui_command()
     base_url, bootstrap_secret = _tui_gateway_connection(config)
     gateway: _GatewayHandle | None = None
     process: subprocess.Popen[Any] | None = None
@@ -94,6 +94,8 @@ def launch_tui(
         env = os.environ.copy()
         env.pop("NANOBOT_TUI_WS_URL", None)
         env.pop("NANOBOT_TUI_API_TOKEN", None)
+        env.pop("NANOBOT_TUI_DESKTOP_RESOLVER", None)
+        env.pop("NANOBOT_TUI_DESKTOP_TARGET", None)
         env.update(
             {
                 "NANOBOT_TUI_BOOTSTRAP_URL": f"{base_url}/webui/bootstrap",
@@ -160,7 +162,7 @@ def launch_tui(
             lease.release(wait_for_stop=False)
 
 
-def _resolve_tui_command() -> list[str]:
+def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
     override = os.environ.get("NANOBOT_TUI_BIN", "").strip()
     if override:
         executable = Path(override).expanduser().resolve(strict=False)
@@ -191,13 +193,13 @@ def _resolve_tui_command() -> list[str]:
                 "this source checkout requires Bun to run its matching TUI; "
                 "install Bun, then run `nanobot agent` again"
             )
-        return _resolve_source_tui_command(source_dir, bun)
+        return _resolve_source_tui_command(source_dir, bun, data_dir=data_dir)
 
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
     if packaged.is_file():
         return [str(packaged)]
 
-    downloaded = _download_release_tui(asset)
+    downloaded = _download_release_tui(asset, data_dir=data_dir)
     if downloaded is not None:
         return [str(downloaded)]
 
@@ -222,7 +224,9 @@ def _tui_source_dir(project_root: Path) -> Path | None:
     return None
 
 
-def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
+def _resolve_source_tui_command(
+    source_dir: Path, bun: str, *, data_dir: Path | None = None,
+) -> list[str]:
     dependency = source_dir / "node_modules" / "@opentui" / "core"
     try:
         install = subprocess.run(
@@ -241,12 +245,12 @@ def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
     executable = named_executable(
         bun,
         name="nanobot-tui",
-        directory=get_data_dir() / "run" / "executables",
+        directory=(data_dir if data_dir is not None else get_data_dir()) / "run" / "executables",
     )
     return [executable, str(source_dir / "src" / "index.ts")]
 
 
-def _download_release_tui(asset: str) -> Path | None:
+def _download_release_tui(asset: str, *, data_dir: Path | None = None) -> Path | None:
     """Install the complete, version-matched TUI release bundle."""
     if os.environ.get("NANOBOT_TUI_NO_DOWNLOAD") == "1":
         return None
@@ -254,7 +258,7 @@ def _download_release_tui(asset: str) -> Path | None:
     if not version or version.endswith((".dev0", "+dev")):
         return None
 
-    target_dir = get_data_dir() / "bin" / "tui" / version
+    target_dir = (data_dir if data_dir is not None else get_data_dir()) / "bin" / "tui" / version
     cached = _cached_release_tui(target_dir, asset)
     if cached is not None:
         return cached

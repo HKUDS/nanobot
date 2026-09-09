@@ -108,6 +108,7 @@ import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
+import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
@@ -963,7 +964,7 @@ export function ThreadComposer({
   const secondEnterPromptIdRef = useRef<string | null>(null);
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
-  const wasStreamingRef = useRef(isStreaming);
+  const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
@@ -1120,6 +1121,12 @@ export function ThreadComposer({
       text: match[1].toLowerCase(),
     };
   }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
+
+  const skillMenuActive = skillQuery !== null;
+  useEffect(() => {
+    // Also refresh an empty menu: skills may have been installed by the agent.
+    if (skillMenuActive) requestSkillsRefresh();
+  }, [skillMenuActive]);
 
   const visibleSlashCommands = useMemo(() => {
     if (!(isStreaming && onStop)) return slashCommands;
@@ -1895,16 +1902,21 @@ export function ThreadComposer({
   }, [onSend, queuedPrompts]);
 
   useEffect(() => {
-    const wasStreaming = wasStreamingRef.current;
-    wasStreamingRef.current = isStreaming;
+    const previous = previousQueueRunRef.current;
+    previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
     if (!isStreaming) secondEnterPromptIdRef.current = null;
-    if (!wasStreaming || isStreaming || queuedPrompts.length === 0) return;
+    // Switching to an idle session is not completion of the previous session's run.
+    if (previous.key !== pendingQueueKey) {
+      skipNextQueuedFlushRef.current = false;
+      return;
+    }
+    if (!previous.isStreaming || isStreaming || queuedPrompts.length === 0) return;
     if (skipNextQueuedFlushRef.current) {
       skipNextQueuedFlushRef.current = false;
       return;
     }
     sendNextQueuedPrompt();
-  }, [sendNextQueuedPrompt, isStreaming, queuedPrompts.length]);
+  }, [sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts.length]);
 
   const handleStop = useCallback(() => {
     secondEnterPromptIdRef.current = null;

@@ -99,7 +99,6 @@ from nanobot.session.recovery import (
     restore_runtime_checkpoint,
 )
 from nanobot.session.summary import (
-    SUMMARY_CONTINUATION_TEXT,
     SessionSummary,
     SessionSummaryCheckpoint,
 )
@@ -107,7 +106,6 @@ from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
-from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.progress_events import output_events
 from nanobot.utils.runtime import (
@@ -2104,8 +2102,6 @@ class AgentLoop:
     def _sanitize_persisted_blocks(
         self,
         content: list[object],
-        *,
-        should_truncate_text: bool = False,
     ) -> list[object]:
         """Strip volatile multimodal payloads before writing session history."""
         filtered: list[object] = []
@@ -2126,45 +2122,9 @@ class AgentLoop:
                 )
                 continue
 
-            if block_data.get("type") == "text" and isinstance(
-                block_data.get("text"),
-                str,
-            ):
-                text = cast(str, block_data["text"])
-                if should_truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text_fn(text, self.max_tool_result_chars)
-                filtered.append({**block_data, "text": text})
-                continue
-
             filtered.append(block_data)
 
         return filtered
-
-    @staticmethod
-    def _insert_summary_checkpoint(
-        session: Session,
-        checkpoint: SessionSummaryCheckpoint,
-        *,
-        insert_at: int | None = None,
-    ) -> None:
-        """Commit a replacement summary and its hidden transcript boundary."""
-        hint = {
-            "role": "user",
-            "content": SUMMARY_CONTINUATION_TEXT,
-            HIDDEN_HISTORY_META: True,
-            "timestamp": datetime.now().isoformat(),
-        }
-        if insert_at is None:
-            session.messages.append(hint)
-            checkpoint_session_index = len(session.messages) - 1
-        else:
-            session.messages.insert(insert_at, hint)
-            checkpoint_session_index = insert_at
-        session.metadata["_last_summary"] = {
-            "text": checkpoint.summary,
-            "last_active": session.updated_at.isoformat(),
-        }
-        session.last_archived = checkpoint_session_index
 
     @staticmethod
     def _validated_checkpoint_boundary(
@@ -2227,9 +2187,8 @@ class AgentLoop:
         # the first message after the replacement checkpoint.
         if summary_checkpoint is not None and checkpoint_boundary == skip - 1:
             insert_at = len(session.messages) - (1 if input_persisted_early else 0)
-            self._insert_summary_checkpoint(
-                session,
-                summary_checkpoint,
+            session.commit_summary_checkpoint(
+                summary_checkpoint.summary,
                 insert_at=insert_at,
             )
 
@@ -2237,7 +2196,7 @@ class AgentLoop:
             # Insert against the raw transcript index before filtering the
             # message so persistence cleanup cannot shift the H/Δ boundary.
             if summary_checkpoint is not None and checkpoint_boundary == message_index:
-                self._insert_summary_checkpoint(session, summary_checkpoint)
+                session.commit_summary_checkpoint(summary_checkpoint.summary)
 
             entry = dict(message)
             followup_id_value = cast(object, entry.pop(PENDING_FOLLOWUP_ID_KEY, None))
@@ -2279,12 +2238,10 @@ class AgentLoop:
                     )
                     continue
                 fulfilled_tool_call_ids.add(tool_call_id_str)
-                if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
-                elif isinstance(content, list):
+                # Preserve model-visible text for replay; redact only inline images.
+                if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(
                         cast(list[object], content),
-                        should_truncate_text=True,
                     )
                     if not filtered:
                         # Preserve the tool_call/result pair after block filtering.
@@ -2319,7 +2276,7 @@ class AgentLoop:
                     if tc.get("id")
                 )
         if summary_checkpoint is not None and checkpoint_boundary == len(messages):
-            self._insert_summary_checkpoint(session, summary_checkpoint)
+            session.commit_summary_checkpoint(summary_checkpoint.summary)
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         if saved_followup_ids:

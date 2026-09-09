@@ -3053,6 +3053,39 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("keeps queued guidance in its session when switching from running to idle", () => {
+    const sendA = vi.fn();
+    const sendB = vi.fn();
+    const view = render(
+      <ThreadComposer onSend={sendA} isStreaming pendingQueueKey="chat-a" />,
+    );
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "follow-up for A" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(screen.getByText("follow-up for A")).toBeInTheDocument();
+    expect(sendA).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ThreadComposer onSend={sendB} isStreaming={false} pendingQueueKey="chat-b" />,
+    );
+    expect(sendB).not.toHaveBeenCalled();
+    expect(screen.queryByText("follow-up for A")).not.toBeInTheDocument();
+
+    view.rerender(
+      <ThreadComposer onSend={sendA} isStreaming pendingQueueKey="chat-a" />,
+    );
+    expect(screen.getByText("follow-up for A")).toBeInTheDocument();
+    expect(sendA).not.toHaveBeenCalled();
+    view.rerender(
+      <ThreadComposer onSend={sendA} isStreaming={false} pendingQueueKey="chat-a" />,
+    );
+    expect(sendA).toHaveBeenCalledTimes(1);
+    expect(sendA).toHaveBeenCalledWith("follow-up for A");
+    expect(sendB).not.toHaveBeenCalled();
+    expect(screen.queryByText("follow-up for A")).not.toBeInTheDocument();
+  });
+
   it("persists queued guidance per chat across remounts", async () => {
     const onSend = vi.fn();
     const { rerender, unmount } = render(

@@ -339,6 +339,11 @@ class TestBuildSystemPrompt:
         assert "Previous chat about Python." in result
         assert "[Archived Context Summary]" in result
 
+    def test_nothing_summary_builds_the_prompt_without_archived_context(self, tmp_path):
+        builder = _builder(tmp_path)
+        summary = {"text": "(nothing)", "last_active": "2026-08-19T10:00:00"}
+        assert builder.build_system_prompt(session_summary=summary) == builder.build_system_prompt()
+
     def test_sections_separated_by_separator(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
         builder = _builder(tmp_path)

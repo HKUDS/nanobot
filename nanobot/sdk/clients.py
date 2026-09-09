@@ -209,7 +209,7 @@ class RuntimeClient:
         return self._loop.bus.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
-        """Archive one session through the shared idle-compaction path."""
+        """Summarize one session and exclude its archived messages from replay."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
         await self._loop.consolidator.compact_idle_session(
@@ -218,8 +218,8 @@ class RuntimeClient:
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 
-    async def compact_idle_session(self, session_key: str, *, max_suffix: int = 8) -> str | None:
-        """Run idle-session compaction for one session and return the summary."""
+    async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
+        """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
         return await self._loop.consolidator.compact_idle_session(

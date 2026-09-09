@@ -497,6 +497,53 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("img", {
       name: /input tokens 16,400.*KV cache hit rate 99%.*output tokens 236/i,
     })).toBeInTheDocument();
+    expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    for (const phase of ["started", "failed"] as const) {
+      act(() => client._emitChat("usage-chart", {
+        event: "context_compaction", chat_id: "usage-chart", compaction_id: "failed", phase,
+      }));
+      expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    }
+    act(() => client._emitChat("usage-chart", {
+      event: "context_compaction", chat_id: "usage-chart",
+      compaction_id: "success", phase: "succeeded",
+    }));
+    expect(trigger).toHaveAccessibleName("Open context usage");
+    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
+  });
+
+  it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
+    const client = makeClient();
+    const messages: UIMessage[] = [
+      {
+        id: "old", role: "assistant", content: "Before compact", createdAt: 1_000,
+        contextWindowTokens: 1_000_000, usage: { context_tokens: 170_000 },
+        roundUsages: [{ prompt_tokens: 170_000 }],
+      },
+      {
+        id: "compact", role: "assistant", kind: "compaction", content: "", createdAt: 2_000,
+        compaction: { id: "compact", phase: "succeeded" },
+      },
+    ];
+    if (newReply) messages.push({
+      id: "new", role: "assistant", content: "After compact", createdAt: 3_000,
+      contextWindowTokens: 1_000_000, usage: { context_tokens: 20_700 },
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Acompact-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, messages })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    render(wrap(client, <ThreadShell
+      session={session("compact-usage")} title="Compact usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    if (newReply) {
+      expect(trigger).toHaveAccessibleName("Context 2%. Open context usage");
+    } else {
+      expect(trigger).toHaveAccessibleName("Open context usage");
+    }
   });
 
   it("moves the session handle into the pane only when the workbench is split", () => {
@@ -737,8 +784,10 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
   });
 
   it("falls back to the current preset while a renamed session reference is stale", async () => {
@@ -762,7 +811,9 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
@@ -844,7 +895,9 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-4 · Company Proxy")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-4 · Company Proxy");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
@@ -896,10 +949,13 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
-    expect(badge).toHaveAttribute(
-      "title",
-      "Default · using deepseek/deepseek-chat",
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(screen.getByLabelText("deepseek-chat"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "deepseek-chat · deepseek/deepseek-chat",
     );
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Default");
+    fireEvent.blur(screen.getByLabelText("deepseek-chat"));
     expect(logo).toBeInTheDocument();
 
     act(() => {
@@ -1281,7 +1337,9 @@ describe("ThreadShell", () => {
     await act(async () => {
       rerender(view(session("chat-new", "fast")));
     });
-    expect(screen.getByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 

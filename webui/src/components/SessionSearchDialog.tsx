@@ -22,31 +22,42 @@ interface SessionSearchDialogProps {
   onSelect: (key: string) => void;
 }
 
+const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
+
 export function SessionSearchDialog({
   open,
   sessions,
   activeKey,
   loading,
-  titleOverrides = {},
+  titleOverrides = EMPTY_TITLE_OVERRIDES,
   onOpenChange,
   onSelect,
 }: SessionSearchDialogProps) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const normalizedQuery = query.trim().toLowerCase();
+  const searchableSessions = useMemo(() => sessions.map((session) => ({
+    session,
+    text: [titleOverrides[session.key], session.title, visibleSessionPreview(session.preview)]
+      .filter(Boolean).join(" ").toLowerCase(),
+  })), [sessions, titleOverrides]);
   const sessionResults = useMemo(() => {
     if (!open) return [];
     if (!normalizedQuery) return sessions;
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
-    return sessions.filter((session) =>
-      sessionMatchesTerms(session, terms, titleOverrides[session.key]),
-    );
-  }, [normalizedQuery, open, sessions, titleOverrides]);
+    return searchableSessions.filter(({ text }) => terms.every((term) => text.includes(term)))
+      .map(({ session }) => session);
+  }, [normalizedQuery, open, sessions, searchableSessions]);
   const itemCount = sessionResults.length;
+  const rowHeight = 64;
+  const windowStart = Math.max(0, Math.min(itemCount - 1, Math.floor(scrollTop / rowHeight) - 4));
+  const windowEnd = Math.min(itemCount, windowStart + 24);
 
   useEffect(() => {
     if (!open) return;
@@ -57,6 +68,8 @@ export function SessionSearchDialog({
 
   useEffect(() => {
     setHighlightedIndex(0);
+    setScrollTop(0);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [normalizedQuery]);
 
   useEffect(() => {
@@ -71,6 +84,14 @@ export function SessionSearchDialog({
 
   useEffect(() => {
     if (!open) return;
+    const scroller = scrollRef.current;
+    if (scroller) {
+      const top = highlightedIndex * rowHeight;
+      if (top < scroller.scrollTop || top + rowHeight > scroller.scrollTop + scroller.clientHeight) {
+        scroller.scrollTop = top;
+        setScrollTop(top);
+      }
+    }
     itemRefs.current[highlightedIndex]?.scrollIntoView({
       block: "nearest",
       inline: "nearest",
@@ -143,6 +164,8 @@ export function SessionSearchDialog({
         </div>
 
         <div
+          ref={scrollRef}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           data-testid="session-search-scroll"
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 scrollbar-thin scrollbar-track-transparent"
         >
@@ -160,8 +183,10 @@ export function SessionSearchDialog({
                 {emptyLabel}
               </div>
             ) : (
-              <ul className="space-y-0.5">
-                {sessionResults.map((session, index) => {
+              <ul>
+                <li aria-hidden style={{ height: windowStart * rowHeight }} />
+                {sessionResults.slice(windowStart, windowEnd).map((session, offset) => {
+                  const index = windowStart + offset;
                   const title = titleOverrides[session.key]?.trim() ||
                     session.title?.trim() ||
                     deriveTitle(session.preview, t("chat.newChat"));
@@ -172,7 +197,7 @@ export function SessionSearchDialog({
                   const highlighted = index === highlightedIndex;
                   const active = session.key === activeKey;
                   return (
-                    <li key={session.key}>
+                    <li key={session.key} style={{ height: rowHeight }}>
                       <button
                         ref={(node) => {
                           itemRefs.current[index] = node;
@@ -182,7 +207,7 @@ export function SessionSearchDialog({
                         onMouseEnter={() => setHighlightedIndex(index)}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "grid min-h-[54px] w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-control px-3 py-2 text-left transition-colors",
+                          "grid h-full w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-control px-3 py-2 text-left transition-colors",
                           highlighted
                             ? "bg-muted text-foreground"
                             : "text-foreground hover:bg-muted",
@@ -209,6 +234,7 @@ export function SessionSearchDialog({
                     </li>
                   );
                 })}
+                <li aria-hidden style={{ height: (itemCount - windowEnd) * rowHeight }} />
               </ul>
             )}
           </section>
@@ -216,21 +242,4 @@ export function SessionSearchDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function sessionMatchesTerms(
-  session: ChatSummary,
-  terms: string[],
-  titleOverride?: string,
-) {
-  const haystack = [
-    titleOverride,
-    session.title,
-    visibleSessionPreview(session.preview),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  return terms.every((term) => haystack.includes(term));
 }

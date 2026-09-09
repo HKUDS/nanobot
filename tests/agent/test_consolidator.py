@@ -24,6 +24,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -127,11 +128,13 @@ async def _archive(
 
 
 class TestTurnTranscriptSummary:
+    @pytest.mark.parametrize("summary", ["replacement checkpoint", "(nothing)"])
     async def test_uses_exact_accepted_prefix_and_existing_archiver(
         self,
         consolidator,
         mock_provider,
         runtime,
+        summary,
     ):
         accepted = [
             {"role": "system", "content": "stable system"},
@@ -139,7 +142,7 @@ class TestTurnTranscriptSummary:
         ]
         tools = [{"type": "function", "function": {"name": "inspect"}}]
         mock_provider.chat_with_retry.return_value = LLMResponse(
-            content="replacement checkpoint",
+            content=summary,
         )
 
         result = await consolidator.summarize_transcript(
@@ -150,7 +153,7 @@ class TestTurnTranscriptSummary:
             tools=tools,
         )
 
-        assert result == "replacement checkpoint"
+        assert result == summary
         call = mock_provider.chat_with_retry.await_args.kwargs
         assert call["messages"][:-1] == accepted
         assert call["messages"][-1]["role"] == "user"
@@ -474,7 +477,7 @@ class TestConsolidatorPromptEstimate:
         assert len(captured["history"]) == 160
         assert captured["history"][0]["content"].endswith("msg-0")
 
-    async def test_estimate_includes_recent_archived_replay(self, consolidator, runtime):
+    async def test_estimate_excludes_archived_replay(self, consolidator, runtime):
         session = Session(key="test:archived-replay")
         for i in range(10):
             session.add_message("user", f"msg-{i}")
@@ -490,8 +493,7 @@ class TestConsolidatorPromptEstimate:
 
         consolidator.estimate_session_prompt_tokens(session, runtime=runtime)
 
-        assert len(captured["history"]) == 8
-        assert captured["history"][0]["content"] == "msg-2"
+        assert captured["history"] == []
 
 class TestCompactIdleSession:
     """Idle compaction tests."""
@@ -519,7 +521,7 @@ class TestCompactIdleSession:
         )
 
     @pytest.mark.asyncio
-    async def test_archives_full_tail_preserves_messages_and_replays_recent_suffix(
+    async def test_archives_full_tail_preserves_messages_and_replays_checkpoint(
         self, real_consolidator, mock_provider, runtime
     ):
         mock_provider.chat_with_retry.return_value = MagicMock(
@@ -542,14 +544,12 @@ class TestCompactIdleSession:
 
         sessions.invalidate("cli:test")
         reloaded = sessions.get_or_create("cli:test")
-        assert len(reloaded.messages) == 40
+        assert len(reloaded.messages) == 41
         assert reloaded.messages[0]["content"] == "user msg 0"
         assert reloaded.last_archived == 40
         assert reloaded.provider_state is None
         visible = reloaded.get_history(max_messages=40)
-        assert len(visible) == 8
-        assert visible[0]["content"] == "user msg 16"
-        assert visible[-1]["content"] == "assistant msg 19"
+        assert [m["content"] for m in visible] == [SUMMARY_CONTINUATION_TEXT]
         meta = reloaded.metadata.get("_last_summary")
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
@@ -629,7 +629,7 @@ class TestCompactIdleSession:
         assert len(store.read_unprocessed_history(since_cursor=0)) == 1
         reloaded = sessions.get_or_create("cli:short")
         assert reloaded.last_archived == 2
-        assert [message["content"] for message in reloaded.get_history()] == ["hello", "hi"]
+        assert [message["content"] for message in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
 
     @pytest.mark.asyncio
     async def test_idle_compaction_with_no_new_messages_is_noop(
@@ -692,7 +692,7 @@ class TestCompactIdleSession:
             contents = [message.get("content", "") for message in sent["messages"]]
             assert "Archived conversation summary." in contents[0]
             assert "question-0" not in contents
-            assert "question-9" in contents
+            assert contents[1:-1] == [SUMMARY_CONTINUATION_TEXT]
             assert "Next question" in contents[-1]
         finally:
             await loop.aclose()
@@ -714,6 +714,32 @@ class TestCompactIdleSession:
         assert reloaded.provider_state == _provider_state()
         assert reloaded.last_archived == 0
         assert "_last_summary" not in reloaded.metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("summary", [None, ""])
+    async def test_missing_summary_preserves_replay(self, real_consolidator, runtime, summary):
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:missing-summary")
+        session.add_message("user", "Keep this context")
+        session.provider_state = _provider_state()
+        sessions.save(session)
+        real_consolidator.archive_session = AsyncMock(return_value=summary)
+        events = []
+
+        async def observe(event):
+            events.append(event)
+
+        result = await real_consolidator.compact_idle_session(
+            session.key, runtime=runtime, events=EventSink(observe),
+        )
+
+        assert result is None
+        assert [event.phase for event in events] == ["started", "failed"]
+        sessions.invalidate(session.key)
+        reloaded = sessions.get_or_create(session.key)
+        assert reloaded.provider_state == _provider_state()
+        assert reloaded.last_archived == 0
+        assert reloaded.get_history() == [{"role": "user", "content": "Keep this context"}]
 
     @pytest.mark.asyncio
     async def test_new_messages_advance_existing_archive_progress(
@@ -748,16 +774,15 @@ class TestCompactIdleSession:
         latest_build = real_consolidator.archiver._build_messages.call_args_list[-1].kwargs
         assert latest_build["session_summary"]["text"] == "First replacement checkpoint."
         latest_messages = mock_provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
-        assert [message["content"] for message in latest_messages[1:5]] == [
-            "first user",
-            "first assistant",
+        assert [message["content"] for message in latest_messages[1:-1]] == [
+            SUMMARY_CONTINUATION_TEXT,
             "second user",
             "second assistant",
         ]
         assert latest_messages[-1]["content"] == _ARCHIVE_PROMPT
         sessions.invalidate("cli:incremental")
         reloaded = sessions.get_or_create("cli:incremental")
-        assert reloaded.last_archived == 4
+        assert reloaded.last_archived == 5
         assert reloaded.metadata["_last_summary"]["text"] == second
 
     @pytest.mark.asyncio
@@ -805,7 +830,7 @@ class TestCompactIdleSession:
         assert reloaded.metadata["_last_summary"]["text"] == fallback
 
     @pytest.mark.asyncio
-    async def test_nothing_keeps_previous_replacement_checkpoint(
+    async def test_nothing_replaces_previous_checkpoint(
         self,
         real_consolidator,
         mock_provider,
@@ -837,12 +862,13 @@ class TestCompactIdleSession:
         assert result == "(nothing)"
         sessions.invalidate("cli:nothing-after-summary")
         reloaded = sessions.get_or_create("cli:nothing-after-summary")
-        assert reloaded.last_archived == 4
-        assert reloaded.metadata["_last_summary"]["text"] == "Existing checkpoint."
+        assert reloaded.last_archived == 5
+        assert reloaded.metadata["_last_summary"]["text"] == result
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_suffix", [8, 0])
     async def test_concurrent_append_remains_unarchived(
-        self, real_consolidator, mock_provider, runtime
+        self, real_consolidator, mock_provider, runtime, max_suffix
     ):
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:concurrent")
@@ -859,17 +885,22 @@ class TestCompactIdleSession:
 
         mock_provider.chat_with_retry.side_effect = append_during_archive
 
-        await real_consolidator.compact_idle_session("cli:concurrent", runtime=runtime)
+        await real_consolidator.compact_idle_session(
+            "cli:concurrent", runtime=runtime, max_suffix=max_suffix,
+        )
 
         sessions.invalidate("cli:concurrent")
         reloaded = sessions.get_or_create("cli:concurrent")
-        assert len(reloaded.messages) == 4
+        assert len(reloaded.messages) == 5
         assert reloaded.last_archived == 2
         assert reloaded.provider_state is None
         assert reloaded.get_history()[-1]["content"] == "late assistant"
+        assert [m["content"] for m in reloaded.get_history()] == [
+            SUMMARY_CONTINUATION_TEXT, "late user", "late assistant",
+        ]
 
     @pytest.mark.asyncio
-    async def test_summarizes_retained_suffix_not_just_dropped_prefix(
+    async def test_summarizes_latest_correction_with_full_history(
         self, real_consolidator, mock_provider, runtime
     ):
         """idleCompact must summarize over the full unarchived tail, including
@@ -884,7 +915,7 @@ class TestCompactIdleSession:
         for i in range(18):
             session.add_message("user", f"user msg {i}")
             session.add_message("assistant", f"assistant msg {i}")
-        # Final correction exchange lands inside the retained max_suffix window.
+        # The latest correction must be included in the replacement summary.
         session.add_message("user", "no, that's wrong, use approach B")
         session.add_message("assistant", "CORRECTED_FINAL_RESULT_alpha")
         sessions.save(session)
@@ -924,8 +955,8 @@ class TestCompactIdleSession:
         assert "user msg 0" in raw
         assert "RETAINED_SUFFIX_marker" in raw
         reloaded = sessions.get_or_create("cli:rawdrop")
-        assert len(reloaded.messages) == 38
-        assert reloaded.messages[-1]["content"] == "RETAINED_SUFFIX_marker"
+        assert len(reloaded.messages) == 39
+        assert reloaded.messages[-2]["content"] == "RETAINED_SUFFIX_marker"
         assert reloaded.provider_state is None
 
     @pytest.mark.asyncio
@@ -975,10 +1006,10 @@ class TestCompactIdleSession:
         assert reloaded.metadata == {}
 
     @pytest.mark.asyncio
-    async def test_nothing_summary_not_stored(
+    async def test_nothing_commits_checkpoint_once_without_raw_archive(
         self, real_consolidator, mock_provider, runtime
     ):
-        """LLM returns '(nothing)' → neither history nor metadata stores it."""
+        """A model's decision to retain nothing is a successful replacement."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="(nothing)", finish_reason="stop"
         )
@@ -999,8 +1030,10 @@ class TestCompactIdleSession:
         assert second == ""
 
         reloaded = sessions.get_or_create("cli:nothing")
-        assert "_last_summary" not in reloaded.metadata
+        assert reloaded.metadata["_last_summary"]["text"] == result
         assert real_consolidator.store.read_unprocessed_history(0) == []
+        assert reloaded.last_archived == 20
+        assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
         mock_provider.chat_with_retry.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1028,19 +1061,10 @@ class TestCompactIdleSession:
         assert entries[0]["content"].startswith("[RAW] 20 messages")
 
         reloaded = sessions.get_or_create("cli:fail")
-        assert reloaded.messages == session.messages
+        assert reloaded.messages[:-1] == session.messages
         assert reloaded.last_archived == 22
         assert reloaded.metadata["_last_summary"]["text"] == result
-        assert [m["content"] for m in reloaded.get_history(max_messages=20)] == [
-            "u6",
-            "a6",
-            "u7",
-            "a7",
-            "u8",
-            "a8",
-            "u9",
-            "a9",
-        ]
+        assert [m["content"] for m in reloaded.get_history(max_messages=20)] == [SUMMARY_CONTINUATION_TEXT]
 
     @pytest.mark.asyncio
     async def test_respects_last_archived(
@@ -1063,7 +1087,7 @@ class TestCompactIdleSession:
         )
         assert result == "Tail summary."
         reloaded = sessions.get_or_create("cli:offset")
-        assert len(reloaded.messages) == 60
+        assert len(reloaded.messages) == 61
         assert reloaded.last_archived == 60
 
         # Verify only the unarchived tail was processed:
@@ -1077,7 +1101,7 @@ class TestCompactIdleSession:
         assert sent_messages[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
-    async def test_full_archive_keeps_extended_legal_replay_suffix(
+    async def test_full_archive_replaces_entire_tool_turn(
         self,
         real_consolidator,
         mock_provider,
@@ -1100,25 +1124,11 @@ class TestCompactIdleSession:
         assert result == "Tail summary."
 
         reloaded = sessions.get_or_create("cli:noncontiguous")
-        assert len(reloaded.messages) == 25
+        assert len(reloaded.messages) == 26
         assert reloaded.last_archived == 25
-        assert [m["content"] for m in reloaded.get_history(max_messages=25)] == [
-            "user-14",
-            "assistant-00",
-            "assistant-01",
-            "assistant-02",
-            "assistant-03",
-            "assistant-04",
-            "assistant-05",
-            "assistant-06",
-            "assistant-07",
-            "assistant-08",
-            "assistant-09",
-        ]
+        assert [m["content"] for m in reloaded.get_history(max_messages=25)] == [SUMMARY_CONTINUATION_TEXT]
 
-        # #4264: idle compaction now summarizes the full unarchived tail, so
-        # the dropped head (user-00) and retained suffix (user-14 through
-        # assistant-09) are all summarized.
+        # Both the first question and the final tool-heavy exchange are summarized.
         archived_call = mock_provider.chat_with_retry.call_args
         sent_content = [message.get("content") for message in archived_call.kwargs["messages"]]
         assert "user-00" in sent_content
@@ -1168,8 +1178,8 @@ class TestCompactIdleSession:
         assert "tool_choice" not in call
 
         reloaded = sessions.get_or_create("cli:tool-history")
-        assert len(reloaded.messages) == 4
-        assert reloaded.messages[-1]["content"] == "final answer"
+        assert len(reloaded.messages) == 5
+        assert reloaded.messages[-2]["content"] == "final answer"
         assert all(
             "memory overview" not in str(message.get("content", "")).lower()
             for message in reloaded.messages
@@ -1298,8 +1308,6 @@ class TestCompactIdleSession:
 
         sent = mock_provider.chat_with_retry.call_args.kwargs["messages"]
         assert [message.get("content") for message in sent[1:-1]] == [
-            "already archived user",
-            "already archived answer",
             "new user",
             "new answer",
         ]

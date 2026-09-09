@@ -268,7 +268,6 @@ class TestCheckExpired:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:old",
             runtime=admitted,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
             events=NO_EVENTS,
         )
 
@@ -444,7 +443,6 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:test",
             runtime=runtime,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
             events=NO_EVENTS,
         )
 

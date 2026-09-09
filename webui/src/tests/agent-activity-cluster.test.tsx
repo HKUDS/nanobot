@@ -563,6 +563,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
@@ -644,6 +645,91 @@ describe("AgentActivityCluster", () => {
 
     assertBetween(screen.getByText("Edited"));
   });
+
+  it.each(["diff", "collapsed_diff"] as const)(
+    "keeps %s edits outside reasoning folds in live and replayed activity",
+    (fileEditDisplayMode) => {
+      localStorage.setItem(
+        "nanobot-webui.settings-preferences",
+        JSON.stringify({ fileEditDisplayMode }),
+      );
+      const messages: UIMessage[] = [
+        { id: "before", role: "assistant", content: "", reasoning: "Before edit", createdAt: 1 },
+        {
+          id: "edit", role: "tool", kind: "trace", content: "edit_file()", createdAt: 2,
+          traces: ["edit_file()"],
+          fileEdits: [{
+            call_id: "edit-call", tool: "edit_file", path: "src/app.tsx", phase: "end",
+            added: 1, deleted: 1, approximate: false, status: "done",
+            diff: unifiedFileDiff([
+              "--- a/src/app.tsx", "+++ b/src/app.tsx", "@@ -1 +1 @@", "-old", "+new",
+            ]),
+          }],
+        },
+        {
+          id: "after", role: "assistant", content: "After edit",
+          activityKind: "model", createdAt: 3,
+        },
+      ];
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+      );
+      try {
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        const assertIndependentDiff = () => {
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(diff).toBeVisible();
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-scroll"]'))
+            .toBeNull();
+          expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(1);
+        };
+        const assertExpandedOrder = () => {
+          for (const toggle of document.querySelectorAll<HTMLButtonElement>(
+            '[data-thread-disclosure][aria-expanded="false"]',
+          )) {
+            fireEvent.click(toggle);
+          }
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(screen.getByText("Before edit")).toBeVisible();
+          expect(screen.getByText("After edit")).toBeVisible();
+          expect(screen.getByText("Before edit").compareDocumentPosition(diff)
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          expect(diff.compareDocumentPosition(screen.getByText("After edit"))
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          assertIndependentDiff();
+        };
+        assertIndependentDiff();
+        assertExpandedOrder();
+        for (const toggle of document.querySelectorAll<HTMLButtonElement>("[data-thread-disclosure]")) {
+          fireEvent.click(toggle);
+          assertIndependentDiff();
+        }
+        rerender(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        assertIndependentDiff();
+        rerender(
+          <AgentActivityCluster
+            messages={messages.slice(0, 2)}
+            isTurnStreaming
+            hasBodyBelow={false}
+            retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
+          />,
+        );
+        expect(screen.getByRole("status", { name: "Connection failed · retrying in 0s · attempt 1/4" }))
+          .toBeVisible();
+        unmount();
+        render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        assertIndependentDiff();
+        assertExpandedOrder();
+      } finally {
+        localStorage.removeItem("nanobot-webui.settings-preferences");
+      }
+    },
+  );
 
   it("renders file edit diffs and responds to preference changes", () => {
     localStorage.setItem(
@@ -980,6 +1066,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Deleted")).toBeInTheDocument();
     expect(screen.queryByText("Edited")).not.toBeInTheDocument();
@@ -1237,6 +1324,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Searched X · nanobot oauth")).toBeInTheDocument();
     expect(screen.queryByText(/Completed X search/i)).not.toBeInTheDocument();
@@ -1270,6 +1358,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
     expect(screen.getByText("Searched release notes access_token=<redacted>")).toBeInTheDocument();
@@ -1486,6 +1575,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const title = screen.getByText("Example documentation");
     const url = screen.getByText("example.com/docs");
@@ -1567,6 +1657,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const run = screen.getByText(/Reviewed sources.*2 files/).closest('[data-testid="activity-step"]');
     expect(run).toBeInTheDocument();
@@ -1607,6 +1698,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not search files “needle”").closest(
       '[data-testid="activity-step"]',
@@ -1635,6 +1727,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/password|signed-secret/)).not.toBeInTheDocument();
     expect(screen.getByText("Completed Download asset")).toBeInTheDocument();
@@ -1721,6 +1814,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
@@ -1815,6 +1909,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
@@ -1848,6 +1943,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
@@ -1915,6 +2011,7 @@ describe("AgentActivityCluster", () => {
                   "-const fps = 30;",
                   "+const fps = 60;",
                   " start();",
+
                 ]),
               },
             ],
@@ -1924,6 +2021,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       const fileRefs = screen.getAllByTestId("activity-file-reference");
       expect(fileRefs).toHaveLength(3);
@@ -1984,6 +2082,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.getByText("Could not edit")).toBeInTheDocument();
@@ -2091,6 +2190,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Could not generate image")).toBeInTheDocument();
     const row = screen.getByText("Could not generate image").closest(
@@ -2163,6 +2263,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const steps = screen.getAllByTestId("activity-step");
     expect(steps.length).toBeGreaterThanOrEqual(3);

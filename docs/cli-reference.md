@@ -33,6 +33,67 @@ python -m nanobot --version
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
 
+### Coexisting with Nanobot Desktop
+
+The Python package and Nanobot Desktop keep separate runtimes, configuration,
+workspaces, and state. When a running Desktop release publishes its private
+terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui`
+asks which installation to use after authenticating a ready Desktop target.
+Use `Up`/`Down` to highlight an installation and `Enter` to confirm.
+`Ctrl+C` cancels with exit code 130 without attaching to Desktop or starting a Python backend.
+If Desktop is absent, busy, unavailable, or cannot be authenticated, the command
+reports the current Python executable and continues normally. A virtual
+environment's executable is shown without resolving it to its base interpreter.
+
+Choosing Desktop for `nanobot webui` opens its already-running browser workbench
+and exits; closing the browser never stops the Desktop gateway. Choosing Desktop
+for bare `nanobot` opens the terminal UI against that same running backend when
+the Desktop host, gateway and terminal client support terminal protocol 1. Older
+versions fail explicitly with update guidance. Use explicit `nanobot agent` for
+the original Python terminal UI.
+After Desktop is selected, a disconnect or incompatible reply ends that invocation
+with an error; it never silently switches to Python or launches a replacement.
+On macOS, browser URLs are delivered through native Launch Services rather than
+command-line arguments. A failed native handoff does not fall back to `open` or
+a `BROWSER` command, keeping bootstrap credentials out of launcher arguments.
+
+On Windows, the shared browser launcher uses a private HTML redirect rather than
+passing a credential-bearing URL to a browser command. A short-lived, windowless
+Python helper receives the URL over an anonymous pipe, opens the redirect through
+the system's HTTP association, and attempts file cleanup after two minutes. The calling
+CLI can exit immediately after the launch acknowledgement; this helper does not
+start, stop, or keep a gateway alive. It does not honor `BROWSER` overrides.
+Redirects are stored in the current user's Windows Local AppData known folder,
+under `NanobotBrowserHandoff-v1`, with an explicit current-user-only protected ACL.
+An ACL-enforcing local filesystem and a non-reparse storage path are required;
+unsafe existing storage or failed browser handoff fails without raw-URL fallback.
+Abnormal termination can leave a private redirect behind. Later invocations retry
+cleanup of verified redirect files older than ten minutes, excluding active files;
+cleanup is not a guarantee of physical erasure or secrecy from same-user programs
+or administrators. No Python/Desktop settings, credentials, or history are imported
+between installations.
+
+Any explicit subcommand or option—including `nanobot agent`,
+`nanobot webui --no-open`, config/workspace selectors, help, version, completion,
+and gateway lifecycle commands—keeps its existing Python meaning and never opens
+the Desktop picker. Target choices are not remembered, and Desktop settings are
+not copied into the Python installation.
+
+Desktop terminal credentials are short-lived WebSocket/API tokens obtained through
+the authenticated current-user rendezvous. The TUI receives them through a bounded
+anonymous pipe, not command arguments, environment variables or temporary files.
+Its environment contains only a trusted resolver command and public instance IDs.
+The resolver verifies the selected Desktop and gateway again for every credential
+refresh. The gateway identity is also checked before any WebSocket mutation. This
+mode does not acquire a gateway lifecycle lease: client exit leaves Desktop running,
+and disconnect never automatically reconnects or replays an uncertain task.
+
+Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside
+their existing private runtime; it is not a replacement for the full Python CLI.
+They must ship this engine entrypoint and a matching terminal client together.
+The client cache can be kept inside Desktop's data root without reading or writing
+the separate Python installation's config. No additional system Python is needed.
+
 ## Common Patterns
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:

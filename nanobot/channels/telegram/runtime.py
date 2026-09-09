@@ -25,7 +25,7 @@ from telegram import (
     Update,
     User,
 )
-from telegram.error import BadRequest, InvalidToken, NetworkError, TimedOut
+from telegram.error import BadRequest, InvalidToken, NetworkError, RetryAfter, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import BaseRequest, HTTPXRequest
 
@@ -46,7 +46,12 @@ TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # raw markdown into chunks whose rendered HTML fits Telegram's true 4096-char
 # boundary so the final rendered message never overflows.
 TELEGRAM_HTML_MAX_LEN = 4096
+# Bot API rich messages accept up to 32,768 UTF-8 characters. Raw Markdown is
+# counted conservatively here; Python's str length counts Unicode code points,
+# so multibyte text must not be split at an encoded-byte boundary.
+TELEGRAM_RICH_MAX_LEN = 32768
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+TELEGRAM_RICH_DRAFT_MIN_INTERVAL = 0.75  # 40 draft updates per 30 seconds per chat
 
 # python-telegram-bot exposes a six-parameter Application generic. Nanobot
 # doesn't customize its context/data/job-queue types, so keep that SDK boundary
@@ -387,6 +392,7 @@ class _StreamBuf:
     """Per-chat streaming accumulator for progressive message editing."""
     text: str = ""
     message_id: int | None = None
+    draft_id: int | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
 
@@ -829,13 +835,30 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _is_rich_capability_error(exc: Exception) -> bool:
-        """True when the error indicates sendRichMessage is unavailable."""
+        """True when the Bot API does not support rich-message endpoints."""
         err = str(exc).lower()
         return (
             "method not found" in err
             or "unknown method" in err
+            or ("endpoint" in err and "not found" in err)
             or "bad request: invalid parameter" in err
+            or "unsupported" in err
+            or "not implemented" in err
         )
+
+    def _rich_streaming_enabled(self) -> bool:
+        return self.config.rich_messages and not self._rich_send_disabled
+
+    @staticmethod
+    def _rich_message_payload(content: str) -> dict[str, str]:
+        return {"markdown": content}
+
+    def _mark_rich_unavailable(self, exc: Exception, operation: str) -> bool:
+        if not self._is_rich_capability_error(exc):
+            return False
+        self._rich_send_disabled = True
+        self.logger.debug("{} unavailable, disabling rich messages: {}", operation, exc)
+        return True
 
     async def _try_send_rich(
         self,
@@ -851,9 +874,7 @@ class TelegramChannel(BaseChannel):
 
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": {
-                "markdown": content,
-            },
+            "rich_message": self._rich_message_payload(content),
         }
         if reply_params is not None:
             # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
@@ -881,13 +902,12 @@ class TelegramChannel(BaseChannel):
             )
             return True
         except BadRequest as exc:
-            if self._is_rich_capability_error(exc):
-                self.logger.debug("sendRichMessage not available, disabling")
-                self._rich_send_disabled = True
-            else:
+            if not self._mark_rich_unavailable(exc, "sendRichMessage"):
                 self.logger.debug("sendRichMessage rejected: {}", exc)
             return False
         except Exception as exc:
+            if self._mark_rich_unavailable(exc, "sendRichMessage"):
+                return False
             err_str = str(exc).lower()
             is_timeout = "timed out" in err_str or isinstance(exc, TimedOut)
             if is_timeout:
@@ -896,67 +916,103 @@ class TelegramChannel(BaseChannel):
             self.logger.debug("sendRichMessage failed: {}", exc)
             return False
 
-    async def _try_edit_rich(self, chat_id: int, message_id: int, content: str) -> bool:
-        """Upgrade an existing message to rich in place via editMessageText (Bot API 10.1).
+    @staticmethod
+    def _new_rich_draft_id() -> int:
+        """Return a non-zero Bot API Integer suitable for one live draft."""
+        return time.time_ns() % 2_147_483_647 or 1
 
-        Editing in place keeps the message identity, so the streaming preview is
-        upgraded without the delete-and-resend pattern that caused flickering and
-        dropped line breaks (issue #4470).
-
-        Returns True when the rich edit is in place (including the ambiguous
-        "message is not modified" retry outcome after a response timeout).
-        Returns False only when the legacy HTML path should take over:
-        capability errors (server older than Bot API 10.1, which also trip the
-        rich latch) and content-shaped BadRequest rejections. Transport,
-        rate-limit, and unexpected errors propagate so the final-edit retry
-        contract is preserved — ChannelManager retries the buffered send
-        instead of an immediate legacy edit doubling connection demand.
-        """
-        if not self._app:
-            return False
-
+    async def _try_send_rich_draft(
+        self,
+        chat_id: int,
+        draft_id: int,
+        content: str,
+        thread_kwargs: dict[str, int],
+    ) -> bool:
+        """Create or update the ephemeral rich preview for a private chat."""
+        app = self._require_app()
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "message_id": message_id,
-            "rich_message": {
-                "markdown": content,
-            },
+            "draft_id": draft_id,
+            "rich_message": self._rich_message_payload(content),
+            **thread_kwargs,
         }
         try:
             await self._call_with_retry(
-                self._app.bot.do_api_request,
-                "editMessageText",
+                app.bot.do_api_request,
+                "sendRichMessageDraft",
                 api_kwargs=payload,
             )
             return True
         except BadRequest as exc:
-            if self._is_not_modified_error(exc):
-                # Ambiguous success: the rich edit was applied server-side but
-                # its response timed out, so the retry hit "message is not
-                # modified". Treat it as done rather than letting the legacy
-                # edit overwrite the already-successful rich result.
-                self.logger.debug("Rich stream edit already applied for {}", chat_id)
-                return True
-            # Before Bot API 10.1, editMessageText ignores rich_message and
-            # reports the absent text argument instead.
-            pre_rich_edit_server = (
-                bool(content)
-                and str(exc).strip().lower() == "message text is empty"
-            )
-            if self._is_rich_capability_error(exc) or pre_rich_edit_server:
-                self.logger.debug("editMessageText rich_message not available, disabling")
-                self._rich_send_disabled = True
-                return False
-            # Content-shaped rejections (invalid markdown, unsupported media in
-            # the rich payload, …) fall back to the legacy HTML edit.
-            self.logger.debug("editMessageText rich_message rejected: {}", exc)
+            if not self._mark_rich_unavailable(exc, "sendRichMessageDraft"):
+                self.logger.debug("Rich draft rejected: {}", exc)
             return False
-        except Exception:
-            # Transport, rate-limit, and unexpected errors propagate so the
-            # final-edit retry contract stays intact: ChannelManager retries
-            # the buffered send instead of this handler doubling connection
-            # demand with an immediate legacy edit.
+        except Exception as exc:
+            if self._mark_rich_unavailable(exc, "sendRichMessageDraft"):
+                return False
             raise
+
+    async def _try_send_stream_rich(
+        self,
+        chat_id: int,
+        content: str,
+        thread_kwargs: dict[str, int],
+    ) -> bool:
+        """Persist one completed rich stream chunk.
+
+        ``False`` means Telegram rejected rich formatting before delivery and the
+        caller may use the legacy path. A timeout is treated as an ambiguous
+        success: retrying this non-idempotent method could duplicate a message
+        that Telegram already stored.
+        """
+        app = self._require_app()
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "rich_message": self._rich_message_payload(content),
+            **thread_kwargs,
+        }
+        try:
+            await app.bot.do_api_request(
+                "sendRichMessage",
+                api_kwargs=payload,
+            )
+        except BadRequest as exc:
+            if not self._mark_rich_unavailable(exc, "sendRichMessage"):
+                self.logger.debug("Stream rich send rejected: {}", exc)
+            return False
+        except TimedOut as exc:
+            self.logger.warning(
+                "Stream rich send timed out; delivery is ambiguous, not retrying: {}", exc
+            )
+            return True
+        except Exception as exc:
+            if self._mark_rich_unavailable(exc, "sendRichMessage"):
+                return False
+            raise
+        return True
+
+    async def _start_legacy_stream(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict[str, int],
+    ) -> None:
+        """Replace a rejected rich draft with an editable plain-text tail."""
+        app = self._require_app()
+        chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
+        for index, (markdown, _) in enumerate(chunks[:-1]):
+            await self._send_text(chat_id, markdown, thread_kwargs=thread_kwargs)
+            buf.text = "\n".join(markdown for markdown, _ in chunks[index + 1:])
+        tail = chunks[-1][0]
+        sent = await self._call_with_retry(
+            app.bot.send_message,
+            chat_id=chat_id,
+            text=_strip_md_block(tail),
+            **thread_kwargs,
+        )
+        buf.text = tail
+        buf.message_id = sent.message_id
+        buf.draft_id = None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -1091,8 +1147,6 @@ class TelegramChannel(BaseChannel):
         **kwargs: Any,
     ) -> _T:
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
-        from telegram.error import RetryAfter
-
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -1171,7 +1225,7 @@ class TelegramChannel(BaseChannel):
         resuming: bool = False,
         merge_next: bool = False,
     ) -> None:
-        """Progressive message editing: send on first delta, edit on subsequent ones."""
+        """Stream a rich draft in private chats, then persist the final message."""
         app = await self._wait_for_app()
         if app is None:
             return
@@ -1184,7 +1238,7 @@ class TelegramChannel(BaseChannel):
             stream_end = False
         if stream_end:
             buf = self._stream_bufs.get(chat_id)
-            if not buf or not buf.message_id or not buf.text:
+            if not buf or not buf.text or (buf.message_id is None and buf.draft_id is None):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
@@ -1197,20 +1251,30 @@ class TelegramChannel(BaseChannel):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
 
-            # Try upgrading the streaming preview to rich in place (Bot API 10.1:
-            # editMessageText gained a rich_message parameter). Editing in place
-            # keeps the message identity, so there is no delete-and-resend and
-            # none of the flickering / dropped line breaks from issue #4470.
-            # The previous branch here was unreachable: it was guarded by
-            # ``not buf.message_id`` after an early return had already ensured
-            # ``buf.message_id`` is set (issue #5516).
-            if self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
-                rich_ok = await self._try_edit_rich(int_chat_id, buf.message_id, raw_text)
-                if rich_ok:
-                    self._stream_bufs.pop(chat_id, None)
-                    return
+            if buf.draft_id is not None:
+                rich_chunks = _split_telegram_markdown(raw_text, TELEGRAM_RICH_MAX_LEN)
+                for index, rich_chunk in enumerate(rich_chunks):
+                    if self._rich_streaming_enabled() and await self._try_send_stream_rich(
+                        int_chat_id, rich_chunk, thread_kwargs,
+                    ):
+                        buf.text = "\n".join(rich_chunks[index + 1:])
+                        continue
+                    legacy_chunks = [
+                        chunk
+                        for remaining in rich_chunks[index:]
+                        for chunk in _split_telegram_markdown(remaining, TELEGRAM_MAX_MESSAGE_LEN)
+                    ]
+                    for legacy_index, legacy_chunk in enumerate(legacy_chunks):
+                        await self._send_text(
+                            int_chat_id, legacy_chunk, thread_kwargs=thread_kwargs,
+                        )
+                        buf.text = "\n".join(legacy_chunks[legacy_index + 1:])
+                    break
+                self._stream_bufs.pop(chat_id, None)
+                return
 
-            # Legacy path: edit existing streaming message with HTML
+            # Group chats and streams that rejected drafts keep the established
+            # HTML/plain finalization path. Native rich drafts are private-only.
             html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
             primary_html = html_chunks[0]
             extra_html_chunks = html_chunks[1:]
@@ -1221,16 +1285,16 @@ class TelegramChannel(BaseChannel):
                     text=primary_html, parse_mode="HTML",
                 )
             except BadRequest as e:
-                # Only fall back to plain text on actual HTML parse/format errors.
-                # Network errors (TimedOut, NetworkError) should propagate immediately
-                # to avoid doubling connection demand during pool exhaustion.
                 if self._is_not_modified_error(e):
                     self.logger.debug("Final stream edit already applied for {}", chat_id)
                     self._stream_bufs.pop(chat_id, None)
                     return
                 self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                # Fall back to raw markdown (not HTML) so users don't see raw tags.
-                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
+                primary_plain = (
+                    split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0]
+                    if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN
+                    else raw_text
+                )
                 try:
                     await self._call_with_retry(
                         app.bot.edit_message_text,
@@ -1242,7 +1306,7 @@ class TelegramChannel(BaseChannel):
                         self.logger.debug("Final stream plain edit already applied for {}", chat_id)
                     else:
                         self.logger.warning("Final stream edit failed: {}", e2)
-                        raise  # Let ChannelManager handle retry
+                        raise
             for extra_html_chunk in extra_html_chunks:
                 try:
                     await self._call_with_retry(
@@ -1252,13 +1316,20 @@ class TelegramChannel(BaseChannel):
                         **thread_kwargs,
                     )
                 except Exception:
-                    # Fall back to _send_text which handles HTML→plain gracefully.
-                    await self._send_text(int_chat_id, extra_html_chunk)
+                    await self._send_text(
+                        int_chat_id,
+                        extra_html_chunk,
+                        thread_kwargs=thread_kwargs,
+                    )
             self._stream_bufs.pop(chat_id, None)
             return
 
         buf = self._stream_bufs.get(chat_id)
-        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+        if buf is None or (
+            stream_id is not None
+            and buf.stream_id is not None
+            and buf.stream_id != stream_id
+        ):
             buf = _StreamBuf(stream_id=stream_id)
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
@@ -1272,26 +1343,68 @@ class TelegramChannel(BaseChannel):
         stream_thread_kwargs: dict[str, int] = {}
         if message_thread_id := meta.get("message_thread_id"):
             stream_thread_kwargs["message_thread_id"] = message_thread_id
-        if buf.message_id is None:
-            preview = _strip_md_block(buf.text)
+        rich_draft_allowed = (
+            self._rich_streaming_enabled() and meta.get("is_group") is False
+        )
+        if buf.message_id is None and buf.draft_id is None:
             try:
-                sent = await self._call_with_retry(
-                    app.bot.send_message,
-                    chat_id=int_chat_id, text=preview,
-                    **stream_thread_kwargs,
-                )
-                buf.message_id = sent.message_id
+                if rich_draft_allowed and len(buf.text) <= TELEGRAM_RICH_MAX_LEN:
+                    buf.draft_id = self._new_rich_draft_id()
+                    if not await self._try_send_rich_draft(
+                        int_chat_id,
+                        buf.draft_id,
+                        buf.text,
+                        stream_thread_kwargs,
+                    ):
+                        buf.draft_id = None
+                if buf.draft_id is None:
+                    await self._start_legacy_stream(
+                        int_chat_id, buf, stream_thread_kwargs,
+                    )
                 buf.last_edit = now
             except Exception as e:
                 self.logger.warning("Stream initial send failed: {}", e)
-                raise  # Let ChannelManager handle retry
-        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
-            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
-                await self._flush_stream_overflow(int_chat_id, buf, stream_thread_kwargs)
+                raise
+        else:
+            edit_interval = (
+                max(self.config.stream_edit_interval, TELEGRAM_RICH_DRAFT_MIN_INTERVAL)
+                if buf.draft_id is not None
+                else self.config.stream_edit_interval
+            )
+            if (now - buf.last_edit) < edit_interval:
+                return
+            overflow_limit = TELEGRAM_RICH_MAX_LEN if buf.draft_id is not None else TELEGRAM_MAX_MESSAGE_LEN
+            if len(buf.text) > overflow_limit:
+                try:
+                    await self._flush_stream_overflow(
+                        int_chat_id, buf, stream_thread_kwargs,
+                    )
+                except (NetworkError, RetryAfter) as exc:
+                    self.logger.warning(
+                        "Stream overflow flush paused with unsent content: {}", exc
+                    )
+                    # Persisted chunks have already been removed from ``buf``.
+                    # Let the next delta or stream_end resume that tail; manager
+                    # retry would append this same delta a second time.
+                    return
                 buf.last_edit = now
                 return
-            preview = _strip_md_block(buf.text)
             try:
+                if buf.draft_id is not None:
+                    if await self._try_send_rich_draft(
+                        int_chat_id,
+                        buf.draft_id,
+                        buf.text,
+                        stream_thread_kwargs,
+                    ):
+                        buf.last_edit = now
+                        return
+                    await self._start_legacy_stream(
+                        int_chat_id, buf, stream_thread_kwargs,
+                    )
+                    buf.last_edit = now
+                    return
+                preview = _strip_md_block(buf.text)
                 await self._call_with_retry(
                     app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
@@ -1303,7 +1416,7 @@ class TelegramChannel(BaseChannel):
                     buf.last_edit = now
                     return
                 self.logger.warning("Stream edit failed: {}", e)
-                raise  # Let ChannelManager handle retry
+                raise
 
     async def _flush_stream_overflow(
         self,
@@ -1311,12 +1424,45 @@ class TelegramChannel(BaseChannel):
         buf: "_StreamBuf",
         thread_kwargs: dict[str, int],
     ) -> None:
-        """Split an oversized stream buffer mid-flight.
+        """Persist full chunks and continue streaming into a new draft tail.
 
-        Edits the current stream message with the first chunk, sends any
-        intermediate chunks as standalone messages, then opens a new message
-        for the tail so subsequent deltas continue streaming into it.
+        Rich chunks use the 32,768-character limit and preserve raw Markdown.
+        If Telegram rejects rich formatting, the same buffer is flushed through
+        the established HTML/plain path without losing stream state.
         """
+        if buf.draft_id is not None:
+            if not self._rich_streaming_enabled():
+                await self._start_legacy_stream(chat_id, buf, thread_kwargs)
+                return
+            chunks = _split_telegram_markdown(buf.text, TELEGRAM_RICH_MAX_LEN)
+            if len(chunks) <= 1:
+                return
+
+            for index, markdown in enumerate(chunks[:-1]):
+                if await self._try_send_stream_rich(chat_id, markdown, thread_kwargs):
+                    buf.text = "\n".join(chunks[index + 1:])
+                    continue
+                buf.text = "\n".join(chunks[index:])
+                await self._start_legacy_stream(chat_id, buf, thread_kwargs)
+                return
+
+            buf.draft_id = self._new_rich_draft_id()
+            if await self._try_send_rich_draft(
+                chat_id, buf.draft_id, buf.text, thread_kwargs,
+            ):
+                return
+            await self._start_legacy_stream(chat_id, buf, thread_kwargs)
+            return
+
+        await self._flush_stream_overflow_legacy(chat_id, buf, thread_kwargs)
+
+    async def _flush_stream_overflow_legacy(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict[str, int],
+    ) -> None:
+        """Legacy HTML/plain overflow path used when rich messaging is absent."""
         chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
         if len(chunks) <= 1:
             return

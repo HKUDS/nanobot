@@ -887,7 +887,7 @@ export function StreamingLabelSheen({
       <span
         data-sheen-text={active ? sheenText : undefined}
         className={cn(
-          "block w-fit max-w-full truncate font-medium leading-normal",
+          "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal after:pr-0.5",
           active ? "streaming-text-sheen" : "text-muted-foreground",
         )}
       >

@@ -1,7 +1,6 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
 import os
-import subprocess
 import sys
 import time
 import webbrowser
@@ -67,15 +66,45 @@ console = Console()
 def _launch_browser(url: str) -> bool:
     """Open *url* and request a foreground browser window."""
     if sys.platform == "darwin":
-        result = subprocess.run(
-            ["open", url],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
+        return _launch_macos_browser(url)
+    if sys.platform == "win32":
+        from nanobot.cli.windows_browser import launch_browser
+
+        return launch_browser(url)
     return bool(webbrowser.open(url, new=2, autoraise=True))
+
+
+def _launch_macos_browser(url: str) -> bool:
+    """Deliver URLs through Launch Services, never a credential-bearing argv."""
+    import ctypes
+
+    try:
+        foundation = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+        )
+        services = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+        foundation.CFURLCreateWithBytes.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32, ctypes.c_void_p,
+        ]
+        foundation.CFURLCreateWithBytes.restype = ctypes.c_void_p
+        foundation.CFRelease.argtypes = [ctypes.c_void_p]
+        foundation.CFRelease.restype = None
+        services.LSOpenCFURLRef.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        services.LSOpenCFURLRef.restype = ctypes.c_int32
+        encoded = url.encode("utf-8")
+        url_ref = foundation.CFURLCreateWithBytes(None, encoded, len(encoded), 0x08000100, None)
+        if not url_ref:
+            return False
+        try:
+            # HTTP URLs reach the preferred browser in a GURL Apple event, not
+            # through `open <url>` or a BROWSER command's process arguments.
+            return services.LSOpenCFURLRef(url_ref, None) == 0
+        finally:
+            foundation.CFRelease(url_ref)
+    except (OSError, AttributeError, UnicodeError):
+        # Callers may display exception text. Keep URLs out of error output and
+        # never retry with a subprocess/controller that can expose credentials.
+        return False
 
 
 def _confirm_webui_action(message: str, *, yes: bool) -> None:

@@ -61,6 +61,38 @@ async def test_find_files_filters_by_query_glob_and_type(tmp_path: Path) -> None
     assert result.splitlines() == ["src/settings_view.tsx"]
 
 
+@pytest.mark.parametrize("tool_name", ["find_files", "grep"])
+@pytest.mark.parametrize(
+    ("glob", "expected"),
+    [
+        ("**/*.py", ["main.py", "src/api.py", "src/nested/deep/worker.py"]),
+        ("src/**/*.py", ["src/api.py", "src/nested/deep/worker.py"]),
+        ("src/**", ["src/api.py", "src/nested/deep/worker.py"]),
+        ("src/*.py", ["src/api.py"]),
+        ("src/**/deep/*.py", ["src/nested/deep/worker.py"]),
+        (r"src\**\*.py", ["src/api.py", "src/nested/deep/worker.py"]),
+    ],
+)
+async def test_search_recursive_glob_matches_zero_or_more_directories(
+    tmp_path: Path, tool_name: str, glob: str, expected: list[str]
+) -> None:
+    for name in ["main.py", "src/api.py", "src/nested/deep/worker.py", "notes.md"]:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("needle\n", encoding="utf-8")
+
+    if tool_name == "find_files":
+        result = await FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path).execute(
+            path=".", glob=glob,
+        )
+    else:
+        result = await GrepTool(workspace=tmp_path, allowed_dir=tmp_path).execute(
+            pattern="needle", path=".", glob=glob, output_mode="files_with_matches",
+        )
+
+    assert sorted(result.splitlines()) == expected
+
+
 @pytest.mark.asyncio
 async def test_find_files_can_include_directories(tmp_path: Path) -> None:
     (tmp_path / "src" / "settings").mkdir(parents=True)

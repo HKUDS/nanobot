@@ -1207,6 +1207,77 @@ class TestToolEventProgress:
         assert captured["model"] == "test-model"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    async def test_webui_title_requires_inbound_opt_in(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+    ) -> None:
+        from nanobot.session.manager import SessionManager
+        from nanobot.session.webui_turns import maybe_generate_webui_title_after_turn
+
+        sessions = SessionManager(tmp_path)
+        session = sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        session.add_message("user", "say hello")
+        session.add_message("assistant", "Hello")
+        sessions.save(session)
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Greeting"))
+
+        generated = await maybe_generate_webui_title_after_turn(
+            channel="websocket",
+            chat_id="chat1",
+            metadata=metadata,
+            sessions=sessions,
+            session_key=session.key,
+            provider=provider,
+            model="test-model",
+        )
+
+        assert generated is False
+        provider.chat_with_retry.assert_not_awaited()
+        assert "title" not in session.metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    async def test_webui_turn_without_opt_in_does_not_schedule_title(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done"))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        session = loop.sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        loop.sessions.save(session)
+        scheduled: list[object] = []
+
+        def schedule_background(coro: object) -> None:
+            scheduled.append(coro)
+            if hasattr(coro, "close"):
+                coro.close()
+
+        loop.schedule_background = schedule_background  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata=metadata,
+        ))
+
+        assert scheduled == []
+        provider.chat_with_retry.assert_awaited_once()
+        assert "title" not in session.metadata
+
+    @pytest.mark.asyncio
     async def test_webui_command_turn_does_not_schedule_title_generation(
         self,
         tmp_path: Path,

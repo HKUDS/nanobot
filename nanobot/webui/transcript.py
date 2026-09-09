@@ -1720,6 +1720,7 @@ def replay_transcript_to_ui_messages(
     messages: list[dict[str, Any]] = []
     buffer_message_id: str | None = None
     buffer_parts: list[str] = []
+    merge_reasoning_message_id: str | None = None
     suppress_until_turn_end = False
     active_activity_segment_id: str | None = None
     active_file_edit_segment_id: str | None = None
@@ -1816,6 +1817,26 @@ def replay_transcript_to_ui_messages(
         created_at_ms: int | None = None,
     ) -> None:
         turn_fields = turn_fields or {}
+        if buffer_message_id is not None and buffer_message_id == merge_reasoning_message_id:
+            for i in range(len(prev) - 1, -1, -1):
+                candidate = prev[i]
+                if candidate.get("id") != buffer_message_id:
+                    continue
+                if _same_turn(candidate, turn_fields):
+                    # A length continuation shares the same Markdown answer.
+                    # Keep its reasoning with that answer, including on replay.
+                    reasoning = str(candidate.get("reasoning") or "")
+                    separator = "\n\n" if reasoning and not candidate.get("reasoningStreaming") else ""
+                    prev[i] = {
+                        **candidate,
+                        "reasoning": reasoning + separator + chunk,
+                        "reasoningStreaming": True,
+                    }
+                    return
+                break
+        if buffer_message_id is not None:
+            close_interrupted_assistant()
+            close_activity_for_answer()
         for i in range(len(prev) - 1, -1, -1):
             candidate = prev[i]
             if candidate.get("role") == "user":
@@ -1882,7 +1903,7 @@ def replay_transcript_to_ui_messages(
         return str(last.get("id"))
 
     def close_interrupted_assistant() -> None:
-        """Close an answer segment before tool activity without changing its semantics.
+        """Close an answer before a new activity phase without changing its semantics.
 
         The wire protocol already marks answer, reasoning, and activity phases.
         A later tool event does not turn previously emitted answer text into
@@ -1908,6 +1929,20 @@ def replay_transcript_to_ui_messages(
             if buffer_message_id == candidate.get("id"):
                 buffer_message_id = None
                 buffer_parts = []
+            return
+
+    def close_buffer_from_other_turn(turn_fields: dict[str, Any]) -> None:
+        nonlocal buffer_message_id, buffer_parts
+        if buffer_message_id is None:
+            return
+        for message in reversed(messages):
+            if message.get("id") != buffer_message_id:
+                continue
+            if not _same_turn(message, turn_fields):
+                message["isStreaming"] = False
+                buffer_message_id = None
+                buffer_parts = []
+                close_activity_for_answer()
             return
 
     def close_reasoning(prev: list[dict[str, Any]]) -> None:
@@ -2211,6 +2246,7 @@ def replay_transcript_to_ui_messages(
             close_activity_for_answer()
             turn_fields = _turn_fields(rec, "answer")
             source_fields = _source_fields(rec)
+            close_buffer_from_other_turn(turn_fields)
             adopted = find_active_placeholder(messages, turn_fields) if buffer_message_id is None else None
             if buffer_message_id is None:
                 if adopted:
@@ -2251,6 +2287,7 @@ def replay_transcript_to_ui_messages(
             final_text = rec.get("text")
             turn_fields = _turn_fields(rec, "answer")
             source_fields = _source_fields(rec)
+            close_buffer_from_other_turn(turn_fields)
             if isinstance(final_text, str):
                 if buffer_message_id is None:
                     buffer_message_id = find_active_placeholder(messages, turn_fields)
@@ -2287,6 +2324,7 @@ def replay_transcript_to_ui_messages(
             if not merge_next:
                 buffer_message_id = None
                 buffer_parts = []
+            merge_reasoning_message_id = buffer_message_id if merge_next else None
             continue
 
         if ev == "reasoning_delta":

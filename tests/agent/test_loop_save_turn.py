@@ -638,6 +638,46 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
     ]
 
 
+def test_save_turn_redacts_tool_image_without_truncating_text() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:tool-image")
+    text = "start-" + ("x" * 20_000) + "-end"
+
+    loop._save_turn(
+        session,
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_image",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_image",
+                "name": "read_file",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                        "_meta": {"path": "media/photo.png"},
+                    },
+                    {"type": "text", "text": text},
+                ],
+            },
+        ],
+        skip=0,
+    )
+
+    assert session.messages[1]["content"] == [
+        {"type": "text", "text": "[image: media/photo.png]"},
+        {"type": "text", "text": text},
+    ]
+
+
 def test_save_turn_persists_runtime_context_and_public_view_hides_it() -> None:
     loop = _mk_loop()
     session = Session(key="test:suffix-strip")
@@ -710,10 +750,10 @@ def test_save_turn_keeps_string_when_only_runtime_context() -> None:
     assert public_history_message(session.messages[0])["content"] == ""
 
 
-def test_save_turn_keeps_tool_results_under_16k() -> None:
+def test_save_turn_keeps_full_processed_tool_result() -> None:
     loop = _mk_loop()
     session = Session(key="test:tool-result")
-    content = "x" * 12_000
+    content = "start-" + ("x" * 20_000) + "-end"
 
     loop._save_turn(
         session,

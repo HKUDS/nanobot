@@ -236,6 +236,28 @@ async def test_exec_blocks_working_dir_outside_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_exec_blocks_relative_working_dir_outside_workspace(tmp_path):
+    """A relative working_dir that escapes the workspace must be rejected."""
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        timeout=5,
+    )
+
+    result = await tool.execute(
+        command="echo ok",
+        working_dir="../outside",
+    )
+
+    assert "outside the configured workspace" in result
+
+
+@pytest.mark.asyncio
 async def test_exec_blocks_absolute_rm_via_hijacked_working_dir(tmp_path):
     """Regression for #2826: `rm /abs/path` via working_dir hijack."""
     workspace = tmp_path / "workspace"

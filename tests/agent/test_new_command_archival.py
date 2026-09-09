@@ -95,12 +95,6 @@ class TestNewCommandArchival:
         session.last_archived = len(session.messages) - 2
         ordinary_history = session.get_history()
         assert [message["content"] for message in ordinary_history] == [
-            "msg1",
-            "resp1",
-            "msg2",
-            "resp2",
-            "msg3",
-            "resp3",
             "msg4",
             "resp4",
         ]

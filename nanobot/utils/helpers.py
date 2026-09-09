@@ -503,20 +503,24 @@ def stringify_text_blocks(content: list[object]) -> str | None:
 
 
 def _render_tool_result_reference(
-    filepath: Path,
+    reference_path: str,
     *,
     original_size: int,
     preview: str,
     truncated_preview: bool,
+    max_chars: int | None = None,
 ) -> str:
     result = (
         f"[tool output persisted]\n"
-        f"Full output saved to: {filepath}\n"
+        f"Full output saved to workspace path: {reference_path}\n"
         f"Original size: {original_size} chars\n"
         f"Preview:\n{preview}"
     )
     if truncated_preview:
-        result += "\n...\n(Read the saved file if you need the full output.)"
+        result += "\n...\nPreview is also truncated."
+    result += "\nResult truncated. Read the saved file if you need the complete output."
+    if max_chars and len(result) > max_chars:
+        result = f"[truncated: {reference_path}]"
     return result
 
 
@@ -570,28 +574,16 @@ def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
     tool_call_id: str,
-    content: Any,
+    content: str,
     *,
     max_chars: int,
-) -> Any:
-    """Persist oversized tool output and replace it with a stable reference string."""
-    if workspace is None or max_chars <= 0:
-        return content
+) -> str:
+    """Offload oversized text.
 
-    text_payload: str | None = None
-    suffix = "txt"
-    if isinstance(content, str):
-        text_payload = content
-    elif isinstance(content, list):
-        text_payload = stringify_text_blocks(cast(list[object], content))
-        if text_payload is None:
-            return cast(Any, content)
-        suffix = "json"
-    else:
+    Complete references may exceed the per-block ``max_chars`` budget.
+    """
+    if workspace is None or max_chars <= 0 or len(content) <= max_chars:
         return content
-
-    if len(text_payload) <= max_chars:
-        return cast(Any, content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -599,19 +591,17 @@ def maybe_persist_tool_result(
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
         logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    path = bucket / f"{safe_filename(tool_call_id)}.txt"
     if not path.exists():
-        if suffix == "json" and isinstance(content, list):
-            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
-        else:
-            _write_text_atomic(path, text_payload)
+        _write_text_atomic(path, content)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
     return _render_tool_result_reference(
-        path,
-        original_size=len(text_payload),
+        str(path.resolve()),
+        original_size=len(content),
         preview=preview,
-        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=len(content) > _TOOL_RESULT_PREVIEW_CHARS,
+        max_chars=max_chars,
     )
 
 

@@ -65,7 +65,7 @@ ProviderCompactionConsolidator = Callable[
 ]
 
 SNIP_SAFETY_BUFFER = 1024
-# read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
+# read_file has its own bound; exempt it to avoid persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
@@ -701,24 +701,48 @@ class ContextGovernor:
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result
-        try:
+
+        def persist_text(text: str, call_id: str) -> str:
             content = maybe_persist_tool_result(
                 config.workspace,
                 config.session_key,
-                tool_call_id,
-                result,
+                call_id,
+                text,
                 max_chars=config.max_tool_result_chars,
             )
+            # Persisted references must retain their complete paths.
+            return truncate_text(content, config.max_tool_result_chars) if config.workspace is None else content
+
+        original_result: object = result
+        try:
+            if isinstance(result, str):
+                return persist_text(result, tool_call_id)
+            if isinstance(result, list):
+                result = cast(list[object], result)
+                blocks: list[dict[str, Any]] = []
+                for raw_block in result:
+                    if not isinstance(raw_block, dict):
+                        return result
+                    block = cast(dict[str, Any], raw_block)
+                    if not isinstance(block.get("type"), str):
+                        return result
+                    if block["type"] == "text" and not isinstance(block.get("text"), str):
+                        return result
+                    blocks.append(block)
+                # Image redaction must not change how neighboring text is normalized.
+                return [
+                    {**block, "text": persist_text(block["text"], f"{tool_call_id}_text_{index}")}
+                    if block["type"] == "text" else block
+                    for index, block in enumerate(blocks)
+                ]
         except Exception:
             logger.exception(
                 "Tool result persist failed for {} in {}; using raw result",
                 tool_call_id,
                 config.session_key or "default",
             )
-            content = result
-        if isinstance(content, str) and len(content) > config.max_tool_result_chars:
-            return truncate_text(content, config.max_tool_result_chars)
-        return content
+            return truncate_text(result, config.max_tool_result_chars) if isinstance(result, str) else original_result
+        return result
 
     @staticmethod
     def strip_placeholder_assistant_messages(

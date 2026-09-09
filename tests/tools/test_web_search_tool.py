@@ -287,6 +287,104 @@ async def test_serper_search_rate_limited(monkeypatch):
     assert is_tool_error_result(result)
 
 
+def test_anysearch_remains_concurrency_safe_without_api_key(monkeypatch):
+    # Unlike keyed providers, AnySearch works without a key (anonymous quota),
+    # so it must never be treated as exclusive/serialized.
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    tool = _tool(provider="anysearch", api_key="")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.anysearch.com/v1/search"
+        assert kw["headers"]["Authorization"] == "Bearer anysearch-key"
+        assert kw["headers"]["X-Anysearch-Client"] == "nanobot/1.0.0"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {"query": "anysearch", "max_results": 1}
+        return _response(json={
+            "code": 0,
+            "data": {
+                "results": [
+                    {"title": "AnySearch", "url": "https://anysearch.com", "content": "Search API"}
+                ],
+                "metadata": {"total_results": 1, "search_time_ms": 42},
+            },
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="anysearch", api_key="anysearch-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="anysearch", count=1)
+    assert "AnySearch" in result
+    assert "https://anysearch.com" in result
+    assert "Search API" in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_without_api_key_uses_anonymous_quota(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.anysearch.com/v1/search"
+        assert "Authorization" not in kw["headers"]
+        assert kw["headers"]["X-Anysearch-Client"] == "nanobot/1.0.0"
+        return _response(json={
+            "code": 0,
+            "data": {
+                "results": [{"title": "Anon", "url": "https://anysearch.com/anon", "snippet": "anonymous tier"}]
+            },
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    tool = _tool(provider="anysearch", api_key="", user_agent="nanobot-search-test")
+    result = await tool.execute(query="anysearch", count=1)
+    assert "Anon" in result
+    assert "anonymous tier" in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["Authorization"] == "Bearer env-anysearch-key"
+        return _response(json={
+            "code": 0,
+            "data": {
+                "results": [{"title": "Env", "url": "https://anysearch.com/env", "content": "ok"}]
+            },
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("ANYSEARCH_API_KEY", "env-anysearch-key")
+    tool = _tool(provider="anysearch", api_key="")
+    result = await tool.execute(query="anysearch", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=403, json={"code": -1, "message": "Forbidden"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="anysearch", api_key="bad-anysearch-key")
+    result = await tool.execute(query="anysearch")
+    assert "Error: AnySearch search failed (403)" in result
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_rate_limited(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=429, json={"code": -1, "message": "rate limited"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="anysearch", api_key="")
+    result = await tool.execute(query="anysearch")
+    assert "AnySearch search rate limited" in result
+    assert is_tool_error_result(result)
+
+
 @pytest.mark.asyncio
 async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):

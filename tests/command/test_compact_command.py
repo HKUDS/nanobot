@@ -14,6 +14,8 @@ from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.command.builtin import cmd_stop
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import GenerationSettings, LLMResponse, ProviderConversationState
+from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
 @pytest.fixture
@@ -73,14 +75,67 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     loop.sessions.invalidate("cli:test")
     reloaded = loop.sessions.get_or_create("cli:test")
     assert reloaded.provider_state is None
-    assert reloaded.messages == session.messages
+    assert reloaded.messages[:-1] == session.messages
+    assert is_hidden_history_message(reloaded.messages[-1])
     assert reloaded.last_archived == 2
+    assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
+    assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
     assert len(loop.consolidator.store.read_unprocessed_history(0)) == 1
 
     response = await loop._process_message(msg, runtime=loop.llm_runtime())
     assert response is None
     assert bus.outbound_size == 0
     loop.provider.chat_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["manual", "idle"])
+@pytest.mark.parametrize("summary", ["The current task is to inspect the checkpoint.", "(nothing)"])
+async def test_checkpoint_continues_through_reloaded_session(loop, trigger, summary) -> None:
+    key = "cli:checkpoint-resume"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "Inspect the checkpoint")
+    session.add_message("assistant", "Inspection started")
+    loop.sessions.save(session)
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
+    loop.provider.chat_with_retry.return_value = LLMResponse(content=summary)
+
+    if trigger == "manual":
+        await loop._process_message(
+            InboundMessage(channel="cli", sender_id="user", chat_id="checkpoint-resume",
+                           content="/compact"),
+            runtime=loop.llm_runtime(),
+        )
+    else:
+        await loop.auto_compact._archive(key, runtime=loop.llm_runtime())
+
+    loop.sessions.invalidate(key)
+    loop.auto_compact._summaries.clear()
+    reloaded = loop.sessions.get_or_create(key)
+    assert reloaded.metadata["_last_summary"]["text"] == summary
+    assert reloaded.last_archived == 2
+    assert reloaded.get_history() == [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+
+    loop.provider.chat_with_retry.reset_mock()
+    loop.provider.chat_with_retry.return_value = LLMResponse(content="Inspection complete.")
+    response = await loop.process_direct("Continue the inspection", session_key=key)
+    assert response.content == "Inspection complete."
+    loop.provider.chat_with_retry.assert_awaited_once()
+    sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
+    expected_summary = reloaded.metadata["_last_summary"] if summary != "(nothing)" else None
+    assert sent[0] == {
+        "role": "system",
+        "content": loop.context.build_system_prompt(channel="cli", session_summary=expected_summary),
+    }
+    assert [message["role"] for message in sent] == ["system", "user", "user"]
+    assert sent[1] == {"role": "user", "content": SUMMARY_CONTINUATION_TEXT}
+    assert "Continue the inspection" in sent[2]["content"]
+
+    loop.sessions.invalidate(key)
+    resumed = loop.sessions.get_or_create(key)
+    assert [message["role"] for message in resumed.get_history()] == ["user", "user", "assistant"]
+    assert resumed.get_history()[0]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert resumed.get_history()[-1]["content"] == "Inspection complete."
 
 
 @pytest.mark.asyncio
@@ -206,3 +261,47 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
     reloaded = loop.sessions.get_or_create(key)
     assert reloaded.messages == session.messages
     assert reloaded.last_archived == 0
+    assert reloaded.get_history() == session.get_history()
+
+
+@pytest.mark.asyncio
+async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "large tool turn")
+    for i in range(20):
+        session.add_message("assistant", "", tool_calls=[{
+            "id": f"tool-{i}", "type": "function",
+            "function": {"name": "exec", "arguments": "{}"},
+        }])
+        session.add_message("tool", "x" * 10_000, tool_call_id=f"tool-{i}")
+    session.add_message("assistant", "done")
+    loop.sessions.save(session)
+    runtime = loop.llm_runtime()
+    await loop.consolidator.compact_idle_session(key, runtime=runtime)
+    assert [m["content"] for m in loop.sessions.get_or_create(key).get_history()] == [
+        SUMMARY_CONTINUATION_TEXT,
+    ]
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact"),
+        runtime=runtime,
+    )
+    loop.provider.chat_with_retry.assert_awaited_once()
+    assert loop.bus.outbound_size == 0
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert len(reloaded.messages) == 43
+    assert is_hidden_history_message(reloaded.messages[-1])
+    assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
+    assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
+
+    reloaded.add_message("user", "next question")
+    reloaded.add_message("assistant", "next answer")
+    loop.sessions.save(reloaded)
+    await loop.consolidator.compact_idle_session(key, runtime=runtime)
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert [m["content"] for m in reloaded.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT,
+    ]
