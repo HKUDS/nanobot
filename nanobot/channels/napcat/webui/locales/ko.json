@@ -8,7 +8,7 @@
     "summary": "NapCat은 로컬 또는 원격 OneBot WebSocket으로 nanobot을 QQ에 연결합니다.",
     "steps": [
       "NapCat을 시작하고 Forward WebSocket 서비스를 활성화하세요.",
-      "WebSocket URL과 선택적 액세스 토큰을 nanobot에 복사하세요.",
+      "WebSocket URL을 nanobot에 복사하세요. 액세스 토큰을 설정했다면 함께 입력하세요.",
       "저장하고 NapCat을 활성화한 다음 QQ 테스트 메시지를 보내세요."
     ],
     "fields": {
@@ -19,7 +19,7 @@
       },
       "accessToken": {
         "label": "액세스 토큰",
-        "placeholder": "선택적 토큰"
+        "placeholder": "액세스 토큰(선택 사항)"
       },
       "groupPolicy": {
         "label": "그룹 동작",

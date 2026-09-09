@@ -1214,7 +1214,7 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
-    const consent = screen.getByRole("radiogroup", { name: "Consent granted" });
+    const consent = screen.getByRole("radiogroup", { name: "Allow nanobot to read and send email" });
     expect(within(consent).getByRole("radio", { name: "Not granted" })).toHaveAttribute(
       "aria-checked",
       "true",

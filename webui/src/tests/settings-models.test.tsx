@@ -938,7 +938,8 @@ describe("Settings models", () => {
 
     expect(await screen.findByText("Provider setup required")).toBeInTheDocument();
     await togglePresetEditor();
-    expect(screen.getAllByText(/Sign in before saving/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in required" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/Sign in before saving/);
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
   });
 
@@ -1221,7 +1222,7 @@ describe("Settings models", () => {
     await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /orcarouter\/auto/i });
     await openPopover(modelButtons[modelButtons.length - 1]);
-    expect(await screen.findByText("Search provider catalog to choose a model.")).toBeInTheDocument();
+    expect(await screen.findByText("Search this provider’s model catalog.")).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).startsWith("/api/settings/provider-models"),

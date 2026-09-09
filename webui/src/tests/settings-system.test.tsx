@@ -91,8 +91,8 @@ describe("Settings system domains", () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: section, exact: true }));
       await waitFor(() => {
         expect(screen.getAllByRole("button", { name: "Restart", exact: true })).toEqual([restart]);
-        expect(screen.getAllByText("Saved. Restart when ready.")).toHaveLength(1);
-        expect(within(sidebar).getByText("Saved. Restart when ready.")).toBeVisible();
+        expect(screen.getAllByText("Saved. Restart to apply changes.")).toHaveLength(1);
+        expect(within(sidebar).getByText("Saved. Restart to apply changes.")).toBeVisible();
       });
     }
   });
@@ -376,7 +376,7 @@ describe("Settings system domains", () => {
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     expect(
-      screen.queryByText("Add tools to nanobot, then @ them in chat."),
+      screen.queryByText("Add tools to nanobot, then mention them with @ in chat."),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");

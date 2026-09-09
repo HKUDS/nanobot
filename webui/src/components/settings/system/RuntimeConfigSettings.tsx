@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
+import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigField, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
@@ -183,7 +184,9 @@ export function RuntimeConfigSettings({
                             onChange={(next) => state.change(field, field.kind === "toggle" ? field.options![next ? 1 : 0] : next)} />
                         ) : (
                           <div className="w-full">
-                            {field.kind === "list" ? (
+                            {field.path === "agents.defaults.timezone" ? (
+                              <TimezonePicker {...common} value={String(current)} onChange={(next) => state.change(field, next)} />
+                            ) : field.kind === "list" ? (
                               <Textarea {...common} value={String(current)} rows={3} spellCheck={false}
                                 onChange={(event) => state.change(field, event.target.value)}
                                 className="resize-y rounded-xl text-[13px]" />

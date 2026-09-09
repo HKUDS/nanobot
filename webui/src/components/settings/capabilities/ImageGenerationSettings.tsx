@@ -140,7 +140,7 @@ export function ImageGenerationSettings({
               ) : null}
             </div>
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.imageProviderBase", "Provider base")}>
+          <SettingsRow title={tx("settings.rows.imageProviderBase", "Provider URL")}>
             <span className="max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
               {selectedProvider?.api_base || selectedProvider?.default_api_base || selectedProvider?.name || tx("settings.values.notAvailable", "Not available")}
             </span>
@@ -165,7 +165,7 @@ export function ImageGenerationSettings({
               onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.defaultAspectRatio", "Default aspect")}>
+          <SettingsRow title={tx("settings.rows.defaultAspectRatio", "Default aspect ratio")}>
             <ProviderPicker
               providers={aspectOptions}
               value={form.defaultAspectRatio}
@@ -186,7 +186,7 @@ export function ImageGenerationSettings({
             />
           </SettingsRow>
           <SettingsAdvancedOptions>
-          <SettingsRow title={tx("settings.rows.maxImagesPerTurn", "Max images per turn")}>
+          <SettingsRow title={tx("settings.rows.maxImagesPerTurn", "Max images per request")}>
             <NumberInput
               value={form.maxImagesPerTurn}
               min={1}
@@ -214,8 +214,8 @@ export function ImageGenerationSettings({
                 ? tx("settings.image.missingCredential", "Configure this provider before enabling image generation.")
                 : error
             }
-            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
-            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart nanobot to apply them.")}
+            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")}
             onSave={onSave}
             onRestart={onRestart}
             isRestarting={isRestarting}

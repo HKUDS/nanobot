@@ -22,26 +22,26 @@
         "placeholder": "Salvo pelo login via QR"
       },
       "sendProgress": { "label": "Enviar progresso" },
-      "sendToolHints": { "label": "Enviar dicas de ferramentas" },
+      "sendToolHints": { "label": "Enviar resumos da atividade das ferramentas" },
       "streaming": { "label": "Usar API de streaming" },
       "replyProgressMessages": { "label": "Enviar progresso estruturado" },
       "replyProgressMaxMessages": { "label": "Limite de progresso estruturado" },
-      "contextMessageBudget": { "label": "Orçamento de mensagens do contexto" },
+      "contextMessageBudget": { "label": "Máximo de mensagens de contexto" },
       "blockStreaming": { "label": "Enviar resposta em blocos" },
-      "blockStreamingMinChars": { "label": "Tamanho mínimo do bloco" },
+      "blockStreamingMinChars": { "label": "Mínimo de caracteres por bloco" },
       "blockStreamingMaxMessages": { "label": "Limite de mensagens em blocos" },
       "baseUrl": { "label": "URL da API" },
       "cdnBaseUrl": { "label": "URL da CDN" },
       "routeTag": { "label": "Etiqueta de rota" },
       "stateDir": { "label": "Diretório de estado" },
-      "pollTimeout": { "label": "Tempo limite da consulta" }
+      "pollTimeout": { "label": "Tempo limite da consulta (segundos)" }
     }
   },
   "custom": {
     "qrAlt": "QR code de login do WeChat",
     "scanTitle": "Escaneie com o WeChat",
     "scanDescription": "Escaneie com o WeChat no celular. O nanobot salva o estado localmente após o login.",
-    "waiting": "Aguardando leitura do WeChat...",
+    "waiting": "Aguardando você escanear o código com o WeChat…",
     "connected": "WeChat está conectado.",
     "stopped": "Login do WeChat interrompido.",
     "connecting": "Conectando...",

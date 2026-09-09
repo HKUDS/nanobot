@@ -121,7 +121,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByRole("textbox", { name: /authorization/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Finish signing in in the browser window.",
+      "Complete sign-in in the browser window.",
     );
     expect(screen.getByRole("button", { name: "Connecting Xmind" })).toHaveTextContent(
       "Connecting…",
@@ -372,19 +372,19 @@ describe("SettingsView Apps catalog", () => {
     expect(oauth).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(within(authentication).getByRole("button", { name: "Headers" }));
-    fireEvent.change(screen.getByLabelText("Headers JSON"), {
+    fireEvent.change(screen.getByLabelText("Headers (JSON)"), {
       target: { value: '{"Authorization":"Bearer stale"}' },
     });
     expect(screen.getByText("Add the request headers used by this server.")).toBeInTheDocument();
 
     fireEvent.click(oauth);
     expect(oauth).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByLabelText("Headers JSON")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Headers (JSON)")).not.toBeInTheDocument();
     expect(
       screen.getByText("Save the server, then select Connect to sign in."),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save MCP" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save MCP server" }));
 
     await waitFor(() => {
       const saveCall = requestMutationMock.mock.calls.find(
@@ -736,7 +736,7 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() => expect(statusCalls).toBe(1), { timeout: 2000 });
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Finish signing in in the browser window.",
+      "Complete sign-in in the browser window.",
     );
     expect(screen.queryByRole("button", { name: "Continue sign-in" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();

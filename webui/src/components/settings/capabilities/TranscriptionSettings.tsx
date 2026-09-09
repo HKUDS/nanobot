@@ -133,7 +133,7 @@ export function TranscriptionSettings({
         </SettingsRow>
         <SettingsRow
           title={tx("settings.rows.transcriptionModel", "Model")}
-          description={tx("settings.help.transcriptionModel", "Leave as the resolved default unless your provider needs a custom model id.")}
+          description={tx("settings.help.transcriptionModel", "Keep the default model unless your provider requires a specific model ID.")}
         >
           <Input
             value={form.model}
@@ -143,7 +143,7 @@ export function TranscriptionSettings({
         </SettingsRow>
         <SettingsRow
           title={tx("settings.rows.transcriptionLanguage", "Language")}
-          description={tx("settings.help.transcriptionLanguage", "Optional ISO-639 hint such as en, zh, ja, or ko.")}
+          description={tx("settings.help.transcriptionLanguage", "Optional language code, such as en for English, zh for Chinese, ja for Japanese, or ko for Korean.")}
         >
           <Input
             value={form.language}
@@ -180,8 +180,8 @@ export function TranscriptionSettings({
           dirty={dirty}
           saving={saving}
           pendingRestart={!embedded && requiresRestartPending}
-          dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
-          pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+          dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart nanobot to apply them.")}
+          pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")}
           onSave={onSave}
           onRestart={onRestart}
           isRestarting={isRestarting}

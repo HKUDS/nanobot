@@ -1,21 +1,21 @@
 {
-  "description": "Gunakan nanobot dari channel dan DM Mattermost.",
-  "requirements": "URL server Mattermost, token bot, dan akses channel",
+  "description": "Gunakan nanobot dari kanal dan DM Mattermost.",
+  "requirements": "URL server Mattermost, token bot, dan akses kanal",
   "setup": {
     "docsLabel": "Buka panduan Mattermost",
     "officialLabel": "Buka panduan bot Mattermost",
-    "tryIt": "Sebut bot di channel Mattermost atau kirim pesan langsung.",
-    "summary": "Mattermost terhubung melalui akun bot di server dan menerima pesan channel serta pesan langsung.",
+    "tryIt": "Sebut bot di kanal Mattermost atau kirim pesan langsung.",
+    "summary": "Mattermost terhubung melalui akun bot di server dan menerima pesan kanal serta pesan langsung.",
     "steps": [
       "Buat akun bot Mattermost dan salin token aksesnya.",
-      "Masukkan URL server dan berikan akses ke tim serta channel tujuan.",
+      "Masukkan URL server dan berikan akses ke tim serta kanal tujuan.",
       "Simpan dan aktifkan Mattermost, lalu sebut bot atau kirim DM."
     ],
     "fields": {
       "serverUrl": {
         "label": "URL server",
         "placeholder": "https://mattermost.example.com",
-        "help": "Gunakan URL dasar workspace Mattermost."
+        "help": "Gunakan URL dasar ruang kerja Mattermost."
       },
       "token": {
         "label": "Token bot",
@@ -29,7 +29,7 @@
       "groupPolicy": {
         "label": "Perilaku kanal",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
@@ -37,7 +37,7 @@
       "groupPolicyInThread": {
         "label": "Perilaku thread",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan (tanpa sebutan)",
           "allowlist": "Daftar izin"
         }

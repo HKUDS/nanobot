@@ -303,7 +303,7 @@ export function AppsCatalogSettings({
         {loading ? (
           <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            {tx("settings.apps.loading", "Loading Apps...")}
+            {tx("settings.apps.loading", "Loading apps…")}
           </div>
         ) : items.length ? (
           <div className="grid grid-cols-1 gap-x-10 gap-y-1 py-3 xl:grid-cols-2">
@@ -1146,7 +1146,7 @@ function McpCustomServerPanel({
                 htmlFor={headersInputId}
                 className="mb-1 block text-[11.5px] font-medium text-muted-foreground"
               >
-                {tx("settings.mcp.headers", "Headers JSON")}
+                {tx("settings.mcp.headers", "Headers (JSON)")}
               </label>
               <Textarea
                 id={headersInputId}
@@ -1180,7 +1180,7 @@ function McpCustomServerPanel({
               aria-hidden
             />
             {advancedOpen
-              ? tx("settings.mcp.hideAdvanced", "Hide advanced")
+              ? tx("settings.mcp.hideAdvanced", "Hide advanced options")
               : tx("settings.mcp.advancedOptions", "Advanced options")}
           </Button>
 
@@ -1196,7 +1196,7 @@ function McpCustomServerPanel({
               {!remote ? (
                 <label className="min-w-0">
                   <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                    {tx("settings.mcp.args", "Args JSON")}
+                    {tx("settings.mcp.args", "Arguments (JSON)")}
                   </span>
                   <Textarea
                     value={form.args}
@@ -1208,7 +1208,7 @@ function McpCustomServerPanel({
               ) : null}
               <label className="min-w-0">
                 <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                  {tx("settings.mcp.env", "Env JSON")}
+                  {tx("settings.mcp.env", "Environment variables (JSON)")}
                 </span>
                 <Textarea
                   value={form.env}
@@ -1219,7 +1219,7 @@ function McpCustomServerPanel({
               </label>
               <label className="min-w-0">
                 <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                  {tx("settings.mcp.timeout", "Tool timeout")}
+                  {tx("settings.mcp.timeout", "Tool timeout (seconds)")}
                 </span>
                 <Input
                   value={form.toolTimeout}
@@ -1240,7 +1240,7 @@ function McpCustomServerPanel({
               className="h-9 w-full rounded-full px-4 text-[12.5px] font-semibold sm:w-auto"
             >
               {customBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-              {tx("settings.mcp.saveCustom", "Save MCP")}
+              {tx("settings.mcp.saveCustom", "Save MCP server")}
             </Button>
           </div>
         </div>
@@ -1295,7 +1295,7 @@ function mcpOAuthStatusText(
       }
       return popupBlocked
         ? tx("settings.mcp.openSignInToContinue", "Open the sign-in page to continue.")
-        : tx("settings.mcp.finishSignInInBrowser", "Finish signing in in the browser window.");
+        : tx("settings.mcp.finishSignInInBrowser", "Complete sign-in in the browser window.");
     case "connecting":
       return tx("settings.mcp.finishingConnection", "Finishing connection...");
     case "authorized":

@@ -1,6 +1,6 @@
 {
   "description": "Usa nanobot en chats y grupos de Feishu.",
-  "requirements": "Credenciales de Feishu, suscripción a eventos y gateway",
+  "requirements": "Credenciales de Feishu, suscripción a eventos y pasarela",
   "setup": {
     "primaryAction": "Conectar Feishu",
     "docsLabel": "Abrir guía de Feishu",
@@ -20,7 +20,7 @@
       "appSecret": {
         "label": "App Secret",
         "placeholder": "Déjalo vacío para conservar el secreto",
-        "help": "Pega uno nuevo solo al rotar credenciales."
+        "help": "Pega un nuevo secreto solo si quieres sustituir el que está guardado."
       },
       "domain": {
         "label": "Región",
@@ -34,7 +34,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "allowFrom": {
@@ -51,12 +51,12 @@
     }
   },
   "custom": {
-    "toggleAssistant": "Asistente {{name}}",
+    "toggleAssistant": "Activar el asistente {{name}}",
     "configured": "Conectado",
     "needsSetup": "Necesita autorización",
     "noAppId": "Sin App ID",
     "createAnother": "Crear otro asistente",
-    "createHint": "Crea un bot Feishu independiente para otro equipo o flujo.",
+    "createHint": "Crea un bot de Feishu independiente para otro equipo, espacio o flujo de trabajo.",
     "createAssistant": "Crear asistente",
     "reconnect": "Reconectar",
     "countNone": "Ningún asistente conectado",

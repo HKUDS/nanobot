@@ -143,7 +143,7 @@ export function ModelPresetDeleteDialog({
           <DialogDescription className="leading-5">
             {tx(
               "settings.models.deletePresetHelp",
-              "This removes the preset “{{name}}”. Provider credentials are not affected.",
+              "Delete “{{name}}” and remove it from the fallback list. Provider credentials will be kept.",
               { name: preset?.name ?? "" },
             )}
           </DialogDescription>
@@ -778,6 +778,9 @@ export function ModelsSettings({
                               </span>
                             ) : null}
                           </span>
+                        </span>
+                        <span className="shrink-0 px-2 py-1 text-[13px] font-normal leading-5 text-muted-foreground">
+                          {t("settings.configure")}
                         </span>
                       </button>
                       {ordered ? (

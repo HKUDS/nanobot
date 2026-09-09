@@ -1,19 +1,19 @@
 {
   "description": "Sử dụng nanobot từ các phòng Matrix.",
-  "requirements": "Homeserver, token tài khoản và quyền truy cập phòng",
+  "requirements": "Máy chủ tài khoản, thông tin đăng nhập và quyền truy cập phòng",
   "setup": {
     "docsLabel": "Mở hướng dẫn Matrix",
     "officialLabel": "Mở danh sách ứng dụng Matrix",
     "tryIt": "Mời tài khoản Matrix vào phòng và gửi tin nhắn thử.",
-    "summary": "Matrix cần tài khoản homeserver và đăng nhập bằng mật khẩu hoặc token truy cập.",
+    "summary": "Nhập máy chủ của tài khoản Matrix rồi đăng nhập bằng mật khẩu hoặc token truy cập.",
     "steps": [
       "Tạo hoặc chọn tài khoản Matrix cho nanobot.",
-      "Nhập homeserver, ID người dùng và mật khẩu hoặc token truy cập.",
+      "Nhập máy chủ tài khoản, ID người dùng và mật khẩu hoặc token truy cập.",
       "Lưu và bật Matrix, mời tài khoản vào phòng rồi gửi tin nhắn thử."
     ],
     "fields": {
       "homeserver": {
-        "label": "Homeserver",
+        "label": "Máy chủ tài khoản",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -27,7 +27,7 @@
       },
       "accessToken": {
         "label": "Token truy cập",
-        "placeholder": "Đăng nhập token tùy chọn",
+        "placeholder": "Nhập token truy cập",
         "help": "Nên dùng khi ứng dụng Matrix cung cấp token truy cập."
       },
       "deviceId": {

@@ -2,7 +2,6 @@ import { useState } from "react";
 import {
   CalendarClock,
   CircleAlert,
-  ListTodo,
   RefreshCcw,
 } from "lucide-react";
 import type { TFunction } from "i18next";
@@ -74,7 +73,7 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
             "hover:bg-accent/40 hover:text-foreground",
           )}
         >
-          <ListTodo className="h-4 w-4 stroke-[1.75]" />
+          <CalendarClock className="h-4 w-4 stroke-[1.75]" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -96,7 +95,6 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
 
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
               <span className="truncate text-[13px] font-medium text-foreground">
                 {t("thread.sessionInfo.automations")}
               </span>

@@ -15,7 +15,7 @@
       "serverUrl": {
         "label": "서버 URL",
         "placeholder": "https://mattermost.example.com",
-        "help": "Mattermost 워크스페이스 기본 URL을 사용하세요."
+        "help": "Mattermost 작업 공간 기본 URL을 사용하세요."
       },
       "token": {
         "label": "봇 토큰",
@@ -24,7 +24,7 @@
       },
       "teamId": {
         "label": "팀 ID",
-        "placeholder": "선택적 팀 ID"
+        "placeholder": "팀 ID(선택 사항)"
       },
       "groupPolicy": {
         "label": "채널 동작",
@@ -38,7 +38,7 @@
         "label": "스레드 동작",
         "choices": {
           "mention": "멘션만",
-          "open": "모든 메시지 (언급 불필요)",
+          "open": "모든 메시지(멘션 불필요)",
           "allowlist": "허용 목록"
         }
       },

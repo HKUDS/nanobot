@@ -396,11 +396,11 @@ export function ModelIdPicker({
           </div>
         ) : !canFetchModels ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-            {tx("settings.models.autoProviderCustomOnly", "Auto provider mode uses custom model IDs.")}
+            {tx("settings.models.autoProviderCustomOnly", "Enter a model ID manually when using automatic provider selection.")}
           </div>
         ) : waitingForModelSearch ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-            {tx("settings.models.searchCatalog", "Search provider catalog to choose a model.")}
+            {tx("settings.models.searchCatalog", "Search this provider’s model catalog.")}
           </div>
         ) : loading ? (
           <div className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-muted-foreground">
@@ -421,8 +421,11 @@ export function ModelIdPicker({
           </div>
         ) : isCatalog && !normalizedQuery ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-            {tx("settings.models.searchCatalog", "Search provider catalog to choose a model.")}
-            {providerModelCount ? ` ${providerModelCount} ${tx("settings.models.modelsAvailable", "available")}.` : ""}
+            {tx("settings.models.searchCatalog", "Search this provider’s model catalog.")}
+            {providerModelCount ? <> {t("settings.models.availableCount", {
+              defaultValue: "Models available: {{count}}",
+              count: providerModelCount,
+            })}</> : null}
           </div>
         ) : null}
 

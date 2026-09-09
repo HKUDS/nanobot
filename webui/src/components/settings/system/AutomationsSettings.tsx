@@ -1070,27 +1070,27 @@ function automationEditDraftError(
   job: SessionAutomationJob | null,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
-  if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
+  if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Enter a task name.");
   if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
-    return tx("settings.automations.validation.messageRequired", "Message is required.");
+    return tx("settings.automations.validation.messageRequired", "Enter a task message.");
   }
   if (draft.scheduleKind === "every") {
     const value = Number(draft.everyValue);
     if (!Number.isInteger(value) || value <= 0) {
-      return tx("settings.automations.validation.intervalRequired", "Interval must be a positive number.");
+      return tx("settings.automations.validation.intervalRequired", "Enter a positive whole number for the interval.");
     }
   }
   if (draft.scheduleKind === "cron" && !draft.cronExpr.trim()) {
-    return tx("settings.automations.validation.cronRequired", "Cron expression is required.");
+    return tx("settings.automations.validation.cronRequired", "Enter a Cron expression.");
   }
   if (draft.scheduleKind === "at") {
     const atMs = new Date(draft.atLocal).getTime();
     if (!Number.isFinite(atMs)) {
-      return tx("settings.automations.validation.timeRequired", "Run time is required.");
+      return tx("settings.automations.validation.timeRequired", "Choose a run time.");
     }
     if (atMs <= Date.now() && automationScheduleChanged(draft, job)) {
-      return tx("settings.automations.validation.futureRequired", "Run time must be in the future.");
+      return tx("settings.automations.validation.futureRequired", "Choose a time in the future.");
     }
   }
   return null;

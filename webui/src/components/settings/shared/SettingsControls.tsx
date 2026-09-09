@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { isNativeRuntime } from "@/lib/runtime";
 import type { NanobotFeatureInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -204,12 +205,9 @@ export function SettingsRow({
   return (
     <div className="settings-row rounded-xl transition-colors settings-hover focus-within:bg-sidebar-accent/60">
       <div className="min-w-0">
-        <div className="select-none text-[14px] font-medium leading-5 text-foreground">{title}</div>
-        {description ? (
-          <div className="sr-only">
-            {description}
-          </div>
-        ) : null}
+        <div className="select-none text-[14px] font-medium leading-5 text-foreground">
+          {description ? <SettingsHint description={description}>{title}</SettingsHint> : title}
+        </div>
       </div>
       {children ? <div className="settings-control">{children}</div> : null}
     </div>
@@ -277,7 +275,7 @@ export function RestartSettingsFooter({
   const statusMessage =
     (saving ? t("settings.actions.saving") : undefined) ?? message ??
     (pendingRestart && !dirty
-      ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+      ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")
       : dirty
         ? autoSave
           ? error ? undefined : t("settings.actions.saving")

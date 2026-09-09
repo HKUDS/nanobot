@@ -19,8 +19,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "已授权",
-        "help": "必需的安全开关。仅在确定要连接此机器人邮箱后才开启。",
+        "label": "允许 nanobot 读取和发送邮件",
+        "help": "开启即表示同意 nanobot 访问此邮箱。请确认这是你要连接的机器人专用邮箱。",
         "choices": {
           "true": "已授权",
           "false": "未授权"
@@ -65,7 +65,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "轮询间隔",
+        "label": "收件检查间隔（秒）",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -88,5 +88,6 @@
         }
       }
     }
-  }
+  },
+  "displayName": "电子邮件"
 }

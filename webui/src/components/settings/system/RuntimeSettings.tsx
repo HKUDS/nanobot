@@ -114,7 +114,7 @@ export function RuntimeSettings({
         target,
         message: tx(
           "settings.status.hostApiUnavailable",
-          "Host actions are only available inside the native app.",
+          "These actions are only available in the desktop app.",
         ),
       });
       return;
@@ -351,7 +351,7 @@ export function RuntimeSettings({
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
                 ) : null}
                 {capabilityAction === "enable:langfuse"
-                  ? tx("settings.capabilities.installing", "Installing support...")
+                  ? tx("settings.capabilities.installing", "Installing required packages…")
                   : tx("settings.observability.enable", "Enable tracing support")}
               </Button>
             )}
@@ -381,7 +381,7 @@ export function RuntimeSettings({
               title={t("settings.rows.restart")}
               description={
                 requiresRestartPending
-                  ? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+                  ? tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")
                   : undefined
               }
             >

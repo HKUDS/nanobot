@@ -24,7 +24,7 @@
       },
       "teamId": {
         "label": "チーム ID",
-        "placeholder": "任意のチーム ID"
+        "placeholder": "チーム ID（任意）"
       },
       "groupPolicy": {
         "label": "チャンネルでの動作",

@@ -5,7 +5,7 @@
     "docsLabel": "Ouvrir le guide Matrix",
     "officialLabel": "Ouvrir la liste des clients Matrix",
     "tryIt": "Invitez le compte Matrix dans un salon et envoyez un message test.",
-    "summary": "Matrix nécessite un compte sur un serveur d’accueil et une connexion par mot de passe ou jeton d’accès.",
+    "summary": "Saisissez le serveur de votre compte Matrix et connectez-vous avec un mot de passe ou un jeton d’accès.",
     "steps": [
       "Créez ou choisissez un compte Matrix pour nanobot.",
       "Saisissez le serveur, l’ID utilisateur et le mot de passe ou le jeton d’accès.",
@@ -27,7 +27,7 @@
       },
       "accessToken": {
         "label": "Jeton d’accès",
-        "placeholder": "Connexion facultative par jeton",
+        "placeholder": "Saisir un jeton d’accès",
         "help": "À privilégier si votre client Matrix expose un jeton d’accès."
       },
       "deviceId": {

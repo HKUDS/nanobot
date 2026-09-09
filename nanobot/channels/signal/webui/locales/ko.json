@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "허용된 DM",
+        "label": "DM을 보낼 수 있는 사용자",
         "placeholder": "전화번호 또는 UUID"
       },
       "group_allowFrom": {

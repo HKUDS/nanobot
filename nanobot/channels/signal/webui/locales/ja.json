@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "許可する DM",
+        "label": "DM を許可する送信者",
         "placeholder": "電話番号または UUID"
       },
       "group_allowFrom": {

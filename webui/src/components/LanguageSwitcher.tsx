@@ -8,7 +8,7 @@ export function LanguageSwitcher() {
   const { t } = useTranslation();
   return (
     <Select value={currentLocale()} onValueChange={(value) => { void setAppLanguage(value as SupportedLocale); }}>
-      <SelectTrigger className="min-w-40" aria-label={t("sidebar.language.ariaLabel")}>
+      <SelectTrigger className="min-w-40 rounded-full" aria-label={t("sidebar.language.ariaLabel")}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

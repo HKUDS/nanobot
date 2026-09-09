@@ -1,6 +1,6 @@
 {
   "description": "Utilisez nanobot dans les conversations professionnelles WeCom.",
-  "requirements": "Identifiants d’application WeCom et paramètres de rappel",
+  "requirements": "Bot ID et Secret du bot IA WeCom",
   "setup": {
     "docsLabel": "Ouvrir le guide WeCom",
     "officialLabel": "Ouvrir la console WeCom",

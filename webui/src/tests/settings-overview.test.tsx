@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -26,22 +26,16 @@ describe("Settings overview and appearance", () => {
     });
   });
 
-  it("keeps the brand logo explanation out of the visual settings row", () => {
+  it("shows the brand logo explanation in a tooltip when requested", async () => {
     renderSettingsView({
       initialSection: "appearance",
       initialSettings: settingsPayload(),
       showSidebar: true,
     });
 
-    const brandLogosTitle = screen.getByText("Brand logos");
-    const brandLogosRow = brandLogosTitle.parentElement?.parentElement;
-
-    expect(brandLogosRow).not.toBeNull();
-    expect(
-      within(brandLogosRow as HTMLElement).getByText(thirdPartyBrandNotice),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText(thirdPartyBrandNotice)).toHaveLength(1);
-    expect(screen.getByText(thirdPartyBrandNotice)).toHaveClass("sr-only");
+    expect(screen.queryByText(thirdPartyBrandNotice)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Brand logos" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(thirdPartyBrandNotice);
   });
 
   it.each(["apps", "channels"] as const)(
@@ -100,7 +94,7 @@ describe("Settings overview and appearance", () => {
     renderSettingsView();
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
-    expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading apps…")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
     expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
   });
@@ -151,7 +145,7 @@ describe("Settings overview and appearance", () => {
     renderSettingsView({ initialSection: "overview" });
 
     expect(await screen.findByLabelText("1,500 tokens")).toBeInTheDocument();
-    expect(screen.getByText("Token Usage")).toBeInTheDocument();
+    expect(screen.getByText("Token usage")).toBeInTheDocument();
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();

@@ -51,12 +51,12 @@
     }
   },
   "custom": {
-    "toggleAssistant": "Assistente {{name}}",
+    "toggleAssistant": "Ativar assistente {{name}}",
     "configured": "Conectado",
     "needsSetup": "Precisa de autorização",
     "noAppId": "Sem App ID",
     "createAnother": "Criar outro assistente",
-    "createHint": "Crie um bot Feishu separado para outra equipe ou fluxo.",
+    "createHint": "Crie um bot Feishu separado para outra equipe, espaço ou fluxo de trabalho.",
     "createAssistant": "Criar assistente",
     "reconnect": "Reconectar",
     "countNone": "Nenhum assistente conectado",

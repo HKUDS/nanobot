@@ -598,7 +598,7 @@ function ConnectionPanel({
                     {field.label}
                     {field.configured ? (
                       <span className="font-normal text-emerald-600 dark:text-emerald-300">
-                        · {tx("settings.mcp.configured", "configured")}
+                        · {tx("settings.mcp.configured", "Configured")}
                       </span>
                     ) : null}
                   </span>
@@ -607,7 +607,7 @@ function ConnectionPanel({
                     type={field.secret ? "password" : "text"}
                     value={values[field.name] ?? ""}
                     onChange={(event) => onFieldChange(preset.name, field.name, event.target.value)}
-                    placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep existing") : field.placeholder}
+                    placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep the current value") : field.placeholder}
                     className="h-10 rounded-full bg-muted/35 text-[12.5px]"
                   />
                 </label>

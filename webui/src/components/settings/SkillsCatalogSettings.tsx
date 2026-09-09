@@ -570,7 +570,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
   const content =
     markdown ||
     t("settings.skills.rawInstructionsEmpty", {
-      defaultValue: "No raw instructions.",
+      defaultValue: "No skill file content available.",
     });
 
   return (
@@ -675,14 +675,14 @@ function RequirementsSection({
         {!installOptions.length && missing_bins.length ? (
           <SetupRequirement
             icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingCommands", { defaultValue: "Missing CLI" })}
+            label={t("settings.skills.missingCommands", { defaultValue: "Missing command-line tools" })}
             items={missing_bins}
           />
         ) : null}
         {missing_env.length ? (
           <SetupRequirement
             icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing ENV" })}
+            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing environment variables" })}
             items={missing_env}
           />
         ) : null}

@@ -201,7 +201,7 @@ export function SettingsSidebar({
             >
               {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 : <RotateCcw className="h-4 w-4" aria-hidden />}
-              <span className="sidebar-action-label [--sidebar-label-width:4em]">{restartLabel}</span>
+              <span>{restartLabel}</span>
             </Button>
           </div>
         ) : null}
@@ -213,7 +213,7 @@ export function SettingsSidebar({
             className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[14px] leading-5 font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive lg:flex"
           >
             <LogOut className="h-4 w-4" aria-hidden />
-            <span className="sidebar-action-label [--sidebar-label-width:4em]">{t("app.account.logout")}</span>
+            <span>{t("app.account.logout")}</span>
           </Button>
         ) : null}
       </div>

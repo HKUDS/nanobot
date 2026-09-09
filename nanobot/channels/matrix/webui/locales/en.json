@@ -5,7 +5,7 @@
     "docsLabel": "Open Matrix setup",
     "officialLabel": "Open Matrix clients",
     "tryIt": "Invite the Matrix account into a room and send a test message.",
-    "summary": "Matrix needs a homeserver account and either password login or an access token.",
+    "summary": "Enter your Matrix homeserver and sign in with a password or access token.",
     "steps": [
       "Create or choose a Matrix account for nanobot.",
       "Enter the homeserver, user ID, and either password or access-token credentials.",
@@ -27,7 +27,7 @@
       },
       "accessToken": {
         "label": "Access token",
-        "placeholder": "Optional token login",
+        "placeholder": "Enter an access token",
         "help": "Preferred when your Matrix client exposes an access token."
       },
       "deviceId": {

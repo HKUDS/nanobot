@@ -421,7 +421,7 @@ function ChannelSetupSurface({
                   setNotice(
                     tx(
                       "settings.channels.connectPreview",
-                      "The in-browser connect flow is next. For now, run the command below.",
+                      "Run the command below in your terminal to connect.",
                     ),
                   )
                 }

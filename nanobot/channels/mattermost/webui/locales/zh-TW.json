@@ -24,7 +24,7 @@
       },
       "teamId": {
         "label": "團隊 ID",
-        "placeholder": "可選的團隊 ID"
+        "placeholder": "選填的團隊 ID"
       },
       "groupPolicy": {
         "label": "頻道行為",
@@ -35,7 +35,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "線程行為",
+        "label": "討論串回覆方式",
         "choices": {
           "mention": "僅提及時",
           "open": "所有訊息（無需提及）",

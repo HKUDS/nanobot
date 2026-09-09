@@ -24,7 +24,7 @@
       },
       "tenantId": {
         "label": "テナント ID",
-        "placeholder": "任意のテナント ID"
+        "placeholder": "テナント ID（任意）"
       },
       "path": {
         "label": "コールバックパス",

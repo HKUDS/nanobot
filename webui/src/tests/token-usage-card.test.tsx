@@ -33,14 +33,14 @@ describe("Token usage card", () => {
     const bars = within(screen.getByRole("group", { name: "Daily token usage" })).getAllByRole("img");
     expect(bars).toHaveLength(30);
     expect(bars[0]).toHaveAccessibleName(/2026-08-11: 100 tokens, 1 requests/);
-    expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Cache unknown: 60, Output: 60/);
+    expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Cache status unknown: 60, Output: 60/);
     const segments = bars[29].firstElementChild?.children;
     expect(segments).toHaveLength(4);
     expect(segments?.[0]).toHaveStyle({ height: "40%" });
     expect(segments?.[1]).toHaveStyle({ height: "20%" });
     expect(segments?.[2]).toHaveStyle({ height: "20%" });
     expect(segments?.[3]).toHaveStyle({ height: "20%" });
-    expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Cache unknown: 100/);
+    expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Cache status unknown: 100/);
     expect(screen.getAllByText("50%")).toHaveLength(2);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
     expect(screen.queryByText(/includes estimates/i)).not.toBeInTheDocument();
@@ -58,7 +58,7 @@ describe("Token usage card", () => {
       { ...day("2026-09-09", 900), cache_read_tokens: 20, cache_read_observed_input_tokens: 300 },
     ])} />);
     fireEvent.click(screen.getByRole("button", { name: "View details" }));
-    const details = screen.getByRole("dialog", { name: "Token Usage" });
+    const details = screen.getByRole("dialog", { name: "Token usage" });
     expect(within(details).getByText("25%")).toBeInTheDocument();
     expect(within(details).queryByRole("group", { name: "Daily requests" })).not.toBeInTheDocument();
     expect(within(details).queryByText("Daily average")).not.toBeInTheDocument();

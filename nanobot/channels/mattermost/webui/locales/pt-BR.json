@@ -5,7 +5,7 @@
     "docsLabel": "Abrir guia do Mattermost",
     "officialLabel": "Abrir guia de bots do Mattermost",
     "tryIt": "Mencione o bot em um canal Mattermost ou envie uma mensagem direta.",
-    "summary": "O Mattermost conecta por uma conta de bot no servidor e recebe canais e mensagens diretas.",
+    "summary": "O nanobot se conecta ao servidor Mattermost com uma conta de bot para receber mensagens de canais e mensagens diretas.",
     "steps": [
       "Crie uma conta de bot Mattermost e copie o token de acesso.",
       "Informe a URL do servidor e conceda acesso à equipe e aos canais desejados.",
@@ -15,7 +15,7 @@
       "serverUrl": {
         "label": "URL do servidor",
         "placeholder": "https://mattermost.example.com",
-        "help": "Use a URL base do seu workspace Mattermost."
+        "help": "Use a URL base do seu espaço de trabalho Mattermost."
       },
       "token": {
         "label": "Token do bot",

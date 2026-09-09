@@ -126,7 +126,7 @@ describe("Settings capabilities", () => {
         enabled: false, provider: "openrouter", model: payload.image_generation.model,
       }), 20_000,
     ));
-    expect(await screen.findByText("Saved. Restart when ready.")).toBeVisible();
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
   });
 
   it("hides web search details until web tools are enabled", async () => {
@@ -340,7 +340,8 @@ describe("Settings capabilities", () => {
 
     expect(await screen.findByText("App safety")).toBeInTheDocument();
     expect(screen.queryByText("Web safety")).not.toBeInTheDocument();
-    expect(screen.getByText("Allow Full Access shell commands to reach services on this Mac.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Local services" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Allow Full Access shell commands to reach services on this Mac.");
   });
 
   it("refreshes settings with a fresh token after native engine restart", async () => {

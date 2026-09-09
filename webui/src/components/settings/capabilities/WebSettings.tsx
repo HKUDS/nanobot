@@ -138,10 +138,10 @@ export function WebSettings({
         {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
           <div className="mb-3">
             <CapabilityInstallNotice
-              title={tx("settings.capabilities.searchSupport", "Search provider support")}
+              title={tx("settings.capabilities.searchSupport", "Search dependencies")}
               description={tx(
                 "settings.capabilities.searchInstallOnSave",
-                "Olostep support will be installed automatically when you save.",
+                "Required Olostep packages will be installed automatically when you save.",
               )}
               installing={olostepInstalling}
             />
@@ -263,7 +263,7 @@ export function WebSettings({
           </SettingsRow>
           <SettingsRow
             title={tx("settings.rows.jinaReader", "Jina reader")}
-            description={tx("settings.help.jinaReader", "Use Jina Reader for web_fetch when available.")}
+            description={tx("settings.help.jinaReader", "Use Jina Reader to read web pages when available.")}
           >
             <ToggleButton
               checked={effectiveJinaReader}
@@ -286,9 +286,9 @@ export function WebSettings({
               missingCredential
                 ? t("settings.byok.webSearch.missingCredential")
                 : error || (!embedded && requiresRestartPending && !dirty
-                  ? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+                  ? tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")
                   : jinaReaderDirty
-                    ? tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
+                    ? tx("settings.status.restartAfterSaving", "Save changes, then restart nanobot to apply them.")
                     : dirty
                       ? t("settings.byok.webSearch.saveHint")
                       : undefined)

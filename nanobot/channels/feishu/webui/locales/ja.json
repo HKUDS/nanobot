@@ -51,7 +51,7 @@
     }
   },
   "custom": {
-    "toggleAssistant": "{{name}} アシスタント",
+    "toggleAssistant": "アシスタント {{name}} を有効にする",
     "configured": "接続済み",
     "needsSetup": "認可が必要",
     "noAppId": "App ID なし",
@@ -60,8 +60,8 @@
     "createAssistant": "アシスタントを作成",
     "reconnect": "再接続",
     "countNone": "接続済みアシスタントなし",
-    "countOne": "1 個のアシスタントを接続中",
-    "countMany": "{{count}} 個のアシスタントを接続中",
+    "countOne": "接続済みアシスタント：1 件",
+    "countMany": "接続済みアシスタント：{{count}} 件",
     "qrAlt": "Feishu 接続 QR コード",
     "scanTitle": "Feishu でスキャン",
     "scanDescription": "スマートフォンの Feishu または Lark でスキャンしてください。認可後に nanobot が設定を完了します。",

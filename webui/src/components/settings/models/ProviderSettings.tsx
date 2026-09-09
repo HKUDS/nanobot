@@ -501,7 +501,7 @@ function ProviderAdvancedOptions({
             {enabled.has("thinking_style") ? (
               <label className="block space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.thinkingStyle", "Thinking style")}
+                  {tx("settings.providers.thinkingStyle", "Reasoning parameter format")}
                 </span>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -572,7 +572,7 @@ function ProviderAdvancedOptions({
             {enabled.has("profile") ? (
               <label className="block space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.profile", "Profile")}
+                  {tx("settings.providers.profile", "AWS profile")}
                 </span>
                 <Input
                   value={form.profile}
@@ -603,7 +603,7 @@ function ProviderAdvancedOptions({
             {enabled.has("extra_query") ? (
               <label className="block min-w-0 space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraQuery", "Extra query")}
+                  {tx("settings.providers.extraQuery", "Additional query parameters")}
                 </span>
                 <Textarea
                   value={form.extraQuery}
@@ -617,7 +617,7 @@ function ProviderAdvancedOptions({
             {enabled.has("extra_body") ? (
               <label className="block min-w-0 space-y-1.5 md:col-span-2">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraBody", "Extra body")}
+                  {tx("settings.providers.extraBody", "Additional body parameters")}
                 </span>
                 <Textarea
                   value={form.extraBody}
@@ -773,6 +773,7 @@ export function ProvidersSettings({
         <DialogTrigger asChild>
         <button
           type="button"
+          aria-label={provider.label}
           className="settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
         >
           <span className="flex min-w-0 items-center gap-3">
@@ -786,6 +787,9 @@ export function ProvidersSettings({
               </span>
             </span>
           </span>
+          <span className="shrink-0 px-2 py-1 text-[13px] font-normal leading-5 text-muted-foreground">
+            {t("settings.configure")}
+          </span>
         </button>
         </DialogTrigger>
 
@@ -794,10 +798,10 @@ export function ProvidersSettings({
             <DialogHeader><DialogTitle>{provider.label}</DialogTitle></DialogHeader>
             {supportFeature && !supportFeature.installed ? (
               <CapabilityInstallNotice
-                title={tx("settings.capabilities.providerSupport", "Provider support")}
+                title={tx("settings.capabilities.providerSupport", "Provider dependencies")}
                 description={tx(
                   "settings.capabilities.providerInstallOnSave",
-                  "Required support will be installed automatically when you save this provider.",
+                  "Required packages will be installed automatically when you save this provider.",
                 )}
                 installing={featureAction === `enable:${supportName}`}
               />

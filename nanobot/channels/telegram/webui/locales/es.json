@@ -1,11 +1,11 @@
 {
   "description": "Chatea con nanobot desde Telegram.",
-  "requirements": "Token del bot, usuarios permitidos y gateway",
+  "requirements": "Token del bot, usuarios permitidos y pasarela",
   "setup": {
     "docsLabel": "Abrir guía de Telegram",
     "officialLabel": "Abrir BotFather",
     "tryIt": "Envía /start o un DM corto a tu bot de Telegram.",
-    "summary": "Activar habilita Telegram. Aún necesitas un token de BotFather para intercambiar mensajes.",
+    "summary": "Añade el token de bot obtenido en BotFather para enviar y recibir mensajes de Telegram.",
     "steps": [
       "Crea un bot con BotFather y copia su token.",
       "Añade el token y elige quién puede escribir al bot.",
@@ -31,7 +31,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       }
     }

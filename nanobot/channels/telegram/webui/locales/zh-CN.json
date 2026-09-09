@@ -1,11 +1,11 @@
 {
-  "description": "通过 Telegram 会话与 nanobot 聊天。",
+  "description": "在 Telegram 中与 nanobot 聊天。",
   "requirements": "机器人令牌、允许的用户和网关",
   "setup": {
     "docsLabel": "打开 Telegram 配置指南",
     "officialLabel": "打开 BotFather",
     "tryIt": "向 Telegram 机器人发送 /start 或一条简短私信。",
-    "summary": "启用只会打开 Telegram 支持；收发消息前仍需填写 BotFather 令牌。",
+    "summary": "填写从 BotFather 获取的机器人令牌后，即可收发 Telegram 消息。",
     "steps": [
       "使用 BotFather 创建机器人并复制令牌。",
       "填写令牌并选择哪些用户可以向机器人发送消息。",

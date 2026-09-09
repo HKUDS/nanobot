@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
+import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { DEFAULT_AGENT_SETTINGS_DRAFT } from "@/components/settings/models/ModelsSettings";
 import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
 
@@ -139,7 +140,7 @@ describe("Runtime configuration settings", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.exec.timeout": 90 } }, 20_000,
     ));
-    expect(await screen.findByText("Saved. Restart when ready.")).toBeInTheDocument();
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeInTheDocument();
     expect(screen.queryByText("Saved and applied.")).not.toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Shell and sandbox" })).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
@@ -170,7 +171,21 @@ describe("Runtime configuration settings", () => {
     ));
   });
 
-  it("enables manual timezone entry and persists both fields together", async () => {
+  it("keeps an existing timezone alias selectable and accepts only listed search results", () => {
+    const onChange = vi.fn();
+    render(<TimezonePicker value="Asia/Calcutta" aria-label="Timezone" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Timezone" }));
+    const search = screen.getByRole("combobox", { name: "Search" });
+    fireEvent.change(search, { target: { value: "invalid timezone" } });
+    expect(screen.getByRole("status")).toHaveTextContent("No matching timezones.");
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(search, { target: { value: "Asia/Calcutta" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("Asia/Calcutta");
+  });
+
+  it("selects a manual timezone from search results and persists both fields", async () => {
     const payload = runtimeSettings();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
       jsonResponse(String(input) === "/api/settings" ? payload : {})));
@@ -178,9 +193,11 @@ describe("Runtime configuration settings", () => {
     renderSettingsView({ initialSection: "runtime", initialSettings: payload });
     expect(screen.queryByRole("textbox", { name: "Timezone" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Use system timezone" }));
-    const field = screen.getByRole("textbox", { name: "Timezone" });
+    const field = screen.getByRole("button", { name: "Timezone", expanded: false });
     expect(field).toBeEnabled();
-    fireEvent.change(field, { target: { value: "Asia/Shanghai" } });
+    fireEvent.click(field);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search" }), { target: { value: "Shanghai" } });
+    fireEvent.click(screen.getByRole("option", { name: /Asia\/Shanghai/ }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: {
         "agents.defaults.timezone_mode": "manual", "agents.defaults.timezone": "Asia/Shanghai",

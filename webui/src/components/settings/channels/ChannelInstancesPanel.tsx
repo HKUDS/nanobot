@@ -135,7 +135,7 @@ export function ChannelInstancesPanel({
       if (payload.nanobot_features) {
         onFeaturesUpdate(payload.nanobot_features);
       }
-      setNotice(tx("settings.channels.savedSettings", "Saved settings."));
+      setNotice(tx("settings.channels.savedSettings", "Settings saved."));
     } catch (err) {
       setNotice((err as Error).message);
     } finally {

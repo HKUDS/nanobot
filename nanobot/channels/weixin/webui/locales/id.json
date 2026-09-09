@@ -1,6 +1,6 @@
 {
   "description": "Gunakan nanobot dari percakapan WeChat.",
-  "requirements": "Setup channel WeChat dan gateway",
+  "requirements": "Pengaturan kanal WeChat dan gateway",
   "setup": {
     "primaryAction": "Hubungkan WeChat",
     "docsLabel": "Buka panduan WeChat",
@@ -22,26 +22,26 @@
         "placeholder": "Disimpan saat login QR"
       },
       "sendProgress": { "label": "Kirim progres" },
-      "sendToolHints": { "label": "Kirim petunjuk alat" },
+      "sendToolHints": { "label": "Kirim ringkasan aktivitas alat" },
       "streaming": { "label": "Gunakan API streaming" },
       "replyProgressMessages": { "label": "Kirim progres terstruktur" },
       "replyProgressMaxMessages": { "label": "Batas progres terstruktur" },
-      "contextMessageBudget": { "label": "Anggaran pesan konteks" },
+      "contextMessageBudget": { "label": "Jumlah maksimum pesan konteks" },
       "blockStreaming": { "label": "Kirim respons per blok" },
-      "blockStreamingMinChars": { "label": "Ukuran blok minimum" },
+      "blockStreamingMinChars": { "label": "Jumlah minimum karakter per blok" },
       "blockStreamingMaxMessages": { "label": "Batas pesan blok" },
       "baseUrl": { "label": "URL API" },
       "cdnBaseUrl": { "label": "URL CDN" },
       "routeTag": { "label": "Tag rute" },
       "stateDir": { "label": "Direktori status" },
-      "pollTimeout": { "label": "Batas waktu polling" }
+      "pollTimeout": { "label": "Batas waktu polling (detik)" }
     }
   },
   "custom": {
     "qrAlt": "Kode QR login WeChat",
     "scanTitle": "Pindai dengan WeChat",
     "scanDescription": "Pindai dengan WeChat di ponsel. nanobot menyimpan status akun secara lokal setelah login.",
-    "waiting": "Menunggu pemindaian WeChat...",
+    "waiting": "Menunggu Anda memindai kode dengan WeChat…",
     "connected": "WeChat sudah terhubung.",
     "stopped": "Login WeChat dihentikan.",
     "connecting": "Menghubungkan...",

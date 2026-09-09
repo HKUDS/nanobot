@@ -1,6 +1,6 @@
 {
   "description": "Gunakan nanobot dari percakapan WhatsApp.",
-  "requirements": "Setup koneksi WhatsApp dan gateway",
+  "requirements": "Pengaturan koneksi WhatsApp dan gateway",
   "setup": {
     "primaryAction": "Hubungkan WhatsApp",
     "docsLabel": "Buka panduan WhatsApp",
@@ -20,7 +20,7 @@
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }

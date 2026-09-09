@@ -7,10 +7,10 @@
     "docsLabel": "開啟飛書設定指南",
     "officialLabel": "開啟飛書開發者後台",
     "tryIt": "向飛書助手傳送私訊，或在群組中提及它。",
-    "summary": "連接流程會透過二維碼建立或關聯飛書應用程式，並自動為 nanobot 儲存應用程式憑證。",
+    "summary": "連接流程會透過QR Code建立或關聯飛書應用程式，並自動為 nanobot 儲存應用程式憑證。",
     "steps": [
-      "點擊連接，用手機飛書或 Lark 掃描二維碼。",
-      "批准應用程式連接，nanobot 會自動儲存 App ID 和 Secret。",
+      "點選連接，用手機飛書或 Lark 掃描QR Code。",
+      "核准應用程式連接，nanobot 會自動儲存 App ID 和 Secret。",
       "向機器人傳送私訊，或在飛書群組中提及它以完成測試。"
     ],
     "fields": {
@@ -20,7 +20,7 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "留空以保留現有密鑰",
+        "placeholder": "留空以保留現有金鑰",
         "help": "僅在輪換憑證時貼上新的 App Secret。"
       },
       "domain": {

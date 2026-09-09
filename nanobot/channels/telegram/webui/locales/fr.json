@@ -5,7 +5,7 @@
     "docsLabel": "Ouvrir le guide Telegram",
     "officialLabel": "Ouvrir BotFather",
     "tryIt": "Envoyez /start ou un court message privé à votre bot Telegram.",
-    "summary": "L’activation ouvre la prise en charge de Telegram. Un jeton BotFather reste nécessaire pour échanger des messages.",
+    "summary": "Ajoutez le jeton de bot obtenu auprès de BotFather pour envoyer et recevoir des messages Telegram.",
     "steps": [
       "Créez un bot avec BotFather et copiez son jeton.",
       "Ajoutez le jeton et choisissez qui peut contacter le bot.",

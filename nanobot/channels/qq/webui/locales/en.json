@@ -5,7 +5,7 @@
     "docsLabel": "Open QQ setup",
     "officialLabel": "Open QQ bot console",
     "tryIt": "Send a direct or group test message from QQ.",
-    "summary": "QQ uses the official bot credentials and a long WebSocket connection.",
+    "summary": "QQ uses official bot credentials and a persistent WebSocket connection.",
     "steps": [
       "Create a bot in QQ Open Platform and copy its App ID and Secret.",
       "Choose the message format and optional sender allowlist.",

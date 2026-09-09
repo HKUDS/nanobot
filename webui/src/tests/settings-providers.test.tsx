@@ -83,7 +83,7 @@ describe("Settings providers", () => {
 
     expect(
       screen.getByText(
-        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, paste the authorization code below.",
+        "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
       ),
     ).toBeInTheDocument();
     const callbackInput = await screen.findByRole("textbox", {
@@ -251,7 +251,7 @@ describe("Settings providers", () => {
 
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    const dialog = (await screen.findByText("Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
+    const dialog = (await screen.findByText("Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
 
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.provider.oauth_login",
@@ -261,7 +261,7 @@ describe("Settings providers", () => {
     expect(openMock).not.toHaveBeenCalled();
     expect(
       within(dialog).getByText(
-        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.",
+        "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
@@ -810,16 +810,16 @@ describe("Settings providers", () => {
     fireEvent.change(screen.getByLabelText("Extra headers"), {
       target: { value: '{"X-Tenant":"engineering"}' },
     });
-    fireEvent.change(screen.getByLabelText("Extra body"), {
+    fireEvent.change(screen.getByLabelText("Additional body parameters"), {
       target: { value: '{"service_tier":"priority"}' },
     });
-    fireEvent.change(screen.getByLabelText("Extra query"), {
+    fireEvent.change(screen.getByLabelText("Additional query parameters"), {
       target: { value: '{"api-version":"2026-01-01"}' },
     });
     fireEvent.change(screen.getByLabelText("Network proxy"), {
       target: { value: "http://127.0.0.1:7890" },
     });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking style" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Reasoning parameter format" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 

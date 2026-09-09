@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TokenUsageDetails } from "@/components/settings/TokenUsageDetails";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 
 type Usage = NonNullable<SettingsPayload["usage"]>;
 const SOURCE_KEYS = ["user", "api", "cron", "dream", "system"] as const;
@@ -61,7 +62,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
   const segmentLabels = [
     t("settings.usage.cachedInput", { defaultValue: "Cached input" }),
     t("settings.usage.cacheMiss", { defaultValue: "Cache miss" }),
-    t("settings.usage.cacheUnknown", { defaultValue: "Cache unknown" }),
+    t("settings.usage.cacheUnknown", { defaultValue: "Cache status unknown" }),
     t("settings.usage.outputTokens", { defaultValue: "Output" }),
     t("settings.usage.otherTokens", { defaultValue: "Other tokens" }),
   ];
@@ -71,7 +72,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
     api: t("settings.usage.sources.api", { defaultValue: "API" }),
     cron: t("settings.usage.sources.cron", { defaultValue: "Automations" }),
     dream: t("settings.usage.sources.dream", { defaultValue: "Memory" }),
-    system: t("settings.usage.sources.system", { defaultValue: "System" }),
+    system: t("settings.usage.sources.system", { defaultValue: "Auxiliary calls" }),
     other: t("settings.usage.unclassified", { defaultValue: "Unclassified" }),
   };
   const sources = new Map<string, number>();
@@ -91,7 +92,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
     <div className="min-w-0 space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-medium">{t("settings.usage.shortTitle", { defaultValue: "Token Usage" })}</h3>
+          <h3 className="text-sm font-medium">{t("settings.usage.shortTitle", { defaultValue: "Token usage" })}</h3>
           <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums" aria-label={usage ? `${exact.format(total)} tokens` : undefined}>
             {usage ? compact.format(total) : "—"}
           </p>
@@ -159,10 +160,16 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
               {segmentLabels.map((label, index) => (index < 4 || hasOtherTokens) && <span key={label} className="flex items-center gap-1.5"><span aria-hidden className={cn("size-2.5 rounded-sm", SEGMENT_CLASSES[index])} style={index === 0 ? CACHE_PATTERN : undefined} />{label}</span>)}
             </div>
           </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-3" aria-label={t("settings.usage.bySource", { defaultValue: "Usage by source" })}>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-xs sm:grid-cols-3" aria-label={t("settings.usage.bySource", { defaultValue: "Usage by source" })}>
             {breakdown.map(([source, tokens]) => (
               <div key={source} className="flex min-w-0 items-center justify-between gap-2">
-                <dt className="truncate text-muted-foreground">{sourceLabels[source]}</dt>
+                <dt className="min-w-0 break-words text-muted-foreground">
+                  {source === "system" ? (
+                    <SettingsHint description={t("settings.usage.systemHelp", {
+                      defaultValue: "Auxiliary calls include chat title generation, other internal tasks, and calls without a recorded source.",
+                    })}>{sourceLabels[source]}</SettingsHint>
+                  ) : sourceLabels[source]}
+                </dt>
                 <dd className="shrink-0 tabular-nums" title={`${exact.format(tokens)} tokens`}>{new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 1 }).format(tokens / total)}</dd>
               </div>
             ))}

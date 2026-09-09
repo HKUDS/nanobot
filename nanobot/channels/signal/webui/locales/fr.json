@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Messages privés autorisés",
+        "label": "Expéditeurs de messages privés autorisés",
         "placeholder": "Numéros ou UUID"
       },
       "group_allowFrom": {

@@ -7,18 +7,18 @@
     "tryIt": "提及 Slack 應用程式，或向它傳送私訊。",
     "summary": "Slack 預設使用 Socket Mode，因此同時需要應用程式層級權杖和機器人權杖。",
     "steps": [
-      "使用提供的 manifest 建立 Slack 應用程式並啟用 Socket Mode。",
+      "使用提供的應用程式資訊清單建立 Slack 應用程式，並啟用 Socket Mode。",
       "將應用程式安裝到工作區，並複製應用程式權杖和機器人權杖。",
       "儲存並啟用 Slack，然後提及應用程式或傳送私訊。"
     ],
     "actions": {
-      "slack-manifest": "複製 manifest"
+      "slack-manifest": "複製應用程式資訊清單"
     },
     "fields": {
       "appToken": {
         "label": "應用程式權杖",
         "placeholder": "xapp-...",
-        "help": "從 Slack Socket Mode 建立。"
+        "help": "在 Slack 應用程式的 Socket Mode 設定中建立。"
       },
       "botToken": {
         "label": "機器人權杖",

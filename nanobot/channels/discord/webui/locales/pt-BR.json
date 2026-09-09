@@ -5,7 +5,7 @@
     "docsLabel": "Abrir guia do Discord",
     "officialLabel": "Abrir portal do Discord",
     "tryIt": "Mencione o bot em um servidor ou envie uma mensagem direta.",
-    "summary": "Ativar liga o suporte ao Discord. O token do bot e as permissões do servidor ainda são necessários.",
+    "summary": "Para conectar o Discord, você precisa de um token de bot e das permissões adequadas no servidor.",
     "steps": [
       "Crie um bot no Discord Developer Portal e copie o token.",
       "Convide-o para o servidor com permissões de leitura/envio e comandos slash.",

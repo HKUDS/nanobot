@@ -1,6 +1,6 @@
 {
   "description": "Usa nanobot desde conversaciones de WhatsApp.",
-  "requirements": "Configuración de conexión de WhatsApp y gateway",
+  "requirements": "Configuración de conexión de WhatsApp y pasarela",
   "setup": {
     "primaryAction": "Conectar WhatsApp",
     "docsLabel": "Abrir guía de WhatsApp",
@@ -22,7 +22,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       }
     }

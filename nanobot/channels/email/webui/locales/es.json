@@ -1,4 +1,5 @@
 {
+  "displayName": "Correo electrónico",
   "description": "Permite que nanobot reciba y responda correos.",
   "requirements": "Bandeja IMAP, envío SMTP, contraseña de app y consentimiento explícito",
   "setup": {
@@ -19,8 +20,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Consentimiento concedido",
-        "help": "Control de seguridad obligatorio. Déjalo desactivado hasta decidir conectar este buzón al bot.",
+        "label": "Permitir que nanobot lea y envíe correos",
+        "help": "Activa esta opción para permitir el acceso al buzón. Comprueba que sea el buzón dedicado al bot.",
         "choices": {
           "true": "Concedido",
           "false": "No concedido"
@@ -65,7 +66,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalo de consulta",
+        "label": "Intervalo de consulta del correo (segundos)",
         "placeholder": "30"
       },
       "allowFrom": {

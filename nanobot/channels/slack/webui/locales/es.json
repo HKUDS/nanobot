@@ -12,13 +12,13 @@
       "Guarda y activa Slack; después menciona la app o envíale un mensaje directo."
     ],
     "actions": {
-      "slack-manifest": "Copiar manifiesto"
+      "slack-manifest": "Copiar manifiesto de la aplicación"
     },
     "fields": {
       "appToken": {
         "label": "Token de la app",
         "placeholder": "xapp-...",
-        "help": "Créalo desde Socket Mode en Slack."
+        "help": "Créalo en los ajustes de Socket Mode de tu aplicación de Slack."
       },
       "botToken": {
         "label": "Token del bot",
@@ -30,7 +30,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       }
     }

@@ -22,11 +22,11 @@
         "placeholder": "Saved by QR login"
       },
       "sendProgress": { "label": "Send progress" },
-      "sendToolHints": { "label": "Send tool hints" },
+      "sendToolHints": { "label": "Send tool activity summaries" },
       "streaming": { "label": "Use streaming API" },
       "replyProgressMessages": { "label": "Send structured progress" },
       "replyProgressMaxMessages": { "label": "Structured progress limit" },
-      "contextMessageBudget": { "label": "Context message budget" },
+      "contextMessageBudget": { "label": "Context message limit" },
       "blockStreaming": { "label": "Send response blocks" },
       "blockStreamingMinChars": { "label": "Minimum block size" },
       "blockStreamingMaxMessages": { "label": "Block message limit" },
@@ -34,14 +34,14 @@
       "cdnBaseUrl": { "label": "CDN URL" },
       "routeTag": { "label": "Route tag" },
       "stateDir": { "label": "State directory" },
-      "pollTimeout": { "label": "Poll timeout" }
+      "pollTimeout": { "label": "Poll timeout (seconds)" }
     }
   },
   "custom": {
     "qrAlt": "WeChat login QR code",
     "scanTitle": "Scan with WeChat",
     "scanDescription": "Use WeChat on your phone to scan this code. nanobot saves the account state locally after login.",
-    "waiting": "Waiting for WeChat scan...",
+    "waiting": "Waiting for you to scan with WeChat…",
     "connected": "WeChat is connected.",
     "stopped": "WeChat login stopped.",
     "connecting": "Connecting...",

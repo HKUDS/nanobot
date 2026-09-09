@@ -6,10 +6,10 @@
     "docsLabel": "開啟 WhatsApp 設定指南",
     "officialLabel": "開啟 WhatsApp 說明",
     "tryIt": "終端機登入完成後，向已連接的帳戶傳送一則 WhatsApp 私訊。",
-    "summary": "使用要執行機器人的 WhatsApp 帳戶掃描二維碼即可完成連接。",
+    "summary": "使用要執行機器人的 WhatsApp 帳戶掃描QR Code即可完成連接。",
     "steps": [
       "執行下方顯示的 WhatsApp 登入指令。",
-      "用手機 WhatsApp 掃描終端機中的二維碼。",
+      "用手機 WhatsApp 掃描終端機中的QR Code。",
       "登入後返回這裡，啟用 WhatsApp，然後傳送一則私訊測試。"
     ],
     "fields": {

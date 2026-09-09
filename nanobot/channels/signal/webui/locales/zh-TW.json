@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "允許的私訊",
+        "label": "允許傳送私訊的使用者",
         "placeholder": "電話號碼或 UUID"
       },
       "group_allowFrom": {
