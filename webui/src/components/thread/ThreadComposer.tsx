@@ -108,6 +108,7 @@ import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
+import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
@@ -1120,6 +1121,12 @@ export function ThreadComposer({
       text: match[1].toLowerCase(),
     };
   }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
+
+  const skillMenuActive = skillQuery !== null;
+  useEffect(() => {
+    // Also refresh an empty menu: skills may have been installed by the agent.
+    if (skillMenuActive) requestSkillsRefresh();
+  }, [skillMenuActive]);
 
   const visibleSlashCommands = useMemo(() => {
     if (!(isStreaming && onStop)) return slashCommands;

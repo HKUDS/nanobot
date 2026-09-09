@@ -74,6 +74,19 @@ summary, replayable raw suffix, and an estimated token count. It deliberately do
 private reasoning and does not pretend to be the complete model prompt; workspace instructions,
 memory, and skills are assembled separately by the Python runtime.
 
+`/usage` shows the latest measured context occupancy and up to eight recent logical model
+rounds from the latest history page, matching the WebUI usage chart. Bar heights represent input
+tokens; orange indicates uncached input, teal indicates cached input, and gray means cache usage
+is unknown. Use `Left`/`Right` to inspect a round's input, output, cache hit rate, generation time,
+and estimated-usage indicator; `Esc` closes the panel. Details collapse in short terminals.
+The panel refreshes when a turn ends while open. Missing usage is not treated as zero, and a
+successful compaction hides the old context meter until a later request reports context usage.
+Bar heights and cache boundaries are rounded independently to eighths of a character row;
+positive input always occupies at least one eighth. Mixed full cells use both foreground and
+background colors. If a partial top cell contains empty space and both token categories, it
+keeps its height and uses the larger category's color because a terminal cell has only two colors.
+Use the numeric details for exact token counts; the chart remains a grid approximation.
+
 `/diff` opens the latest turn's file changes in a full-screen unified diff. Use `Left`/`Right`
 to switch edits, `PageUp`/`PageDown` or `Home`/`End` to navigate, and `Esc` to return to chat.
 The gateway remains the source of the patch; the TUI never rereads workspace files to rebuild it.

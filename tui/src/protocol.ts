@@ -263,6 +263,11 @@ export interface TokenUsage {
   timed_requests?: number
 }
 
+export interface SessionUsageSnapshot {
+  context: { tokens: number; windowTokens?: number } | null
+  rounds: TokenUsage[]
+}
+
 export interface SessionContextSnapshot {
   totalMessages: number
   archivedMessages: number
@@ -569,13 +574,92 @@ async function fetchApi(
   apiToken: string,
   path: string,
   reauthenticate?: ApiReauthenticator,
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const request = (connection: GatewayApiConnection) => fetch(`${connection.apiUrl}${path}`, {
-    headers: { Authorization: `Bearer ${connection.apiToken}` },
-  })
+  const request = (connection: GatewayApiConnection) => {
+    signal?.throwIfAborted()
+    return fetch(`${connection.apiUrl}${path}`, {
+      headers: { Authorization: `Bearer ${connection.apiToken}` },
+      ...(signal ? { signal } : {}),
+    })
+  }
   const response = await request({ apiUrl, apiToken })
+  signal?.throwIfAborted()
   if (response.status !== 401 || !reauthenticate) return response
   return request(await reauthenticate(apiToken))
+}
+
+interface ThreadPage {
+  messages?: Array<Record<string, unknown>>
+  page?: { has_more_before?: boolean; before_cursor?: string; user_message_offset?: number }
+}
+
+async function fetchThreadPage(
+  apiUrl: string,
+  apiToken: string,
+  chatId: string,
+  beforeCursor?: string | null,
+  reauthenticate?: ApiReauthenticator,
+  signal?: AbortSignal,
+): Promise<ThreadPage> {
+  if (!apiUrl || !apiToken) return {}
+  const key = encodeURIComponent(`websocket:${chatId}`)
+  const params = new URLSearchParams({ limit: "120", direction: "latest" })
+  if (beforeCursor) params.set("before", beforeCursor)
+  const response = await fetchApi(
+    apiUrl,
+    apiToken,
+    `/api/sessions/${key}/webui-thread?${params}`,
+    reauthenticate,
+    signal,
+  )
+  if (response.status === 404) return {}
+  if (!response.ok) throw new Error(`history request failed: HTTP ${response.status}`)
+  return await response.json() as ThreadPage
+}
+
+/** Same recent model-call samples and context boundary as the WebUI usage popover. */
+export async function fetchSessionUsage(
+  apiUrl: string,
+  apiToken: string,
+  chatId: string,
+  reauthenticate?: ApiReauthenticator,
+  signal?: AbortSignal,
+): Promise<SessionUsageSnapshot> {
+  const payload = await fetchThreadPage(apiUrl, apiToken, chatId, undefined, reauthenticate, signal)
+  signal?.throwIfAborted()
+  const snapshot: SessionUsageSnapshot = { context: null, rounds: [] }
+  const seenTurns = new Set<unknown>()
+  let contextResolved = false
+  for (const message of [...(payload.messages ?? [])].reverse()) {
+    if (message.kind === "compaction" && isRecord(message.compaction)
+      && message.compaction.phase === "succeeded") contextResolved = true
+    if (message.role !== "assistant" || message.kind === "trace" || message.isStreaming) continue
+    const usage = isTokenUsage(message.usage) ? message.usage : null
+    if (!contextResolved && typeof usage?.context_tokens === "number"
+      && Number.isFinite(usage.context_tokens) && usage.context_tokens >= 0) {
+      const window = message.contextWindowTokens
+      snapshot.context = {
+        tokens: usage.context_tokens,
+        ...(typeof window === "number" && Number.isFinite(window) && window > 0
+          ? { windowTokens: window } : {}),
+      }
+      contextResolved = true
+    }
+    const turnKey = message.turnId || message.id || message
+    if (seenTurns.has(turnKey)) continue
+    seenTurns.add(turnKey)
+    const rounds = Array.isArray(message.roundUsages) ? message.roundUsages : []
+    for (const round of [...rounds].reverse()) {
+      if (snapshot.rounds.length >= 8) break
+      if (isTokenUsage(round) && typeof round.prompt_tokens === "number"
+        && Number.isFinite(round.prompt_tokens) && round.prompt_tokens > 0) {
+        snapshot.rounds.push(round)
+      }
+    }
+  }
+  snapshot.rounds.reverse()
+  return snapshot
 }
 
 export async function fetchHistory(
@@ -585,26 +669,7 @@ export async function fetchHistory(
   beforeCursor?: string | null,
   reauthenticate?: ApiReauthenticator,
 ): Promise<HistorySnapshot> {
-  if (!apiUrl || !apiToken) {
-    return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
-  }
-  const key = encodeURIComponent(`websocket:${chatId}`)
-  const params = new URLSearchParams({ limit: "120", direction: "latest" })
-  if (beforeCursor) params.set("before", beforeCursor)
-  const response = await fetchApi(
-    apiUrl,
-    apiToken,
-    `/api/sessions/${key}/webui-thread?${params}`,
-    reauthenticate,
-  )
-  if (response.status === 404) {
-    return { messages: [], hasMoreBefore: false, beforeCursor: null, userMessageOffset: 0 }
-  }
-  if (!response.ok) throw new Error(`history request failed: HTTP ${response.status}`)
-  const payload = (await response.json()) as {
-    messages?: Array<Record<string, unknown>>
-    page?: { has_more_before?: boolean; before_cursor?: string; user_message_offset?: number }
-  }
+  const payload = await fetchThreadPage(apiUrl, apiToken, chatId, beforeCursor, reauthenticate)
   let userIndex = typeof payload.page?.user_message_offset === "number"
     ? Math.max(0, payload.page.user_message_offset)
     : 0

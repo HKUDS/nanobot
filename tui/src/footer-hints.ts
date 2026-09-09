@@ -22,6 +22,7 @@ export type FooterMode =
   | "command"
   | "session"
   | "context"
+  | "usage"
   | "history"
   | "ready"
 
@@ -87,6 +88,7 @@ function hintsFor(
   if (mode === "session") return width >= 64
     ? [hint("type", "filter"), hint("↑↓", "choose"), hint("enter", "open"), hint("esc", "close")]
     : [hint("enter", "open"), hint("esc", "close")]
+  if (mode === "usage") return [hint("←→", "round"), hint("esc", "close")]
   if (mode === "context") return [hint("esc", "close"), hint("pgup/pgdn", "scroll")]
   if (mode === "history") return width >= 72
     ? [hint("ctrl+end", "latest"), hint("pgup/pgdn", "scroll")]
