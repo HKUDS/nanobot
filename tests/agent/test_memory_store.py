@@ -46,6 +46,70 @@ class TestMemoryStoreBasicIO:
         assert "important fact" in ctx
 
 
+class TestPerFileOversizeWarning:
+    """write_memory/write_soul/write_user warn (but never block) on oversize."""
+
+    def test_write_memory_under_cap_is_silent(self, store, monkeypatch):
+        records: list[str] = []
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        store.write_memory("short content")
+        assert records == []
+
+    def test_write_memory_over_cap_warns_but_still_writes(self, tmp_path, monkeypatch):
+        store = MemoryStore(tmp_path, max_file_chars=100)
+        records: list[str] = []
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        content = "x" * 200
+        store.write_memory(content)
+        assert store.read_memory() == content  # write is never blocked or truncated
+        oversize_warnings = [r for r in records if "memory/MEMORY.md" in r and "exceeds" in r]
+        assert len(oversize_warnings) == 1
+
+    def test_write_soul_over_cap_warns(self, tmp_path, monkeypatch):
+        store = MemoryStore(tmp_path, max_file_chars=100)
+        records: list[str] = []
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        store.write_soul("x" * 200)
+        assert any("SOUL.md" in r and "exceeds" in r for r in records)
+
+    def test_write_user_over_cap_warns(self, tmp_path, monkeypatch):
+        store = MemoryStore(tmp_path, max_file_chars=100)
+        records: list[str] = []
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        store.write_user("x" * 200)
+        assert any("USER.md" in r and "exceeds" in r for r in records)
+
+    def test_oversize_warning_is_emitted_once_per_file(self, tmp_path, monkeypatch):
+        store = MemoryStore(tmp_path, max_file_chars=100)
+        records: list[str] = []
+        monkeypatch.setattr(
+            "nanobot.agent.memory.logger.warning",
+            lambda message, *args: records.append(message.format(*args)),
+        )
+        content = "x" * 200
+        store.write_memory(content)
+        store.write_memory(content)
+        store.write_memory(content)
+        oversize_warnings = [r for r in records if "memory/MEMORY.md" in r and "exceeds" in r]
+        assert len(oversize_warnings) == 1
+
+    def test_default_max_file_chars_matches_historical_cap(self, store):
+        """Default matches the pre-#5622 _DREAM_FILE_EMBED_CAP value (8000)."""
+        assert store.max_file_chars == 8_000
+
+
 class TestHistoryWithCursor:
     def test_append_history_returns_cursor(self, store):
         cursor = store.append_history("event 1")

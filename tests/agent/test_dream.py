@@ -172,6 +172,174 @@ class TestBuildDreamPrompt:
         assert "Always strip these bracketed tags from saved memory content" in prompt
 
 
+class TestDreamPromptWithinBudget:
+    """dream_prompt_within_budget guards the request size the way
+    Consolidator._input_token_budget guards regular-turn consolidation —
+    build_dream_prompt() alone has no equivalent check."""
+
+    @staticmethod
+    def _runtime(context_window_tokens: int, max_tokens: int = 100):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.providers.base import GenerationSettings
+        from nanobot.utils.llm_runtime import LLMRuntime
+
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock()
+        provider.generation = GenerationSettings(max_tokens=max_tokens)
+        # No estimate_prompt_tokens attribute -> falls through to the
+        # byte-length heuristic in estimate_prompt_tokens_chain, which is
+        # predictable enough for these tests without mocking a tokenizer.
+        del provider.estimate_prompt_tokens
+        return LLMRuntime.capture(
+            provider, "test-model", context_window_tokens=context_window_tokens,
+        )
+
+    @staticmethod
+    def _build_messages(**kwargs) -> list[dict]:
+        return [{"role": "system", "content": "sys"}, {"role": "user", "content": kwargs["current_message"]}]
+
+    def test_returns_none_batch_when_no_history(self, store):
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        result = dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=100_000),
+            build_messages=self._build_messages,
+        )
+
+        assert result.batch is None
+        assert result.over_budget is False
+
+    def test_fits_within_generous_budget(self, store):
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        store.append_history("a short fact")
+
+        result = dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=100_000),
+            build_messages=self._build_messages,
+        )
+
+        assert result.batch is not None
+        assert result.over_budget is False
+        prompt, _ = result.batch
+        assert "a short fact" in prompt
+
+    def test_shrinks_entries_until_it_fits(self, store):
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        for i in range(20):
+            store.append_history(f"entry-{i:02d} " + "x" * 500)
+
+        calls: list[list[dict]] = []
+
+        def counting_build_messages(**kwargs) -> list[dict]:
+            messages = self._build_messages(**kwargs)
+            calls.append(messages)
+            return messages
+
+        # 20 entries estimate to ~4198 tokens, 10 to ~3398, 5 to ~2998 (with
+        # this fixture's dream template + real dream tool schemas + tiktoken
+        # estimator). A budget of 3000 (context_window_tokens=4074,
+        # max_tokens=50, buffer=1024) rejects 20 and 10 but fits at 5,
+        # exercising two shrink iterations.
+        result = dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=4074, max_tokens=50),
+            build_messages=counting_build_messages,
+        )
+
+        assert result.batch is not None
+        assert result.over_budget is False
+        assert len(calls) > 1  # retried at least once with a smaller batch
+        prompt, _ = result.batch
+        # build_dream_prompt() always takes the oldest unprocessed entries
+        # first (Dream must advance the cursor sequentially) — a shrunk
+        # batch is a smaller prefix, not a differently-chosen slice.
+        assert "entry-00" in prompt
+        assert "entry-19" not in prompt
+
+    def test_over_budget_even_at_minimum_entries(self, store):
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        store.append_history("x" * 5000)
+
+        result = dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=10, max_tokens=1),
+            build_messages=self._build_messages,
+        )
+
+        assert result.batch is None
+        assert result.over_budget is True
+
+    def test_estimates_against_the_real_restricted_dream_tools(self, store, monkeypatch):
+        """The budget estimate must use store.build_dream_tools() (the small
+        registry Dream's real request actually sends), not a caller-supplied
+        full tool registry — otherwise the estimate is wrong in either
+        direction depending on what the caller happens to pass."""
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        store.append_history("hello")
+
+        seen_tools: list[list[dict]] = []
+        real_chain = __import__(
+            "nanobot.utils.helpers", fromlist=["estimate_prompt_tokens_chain"]
+        ).estimate_prompt_tokens_chain
+
+        def spy_chain(provider, model, messages, tools=None):
+            seen_tools.append(tools or [])
+            return real_chain(provider, model, messages, tools)
+
+        monkeypatch.setattr("nanobot.agent.memory.estimate_prompt_tokens_chain", spy_chain)
+
+        dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=100_000),
+            build_messages=self._build_messages,
+        )
+
+        assert len(seen_tools) == 1
+        # store.build_dream_tools() registers read_file/edit_file/apply_patch/write_file.
+        tool_names = {t.get("function", {}).get("name") or t.get("name") for t in seen_tools[0]}
+        assert "read_file" in tool_names
+        assert "edit_file" in tool_names
+
+    def test_zero_or_negative_budget_short_circuits(self, store):
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        store.append_history("hello")
+
+        # max_tokens alone consumes the whole window, before the safety buffer.
+        result = dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=50, max_tokens=50),
+            build_messages=self._build_messages,
+        )
+
+        assert result.batch is None
+        assert result.over_budget is True
+
+    def test_non_positive_context_window_skips_the_check(self, store):
+        """A runtime with no known context window (0) can't be budgeted
+        against — fall back to the unguarded build_dream_prompt() rather than
+        always reporting over_budget."""
+        from nanobot.agent.memory import dream_prompt_within_budget
+
+        store.append_history("hello")
+
+        result = dream_prompt_within_budget(
+            store,
+            runtime=self._runtime(context_window_tokens=0),
+            build_messages=self._build_messages,
+        )
+
+        assert result.batch is not None
+        assert result.over_budget is False
+
+
 class TestDreamRunCompletion:
     """The runner's terminal state gates Dream cursor advancement."""
 
@@ -652,6 +820,61 @@ class TestEphemeralDirect:
             assert marker in system_prompt
             assert request_text.count(marker) == 1
         assert loop.sessions._get_session_path(session_key).exists()
+
+    async def test_dream_session_key_bypasses_the_display_cap_end_to_end(self, tmp_path):
+        """A real `dream:` turn must see the full, uncapped SOUL.md — driven
+        through AgentLoop.process_direct so the ``session_key.startswith("dream:")``
+        wiring in loop.py is itself under test, not just ContextBuilder in
+        isolation. A `cli:` turn with the same oversize file must be capped.
+
+        This guards the highest-risk part of the design: if the Dream
+        detection ever silently breaks, Dream would start seeing a truncated
+        view of the files it's the sole writer of, risking exactly the kind
+        of overwrite-on-incomplete-view data loss the cap was designed to avoid.
+        """
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        store = MemoryStore(tmp_path, max_file_chars=150)
+        oversize_soul = "\n\n".join(
+            f"## Section {i}\n\n{chr(97 + i) * 100}" for i in range(3)
+        )
+        store.write_soul(oversize_soul)
+
+        captured: dict[str, list[dict]] = {}
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+
+        async def chat_with_retry(**kwargs):
+            captured["messages"] = kwargs["messages"]
+            return LLMResponse(content="done", finish_reason="stop")
+
+        provider.chat_with_retry = chat_with_retry
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            context_window_tokens=32_000,
+            memory_max_file_chars=150,
+        )
+
+        await loop.process_direct(
+            "hello", session_key="dream:cap-check", ephemeral=True,
+        )
+        dream_prompt = str(captured["messages"][0]["content"])
+
+        await loop.process_direct("hello", session_key="cli:cap-check")
+        regular_prompt = str(captured["messages"][0]["content"])
+
+        assert "a" * 100 in dream_prompt
+        assert "[Note:" not in dream_prompt
+
+        assert "a" * 100 not in regular_prompt
+        assert "[Note: SOUL.md exceeds" in regular_prompt
 
 
 class TestEphemeralHooks:
