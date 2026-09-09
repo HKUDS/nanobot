@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Dialog, DialogContent, DialogDescription, DialogLayoutContext, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogLayoutContext, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TokenUsageModels } from "@/components/settings/TokenUsageModels";
@@ -37,7 +37,6 @@ export function TokenUsageDetails({ days, models, modelDays }: {
         </DialogTrigger>
         <DialogContent className="w-[min(1100px,calc(100vw-32px))] max-w-none gap-5 p-5 pt-10 sm:p-7 sm:pt-10" aria-describedby={undefined}>
           <DialogTitle className="sr-only">{t("settings.usage.shortTitle")}</DialogTitle>
-          <DialogDescription className="text-xs tabular-nums">{days[0].date} – {days[days.length - 1].date}</DialogDescription>
           <dl className="grid grid-cols-3 gap-3">
             {metrics.map(([label, value], index) => <div key={label} title={index === 2 ? t("settings.usage.cacheRateHelp") : undefined}>
               <dt className="text-xs text-muted-foreground">{label}</dt>
