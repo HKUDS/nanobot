@@ -15,6 +15,7 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
@@ -809,6 +810,18 @@ class ChannelManager:
                         msg.channel, tool_hint=False,
                     ):
                         continue
+
+                # Automatic compaction notices are maintenance chatter, so they
+                # follow the channel's progress setting like other progress
+                # text. A user-requested ``/compact`` and a failed compaction
+                # are still reported.
+                if (
+                    isinstance(event, ContextCompactionEvent)
+                    and not event.manual
+                    and event.phase != "failed"
+                    and not self._should_send_progress(msg.channel)
+                ):
+                    continue
 
                 if isinstance(event, RetryWaitEvent):
                     continue

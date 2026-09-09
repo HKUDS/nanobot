@@ -1165,6 +1165,7 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
+        manual: bool = False,
     ) -> str | None:
         """Replace archived history with a summary checkpoint.
 
@@ -1187,7 +1188,7 @@ class Consolidator:
 
             compaction_id = uuid4().hex
             await events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                ContextCompactionEvent(compaction_id=compaction_id, phase="started", manual=manual),
             )
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
@@ -1207,19 +1208,21 @@ class Consolidator:
                 await events.emit(
                     ContextCompactionEvent(
                         compaction_id=compaction_id,
+                        manual=manual,
                         phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
                     ),
                 )
                 raise
             if not summary:
                 await events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed", manual=manual),
                 )
                 return None
 
             await events.emit(
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
+                    manual=manual,
                     phase="succeeded",
                 ),
             )

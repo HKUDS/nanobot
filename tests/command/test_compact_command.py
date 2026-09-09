@@ -71,6 +71,9 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert started.phase == "started"
     assert completed.phase == "succeeded"
     assert started.compaction_id == completed.compaction_id
+    # A user-requested compaction is reported even on channels with progress off.
+    assert started.manual is True
+    assert completed.manual is True
 
     loop.sessions.invalidate("cli:test")
     reloaded = loop.sessions.get_or_create("cli:test")

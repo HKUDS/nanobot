@@ -17,6 +17,9 @@ class AgentEvent:
 class ContextCompactionEvent(AgentEvent):
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    # True when the user asked for the compaction (``/compact``). Automatic
+    # compaction is routine maintenance and its notices follow ``send_progress``.
+    manual: bool = False
 
 
 @dataclass(frozen=True)
