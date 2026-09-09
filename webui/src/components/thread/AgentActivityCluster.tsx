@@ -171,11 +171,12 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
   const items: ReactNode[] = [];
   let pending: UIMessage[] = [];
   const flush = (last: boolean) => {
-    if (!pending.length) return;
+    // A live turn still needs its status header when the last row is a diff.
+    if (!pending.length && !(last && props.isTurnStreaming)) return;
     items.push(
       <FoldedAgentActivity
         {...props}
-        key={pending[0].id}
+        key={pending[0]?.id ?? "tail-status"}
         messages={pending}
         isTurnStreaming={last && props.isTurnStreaming}
         retryStatus={last ? props.retryStatus : null}

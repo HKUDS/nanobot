@@ -694,6 +694,16 @@ describe("AgentActivityCluster", () => {
         }
         rerender(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
         assertIndependentDiff();
+        rerender(
+          <AgentActivityCluster
+            messages={messages.slice(0, 2)}
+            isTurnStreaming
+            hasBodyBelow={false}
+            retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
+          />,
+        );
+        expect(screen.getByRole("status", { name: "Connection failed · retrying in 0s · attempt 1/4" }))
+          .toBeVisible();
         unmount();
         render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
         if (fileEditDisplayMode === "collapsed_diff") {
