@@ -313,6 +313,7 @@ describe("App layout", () => {
     Reflect.deleteProperty(window, "nanobotHost");
     setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("nanobot-webui.sidebar");
+    localStorage.removeItem("nanobot-webui.sidebar.width");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
@@ -458,7 +459,7 @@ describe("App layout", () => {
     expect(main).not.toHaveAttribute("style");
     expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
     expect(screen.getByTestId("sidebar-brand-mark")).not.toHaveClass("mt-5");
-    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveClass("mt-1");
+    expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
 
     const asideClassNames = Array.from(container.querySelectorAll("aside")).map(
       (el) => el.className,
@@ -545,12 +546,8 @@ describe("App layout", () => {
     const newTopicButton = within(sidebar).getByRole("button", { name: "New topic" });
 
     expect(newTopicButton).toHaveAttribute("aria-current", "page");
-    expect(newTopicButton).not.toHaveClass("bg-sidebar-accent");
     expect(newTopicButton).toHaveClass("transition-[width,padding,color]");
-    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
-      "data-active-id",
-      "new-chat",
-    );
+    expect(newTopicButton).toBeEnabled();
   });
 
   it("keeps a just-created topic route while the session list catches up", async () => {
@@ -1656,6 +1653,35 @@ describe("App layout", () => {
     expect(document.title).toBe("自动任务 · nanobot");
   });
 
+  it("resizes the sidebar, collapses at the drag threshold and restores its saved width", async () => {
+    const view = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+    const sidebar = screen.getByTestId("host-sidebar-flow");
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 360 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).toHaveStyle({ width: "360px" });
+    expect(localStorage.getItem("nanobot-webui.sidebar.width")).toBe("360");
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 2, clientX: 360 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 150 });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 180 });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 240 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientX: 240 });
+    expect(sidebar).toHaveStyle({ width: "240px" });
+    fireEvent.keyDown(handle, { key: "Enter" });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    view.unmount();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Toggle sidebar" }));
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "240px" });
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "ArrowRight" });
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "272px" });
+  });
+
   it("uses the shared sidebar controls and rail on the native host", async () => {
     mockSessions = [
       {
@@ -1682,13 +1708,13 @@ describe("App layout", () => {
     expect(flowSidebar).toHaveStyle({ width: "272px" });
     expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
     expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
-    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveClass("mt-1");
+    expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
     expect(screen.queryByTestId("host-sidebar-toggle")).not.toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
     await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "56px" }));
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),
@@ -2706,7 +2732,7 @@ describe("App layout", () => {
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     expect(
-      newChatButton.compareDocumentPosition(searchButton) &
+      searchButton.compareDocumentPosition(newChatButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
@@ -2884,7 +2910,6 @@ describe("App layout", () => {
     )).toEqual(["Alpha child"]));
     expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
 
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.pointerDown(within(sidebar).getByRole("button", {
@@ -3421,7 +3446,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Toggle theme from header" }));
     expect(toggleThemeSpy).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
     const sidebarAside = container.querySelector("aside.lg\\:block") as HTMLElement;
     await waitFor(() => expect(sidebarAside.style.width).toBe("56px"));
 

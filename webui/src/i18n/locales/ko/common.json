@@ -61,6 +61,7 @@
     "closeAction": "임시 채팅 닫기: {{title}}"
   },
   "sidebar": {
+    "resize": "사이드바 너비 조절",
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",
     "newChat": "새 주제",

@@ -61,6 +61,7 @@
     "closeAction": "Tutup obrolan sementara: {{title}}"
   },
   "sidebar": {
+    "resize": "Ubah lebar bilah samping",
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",
     "newChat": "Topik baru",

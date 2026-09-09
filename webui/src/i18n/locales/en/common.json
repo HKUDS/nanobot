@@ -61,6 +61,7 @@
     "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
+    "resize": "Resize sidebar",
     "navigation": "Sidebar navigation",
     "collapse": "Collapse sidebar",
     "newChat": "New topic",

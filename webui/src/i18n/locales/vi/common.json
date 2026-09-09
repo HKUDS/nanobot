@@ -61,6 +61,7 @@
     "closeAction": "Đóng trò chuyện tạm thời: {{title}}"
   },
   "sidebar": {
+    "resize": "Điều chỉnh độ rộng thanh bên",
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
     "newChat": "Chủ đề mới",

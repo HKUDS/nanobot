@@ -12,6 +12,7 @@ import { Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
+import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
@@ -111,6 +112,7 @@ const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
+const SIDEBAR_WIDTH_STORAGE_KEY = "nanobot-webui.sidebar.width";
 const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
@@ -433,6 +435,16 @@ function AuthForm({
       </form>
     </div>
   );
+}
+
+function readSidebarWidth(): number {
+  try {
+    const width = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    return Number.isFinite(width) && width >= SIDEBAR_MIN_WIDTH
+      ? Math.min(SIDEBAR_MAX_WIDTH, width) : SIDEBAR_WIDTH;
+  } catch {
+    return SIDEBAR_WIDTH;
+  }
 }
 
 function readSidebarOpen(): boolean {
@@ -1047,6 +1059,8 @@ function Shell({
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
@@ -1212,7 +1226,12 @@ function Shell({
     } catch {
       // ignore storage errors (private mode, etc.)
     }
-  }, [hostSidebarOpen]);
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    } catch {
+      // Storage can be unavailable in private browsing.
+    }
+  }, [hostSidebarOpen, sidebarWidth]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
@@ -1469,10 +1488,6 @@ function Shell({
       return changed ? next : current;
     });
   }, [client, loading, sessions]);
-
-  const closeHostSidebar = useCallback(() => {
-    setHostSidebarOpen(false);
-  }, []);
 
   const openHostSidebar = useCallback(() => {
     setHostSidebarOpen(true);
@@ -2526,7 +2541,7 @@ function Shell({
     archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
-  const hostSidebarFlowWidth = hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH;
+  const hostSidebarFlowWidth = hostSidebarOpen ? sidebarWidth : SIDEBAR_RAIL_WIDTH;
 
   useEffect(() => {
     document.documentElement.classList.toggle("native-host", showHostChrome);
@@ -2574,9 +2589,10 @@ function Shell({
           {showMainSidebar ? (
             <aside
               data-testid="host-sidebar-flow"
+              id="main-sidebar"
               className={cn(
                 "relative z-20 hidden shrink-0 overflow-hidden lg:block",
-                "transition-[width] duration-300 ease-out",
+                sidebarDragging ? "select-none" : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
               )}
               style={{
                 width: hostSidebarFlowWidth,
@@ -2594,10 +2610,18 @@ function Shell({
                   {...sidebarProps}
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
-                  onCollapse={closeHostSidebar}
                   onExpand={openHostSidebar}
                 />
               </div>
+              <SidebarResizeHandle
+                width={sidebarWidth}
+                open={hostSidebarOpen}
+                onDraggingChange={setSidebarDragging}
+                onResize={(width, open) => {
+                  if (open) setSidebarWidth(width);
+                  setHostSidebarOpen(open);
+                }}
+              />
             </aside>
           ) : null}
 

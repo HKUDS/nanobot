@@ -61,6 +61,7 @@
     "closeAction": "Fermer la discussion temporaire : {{title}}"
   },
   "sidebar": {
+    "resize": "Redimensionner la barre latérale",
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
     "newChat": "Nouveau sujet",

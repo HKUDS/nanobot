@@ -8,7 +8,7 @@ import {
   Archive,
   Brain,
   CalendarClock,
-  Menu,
+  PanelLeftClose,
   Search,
   Settings,
   SquarePen,
@@ -70,7 +70,7 @@ interface SidebarProps {
   onOpenSearch: () => void;
   activeUtility?: "apps" | "skills" | "automations" | null;
   onToggleArchived: () => void;
-  onCollapse: () => void;
+  onCollapse?: () => void;
   onExpand?: () => void;
   containActionMenus?: boolean;
   collapsed?: boolean;
@@ -112,11 +112,38 @@ export function Sidebar(props: SidebarProps) {
   const toggleLabel = t("thread.header.toggleSidebar");
   const apple = isApplePlatform();
   const activeActionRef = useRef<HTMLButtonElement>(null);
-  const activeActionId = props.newChatActive
+  const activeActionId = collapsed && props.newChatActive
     ? "new-chat"
     : props.activeUtility
       ? `utility:${props.activeUtility}`
       : null;
+
+  const newChatButton = (
+    <SidebarActionButton
+      collapsed={collapsed}
+      label={t("sidebar.newChat")}
+      iconOnly
+      className={collapsed ? undefined : "rounded-full border border-border/70 bg-background/80 shadow-sm"}
+      onClick={props.onNewChat}
+      active={props.newChatActive}
+      selectionRef={collapsed ? activeActionRef : undefined}
+      icon={<SquarePen className="h-4 w-4" />}
+      shortcut={sidebarShortcutLabel("newChat", apple)}
+      ariaKeyShortcuts={sidebarShortcutAria("newChat")}
+    />
+  );
+  const searchButton = (
+    <SidebarActionButton
+      collapsed={collapsed}
+      label={t("sidebar.searchAria")}
+      shortcut={sidebarShortcutLabel("search", apple)}
+      ariaKeyShortcuts={sidebarShortcutAria("search")}
+      iconOnly
+      onClick={props.onOpenSearch}
+      icon={<Search className="h-4 w-4" />}
+    />
+  );
+
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -131,8 +158,8 @@ export function Sidebar(props: SidebarProps) {
       <div
         data-testid="sidebar-brand-row"
         className={cn(
-          "flex items-start px-3 pb-2.5 pt-3",
-          collapsed ? "w-14 justify-start" : "justify-between",
+          "flex items-start gap-1 pb-4 pt-3",
+          collapsed ? "w-14 justify-start px-3" : "justify-between ps-4 pe-2",
         )}
       >
         <button
@@ -144,30 +171,29 @@ export function Sidebar(props: SidebarProps) {
           onClick={collapsed ? props.onExpand : undefined}
           tabIndex={collapsed ? 0 : -1}
           className={cn(
-            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl transition-colors",
+            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors",
             props.hostChromeInset && "mt-5",
             collapsed
-              ? "-ml-0.5 hover:bg-sidebar-accent/75"
-              : "pointer-events-none -ml-0.5",
+              ? "hover:bg-sidebar-accent/60"
+              : "pointer-events-none",
           )}
         >
           <img
             src="/brand/nanobot_mark.svg"
             alt=""
-            className="h-6 w-6 select-none object-contain"
+            className="h-8 w-8 select-none object-contain"
             draggable={false}
           />
         </button>
         {!collapsed && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("sidebar.collapse")}
-            onClick={props.onCollapse}
-            className="host-no-drag mt-1 h-7 w-7 rounded-lg text-muted-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
-          >
-            <Menu className="h-3.5 w-3.5" />
-          </Button>
+          <div className={cn("flex min-w-0 flex-1 items-center justify-end gap-1", props.hostChromeInset && "mt-5")}>
+            {searchButton}
+            {newChatButton}
+            {props.onCollapse && (
+              <SidebarActionButton collapsed={false} label={t("sidebar.collapse")} iconOnly
+                onClick={props.onCollapse} icon={<PanelLeftClose className="h-4 w-4" />} />
+            )}
+          </div>
         )}
       </div>
 
@@ -176,36 +202,16 @@ export function Sidebar(props: SidebarProps) {
         activeId={activeActionId}
         scope="actions"
         className={cn(
-          "relative gap-1 pb-2",
-          collapsed ? "flex w-14 flex-col items-center px-0" : "grid auto-cols-fr grid-flow-col px-2",
+          "relative gap-0.5 pb-3",
+          collapsed ? "flex w-14 flex-col items-center px-0" : "flex flex-col px-2",
         )}
       >
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.newChat")}
-          iconOnly
-          onClick={props.onNewChat}
-          active={props.newChatActive}
-          selectionRef={activeActionRef}
-          icon={<SquarePen className="h-4 w-4" />}
-          shortcut={sidebarShortcutLabel("newChat", apple)}
-          ariaKeyShortcuts={sidebarShortcutAria("newChat")}
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.searchAria")}
-          shortcut={sidebarShortcutLabel("search", apple)}
-          ariaKeyShortcuts={sidebarShortcutAria("search")}
-          iconOnly
-          onClick={props.onOpenSearch}
-          icon={<Search className="h-4 w-4" />}
-        />
+        {collapsed && <>{newChatButton}{searchButton}</>}
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.apps")}
           shortcut={sidebarShortcutLabel("apps", apple)}
           ariaKeyShortcuts={sidebarShortcutAria("apps")}
-          iconOnly
           onClick={props.onOpenApps}
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "apps"}
@@ -217,7 +223,6 @@ export function Sidebar(props: SidebarProps) {
           label={t("sidebar.skills.title")}
           shortcut={sidebarShortcutLabel("skills", apple)}
           ariaKeyShortcuts={sidebarShortcutAria("skills")}
-          iconOnly
           onClick={props.onOpenSkills}
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "skills"}
@@ -229,7 +234,6 @@ export function Sidebar(props: SidebarProps) {
           label={t("sidebar.automations", { defaultValue: "Automations" })}
           shortcut={sidebarShortcutLabel("automations", apple)}
           ariaKeyShortcuts={sidebarShortcutAria("automations")}
-          iconOnly
           onClick={props.onOpenAutomations}
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "automations"}
@@ -240,7 +244,6 @@ export function Sidebar(props: SidebarProps) {
           <SidebarActionButton
             collapsed={collapsed}
             label={props.showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
-            iconOnly
             onClick={props.onToggleArchived}
             icon={<Archive className="h-4 w-4" />}
           />
@@ -249,6 +252,7 @@ export function Sidebar(props: SidebarProps) {
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-200",
+          props.onExpand && !collapsed && "me-3",
           collapsed && "pointer-events-none opacity-0",
         )}
       >
@@ -362,27 +366,27 @@ function SidebarActionButton({
       onFocus={onIntent}
       onPointerEnter={onIntent}
       className={cn(
-        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-xl font-medium",
+        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-xl font-normal",
         SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
         collapsed
-          ? "w-9 justify-center gap-0 px-0"
-          : iconOnly ? "w-full justify-center gap-0 px-0"
-          : "w-full justify-start gap-2 px-3 text-[14px] leading-5",
+          ? "w-8 justify-center gap-0 px-0"
+          : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-xl px-0"
+          : "w-full justify-start gap-2 px-2 text-[14px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
-          : "text-muted-foreground settings-hover hover:text-foreground",
+          : "text-sidebar-foreground/75 settings-hover hover:text-sidebar-foreground",
         className,
       )}
     >
       <span className="flex shrink-0 items-center justify-center" aria-hidden>
         {icon}
       </span>
-      {!compact && <span className="sidebar-action-label min-w-0 max-w-[12rem] truncate whitespace-nowrap">
+      {!compact && <span className="min-w-0 max-w-[12rem] truncate whitespace-nowrap">
         {label}
       </span>}
     </Button>
   );
-  return compact ? (
+  return compact || shortcut ? (
     <Tooltip>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side={collapsed ? "right" : "bottom"} className="flex items-center gap-4">

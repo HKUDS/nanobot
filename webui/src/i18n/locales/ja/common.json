@@ -61,6 +61,7 @@
     "closeAction": "一時チャット「{{title}}」を閉じる"
   },
   "sidebar": {
+    "resize": "サイドバーの幅を変更",
     "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
     "newChat": "新しいトピック",

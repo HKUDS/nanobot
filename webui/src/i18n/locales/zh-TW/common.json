@@ -61,6 +61,7 @@
     "closeAction": "關閉臨時聊天：{{title}}"
   },
   "sidebar": {
+    "resize": "調整側欄寬度",
     "navigation": "側邊欄導覽",
     "collapse": "收合側邊欄",
     "newChat": "新增話題",

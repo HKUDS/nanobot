@@ -61,6 +61,7 @@
     "closeAction": "Cerrar chat temporal: {{title}}"
   },
   "sidebar": {
+    "resize": "Cambiar el ancho de la barra lateral",
     "navigation": "Navegación de la barra lateral",
     "collapse": "Contraer barra lateral",
     "newChat": "Nuevo tema",
