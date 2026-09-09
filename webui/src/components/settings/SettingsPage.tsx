@@ -561,7 +561,6 @@ export function SettingsPage({
       case "automations":
         return (
           <div className="settings-stack">
-            {runtimeConfiguration("automations")}
             <AutomationsSettings
               payload={automations}
               loading={automationsLoading}

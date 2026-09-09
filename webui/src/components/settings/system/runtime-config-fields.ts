@@ -9,12 +9,11 @@ export interface RuntimeConfigField {
   max?: number;
 }
 
-export type RuntimeConfigPage = "memory" | "runtime" | "automations" | "advanced" | "browser" | "image" | "apps";
+export type RuntimeConfigPage = "memory" | "runtime" | "advanced" | "browser" | "image" | "apps";
 
 export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabledBy?: string }[] = [
   { id: "identity", page: "runtime" },
   { id: "memory", page: "memory" },
-  { id: "heartbeat", page: "automations" },
   { id: "chat", page: "advanced" },
   { id: "execution", page: "advanced" },
   { id: "sessions", page: "runtime" },
@@ -34,8 +33,6 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "identity", path: "agents.defaults.timezone_mode", kind: "toggle", options: ["manual", "auto"] },
   { group: "identity", path: "agents.defaults.timezone", kind: "text", when: { path: "agents.defaults.timezone_mode", value: "manual" } },
   { group: "memory", path: "agents.defaults.dream.enabled", kind: "boolean" },
-  { group: "heartbeat", path: "gateway.heartbeat.enabled", kind: "boolean" },
-  { group: "heartbeat", path: "gateway.heartbeat.interval_s", kind: "number", min: 1, when: { path: "gateway.heartbeat.enabled", value: true } },
   { group: "execution", path: "agents.defaults.max_tool_iterations", kind: "number", min: 1 },
   { group: "execution", path: "agents.defaults.max_concurrent_subagents", kind: "number", min: 1 },
   { group: "execution", path: "agents.defaults.max_tool_result_chars", kind: "number", min: 1 },

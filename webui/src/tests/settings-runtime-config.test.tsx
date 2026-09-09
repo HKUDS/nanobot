@@ -66,10 +66,11 @@ describe("Runtime configuration settings", () => {
     expect(document.getElementById("runtime-tools.cli_apps.enable")).toBeInTheDocument();
   });
 
-  it("keeps heartbeat on the automations page", () => {
+  it("keeps runtime configuration out of the automations page", () => {
     renderSettingsView({ initialSection: "automations", initialSettings: runtimeSettings() });
     expect(document.getElementById("runtime-agents.defaults.dream.enabled")).not.toBeInTheDocument();
-    expect(document.getElementById("runtime-gateway.heartbeat.enabled")).toBeVisible();
+    expect(document.getElementById("runtime-gateway.heartbeat.enabled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Heartbeat schedule")).not.toBeInTheDocument();
   });
 
 
