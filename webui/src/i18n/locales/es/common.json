@@ -81,7 +81,7 @@
     }
   },
   "settings": {
-    "configure": "Configurar…",
+    "configure": "Configurar",
     "exit": {
       "title": "¿Reiniciar antes de salir?",
       "description": "Los cambios están guardados. Reinicia para aplicarlos.",

@@ -81,7 +81,7 @@
     }
   },
   "settings": {
-    "configure": "配置…",
+    "configure": "配置",
     "exit": {
       "title": "退出前重启？",
       "description": "更改已保存，重启后生效。",

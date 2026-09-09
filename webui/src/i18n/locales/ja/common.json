@@ -81,7 +81,7 @@
     }
   },
   "settings": {
-    "configure": "設定…",
+    "configure": "設定",
     "exit": {
       "title": "終了する前に再起動しますか？",
       "description": "変更は保存されています。反映するには再起動してください。",

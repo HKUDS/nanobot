@@ -81,7 +81,7 @@
     }
   },
   "settings": {
-    "configure": "Cấu hình…",
+    "configure": "Cấu hình",
     "exit": {
       "title": "Khởi động lại trước khi thoát?",
       "description": "Thay đổi đã được lưu. Khởi động lại để áp dụng.",
