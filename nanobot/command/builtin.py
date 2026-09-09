@@ -160,6 +160,14 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         accepts_args=True,
     ),
     BuiltinCommandSpec(
+        "/archive-prompt",
+        "Archive consolidation",
+        "Tell Archive what to keep when compacting this workspace's session history.",
+        "file-text",
+        "[init]",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
         "/evaluator-prompt",
         "Heartbeat evaluator",
         "Customize the heartbeat notification gate prompt for this workspace.",
@@ -561,6 +569,49 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
             "Dream memory instructions: nanobot default\n\n"
             f"- Editable file: `{display_path}`\n"
             "- Run `/dream-prompt init` to create an editable copy."
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
+async def cmd_archive_prompt(ctx: CommandContext) -> OutboundMessage:
+    """Show or set up the workspace Archive consolidation prompt."""
+    store = ctx.loop.context.memory
+    path = store.archive_prompt_file
+    display_path = path.relative_to(store.workspace).as_posix()
+    args = ctx.args.strip().lower()
+
+    if args == "init":
+        if not initialize_workspace_prompt(path, store.default_archive_prompt()):
+            content = (
+                f"Archive consolidation prompt already exists at `{display_path}`.\n\n"
+                "Edit that file, or delete/empty it to return to nanobot's default."
+            )
+        else:
+            content = (
+                f"Created Archive consolidation prompt at `{display_path}`.\n\n"
+                "Edit that file to teach Archive what to keep when compacting session "
+                "history. This fully replaces nanobot's default Archive guide for this "
+                "workspace. Delete or empty it to return to nanobot's default."
+            )
+    elif args:
+        content = "Usage: /archive-prompt [init]"
+    elif store.has_archive_prompt_override():
+        content = (
+            "Archive consolidation prompt: custom for this workspace\n\n"
+            f"- Path: `{display_path}`\n"
+            "- Delete or empty this file to return to nanobot's default."
+        )
+    else:
+        content = (
+            "Archive consolidation prompt: nanobot default\n\n"
+            f"- Editable file: `{display_path}`\n"
+            "- Run `/archive-prompt init` to create an editable copy."
         )
 
     return OutboundMessage(
@@ -1092,6 +1143,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/dream-prompt", cmd_dream_prompt)
     router.prefix("/dream-prompt ", cmd_dream_prompt)
+    router.exact("/archive-prompt", cmd_archive_prompt)
+    router.prefix("/archive-prompt ", cmd_archive_prompt)
     router.exact("/evaluator-prompt", cmd_evaluator_prompt)
     router.prefix("/evaluator-prompt ", cmd_evaluator_prompt)
     router.exact("/skill", cmd_skill)

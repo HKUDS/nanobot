@@ -490,6 +490,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
         BotCommand("dream_prompt", "Tell Dream how to organize memory"),
+        BotCommand("archive_prompt", "Tell Archive what to keep when compacting history"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -558,6 +559,8 @@ class TelegramChannel(BaseChannel):
             return content.replace("/dream_restore", "/dream-restore", 1)
         if content == "/dream_prompt" or content.startswith("/dream_prompt "):
             return content.replace("/dream_prompt", "/dream-prompt", 1)
+        if content == "/archive_prompt" or content.startswith("/archive_prompt "):
+            return content.replace("/archive_prompt", "/archive-prompt", 1)
         return content
 
     async def start(self) -> None:
@@ -655,7 +658,8 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(
             MessageHandler(
                 filters.Regex(
-                    r"^/(dream-log|dream_log|dream-restore|dream_restore|dream-prompt|dream_prompt)(?:@\w+)?(?:\s+.*)?$"
+                    r"^/(dream-log|dream_log|dream-restore|dream_restore|dream-prompt|dream_prompt"
+                    r"|archive-prompt|archive_prompt)(?:@\w+)?(?:\s+.*)?$"
                 ),
                 self._forward_command,
             )
