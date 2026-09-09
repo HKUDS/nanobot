@@ -92,11 +92,6 @@ export function SettingsSidebar({
         <ChevronLeft className="h-[1em] w-[1em]" aria-hidden />
         {t("settings.backToChat")}
       </button>
-      <div className="mb-3 px-1 lg:mb-4 lg:px-2">
-        <h1 className="text-[18px] font-normal tracking-normal text-foreground">
-          {t("settings.sidebar.title")}
-        </h1>
-      </div>
 
       <nav
         aria-label={t("settings.sidebar.ariaLabel")}
