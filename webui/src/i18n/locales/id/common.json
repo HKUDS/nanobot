@@ -1483,9 +1483,6 @@
     "truncated": "Pratinjau dipotong karena file ini besar."
   },
   "code": {
-    "previousPage": "Halaman sebelumnya",
-    "nextPage": "Halaman berikutnya",
-    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "kode",
     "copyAria": "Salin kode",
     "copy": "Salin",

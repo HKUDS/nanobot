@@ -1483,9 +1483,6 @@
     "truncated": "L’aperçu est tronqué car le fichier est volumineux."
   },
   "code": {
-    "previousPage": "Page précédente",
-    "nextPage": "Page suivante",
-    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "code",
     "copyAria": "Copier le code",
     "copy": "Copier",

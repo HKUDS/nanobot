@@ -1483,9 +1483,6 @@
     "truncated": "檔案較大，因此預覽內容已截斷。"
   },
   "code": {
-    "previousPage": "上一頁",
-    "nextPage": "下一頁",
-    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "程式碼",
     "copyAria": "複製程式碼",
     "copy": "複製",

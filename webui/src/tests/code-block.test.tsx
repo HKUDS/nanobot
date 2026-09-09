@@ -5,26 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import { CodeBlock } from "@/components/CodeBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
 
-it("bounds large code pages and makes every page reachable", async () => {
-  const source = Array.from({ length: 1200 }, (_, i) => `line ${i}`).join("\n");
-  render(<CodeBlock code={source} language="typescript" showLineNumbers />);
-  expect(screen.getByTestId("plain-code-fallback").textContent?.length).toBeLessThan(10000);
-  await userEvent.click(screen.getByRole("button", { name: "Next page" }));
-  expect(screen.getByTestId("plain-code-fallback")).toHaveTextContent("line 400");
-  await userEvent.click(screen.getByRole("button", { name: "Next page" }));
-  expect(screen.getByTestId("plain-code-fallback")).toHaveTextContent("line 1199");
-  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
-});
-
-it("keeps Unicode characters intact at the page boundary", async () => {
-  const source = "x".repeat(23999) + "😀tail";
-  render(<CodeBlock code={source} highlight={false} />);
-  const first = screen.getByTestId("plain-code-fallback").textContent;
-  await userEvent.click(screen.getByRole("button", { name: "Next page" }));
-  expect(first).toBe("x".repeat(23999) + "😀");
-  expect(first + screen.getByTestId("plain-code-fallback").textContent!).toBe(source);
-});
-
 const mockedStyles = vi.hoisted(() => ({
   dark: { pre: { background: "#111" } },
   light: { pre: { background: "#fff" } },
@@ -59,6 +39,33 @@ vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-light", () => ({
 }));
 
 describe("CodeBlock", () => {
+  it("renders and copies a large code block in full without pagination", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = Array.from({ length: 1200 }, (_, i) => `const value${i} = ${i};`).join("\n");
+
+    try {
+      render(<CodeBlock code={source} language="typescript" showLineNumbers />);
+      expect((await screen.findByTestId("highlighted-code")).textContent).toBe(source);
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+      expect(writeText).toHaveBeenCalledWith(source);
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("renders long plain text with Unicode in full", () => {
+    const source = "x".repeat(23999) + "😀tail";
+    render(<CodeBlock code={source} highlight={false} />);
+    expect(screen.getByTestId("plain-code-fallback").textContent).toBe(source);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
   it("renders plain code without mounting the highlighter when highlighting is disabled", () => {
     render(
       <ThemeProvider theme="dark">

@@ -1483,9 +1483,6 @@
     "truncated": "Bản xem trước bị cắt vì tệp này lớn."
   },
   "code": {
-    "previousPage": "Trang trước",
-    "nextPage": "Trang sau",
-    "page": "{{page}} / {{count}}",
     "fallbackLanguage": "mã",
     "copyAria": "Sao chép mã",
     "copy": "Sao chép",
