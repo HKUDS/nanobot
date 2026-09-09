@@ -821,6 +821,8 @@
       "shortTitle": "Token Usage",
       "last30Days": "Last 30 days",
       "viewDetails": "View details",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
       "dailyAverage": "Daily average",
       "inputTokens": "Input tokens",
       "cacheHitRate": "Cache hit rate",

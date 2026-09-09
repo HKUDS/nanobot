@@ -420,6 +420,8 @@
       "shortTitle": "トークン使用量",
       "last30Days": "過去30日間",
       "viewDetails": "詳細を見る",
+      "previousPage": "前のページ",
+      "nextPage": "次のページ",
       "dailyAverage": "1日平均",
       "inputTokens": "入力トークン",
       "cacheHitRate": "キャッシュヒット率",

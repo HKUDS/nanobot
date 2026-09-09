@@ -96,7 +96,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
             {usage ? compact.format(total) : "—"}
           </p>
         </div>
-        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} modelDays={usage.model_days_30d} sources={breakdown.map(([source, tokens]) => ({ label: sourceLabels[source], tokens }))} />}
+        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} modelDays={usage.model_days_30d} />}
       </div>
 
       {!usage || total === 0 ? (

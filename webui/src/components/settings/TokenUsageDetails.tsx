@@ -1,89 +1,62 @@
+import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogDescription, DialogLayoutContext, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { SettingsPayload } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { TokenUsageModels } from "@/components/settings/TokenUsageModels";
 import { TokenUsageModelTrend } from "@/components/settings/TokenUsageModelTrend";
 
-type UsageDay = NonNullable<SettingsPayload["usage"]>["days"][number];
+type Usage = NonNullable<SettingsPayload["usage"]>;
 
-export function TokenUsageDetails({ days, sources, models, modelDays }: {
-  days: { date: string; usage?: UsageDay }[];
-  sources: { label: string; tokens: number }[];
-  models?: NonNullable<SettingsPayload["usage"]>["providers_30d"];
-  modelDays?: NonNullable<SettingsPayload["usage"]>["model_days_30d"];
+export function TokenUsageDetails({ days, models, modelDays }: {
+  days: { date: string; usage?: Usage["days"][number] }[];
+  models?: Usage["providers_30d"];
+  modelDays?: Usage["model_days_30d"];
 }) {
   const { t, i18n } = useTranslation();
+  const [view, setView] = useState("trend");
   const number = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 });
   const percent = new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 1 });
-  const sum = (key: "total_tokens" | "input_tokens" | "output_tokens" | "requests" | "cache_read_tokens" | "cache_read_observed_input_tokens") =>
+  const sum = (key: "total_tokens" | "requests" | "cache_read_tokens" | "cache_read_observed_input_tokens") =>
     days.reduce((total, day) => total + (day.usage?.[key] ?? 0), 0);
   const total = sum("total_tokens");
   const observed = sum("cache_read_observed_input_tokens");
-  const peakRequests = Math.max(0, ...days.map(day => day.usage?.requests ?? 0));
-  const requestsLabel = t("settings.usage.requests", { defaultValue: "Requests" });
-  const range = `${days[0].date} – ${days[days.length - 1].date}`;
   const metrics = [
-    [t("settings.usage.totalTokens", { defaultValue: "Total tokens" }), number.format(total)],
-    [t("settings.usage.dailyAverage", { defaultValue: "Daily average" }), number.format(total / days.length)],
-    [requestsLabel, number.format(sum("requests"))],
-    [t("settings.usage.inputTokens", { defaultValue: "Input tokens" }), number.format(sum("input_tokens"))],
-    [t("settings.usage.outputTokens", { defaultValue: "Output" }), number.format(sum("output_tokens"))],
-    [t("settings.usage.cacheHitRate", { defaultValue: "Cache hit rate" }), observed ? percent.format(sum("cache_read_tokens") / observed) : "—"],
+    [t("settings.usage.totalTokens"), number.format(total)],
+    [t("settings.usage.requests"), number.format(sum("requests"))],
+    [t("settings.usage.cacheHitRate"), observed ? percent.format(sum("cache_read_tokens") / observed) : "—"],
   ];
-
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <button type="button" className="settings-hover flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
-          {t("settings.usage.viewDetails", { defaultValue: "View details" })}<ChevronRight className="size-3.5" aria-hidden />
-        </button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[85dvh] max-w-[640px] overflow-y-auto p-6 pt-10" aria-describedby={undefined}>
-        <DialogTitle className="sr-only">{t("settings.usage.shortTitle", { defaultValue: "Token Usage" })}</DialogTitle>
-        <DialogDescription className="text-xs tabular-nums">{range}</DialogDescription>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
-          {metrics.map(([label, value]) => <div key={label}>
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="mt-1 text-xl font-medium tabular-nums">{value}</dd>
-          </div>)}
-        </dl>
-        <p className="text-xs text-muted-foreground">{t("settings.usage.cacheRateHelp", { defaultValue: "Cache hit rate excludes input with unknown cache status." })}</p>
-        {modelDays && <TokenUsageModelTrend days={days} modelDays={modelDays} />}
-        <TokenUsageModels models={models} total={total} />
-        <section className="mt-2">
-          <h3 className="mb-3 text-sm font-medium">{t("settings.usage.requestTrend", { defaultValue: "Daily requests" })}</h3>
-          {peakRequests === 0 ? <p className="text-sm text-muted-foreground">{number.format(0)}</p> : <>
-            <div className="mb-1 text-right text-[11px] text-muted-foreground">{number.format(peakRequests)}</div>
-            <div role="group" aria-label={t("settings.usage.requestTrend", { defaultValue: "Daily requests" })} className="grid h-24 grid-cols-[repeat(30,minmax(0,1fr))] gap-1 border-b border-border">
-              <TooltipProvider delayDuration={120}>
-                {days.map(day => {
-                  const requests = day.usage?.requests ?? 0;
-                  const label = `${day.date} · ${requestsLabel}: ${number.format(requests)}`;
-                  return <Tooltip key={day.date}>
-                    <TooltipTrigger asChild><span role="img" tabIndex={0} aria-label={label} className="flex min-w-0 items-end focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500">
-                      <span className="w-full rounded-t-sm bg-orange-500 dark:bg-orange-400" style={{ height: `${requests / peakRequests * 100}%` }} />
-                    </span></TooltipTrigger>
-                    <TooltipContent>{label}</TooltipContent>
-                  </Tooltip>;
-                })}
-              </TooltipProvider>
-            </div>
-            <div className="mt-2 flex justify-between text-[11px] tabular-nums text-muted-foreground"><span>{days[0].date}</span><span>{days[days.length - 1].date}</span></div>
-          </>}
-        </section>
-        {sources.length > 0 && <section className="mt-2">
-          <h3 className="mb-3 text-sm font-medium">{t("settings.usage.bySource", { defaultValue: "Usage by source" })}</h3>
-          <dl className="space-y-3">
-            {sources.map(source => <div key={source.label}>
-              <div className="mb-1.5 flex justify-between gap-4 text-xs"><dt>{source.label}</dt><dd className="tabular-nums">{number.format(source.tokens)} <span className="ml-2 text-muted-foreground">{percent.format(source.tokens / total)}</span></dd></div>
-              <div className="h-1 rounded-full bg-muted" aria-hidden><div className="h-full rounded-full bg-neutral-400 dark:bg-neutral-500" style={{ width: `${source.tokens / total * 100}%` }} /></div>
+    <DialogLayoutContext.Provider value={null}>
+      <Dialog onOpenChange={open => { if (open) setView(modelDays?.length ? "trend" : "models"); }}>
+        <DialogTrigger asChild>
+          <button type="button" className="settings-hover flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+            {t("settings.usage.viewDetails")}<ChevronRight className="size-3.5" aria-hidden />
+          </button>
+        </DialogTrigger>
+        <DialogContent className="w-[min(1100px,calc(100vw-32px))] max-w-none gap-5 p-5 pt-10 sm:p-7 sm:pt-10" aria-describedby={undefined}>
+          <DialogTitle className="sr-only">{t("settings.usage.shortTitle")}</DialogTitle>
+          <DialogDescription className="text-xs tabular-nums">{days[0].date} – {days[days.length - 1].date}</DialogDescription>
+          <dl className="grid grid-cols-3 gap-3">
+            {metrics.map(([label, value], index) => <div key={label} title={index === 2 ? t("settings.usage.cacheRateHelp") : undefined}>
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd className="mt-1 text-lg font-medium tabular-nums sm:text-2xl">{value}</dd>
             </div>)}
           </dl>
-        </section>}
-      </DialogContent>
-    </Dialog>
+          <div className="flex gap-1 min-[900px]:hidden">
+            {[["trend", t("settings.usage.modelTrend")], ["models", t("settings.usage.byModel")]].map(([key, label]) => <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={cn("rounded-full px-3 py-1.5 text-xs", view === key ? "bg-muted text-foreground" : "settings-hover text-muted-foreground")}>{label}</button>)}
+          </div>
+          <div className="grid min-w-0 gap-7 min-[900px]:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+            <div className={cn("min-w-0 min-[900px]:block", view !== "trend" && "hidden")}>
+              {modelDays?.length ? <TokenUsageModelTrend days={days} modelDays={modelDays} /> : <p className="text-sm text-muted-foreground">{t("settings.usage.modelsUnavailable")}</p>}
+            </div>
+            <div className={cn("min-w-0 min-[900px]:block", view !== "models" && "hidden")}>
+              <TokenUsageModels models={models} total={total} />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </DialogLayoutContext.Provider>
   );
 }

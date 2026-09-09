@@ -420,6 +420,8 @@
       "shortTitle": "Mức dùng token",
       "last30Days": "30 ngày qua",
       "viewDetails": "Xem chi tiết",
+      "previousPage": "Trang trước",
+      "nextPage": "Trang sau",
       "dailyAverage": "Trung bình mỗi ngày",
       "inputTokens": "Token đầu vào",
       "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",

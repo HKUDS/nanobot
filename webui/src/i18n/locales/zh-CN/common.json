@@ -821,6 +821,8 @@
       "shortTitle": "Token 用量",
       "last30Days": "近 30 天",
       "viewDetails": "查看详情",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
       "dailyAverage": "日均用量",
       "inputTokens": "输入 Token",
       "cacheHitRate": "缓存命中率",

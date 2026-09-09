@@ -420,6 +420,8 @@
       "shortTitle": "Token 用量",
       "last30Days": "近 30 天",
       "viewDetails": "查看詳情",
+      "previousPage": "上一頁",
+      "nextPage": "下一頁",
       "dailyAverage": "日均用量",
       "inputTokens": "輸入 Token",
       "cacheHitRate": "快取命中率",

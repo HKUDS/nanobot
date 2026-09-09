@@ -61,8 +61,9 @@ describe("Token usage card", () => {
     fireEvent.click(screen.getByRole("button", { name: "View details" }));
     const details = screen.getByRole("dialog", { name: "Token Usage" });
     expect(within(details).getByText("25%")).toBeInTheDocument();
-    expect(within(details).getByRole("group", { name: "Daily requests" })).toBeInTheDocument();
-    expect(within(details).getByText("Cache hit rate excludes input with unknown cache status.")).toBeInTheDocument();
+    expect(within(details).queryByRole("group", { name: "Daily requests" })).not.toBeInTheDocument();
+    expect(within(details).queryByText("Daily average")).not.toBeInTheDocument();
+    expect(within(details).getByTitle("Cache hit rate excludes input with unknown cache status.")).toBeInTheDocument();
   });
 
   it("does not misrepresent unavailable usage as zero", () => {
@@ -78,15 +79,22 @@ describe("Token usage card", () => {
       estimated_requests: 0, generation_ms: 0, measured_output_tokens: 0, ttft_ms: 0,
       timed_requests: 0, duration_ms: 0,
     });
-    render(<TokenUsageModels total={1000} models={[model("provider-a", 200), model("provider-b", 600), model("unused-provider", 0)]} />);
+    const view = render(<TokenUsageModels total={1000} models={[model("provider-a", 200), model("provider-b", 600), model("unused-provider", 0)]} />);
     const rows = screen.getAllByRole("img");
     expect(rows).toHaveLength(2);
     expect(screen.queryByText("unused-provider")).not.toBeInTheDocument();
-    expect(rows[0]).toHaveAccessibleName(/provider-b · shared-model: 600 tokens/);
-    expect(rows[1]).toHaveAccessibleName(/provider-a · shared-model: 200 tokens/);
+    expect(rows[0]).toHaveAccessibleName(/shared-model: 600 tokens/);
+    expect(rows[1]).toHaveAccessibleName(/shared-model: 200 tokens/);
+    expect(screen.queryByText("provider-b")).not.toBeInTheDocument();
     expect(screen.getByText("60%")).toBeInTheDocument();
     expect(screen.getByText("Other / unattributed")).toBeInTheDocument();
     expect(screen.getByText("200 · 20%")).toBeInTheDocument();
+    view.rerender(<TokenUsageModels total={2100} models={Array.from({ length: 6 }, (_, i) => model(`provider-${i}`, (i + 1) * 100))} />);
+    expect(screen.getAllByRole("img")).toHaveLength(5);
+    expect(screen.queryByText("provider-0")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getAllByRole("img")).toHaveLength(1);
+    expect(screen.getByRole("img")).toHaveAccessibleName(/shared-model: 100 tokens/);
   });
 
   it("keeps the five leading model series and reconciles the rest to the daily total", () => {
@@ -100,8 +108,8 @@ describe("Token usage card", () => {
       modelDays={Array.from({ length: 6 }, (_, index) => ({ date: "2026-09-09", provider: "provider", model: `model-${index}`, total_tokens: (index + 1) * 100 }))} />);
     const column = screen.getAllByRole("img")[29];
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
-    expect(column).toHaveAccessibleName(/model-5 · provider: 600/);
+    expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
-    expect(screen.queryByText("model-0 · provider")).not.toBeInTheDocument();
+    expect(screen.queryByText("model-0")).not.toBeInTheDocument();
   });
 });

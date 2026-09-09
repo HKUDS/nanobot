@@ -19,7 +19,7 @@ export function TokenUsageModelTrend({ days, modelDays }: {
   for (const row of modelDays) {
     if (!dates.has(row.date) || row.total_tokens <= 0) continue;
     const key = JSON.stringify([row.provider, row.model]);
-    const item = totals.get(key) ?? { label: `${row.model} · ${row.provider}`, total: 0 };
+    const item = totals.get(key) ?? { label: row.model, total: 0 };
     item.total += row.total_tokens;
     totals.set(key, item);
     const bucket = daily.get(row.date) ?? new Map<string, number>();
@@ -32,7 +32,7 @@ export function TokenUsageModelTrend({ days, modelDays }: {
     const bucket = daily.get(day.date);
     const values = series.map(([key]) => bucket?.get(key) ?? 0);
     const total = day.usage?.total_tokens ?? 0;
-    return { date: day.date, total, values: [...values, Math.max(0, total - values.reduce((a, b) => a + b, 0))] };
+    return { date: day.date, total, requests: day.usage?.requests ?? 0, values: [...values, Math.max(0, total - values.reduce((a, b) => a + b, 0))] };
   });
   const peak = Math.max(0, ...columns.map(column => column.total));
   if (!peak || !series.length) return null;
@@ -63,6 +63,7 @@ export function TokenUsageModelTrend({ days, modelDays }: {
                   <dt className="flex min-w-0 items-start gap-2"><span aria-hidden className={cn("mt-0.5 h-3 w-1 shrink-0 rounded-full", color(index))} /><span className="break-words">{labels[index]}</span></dt><dd className="shrink-0 tabular-nums">{number.format(value)}</dd>
                 </div>)}
                 <div className="flex justify-between border-t border-border/50 pt-2 text-xs font-medium"><dt>{t("settings.usage.totalTokens", { defaultValue: "Total tokens" })}</dt><dd className="tabular-nums">{number.format(column.total)}</dd></div>
+                <div className="flex justify-between text-xs text-muted-foreground"><dt>{t("settings.usage.requests")}</dt><dd className="tabular-nums">{number.format(column.requests)}</dd></div>
               </dl>
             </TooltipContent>
           </Tooltip>)}
@@ -71,7 +72,7 @@ export function TokenUsageModelTrend({ days, modelDays }: {
       <div className="relative mt-2 flex justify-between text-[10px] tabular-nums text-muted-foreground"><span>{days[0].date.slice(5)}</span><span>{days[14].date.slice(5)}</span><span>{days[days.length - 1].date.slice(5)}</span></div>
     </div>
     <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-muted-foreground">
-      {labels.map((label, index) => (index < series.length || hasOther) && <span key={label} title={label} className="flex min-w-0 items-center gap-1.5"><span aria-hidden className={cn("size-2 shrink-0 rounded-sm", color(index))} /><span className="truncate">{label}</span></span>)}
+      {labels.map((label, index) => (index < series.length || hasOther) && <span key={index} title={label} className="flex min-w-0 items-center gap-1.5"><span aria-hidden className={cn("size-2 shrink-0 rounded-sm", color(index))} /><span className="truncate">{label}</span></span>)}
     </div>
   </section>;
 }

@@ -420,6 +420,8 @@
       "shortTitle": "토큰 사용량",
       "last30Days": "최근 30일",
       "viewDetails": "자세히 보기",
+      "previousPage": "이전 페이지",
+      "nextPage": "다음 페이지",
       "dailyAverage": "일평균 사용량",
       "inputTokens": "입력 토큰",
       "cacheHitRate": "캐시 적중률",

@@ -420,6 +420,8 @@
       "shortTitle": "Uso de tokens",
       "last30Days": "Últimos 30 días",
       "viewDetails": "Ver detalles",
+      "previousPage": "Página anterior",
+      "nextPage": "Página siguiente",
       "dailyAverage": "Promedio diario",
       "inputTokens": "Tokens de entrada",
       "cacheHitRate": "Tasa de aciertos de caché",

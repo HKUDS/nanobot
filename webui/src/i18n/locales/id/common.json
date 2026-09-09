@@ -420,6 +420,8 @@
       "shortTitle": "Penggunaan token",
       "last30Days": "30 hari terakhir",
       "viewDetails": "Lihat detail",
+      "previousPage": "Halaman sebelumnya",
+      "nextPage": "Halaman berikutnya",
       "dailyAverage": "Rata-rata harian",
       "inputTokens": "Token input",
       "cacheHitRate": "Rasio cache hit",
