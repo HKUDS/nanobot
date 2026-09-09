@@ -1258,6 +1258,23 @@
       "selectProvider": "选择提供商",
       "configureProvider": "配置提供商",
       "languageAuto": "自动"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "话题 {{id}}",
+    "forkTitle": "分叉：{{title}}",
+    "loading": "加载中…",
+    "noSessions": "还没有话题。",
+    "showMore": "再显示 {{count}} 个",
+    "collapsed": "已折叠 {{count}} 个话题",
+    "showLess": "收起",
+    "actions": "“{{title}}” 的话题操作",
+    "newInProject": "在 {{project}} 中开始新话题",
+    "activity": {
+      "running": "智能体正在运行",
+      "complete": "智能体已完成",
+      "updated": "有新内容",
+      "recovery": "此对话需要你的处理"
     },
     "pin": "置顶",
     "unpin": "取消置顶",
