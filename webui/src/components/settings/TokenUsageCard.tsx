@@ -136,7 +136,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
                         <div className="mb-2 flex justify-between gap-6 font-medium tabular-nums"><span>{day.date}</span><span>{exact.format(tokens)}</span></div>
                         <dl className="space-y-1.5">
                           {segments.map((value, index) => (index < 4 || value > 0) && <div key={index} className="flex items-center justify-between gap-6">
-                            <dt className="flex items-center gap-2 text-muted-foreground"><span aria-hidden className={cn("size-2.5 rounded-sm", SEGMENT_CLASSES[index])} style={index === 0 ? CACHE_PATTERN : undefined} />{segmentLabels[index]}</dt>
+                            <dt className="flex items-center text-muted-foreground"><span aria-hidden className={cn("size-2.5 rounded-sm", SEGMENT_CLASSES[index])} style={index === 0 ? CACHE_PATTERN : undefined} /><span className="sr-only">{segmentLabels[index]}</span></dt>
                             <dd className="tabular-nums">{exact.format(value)}</dd>
                           </div>)}
                           <div className="flex justify-between gap-6 border-t border-border/50 pt-2">
