@@ -32,8 +32,7 @@ export function SegmentedControl<T extends string>({
       role={tabs ? "tablist" : undefined}
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex min-h-8 max-w-full items-center gap-1 overflow-x-auto rounded-full bg-muted/65 p-1 text-[12px] font-medium text-muted-foreground",
-        "scrollbar-thin scrollbar-track-transparent",
+        "segmented-control inline-flex min-h-8 max-w-full flex-nowrap items-center gap-1 rounded-full bg-muted/65 p-1 text-[12px] font-medium text-muted-foreground",
         className,
       )}
     >
@@ -48,7 +47,7 @@ export function SegmentedControl<T extends string>({
             aria-pressed={tabs ? undefined : selected}
             onClick={() => onChange(option.value)}
             className={cn(
-              "shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-muted-foreground transition-colors",
+              "min-w-0 truncate whitespace-nowrap rounded-full px-2 py-1 text-muted-foreground transition-colors",
               selected ? "bg-background text-foreground" : "hover:text-foreground",
               itemClassName,
             )}
