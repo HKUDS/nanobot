@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Trash2,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -661,6 +662,7 @@ export function ProvidersSettings({
   onChangeProviderForm,
   onSaveProvider,
   onCreateCustomProvider,
+  onDeleteProvider,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
   imageProviderRestartPending,
@@ -684,6 +686,7 @@ export function ProvidersSettings({
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
+  onDeleteProvider: (provider: string) => Promise<string | null>;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
   imageProviderRestartPending: boolean;
@@ -697,6 +700,9 @@ export function ProvidersSettings({
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
     emptyCustomProviderDraft,
   );
+  const [providerPendingDelete, setProviderPendingDelete] =
+    useState<SettingsPayload["providers"][number] | null>(null);
+  const [providerDeleteError, setProviderDeleteError] = useState<string | null>(null);
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const unconfiguredProviders = useMemo(
     () =>
@@ -1028,6 +1034,23 @@ export function ProvidersSettings({
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 <div className="flex items-center justify-end gap-2">
+                  {provider.configured ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setProviderDeleteError(null);
+                        setProviderPendingDelete(provider);
+                      }}
+                      disabled={saving}
+                      className="mr-auto rounded-full text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                      {provider.is_custom
+                        ? tx("settings.providers.deleteProvider", "Delete provider")
+                        : tx("settings.providers.removeConfiguration", "Remove configuration")}
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1199,6 +1222,79 @@ export function ProvidersSettings({
   ) : null;
   return (
     <div className="space-y-6">
+      <Dialog
+        open={providerPendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setProviderPendingDelete(null);
+            setProviderDeleteError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-[440px] rounded-[24px]">
+          <DialogHeader className="text-left">
+            <DialogTitle>
+              {providerPendingDelete?.is_custom
+                ? tx("settings.providers.deleteProviderTitle", "Delete provider?")
+                : tx("settings.providers.removeConfigurationTitle", "Remove configuration?")}
+            </DialogTitle>
+            <DialogDescription className="leading-5">
+              {providerPendingDelete?.is_custom
+                ? t("settings.providers.deleteProviderHelp", {
+                    name: providerPendingDelete.label,
+                    defaultValue: "This permanently removes provider “{{name}}” and its credentials.",
+                  })
+                : t("settings.providers.removeConfigurationHelp", {
+                    name: providerPendingDelete?.label ?? "",
+                    defaultValue: "This removes saved credentials and settings for “{{name}}”.",
+                  })}
+            </DialogDescription>
+            {providerDeleteError ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+              >
+                {providerDeleteError}
+              </div>
+            ) : null}
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button
+              type="button"
+              variant="ghost"
+              className="rounded-full"
+              disabled={providerSaving === providerPendingDelete?.name}
+              onClick={() => setProviderPendingDelete(null)}
+            >
+              {t("settings.actions.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="rounded-full"
+              disabled={providerSaving === providerPendingDelete?.name}
+              onClick={() => {
+                if (!providerPendingDelete) return;
+                setProviderDeleteError(null);
+                void onDeleteProvider(providerPendingDelete.name).then((deleteError) => {
+                  if (deleteError) {
+                    setProviderDeleteError(deleteError);
+                  } else {
+                    setProviderPendingDelete(null);
+                  }
+                });
+              }}
+            >
+              {providerSaving === providerPendingDelete?.name ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : null}
+              {providerSaving === providerPendingDelete?.name
+                ? t("settings.actions.deleting")
+                : t("settings.actions.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {imageProviderRestartPending && onRestart ? (
         <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
           <p className="text-[13px] leading-5 text-muted-foreground">

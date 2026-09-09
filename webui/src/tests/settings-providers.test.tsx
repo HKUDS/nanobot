@@ -14,6 +14,66 @@ async function chooseProviderToConfigure(label: string) {
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
 
+  it("removes a configured provider after confirmation", async () => {
+    const base = settingsPayload();
+    const provider = {
+      name: "openai",
+      label: "OpenAI",
+      configured: true,
+      auth_type: "api_key" as const,
+      api_key_required: true,
+      api_key_hint: "sk-••••test",
+      api_base: "https://api.openai.com/v1",
+    };
+    const payload: SettingsPayload = { ...base, providers: [provider] };
+    requestMutationMock.mockResolvedValue({
+      ...payload,
+      providers: [{ ...provider, configured: false, api_key_hint: null, api_base: null }],
+    });
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("button", { name: /^OpenAI/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove configuration" }));
+    expect(screen.getByRole("heading", { name: "Remove configuration?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.delete",
+      { provider: "openai" },
+      20_000,
+    ));
+  });
+
+
+  it("shows a dialog error when a provider is used by a model preset", async () => {
+    const base = settingsPayload();
+    const provider = {
+      name: "openai",
+      label: "OpenAI",
+      configured: true,
+      auth_type: "api_key" as const,
+      api_key_required: true,
+      api_key_hint: "sk-••••test",
+      api_base: "https://api.openai.com/v1",
+    };
+    const payload: SettingsPayload = { ...base, providers: [provider] };
+    requestMutationMock.mockRejectedValue(
+      new Error("remove this provider from model presets before removing its configuration"),
+    );
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("button", { name: /^OpenAI/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove configuration" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This provider is used by a model preset. Remove it from the preset before trying again.",
+    );
+    expect(screen.getByRole("heading", { name: "Remove configuration?" })).toBeInTheDocument();
+  });
+
 
   it("signs in to the xAI Grok provider", async () => {
     const base = settingsPayload();
