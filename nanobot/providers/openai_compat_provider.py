@@ -358,6 +358,13 @@ def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | No
     return bool(api_base and "openrouter" in api_base.lower())
 
 
+def _uses_opencode_affinity(spec: ProviderSpec | None, api_base: str | None) -> bool:
+    if spec and spec.name in {"opencode", "opencode_zen", "opencode_go"}:
+        return True
+    host = (urlparse(api_base or "").hostname or "").rstrip(".")
+    return host == "opencode.ai" or host.endswith(".opencode.ai")
+
+
 _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
@@ -538,6 +545,12 @@ class OpenAICompatProvider(LLMProvider):
             self._default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
         if extra_headers:
             self._default_headers.update(extra_headers)
+        self._opencode_session_affinity = _uses_opencode_affinity(spec, effective_base) and not any(
+            name.lower() == "x-opencode-session" for name in self.extra_headers
+        )
+        if self._opencode_session_affinity:
+            # Calls without conversation context still need a stable routing header.
+            self._default_headers["x-opencode-session"] = uuid.uuid4().hex
         self._api_key_for_client = api_key or "no-key"
         self._is_local = _is_local_endpoint(spec, effective_base)
 
@@ -906,21 +919,15 @@ class OpenAICompatProvider(LLMProvider):
         self,
         provider_context: "ProviderCallContext | None",
     ) -> dict[str, str] | None:
-        """Per-request OpenCode session-affinity header.
-
-        OpenCode Zen/Go relays route backend affinity and prompt-cache by
-        ``x-opencode-session``; the generic ``x-session-affinity`` default
-        header does not activate it. Applies to registered ``opencode*``
-        providers or base URLs aimed at ``opencode.ai``, keyed by the stable
-        conversation-scoped ``session_id``.
-        """
-        if provider_context is None or not provider_context.session_id:
+        """Override the instance fallback with an opaque, ASCII-safe conversation key."""
+        if (
+            not self._opencode_session_affinity
+            or provider_context is None
+            or not provider_context.session_id
+        ):
             return None
-        spec_name = (self._spec.name if self._spec else "") or ""
-        base = self._effective_base or ""
-        if not spec_name.lower().startswith("opencode") and "opencode.ai" not in base.lower():
-            return None
-        return {"x-opencode-session": provider_context.session_id}
+        session_key = hashlib.sha256(provider_context.session_id.encode("utf-8")).hexdigest()
+        return {"x-opencode-session": session_key}
 
     def _build_kwargs(
         self,
