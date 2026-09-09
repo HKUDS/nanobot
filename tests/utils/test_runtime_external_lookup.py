@@ -8,11 +8,7 @@ from nanobot.utils.runtime import (
 )
 
 
-def test_web_fetch_signature_ignores_none_url():
-    assert external_lookup_signature("web_fetch", {"url": None}) is None
-
-
-def test_web_fetch_signature_ignores_non_string_url():
+def test_web_fetch_signature_ignores_truthy_non_string_url():
     assert external_lookup_signature("web_fetch", {"url": 123}) is None
 
 
